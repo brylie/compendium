@@ -1,3 +1,4 @@
+import tailwindcss from '@tailwindcss/vite';
 import { defineConfig, type Plugin } from 'vitest/config';
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
@@ -12,6 +13,7 @@ function yjsWebSocketPlugin(): Plugin {
 		configureServer(server) {
 			if (server.httpServer) attachYjsWebSocket(server.httpServer);
 		},
+
 		configurePreviewServer(server) {
 			if (server.httpServer) attachYjsWebSocket(server.httpServer);
 		}
@@ -20,6 +22,7 @@ function yjsWebSocketPlugin(): Plugin {
 
 export default defineConfig({
 	plugins: [
+		tailwindcss(),
 		sveltekit({
 			compilerOptions: {
 				// Force runes mode for the project, except for libraries. Can be removed in svelte 6.
