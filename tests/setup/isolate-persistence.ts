@@ -8,7 +8,7 @@ import { resetAwarenessForTests } from '$lib/server/awareness';
 
 // Every test in this project touches the real getDb()/getYDoc() singletons
 // somewhere in the call chain (directly or via a service function). Without
-// this, AGENTSPACE_DB_PATH defaults to .data/agentspace.db — the real dev
+// this, DATABASE_URL defaults to .data/agentspace.db — the real dev
 // workspace database — and test runs silently write real audit log entries
 // and Yjs snapshots into it. This applies to every test file automatically
 // so isolation doesn't depend on each file remembering to set it up itself
@@ -17,13 +17,13 @@ let dir: string;
 
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), 'agentspace-test-'));
-	process.env.AGENTSPACE_DB_PATH = join(dir, 'test.db');
+	process.env.DATABASE_URL = join(dir, 'test.db');
 });
 
 afterEach(() => {
 	closeDb();
 	resetYDocForTests();
 	resetAwarenessForTests();
-	delete process.env.AGENTSPACE_DB_PATH;
+	delete process.env.DATABASE_URL;
 	rmSync(dir, { recursive: true, force: true });
 });

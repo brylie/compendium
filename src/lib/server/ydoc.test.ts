@@ -10,13 +10,13 @@ describe('ydoc: snapshot persistence survives a process restart', () => {
 
 	beforeEach(() => {
 		dir = mkdtempSync(join(tmpdir(), 'agentspace-ydoc-'));
-		process.env.AGENTSPACE_DB_PATH = join(dir, 'test.db');
+		process.env.DATABASE_URL = join(dir, 'test.db');
 	});
 
 	afterEach(() => {
 		resetYDocForTests();
 		closeDb();
-		delete process.env.AGENTSPACE_DB_PATH;
+		delete process.env.DATABASE_URL;
 		rmSync(dir, { recursive: true, force: true });
 	});
 

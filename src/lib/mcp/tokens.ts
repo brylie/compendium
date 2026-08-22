@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { desc, eq } from 'drizzle-orm';
 import { getDb } from '$lib/server/store.js';
+import { accessTokens } from '$lib/server/db/schema.js';
 
 export interface AccessToken {
 	tokenHash: string;
@@ -10,23 +12,14 @@ export interface AccessToken {
 	revokedAt?: number;
 }
 
-interface TokenRow {
-	token_hash: string;
-	client_label: string;
-	allowed_document_ids: string;
-	allowed_collection_ids: string;
-	created_at: number;
-	revoked_at: number | null;
-}
-
-function rowToToken(row: TokenRow): AccessToken {
+function rowToToken(row: typeof accessTokens.$inferSelect): AccessToken {
 	return {
-		tokenHash: row.token_hash,
-		clientLabel: row.client_label,
-		allowedDocumentIds: JSON.parse(row.allowed_document_ids),
-		allowedCollectionIds: JSON.parse(row.allowed_collection_ids),
-		createdAt: row.created_at,
-		revokedAt: row.revoked_at ?? undefined
+		tokenHash: row.tokenHash,
+		clientLabel: row.clientLabel,
+		allowedDocumentIds: row.allowedDocumentIds,
+		allowedCollectionIds: row.allowedCollectionIds,
+		createdAt: row.createdAt,
+		revokedAt: row.revokedAt ?? undefined
 	};
 }
 
@@ -49,18 +42,7 @@ export function createToken(input: {
 		createdAt: Date.now()
 	};
 
-	getDb()
-		.prepare(
-			`INSERT INTO access_tokens (token_hash, client_label, allowed_document_ids, allowed_collection_ids, created_at)
-			 VALUES (?, ?, ?, ?, ?)`
-		)
-		.run(
-			record.tokenHash,
-			record.clientLabel,
-			JSON.stringify(record.allowedDocumentIds),
-			JSON.stringify(record.allowedCollectionIds),
-			record.createdAt
-		);
+	getDb().insert(accessTokens).values(record).run();
 
 	return { token, record };
 }
@@ -68,53 +50,59 @@ export function createToken(input: {
 /** Verifies a raw bearer token and returns its (non-revoked) record, or null. */
 export function verifyToken(token: string): AccessToken | null {
 	const row = getDb()
-		.prepare('SELECT * FROM access_tokens WHERE token_hash = ?')
-		.get(hashToken(token)) as TokenRow | undefined;
-	if (!row || row.revoked_at) return null;
+		.select()
+		.from(accessTokens)
+		.where(eq(accessTokens.tokenHash, hashToken(token)))
+		.get();
+	if (!row || row.revokedAt) return null;
 	return rowToToken(row);
 }
 
 export function listTokens(): AccessToken[] {
-	const rows = getDb()
-		.prepare('SELECT * FROM access_tokens ORDER BY created_at DESC')
-		.all() as TokenRow[];
+	const rows = getDb().select().from(accessTokens).orderBy(desc(accessTokens.createdAt)).all();
 	return rows.map(rowToToken);
 }
 
 /** A team member can revoke their own client's connection at any time — no admin action required (PRD). */
 export function revokeToken(tokenHash: string): void {
 	getDb()
-		.prepare('UPDATE access_tokens SET revoked_at = ? WHERE token_hash = ?')
-		.run(Date.now(), tokenHash);
+		.update(accessTokens)
+		.set({ revokedAt: Date.now() })
+		.where(eq(accessTokens.tokenHash, tokenHash))
+		.run();
 }
 
 /** Persists an access grant for a newly created document to SQLite so subsequent tool calls succeed. */
 export function grantDocumentAccess(tokenHash: string, documentId: string): void {
-	const row = getDb()
-		.prepare('SELECT allowed_document_ids FROM access_tokens WHERE token_hash = ?')
-		.get(tokenHash) as { allowed_document_ids: string } | undefined;
+	const db = getDb();
+	const row = db
+		.select({ allowedDocumentIds: accessTokens.allowedDocumentIds })
+		.from(accessTokens)
+		.where(eq(accessTokens.tokenHash, tokenHash))
+		.get();
 	if (!row) return;
-	const currentIds: string[] = JSON.parse(row.allowed_document_ids);
-	if (!currentIds.includes(documentId)) {
-		currentIds.push(documentId);
-		getDb()
-			.prepare('UPDATE access_tokens SET allowed_document_ids = ? WHERE token_hash = ?')
-			.run(JSON.stringify(currentIds), tokenHash);
+	if (!row.allowedDocumentIds.includes(documentId)) {
+		db.update(accessTokens)
+			.set({ allowedDocumentIds: [...row.allowedDocumentIds, documentId] })
+			.where(eq(accessTokens.tokenHash, tokenHash))
+			.run();
 	}
 }
 
 /** Persists an access grant for a newly created collection to SQLite so subsequent tool calls succeed. */
 export function grantCollectionAccess(tokenHash: string, collectionId: string): void {
-	const row = getDb()
-		.prepare('SELECT allowed_collection_ids FROM access_tokens WHERE token_hash = ?')
-		.get(tokenHash) as { allowed_collection_ids: string } | undefined;
+	const db = getDb();
+	const row = db
+		.select({ allowedCollectionIds: accessTokens.allowedCollectionIds })
+		.from(accessTokens)
+		.where(eq(accessTokens.tokenHash, tokenHash))
+		.get();
 	if (!row) return;
-	const currentIds: string[] = JSON.parse(row.allowed_collection_ids);
-	if (!currentIds.includes(collectionId)) {
-		currentIds.push(collectionId);
-		getDb()
-			.prepare('UPDATE access_tokens SET allowed_collection_ids = ? WHERE token_hash = ?')
-			.run(JSON.stringify(currentIds), tokenHash);
+	if (!row.allowedCollectionIds.includes(collectionId)) {
+		db.update(accessTokens)
+			.set({ allowedCollectionIds: [...row.allowedCollectionIds, collectionId] })
+			.where(eq(accessTokens.tokenHash, tokenHash))
+			.run();
 	}
 }
 

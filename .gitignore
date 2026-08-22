@@ -26,3 +26,11 @@ vite.config.ts.timestamp-*
 /.data
 
 test-results/
+playwright-report/
+coverage/
+
+# SQLite
+*.db
+*.db-wal
+*.db-shm
+*.db-journal

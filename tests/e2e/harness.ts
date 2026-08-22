@@ -72,7 +72,7 @@ async function nodeRequestToWebRequest(
 export async function createTestHarness(): Promise<TestHarness> {
 	const tempDir = mkdtempSync(join(tmpdir(), 'agentspace-e2e-'));
 	const dbPath = join(tempDir, 'test.db');
-	process.env.AGENTSPACE_DB_PATH = dbPath;
+	process.env.DATABASE_URL = dbPath;
 
 	// Reset state
 	closeDb();

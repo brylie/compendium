@@ -1,4 +1,6 @@
+import { and, desc, gte, lte } from 'drizzle-orm';
 import { getDb } from './store.js';
+import { auditLog } from './db/schema.js';
 import type { ActorId } from '$lib/data/types';
 
 export interface AuditEntry {
@@ -17,17 +19,15 @@ export function logAudit(input: {
 	diff?: unknown;
 }): void {
 	getDb()
-		.prepare(
-			`INSERT INTO audit_log (actor_json, action, target_record_id, timestamp, diff_json)
-			 VALUES (?, ?, ?, ?, ?)`
-		)
-		.run(
-			JSON.stringify(input.actor),
-			input.action,
-			input.targetRecordId ?? null,
-			Date.now(),
-			input.diff !== undefined ? JSON.stringify(input.diff) : null
-		);
+		.insert(auditLog)
+		.values({
+			actor: input.actor,
+			action: input.action,
+			targetRecordId: input.targetRecordId ?? null,
+			timestamp: Date.now(),
+			diff: input.diff !== undefined ? input.diff : null
+		})
+		.run();
 }
 
 export interface AuditQuery {
@@ -37,38 +37,28 @@ export interface AuditQuery {
 	limit?: number;
 }
 
-interface AuditRow {
-	id: number;
-	actor_json: string;
-	action: string;
-	target_record_id: string | null;
-	timestamp: number;
-	diff_json: string | null;
-}
-
 export function queryAuditLog(query: AuditQuery = {}): AuditEntry[] {
 	const rows = getDb()
-		.prepare(
-			`SELECT id, actor_json, action, target_record_id, timestamp, diff_json
-			 FROM audit_log
-			 WHERE timestamp >= ? AND timestamp <= ?
-			 ORDER BY id DESC
-			 LIMIT ?`
+		.select()
+		.from(auditLog)
+		.where(
+			and(
+				gte(auditLog.timestamp, query.since ?? 0),
+				lte(auditLog.timestamp, query.until ?? Number.MAX_SAFE_INTEGER)
+			)
 		)
-		.all(
-			query.since ?? 0,
-			query.until ?? Number.MAX_SAFE_INTEGER,
-			query.limit ?? 500
-		) as AuditRow[];
+		.orderBy(desc(auditLog.id))
+		.limit(query.limit ?? 500)
+		.all();
 
 	return rows
 		.map((row) => ({
 			id: row.id,
-			actor: JSON.parse(row.actor_json) as ActorId,
+			actor: row.actor,
 			action: row.action,
-			targetRecordId: row.target_record_id ?? undefined,
+			targetRecordId: row.targetRecordId ?? undefined,
 			timestamp: row.timestamp,
-			diff: row.diff_json ? JSON.parse(row.diff_json) : undefined
+			diff: row.diff ?? undefined
 		}))
 		.filter((entry) => (query.actorFilter ? query.actorFilter(entry.actor) : true));
 }
