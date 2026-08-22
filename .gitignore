@@ -24,3 +24,5 @@ vite.config.ts.timestamp-*
 
 # AgentSpace local data (SQLite snapshots, audit log, access tokens)
 /.data
+
+test-results/

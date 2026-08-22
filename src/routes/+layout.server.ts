@@ -1,11 +1,10 @@
-import { getYDoc } from '$lib/server/ydoc';
-import { listCollections, listDocuments } from '$lib/data/records';
+import { listCollections, listDocuments } from '$lib/services';
+import { CURRENT_USER } from '$lib/server/current-user';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = () => {
-	const doc = getYDoc();
 	return {
-		documents: listDocuments(doc),
-		collections: listCollections(doc)
+		documents: listDocuments(CURRENT_USER),
+		collections: listCollections(CURRENT_USER)
 	};
 };

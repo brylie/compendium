@@ -1,22 +1,12 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { getYDoc } from '$lib/server/ydoc';
-import {
-	createCollection,
-	createDocument,
-	createRecord,
-	listCollections,
-	listDocuments
-} from '$lib/data/records';
-import { logAudit } from '$lib/server/audit';
+import { createCollection, createDocument, listCollections, listDocuments } from '$lib/services';
+import { CURRENT_USER } from '$lib/server/current-user';
 import type { Actions, PageServerLoad } from './$types';
 
-const CURRENT_USER = { kind: 'human', userId: 'local' } as const;
-
 export const load: PageServerLoad = () => {
-	const doc = getYDoc();
 	return {
-		documents: listDocuments(doc),
-		collections: listCollections(doc)
+		documents: listDocuments(CURRENT_USER),
+		collections: listCollections(CURRENT_USER)
 	};
 };
 
@@ -27,10 +17,11 @@ export const actions: Actions = {
 		const parentDocumentId = String(data.get('parentDocumentId') ?? '').trim() || undefined;
 		if (!title) return fail(400, { error: 'Title is required' });
 
-		const doc = getYDoc();
-		const document = createDocument(doc, { title, parentDocumentId });
-		createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, CURRENT_USER);
-		logAudit({ actor: CURRENT_USER, action: 'create_document', targetRecordId: document.id });
+		const document = createDocument(CURRENT_USER, {
+			title,
+			parentDocumentId,
+			createInitialBlock: true
+		});
 		redirect(303, `/doc/${document.id}`);
 	},
 	createCollection: async ({ request }) => {
@@ -38,9 +29,7 @@ export const actions: Actions = {
 		const title = String(data.get('title') ?? '').trim();
 		if (!title) return fail(400, { error: 'Title is required' });
 
-		const doc = getYDoc();
-		const collection = createCollection(doc, { title, schema: [] });
-		logAudit({ actor: CURRENT_USER, action: 'create_collection', targetRecordId: collection.id });
+		const collection = createCollection(CURRENT_USER, { title, schema: [] });
 		redirect(303, `/table/${collection.id}`);
 	}
 };

@@ -1,6 +1,6 @@
 import { Awareness } from 'y-protocols/awareness';
 import { getYDoc } from './ydoc.js';
-import { initHoldEviction } from './holds.js';
+import { initHoldEviction, resetHoldEvictionForTests } from './holds.js';
 
 // Ephemeral, per-client state (cursor position, holds) that isn't part of
 // document content — never persisted, never CRDT-merged, auto-clears on
@@ -18,4 +18,5 @@ export function getAwareness(): Awareness {
 export function resetAwarenessForTests(): void {
 	awareness?.destroy();
 	awareness = null;
+	resetHoldEvictionForTests();
 }

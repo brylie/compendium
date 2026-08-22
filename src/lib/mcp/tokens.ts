@@ -103,6 +103,21 @@ export function grantDocumentAccess(tokenHash: string, documentId: string): void
 	}
 }
 
+/** Persists an access grant for a newly created collection to SQLite so subsequent tool calls succeed. */
+export function grantCollectionAccess(tokenHash: string, collectionId: string): void {
+	const row = getDb()
+		.prepare('SELECT allowed_collection_ids FROM access_tokens WHERE token_hash = ?')
+		.get(tokenHash) as { allowed_collection_ids: string } | undefined;
+	if (!row) return;
+	const currentIds: string[] = JSON.parse(row.allowed_collection_ids);
+	if (!currentIds.includes(collectionId)) {
+		currentIds.push(collectionId);
+		getDb()
+			.prepare('UPDATE access_tokens SET allowed_collection_ids = ? WHERE token_hash = ?')
+			.run(JSON.stringify(currentIds), tokenHash);
+	}
+}
+
 export function tokenAllowsParent(token: AccessToken, parentId: string): boolean {
 	return (
 		token.allowedDocumentIds.includes(parentId) || token.allowedCollectionIds.includes(parentId)

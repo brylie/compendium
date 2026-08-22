@@ -84,6 +84,13 @@ export function initHoldEviction(awareness: Awareness): void {
 	);
 }
 
+export function resetHoldEvictionForTests(): void {
+	evictionWired = false;
+	agentClocks.clear();
+	agentTtlTimers.forEach((timer) => clearTimeout(timer));
+	agentTtlTimers.clear();
+}
+
 function evictFromOthers(awareness: Awareness, recordId: string, exceptClientId: number): void {
 	awareness.getStates().forEach((rawState, clientId) => {
 		if (clientId === exceptClientId) return;
