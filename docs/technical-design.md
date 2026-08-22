@@ -41,7 +41,7 @@ One long-running local Node process, no separate backend/frontend deployment:
                                           └───────────────────┘
 ```
 
-**Why one process, not a client/server split with a real API:** the PRD's core acceptance criterion is that MCP writes and UI edits go through the *same* sync engine and appear live to each other with no polling. The simplest way to guarantee that in Phase 0 is for the MCP server's tool handlers to mutate the same in-memory `Y.Doc` object the browser's y-websocket connection observes — not a separate database the UI polls. This is also exactly why a bespoke server is worth it here: an adopted framework would need to be convinced to expose its internal doc to a second, non-browser writer.
+**Why one process, not a client/server split with a real API:** the PRD's core acceptance criterion is that MCP writes and UI edits go through the _same_ sync engine and appear live to each other with no polling. The simplest way to guarantee that in Phase 0 is for the MCP server's tool handlers to mutate the same in-memory `Y.Doc` object the browser's y-websocket connection observes — not a separate database the UI polls. This is also exactly why a bespoke server is worth it here: an adopted framework would need to be convinced to expose its internal doc to a second, non-browser writer.
 
 **Why HTTP MCP transport, not stdio:** Claude Desktop, Claude Code, and ChatGPT all support pointing at a remote MCP server via URL + bearer token in their own config (per the docs linked in the PRD). That matches Phase 0's "simple local access token" decision better than stdio, which would mean each client spawns and manages its own subprocess — more moving parts for no benefit when everything's already running as one long-lived local service.
 
@@ -49,69 +49,69 @@ One long-running local Node process, no separate backend/frontend deployment:
 
 ```typescript
 type ActorId =
-  | { kind: 'human'; userId: string }
-  | { kind: 'agent'; agentId: string; name: string }
-  | { kind: 'human-via-client'; userId: string; client: string }; // "Brylie · via Claude Desktop"
+	| { kind: 'human'; userId: string }
+	| { kind: 'agent'; agentId: string; name: string }
+	| { kind: 'human-via-client'; userId: string; client: string }; // "Brylie · via Claude Desktop"
 
 type PropertyValue =
-  | { type: 'text'; value: string }
-  | { type: 'number'; value: number }
-  | { type: 'date'; value: string }      // ISO 8601
-  | { type: 'select'; value: string }    // option id, defined in the Collection's schema
-  | { type: 'checkbox'; value: boolean }
-  | { type: 'relation'; value: string[] }; // record IDs
+	| { type: 'text'; value: string }
+	| { type: 'number'; value: number }
+	| { type: 'date'; value: string } // ISO 8601
+	| { type: 'select'; value: string } // option id, defined in the Collection's schema
+	| { type: 'checkbox'; value: boolean }
+	| { type: 'relation'; value: string[] }; // record IDs
 
 interface PropertyDefinition {
-  key: string;
-  label: string;
-  type: PropertyValue['type'];
-  options?: { id: string; label: string; color?: string }[]; // for 'select'
+	key: string;
+	label: string;
+	type: PropertyValue['type'];
+	options?: { id: string; label: string; color?: string }[]; // for 'select'
 }
 
 // A block IS a record — this isn't a separate type, just a record whose
 // parent is a Document rather than a Collection. Kept as one shape so the
 // MCP tool surface never needs to special-case "block vs. row."
 interface Record {
-  id: string;                 // stable, globally unique
-  parentId: string;           // Document ID or Collection ID
-  order: string;               // fractional index, orders records within parentId
-  blockType?: string;          // set when parent is a Document: 'paragraph' | 'heading' | 'list-item' | 'table' | 'code' | 'embed'
-  content?: RichText;          // set when parent is a Document — the block's text
-  properties?: Record<string, PropertyValue>; // set when parent is a Collection
-  createdBy: ActorId;
-  createdAt: number;
-  lastEditedBy: ActorId;
-  lastEditedAt: number;
+	id: string; // stable, globally unique
+	parentId: string; // Document ID or Collection ID
+	order: string; // fractional index, orders records within parentId
+	blockType?: string; // set when parent is a Document: 'paragraph' | 'heading' | 'list-item' | 'table' | 'code' | 'embed'
+	content?: RichText; // set when parent is a Document — the block's text
+	properties?: Record<string, PropertyValue>; // set when parent is a Collection
+	createdBy: ActorId;
+	createdAt: number;
+	lastEditedBy: ActorId;
+	lastEditedAt: number;
 }
 
 interface RichText {
-  // Conceptually a run array (see PRD's Core Architectural Principle). Concretely,
-  // realized as a Y.Text with formatting attributes — see §3. This TypeScript
-  // shape is what the MCP boundary and the UI layer both see; the Y.Text
-  // encoding is an internal storage detail behind it.
-  runs: { text: string; marks: TextMarks }[];
+	// Conceptually a run array (see PRD's Core Architectural Principle). Concretely,
+	// realized as a Y.Text with formatting attributes — see §3. This TypeScript
+	// shape is what the MCP boundary and the UI layer both see; the Y.Text
+	// encoding is an internal storage detail behind it.
+	runs: { text: string; marks: TextMarks }[];
 }
 
 interface TextMarks {
-  bold?: boolean;
-  italic?: boolean;
-  strikethrough?: boolean;
-  code?: boolean;
-  link?: string;
-  mention?: string; // ActorId's userId or agentId
+	bold?: boolean;
+	italic?: boolean;
+	strikethrough?: boolean;
+	code?: boolean;
+	link?: string;
+	mention?: string; // ActorId's userId or agentId
 }
 
 interface Document {
-  id: string;
-  title: string;
-  recordIds: string[]; // ordered — the Document's blocks, in order
+	id: string;
+	title: string;
+	recordIds: string[]; // ordered — the Document's blocks, in order
 }
 
 interface Collection {
-  id: string;
-  title: string;
-  schema: PropertyDefinition[];
-  recordIds: string[]; // membership; row order within a view is a view concern, not stored here
+	id: string;
+	title: string;
+	schema: PropertyDefinition[];
+	recordIds: string[]; // membership; row order within a view is a view concern, not stored here
 }
 ```
 
@@ -119,12 +119,12 @@ interface Collection {
 
 One `Y.Doc` for the whole workspace (Phase 0 is single-tenant, single workspace — no need for multiple docs yet).
 
-| Concept | Yjs type | Notes |
-|---|---|---|
-| Documents index | `Y.Map<string, DocumentMeta>` | keyed by Document ID; `DocumentMeta` is `{title, recordIds: Y.Array<string>}` |
-| Collections index | `Y.Map<string, CollectionMeta>` | keyed by Collection ID; includes `schema` as a plain JSON value (schema edits are rare, don't need fine-grained CRDT merge) |
-| Records | `Y.Map<string, Y.Map>` | keyed by record ID; each record's own `Y.Map` holds `parentId`, `order`, `blockType`, `properties` (plain JSON), and — for block-records — `content` |
-| Block rich text | `Y.Text` | one per block-record, stored as the record's `content` field. **Not** a custom run array — Yjs's own `Y.Text.format()` already stores marks as attribute ranges over the text and merges concurrent overlapping formatting correctly (see PRD's rich-text acceptance criterion). The `RichText.runs` shape in §2 is derived from `Y.Text` on read, not stored separately. |
+| Concept           | Yjs type                        | Notes                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Documents index   | `Y.Map<string, DocumentMeta>`   | keyed by Document ID; `DocumentMeta` is `{title, recordIds: Y.Array<string>}`                                                                                                                                                                                                                                                                                             |
+| Collections index | `Y.Map<string, CollectionMeta>` | keyed by Collection ID; includes `schema` as a plain JSON value (schema edits are rare, don't need fine-grained CRDT merge)                                                                                                                                                                                                                                               |
+| Records           | `Y.Map<string, Y.Map>`          | keyed by record ID; each record's own `Y.Map` holds `parentId`, `order`, `blockType`, `properties` (plain JSON), and — for block-records — `content`                                                                                                                                                                                                                      |
+| Block rich text   | `Y.Text`                        | one per block-record, stored as the record's `content` field. **Not** a custom run array — Yjs's own `Y.Text.format()` already stores marks as attribute ranges over the text and merges concurrent overlapping formatting correctly (see PRD's rich-text acceptance criterion). The `RichText.runs` shape in §2 is derived from `Y.Text` on read, not stored separately. |
 
 **Why not a `Y.Text` per Document instead of one per block:** merging at the whole-document level would make block-level hold/release (§4) meaningless — the CRDT and the coordination layer need to operate at the same granularity. One `Y.Text` per block-record keeps them aligned.
 
@@ -134,7 +134,7 @@ Yjs ships an **Awareness** protocol specifically for ephemeral, per-client state
 
 - Each connected client (browser tab or MCP session) publishes an Awareness state: `{ actor: ActorId, heldRecordIds: string[] }`.
 - **Human cursor presence → implicit hold:** the browser UI updates its own Awareness state's `heldRecordIds` to `[currentBlockId]` whenever the cursor moves, debounced ~1.5s on move-away (per PRD).
-- **Agent hold request:** the MCP server's `hold_records` tool handler checks the *aggregate* Awareness state across all connected clients for each requested record ID. A record already present in another client's `heldRecordIds` is denied for this request; everything else is granted. This directly implements the PRD's per-record (not all-or-nothing) acceptance criterion.
+- **Agent hold request:** the MCP server's `hold_records` tool handler checks the _aggregate_ Awareness state across all connected clients for each requested record ID. A record already present in another client's `heldRecordIds` is denied for this request; everything else is granted. This directly implements the PRD's per-record (not all-or-nothing) acceptance criterion.
 - **TTL:** Awareness states carry Yjs's built-in timeout (clears automatically if a client stops sending heartbeats) — this gives the 90–120s auto-release for free rather than needing custom expiry logic.
 - **Placeholder rendering:** the UI subscribes to the aggregate Awareness state; any record ID held by an agent renders as the shimmer placeholder with that agent's avatar, sourced directly from the Awareness entry's `actor` field.
 
@@ -142,18 +142,18 @@ Yjs ships an **Awareness** protocol specifically for ephemeral, per-client state
 
 All tools operate on `Record` uniformly — no separate "block tools" vs. "row tools," per the PRD's unified-model requirement.
 
-| Tool | Input | Output | Notes |
-|---|---|---|---|
-| `list_documents` | — | `{id, title}[]` | |
-| `get_document` | `documentId` | `{id, title, records: {id, blockType, markdown}[]}` | `content` transcoded to Markdown at this boundary (§6) |
-| `list_collections` | — | `{id, title, schema}[]` | |
-| `query_collection` | `collectionId, filter?` | `Record[]` | backed by the Drizzle-managed read model (§7.5), not a direct `Y.Doc` walk |
-| `search_workspace` | `query` | `{recordId, snippet}[]` | full-text over block content + text/select properties, via the same read model (SQLite FTS5) |
-| `hold_records` | `recordIds: string[]` | `{granted: string[], denied: string[]}` | see §4; permission-checked per record before Awareness is checked |
-| `write_record` | `recordId, markdown \| properties` | `{success: boolean}` | requires an active hold for existing block content; atomic content-write + hold-release |
-| `release_records` | `recordIds: string[]` | `{success: boolean}` | explicit abandon, without writing |
-| `create_record` | `parentId, afterRecordId?, blockType? \| properties?` | `{recordId}` | no hold needed — no prior content to protect |
-| `delete_record` | `recordId` | `{success: boolean}` | no hold needed |
+| Tool               | Input                                                 | Output                                              | Notes                                                                                        |
+| ------------------ | ----------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `list_documents`   | —                                                     | `{id, title}[]`                                     |                                                                                              |
+| `get_document`     | `documentId`                                          | `{id, title, records: {id, blockType, markdown}[]}` | `content` transcoded to Markdown at this boundary (§6)                                       |
+| `list_collections` | —                                                     | `{id, title, schema}[]`                             |                                                                                              |
+| `query_collection` | `collectionId, filter?`                               | `Record[]`                                          | backed by the Drizzle-managed read model (§7.5), not a direct `Y.Doc` walk                   |
+| `search_workspace` | `query`                                               | `{recordId, snippet}[]`                             | full-text over block content + text/select properties, via the same read model (SQLite FTS5) |
+| `hold_records`     | `recordIds: string[]`                                 | `{granted: string[], denied: string[]}`             | see §4; permission-checked per record before Awareness is checked                            |
+| `write_record`     | `recordId, markdown \| properties`                    | `{success: boolean}`                                | requires an active hold for existing block content; atomic content-write + hold-release      |
+| `release_records`  | `recordIds: string[]`                                 | `{success: boolean}`                                | explicit abandon, without writing                                                            |
+| `create_record`    | `parentId, afterRecordId?, blockType? \| properties?` | `{recordId}`                                        | no hold needed — no prior content to protect                                                 |
+| `delete_record`    | `recordId`                                            | `{success: boolean}`                                | no hold needed                                                                               |
 
 **Permission scoping:** each access token (see §7) carries an allowlist of Document/Collection IDs. Every tool call checks the target record's `parentId` against that allowlist before touching Awareness or the `Y.Doc` — this is what "per-agent permission scoping" means concretely in Phase 0, even single-tenant: a token scoped to one Document can't read or write anything else, which is directly testable per the PRD's permission-denied acceptance criterion.
 
