@@ -20,6 +20,7 @@ Ordered, concrete task sequence for the personal MVP. Each milestone should be i
 
 ## M2 — Data access layer
 - [ ] Implement `Record`/`Document`/`Collection` types and CRUD functions (`getRecord`, `createRecord`, `updateRecordContent`, `updateRecordProperties`, `deleteRecord`, `listDocuments`, `listCollections`) against the `Y.Doc`, per technical-design.md §2–3.
+- [ ] `record_index` table via Drizzle (§7.5), kept in sync one-directionally from `Y.Doc` updates. Write the sync function now even though nothing queries it yet — easier to verify against M2's own writes than to retrofit once M4/M6 depend on it.
 - [ ] Unit tests for the CRDT-merge acceptance criteria from the PRD directly: concurrent overlapping bold/italic on one block merges correctly; a record created via this API is readable the same way regardless of which "view" logically created it.
 - **Done when:** this layer works standalone against an in-memory `Y.Doc` with no UI — it's the thing both the UI and the MCP server will import.
 
@@ -31,7 +32,8 @@ Ordered, concrete task sequence for the personal MVP. Each milestone should be i
 
 ## M4 — Table view
 - [ ] Collection schema editor: add/remove typed properties (text, number, date, select, checkbox, relation).
-- [ ] Row grid: add/edit/delete rows against the property types.
+- [ ] Row grid: add/edit/delete rows (writes go through M2's `Y.Doc` API, never the `record_index` table directly).
+- [ ] Grid filter/sort bound to a Svelte store derived from `Y.Doc` observers on the Collection — not the `record_index` table, which is for one-shot MCP queries only (§7.5).
 - **Done when:** you can create a Collection, define a few properties, and manage rows without leaving the app.
 
 ## M5 — Hold, placeholder, and Awareness-based presence

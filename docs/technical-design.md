@@ -147,8 +147,8 @@ All tools operate on `Record` uniformly — no separate "block tools" vs. "row t
 | `list_documents` | — | `{id, title}[]` | |
 | `get_document` | `documentId` | `{id, title, records: {id, blockType, markdown}[]}` | `content` transcoded to Markdown at this boundary (§6) |
 | `list_collections` | — | `{id, title, schema}[]` | |
-| `query_collection` | `collectionId, filter?` | `Record[]` | `filter` is a simple property-equality/range filter for Phase 0, not a general query language |
-| `search_workspace` | `query` | `{recordId, snippet}[]` | full-text over block content + text/select properties |
+| `query_collection` | `collectionId, filter?` | `Record[]` | backed by the Drizzle-managed read model (§7.5), not a direct `Y.Doc` walk |
+| `search_workspace` | `query` | `{recordId, snippet}[]` | full-text over block content + text/select properties, via the same read model (SQLite FTS5) |
 | `hold_records` | `recordIds: string[]` | `{granted: string[], denied: string[]}` | see §4; permission-checked per record before Awareness is checked |
 | `write_record` | `recordId, markdown \| properties` | `{success: boolean}` | requires an active hold for existing block content; atomic content-write + hold-release |
 | `release_records` | `recordIds: string[]` | `{success: boolean}` | explicit abandon, without writing |
@@ -165,13 +165,22 @@ Per the PRD: CommonMark + GFM (tables, task-list checkboxes, strikethrough) as t
 - **Write path** (Markdown → `Y.Text`): parse with a standard CommonMark+GFM parser (e.g., `remark` — pure JS, no framework coupling, fits a bespoke SvelteKit-side build), walk the resulting AST, apply `Y.Text.format()` calls for each inline mark, and resolve `@mention`/`[[...]]` tokens against the workspace's actor/record indices before writing.
 - Kept as a small internal module (`markdown-transcode.ts`) independent of both the UI and the MCP server, since both may eventually need it (e.g., pasting Markdown into the editor UI directly).
 
-## 7. Persistence (SQLite)
+## 7. Persistence (SQLite via Drizzle)
 
-Three tables, no ORM needed at this scale:
+[Drizzle](https://orm.drizzle.team/) (Apache 2.0 — same license as this project's own goal, not just compatible with it) manages every SQLite table, including the read model in §7.5 — one schema/migration story (`drizzle-kit`) instead of hand-written SQL for some tables and a separate library for others. It's also the SvelteKit-idiomatic choice: the Svelte CLI ships a built-in `drizzle` setup command.
 
 - `snapshots` — periodic binary snapshots of the `Y.Doc` state (via `Y.encodeStateAsUpdate`), loaded on process start. Simpler than an update-log replay for Phase 0; revisit if snapshot size becomes a problem.
 - `audit_log` — append-only: `id, actor_json, action, target_record_id, timestamp, diff_json`. Populated on every write/delete tool call and every UI-originated write, satisfying the PRD's audit-log requirement.
 - `access_tokens` — `token_hash, client_label, allowed_document_ids, allowed_collection_ids, created_at`. `client_label` is a free-text field set when the token is created (e.g., "Claude Desktop") — this is what powers the "Brylie · via Claude Desktop" attribution tag, since Phase 0 has no per-vendor OAuth to source it from otherwise.
+
+## 7.5. Query read model — Drizzle, not a reactive database
+
+`query_collection` and `search_workspace` are **one-shot MCP tool calls**: an agent asks a question, gets an answer, done — there's no subscription involved, so a reactive-query engine (the original RxDB proposal) was solving a problem that doesn't exist on this path. A plain SQLite table, queried point-in-time through Drizzle's type-safe query builder, is the right-sized tool:
+
+- `record_index` table: `record_id, parent_id, parent_type ('document' | 'collection'), plain_text_content, properties_json`, kept in sync **one-directionally** from `Y.Doc` changes (`Y.Doc` writes first, always — this table is a disposable projection, never a parallel write path; if it ever drifts, it's rebuildable by replaying the `Y.Doc`'s current state).
+- `query_collection`'s `filter` maps onto a Drizzle `where` clause against `properties_json`; `search_workspace` uses SQLite's FTS5 virtual table over `plain_text_content` for full-text search — both plain request/response, no reactivity anywhere in this path.
+
+**The Table view's live-updating grid is a different problem and doesn't need this table at all** — it's genuinely reactive (the UI should update as records change while you're looking at it), but that reactivity comes for free from the actual source of truth: a Svelte store derived from `Y.Doc` observers (`ymap.observe(...)`) on the relevant Collection, with filter/sort done client-side in a Svelte reactive statement. That keeps the UI's live-update path directly off Yjs rather than through an intermediate database — one less system to keep in sync, and no need for a reactive-database library at all once the one-shot query path is separated out.
 
 ## 8. App structure (SvelteKit)
 
