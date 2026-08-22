@@ -4,6 +4,7 @@ Translates [agent-workspace-prd.md](./agent-workspace-prd.md) into concrete engi
 
 **Status:** Draft
 **Depends on:** agent-workspace-prd.md (all decisions there are inherited, not re-litigated here)
+**See also:** [`service-layer.specification.md`](./service-layer.specification.md) (centralizing permission/audit logic behind MCP and route handlers) and [`e2e-testing.specification.md`](./e2e-testing.specification.md) (testing MCP/UI parity across the real transport boundary) — split out as their own specs rather than folded in here, to keep this doc scoped to Phase 0's original architecture decisions.
 
 ---
 
