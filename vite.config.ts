@@ -42,7 +42,8 @@ export default defineConfig({
 					name: 'server',
 					environment: 'node',
 					include: ['src/**/*.{test,spec}.{js,ts}', 'tests/**/*.test.{js,ts}'],
-					exclude: ['src/**/*.svelte.{test,spec}.{js,ts}', 'tests/**/*.spec.{js,ts}']
+					exclude: ['src/**/*.svelte.{test,spec}.{js,ts}', 'tests/**/*.spec.{js,ts}'],
+					setupFiles: ['./tests/setup/isolate-persistence.ts']
 				}
 			}
 		]
