@@ -1,4 +1,4 @@
-// Data model per docs/technical-design.md §2.
+// Data model per docs/technical-design.md §2 and docs/phase-1-plan.md M1-M3.
 // Note: the spec calls the record primitive "Record" — renamed to
 // WorkspaceRecord here to avoid shadowing TypeScript's built-in Record<K, V>.
 
@@ -24,7 +24,28 @@ export interface PropertyDefinition {
 	options?: { id: string; label: string; color?: string }[]; // for 'select'
 }
 
-export type BlockType = 'paragraph' | 'heading' | 'list-item' | 'table' | 'code' | 'embed';
+export type BlockType =
+	| 'paragraph'
+	| 'heading'
+	| 'heading_1'
+	| 'heading_2'
+	| 'heading_3'
+	| 'heading_4'
+	| 'bulleted_list_item'
+	| 'numbered_list_item'
+	| 'list-item'
+	| 'to_do'
+	| 'quote'
+	| 'divider'
+	| 'callout'
+	| 'toggle'
+	| 'table'
+	| 'code'
+	| 'table_of_contents'
+	| 'synced_block'
+	| 'page-link'
+	| 'page_link'
+	| 'embed';
 
 export interface TextMarks {
 	bold?: boolean;
@@ -49,6 +70,9 @@ export interface WorkspaceRecord {
 	blockType?: BlockType; // set when parent is a Document
 	content?: RichText; // set when parent is a Document — the block's text
 	properties?: Record<string, PropertyValue>; // set when parent is a Collection
+	checked?: boolean; // for to_do blocks
+	collapsed?: boolean; // for toggle blocks
+	referencedRecordId?: string; // for synced_block
 	createdBy: ActorId;
 	createdAt: number;
 	lastEditedBy: ActorId;
@@ -58,7 +82,14 @@ export interface WorkspaceRecord {
 export interface DocumentMeta {
 	id: string;
 	title: string;
+	parentDocumentId?: string;
+	order: string;
 	recordIds: string[]; // ordered — the Document's blocks, in order
+}
+
+export interface DocumentTreeNode extends DocumentMeta {
+	children: DocumentTreeNode[];
+	level: number;
 }
 
 export interface CollectionMeta {

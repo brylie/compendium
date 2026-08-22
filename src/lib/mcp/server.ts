@@ -11,6 +11,7 @@ import {
 } from '$lib/server/holds';
 import { logAudit } from '$lib/server/audit';
 import {
+	createDocument,
 	createRecord,
 	deleteRecord,
 	getDocument,
@@ -19,12 +20,13 @@ import {
 	listCollections,
 	listDocuments,
 	listRecordsForParent,
+	updateDocumentParent,
 	updateRecordContent,
 	updateRecordProperties
 } from '$lib/data/records';
 import { yTextToRichText } from '$lib/data/richtext';
 import { markdownToRichText, richTextToMarkdown } from './markdown-transcode';
-import { tokenAllowsParent, verifyToken, type AccessToken } from './tokens';
+import { grantDocumentAccess, tokenAllowsParent, verifyToken, type AccessToken } from './tokens';
 import type { ActorId, BlockType } from '$lib/data/types';
 
 const propertyValueSchema = z.discriminatedUnion('type', [
@@ -36,7 +38,29 @@ const propertyValueSchema = z.discriminatedUnion('type', [
 	z.object({ type: z.literal('relation'), value: z.array(z.string()) })
 ]);
 
-const blockTypeSchema = z.enum(['paragraph', 'heading', 'list-item', 'table', 'code', 'embed']);
+const blockTypeSchema = z.enum([
+	'paragraph',
+	'heading',
+	'heading_1',
+	'heading_2',
+	'heading_3',
+	'heading_4',
+	'bulleted_list_item',
+	'numbered_list_item',
+	'list-item',
+	'to_do',
+	'quote',
+	'divider',
+	'callout',
+	'toggle',
+	'table',
+	'code',
+	'table_of_contents',
+	'synced_block',
+	'page-link',
+	'page_link',
+	'embed'
+]);
 
 function actorForToken(token: AccessToken): ActorId {
 	return { kind: 'human-via-client', userId: 'local', client: token.clientLabel };
@@ -76,7 +100,7 @@ export function createAgentSpaceMcpServer(): McpServer {
 	server.registerTool(
 		'list_documents',
 		{
-			description: 'List Documents this connection has access to.',
+			description: 'List Documents this connection has access to, including tree hierarchy.',
 			inputSchema: {}
 		},
 		async (_args, extra) => {
@@ -85,7 +109,12 @@ export function createAgentSpaceMcpServer(): McpServer {
 				const doc = getYDoc();
 				const docs = listDocuments(doc)
 					.filter((d) => tokenAllowsParent(token, d.id))
-					.map((d) => ({ id: d.id, title: d.title }));
+					.map((d) => ({
+						id: d.id,
+						title: d.title,
+						parentDocumentId: d.parentDocumentId,
+						order: d.order
+					}));
 				return textResult(docs);
 			} catch (err) {
 				return handleToolError(err);
@@ -110,6 +139,9 @@ export function createAgentSpaceMcpServer(): McpServer {
 				const records = listRecordsForParent(doc, documentId).map((r) => ({
 					id: r.id,
 					blockType: r.blockType,
+					checked: r.checked,
+					collapsed: r.collapsed,
+					referencedRecordId: r.referencedRecordId,
 					markdown: r.content ? richTextToMarkdown(doc, r.content) : ''
 				}));
 
@@ -118,7 +150,86 @@ export function createAgentSpaceMcpServer(): McpServer {
 					action: 'get_document',
 					targetRecordId: documentId
 				});
-				return textResult({ id: document.id, title: document.title, records });
+				return textResult({
+					id: document.id,
+					title: document.title,
+					parentDocumentId: document.parentDocumentId,
+					records
+				});
+			} catch (err) {
+				return handleToolError(err);
+			}
+		}
+	);
+
+	server.registerTool(
+		'create_document',
+		{
+			description: 'Create a new Document, optionally nested under an accessible parent Document.',
+			inputSchema: {
+				title: z.string(),
+				parentDocumentId: z.string().optional()
+			}
+		},
+		async ({ title, parentDocumentId }, extra) => {
+			try {
+				const token = requireToken(extra);
+				// Decision: In single-tenant Phase 0/1, any authenticated bearer token is permitted
+				// to create top-level documents; when nested, access to parentDocumentId is verified.
+				if (parentDocumentId) {
+					requireAccessibleParent(token, parentDocumentId);
+				}
+				const doc = getYDoc();
+				const actor = actorForToken(token);
+				const document = createDocument(doc, { title, parentDocumentId });
+
+				// Persist access grant in SQLite so future tool calls from this token succeed
+				grantDocumentAccess(token.tokenHash, document.id);
+				token.allowedDocumentIds.push(document.id);
+
+				logAudit({ actor, action: 'create_document', targetRecordId: document.id });
+				return textResult({
+					id: document.id,
+					title: document.title,
+					parentDocumentId: document.parentDocumentId
+				});
+			} catch (err) {
+				return handleToolError(err);
+			}
+		}
+	);
+
+	server.registerTool(
+		'move_document',
+		{
+			description: 'Move or reorder a Document in the hierarchy, optionally under a new parent.',
+			inputSchema: {
+				documentId: z.string(),
+				parentDocumentId: z.string().optional(),
+				afterDocumentId: z.string().optional()
+			}
+		},
+		async ({ documentId, parentDocumentId, afterDocumentId }, extra) => {
+			try {
+				const token = requireToken(extra);
+				requireAccessibleParent(token, documentId);
+				if (parentDocumentId) {
+					requireAccessibleParent(token, parentDocumentId);
+				}
+				const doc = getYDoc();
+				const actor = actorForToken(token);
+				updateDocumentParent(doc, documentId, parentDocumentId, afterDocumentId);
+				logAudit({
+					actor,
+					action: 'move_document',
+					targetRecordId: documentId,
+					diff: { parentDocumentId, afterDocumentId }
+				});
+				return textResult({
+					success: true,
+					documentId,
+					parentDocumentId
+				});
 			} catch (err) {
 				return handleToolError(err);
 			}

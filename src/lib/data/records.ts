@@ -6,6 +6,7 @@ import type {
 	BlockType,
 	CollectionMeta,
 	DocumentMeta,
+	DocumentTreeNode,
 	ParentKind,
 	PropertyDefinition,
 	PropertyValue,
@@ -46,7 +47,7 @@ export function listDocuments(doc: Y.Doc): DocumentMeta[] {
 	documentsMap(doc).forEach((ymeta, id) => {
 		out.push(readDocumentMeta(id, ymeta as Y.Map<unknown>));
 	});
-	return out;
+	return out.sort((a, b) => a.order.localeCompare(b.order));
 }
 
 export function getDocument(doc: Y.Doc, id: string): DocumentMeta | undefined {
@@ -55,29 +56,108 @@ export function getDocument(doc: Y.Doc, id: string): DocumentMeta | undefined {
 }
 
 function readDocumentMeta(id: string, ymeta: Y.Map<unknown>): DocumentMeta {
-	const recordIds = ymeta.get('recordIds') as Y.Array<string>;
+	const recordIds = ymeta.get('recordIds') as Y.Array<string> | undefined;
 	return {
 		id,
-		title: ymeta.get('title') as string,
-		recordIds: recordIds.toArray()
+		title: (ymeta.get('title') as string) ?? 'Untitled',
+		parentDocumentId: (ymeta.get('parentDocumentId') as string | undefined) || undefined,
+		order: (ymeta.get('order') as string) ?? 'a0',
+		recordIds: recordIds ? recordIds.toArray() : []
 	};
 }
 
-export function createDocument(doc: Y.Doc, input: { id?: string; title: string }): DocumentMeta {
+export function createDocument(
+	doc: Y.Doc,
+	input: {
+		id?: string;
+		title: string;
+		parentDocumentId?: string;
+		afterDocumentId?: string;
+	}
+): DocumentMeta {
 	const id = input.id ?? nanoid();
-	doc.transact(() => {
+	const parentDocumentId = input.parentDocumentId || undefined;
+
+	return doc.transact(() => {
+		const allDocs = listDocuments(doc);
+		const siblings = allDocs.filter((d) => d.parentDocumentId === parentDocumentId);
+
+		let before: string | null = null;
+		let after: string | null = null;
+
+		if (input.afterDocumentId) {
+			const idx = siblings.findIndex((s) => s.id === input.afterDocumentId);
+			if (idx !== -1) {
+				before = siblings[idx].order;
+				after = idx + 1 < siblings.length ? siblings[idx + 1].order : null;
+			}
+		} else if (siblings.length > 0) {
+			before = siblings[siblings.length - 1].order;
+		}
+
+		const order = generateKeyBetween(before, after);
+
 		const ymeta = new Y.Map<unknown>();
+		ymeta.set('id', id);
 		ymeta.set('title', input.title);
+		if (parentDocumentId) {
+			ymeta.set('parentDocumentId', parentDocumentId);
+		}
+		ymeta.set('order', order);
 		ymeta.set('recordIds', new Y.Array<string>());
 		documentsMap(doc).set(id, ymeta);
+
+		return {
+			id,
+			title: input.title,
+			parentDocumentId,
+			order,
+			recordIds: []
+		};
 	});
-	return { id, title: input.title, recordIds: [] };
 }
 
 export function updateDocumentTitle(doc: Y.Doc, id: string, title: string): void {
 	const ymeta = documentsMap(doc).get(id) as Y.Map<unknown> | undefined;
 	if (!ymeta) throw new NotFoundError(`Document ${id} not found`);
 	ymeta.set('title', title);
+}
+
+export function updateDocumentParent(
+	doc: Y.Doc,
+	id: string,
+	parentDocumentId?: string,
+	afterDocumentId?: string
+): void {
+	const ymeta = documentsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	if (!ymeta) throw new NotFoundError(`Document ${id} not found`);
+
+	doc.transact(() => {
+		const allDocs = listDocuments(doc).filter((d) => d.id !== id);
+		const siblings = allDocs.filter((d) => d.parentDocumentId === (parentDocumentId || undefined));
+
+		let before: string | null = null;
+		let after: string | null = null;
+
+		if (afterDocumentId) {
+			const idx = siblings.findIndex((s) => s.id === afterDocumentId);
+			if (idx !== -1) {
+				before = siblings[idx].order;
+				after = idx + 1 < siblings.length ? siblings[idx + 1].order : null;
+			}
+		} else if (siblings.length > 0) {
+			before = siblings[siblings.length - 1].order;
+		}
+
+		const order = generateKeyBetween(before, after);
+
+		if (parentDocumentId) {
+			ymeta.set('parentDocumentId', parentDocumentId);
+		} else {
+			ymeta.delete('parentDocumentId');
+		}
+		ymeta.set('order', order);
+	});
 }
 
 export function updateCollectionTitle(doc: Y.Doc, id: string, title: string): void {
@@ -90,11 +170,57 @@ export function deleteDocument(doc: Y.Doc, id: string): void {
 	doc.transact(() => {
 		const meta = getDocument(doc, id);
 		if (!meta) return;
+
+		// Delete descendant documents recursively
+		const allDocs = listDocuments(doc);
+		const childDocs = allDocs.filter((d) => d.parentDocumentId === id);
+		for (const child of childDocs) {
+			deleteDocument(doc, child.id);
+		}
+
 		for (const recordId of meta.recordIds) {
 			recordsMap(doc).delete(recordId);
 		}
 		documentsMap(doc).delete(id);
 	});
+}
+
+export function buildDocumentTree(documents: DocumentMeta[]): DocumentTreeNode[] {
+	const sorted = [...documents].sort((a, b) => a.order.localeCompare(b.order));
+	const map = new Map<string, DocumentTreeNode>();
+
+	for (const doc of sorted) {
+		map.set(doc.id, {
+			...doc,
+			children: [],
+			level: 0
+		});
+	}
+
+	const roots: DocumentTreeNode[] = [];
+
+	for (const doc of sorted) {
+		const node = map.get(doc.id)!;
+		if (doc.parentDocumentId && map.has(doc.parentDocumentId)) {
+			const parent = map.get(doc.parentDocumentId)!;
+			node.level = parent.level + 1;
+			parent.children.push(node);
+		} else {
+			node.level = 0;
+			roots.push(node);
+		}
+	}
+
+	// Update levels recursively in case of deep tree
+	function setLevel(nodes: DocumentTreeNode[], lvl: number) {
+		for (const n of nodes) {
+			n.level = lvl;
+			setLevel(n.children, lvl + 1);
+		}
+	}
+	setLevel(roots, 0);
+
+	return roots;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +246,7 @@ function readCollectionMeta(id: string, ymeta: Y.Map<unknown>): CollectionMeta {
 		id,
 		title: ymeta.get('title') as string,
 		schema: (ymeta.get('schema') as PropertyDefinition[]) ?? [],
-		recordIds: recordIds.toArray()
+		recordIds: recordIds ? recordIds.toArray() : []
 	};
 }
 
@@ -211,6 +337,9 @@ function readRecord(yrecord: Y.Map<unknown>): WorkspaceRecord {
 		blockType: yrecord.get('blockType') as BlockType | undefined,
 		content: content ? yTextToRichText(content) : undefined,
 		properties: hasProps ? properties : undefined,
+		checked: yrecord.get('checked') as boolean | undefined,
+		collapsed: yrecord.get('collapsed') as boolean | undefined,
+		referencedRecordId: yrecord.get('referencedRecordId') as string | undefined,
 		createdBy: yrecord.get('createdBy') as ActorId,
 		createdAt: yrecord.get('createdAt') as number,
 		lastEditedBy: yrecord.get('lastEditedBy') as ActorId,
@@ -224,6 +353,9 @@ export interface CreateRecordInput {
 	afterRecordId?: string;
 	blockType?: BlockType; // set when parent is a Document
 	properties?: Record<string, PropertyValue>; // set when parent is a Collection
+	checked?: boolean;
+	collapsed?: boolean;
+	referencedRecordId?: string;
 }
 
 export function createRecord(
@@ -258,6 +390,9 @@ export function createRecord(
 		if (kind === 'document') {
 			yrecord.set('blockType', input.blockType ?? 'paragraph');
 			yrecord.set('content', new Y.Text());
+			if (input.checked !== undefined) yrecord.set('checked', input.checked);
+			if (input.collapsed !== undefined) yrecord.set('collapsed', input.collapsed);
+			if (input.referencedRecordId) yrecord.set('referencedRecordId', input.referencedRecordId);
 		} else {
 			yrecord.set('isCollectionRow', true);
 			for (const [key, value] of Object.entries(input.properties ?? {})) {
@@ -320,6 +455,46 @@ export function setBlockType(doc: Y.Doc, id: string, blockType: BlockType, actor
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	doc.transact(() => {
 		yrecord.set('blockType', blockType);
+		yrecord.set('lastEditedBy', actor);
+		yrecord.set('lastEditedAt', Date.now());
+	});
+}
+
+export function setRecordChecked(doc: Y.Doc, id: string, checked: boolean, actor: ActorId): void {
+	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
+	doc.transact(() => {
+		yrecord.set('checked', checked);
+		yrecord.set('lastEditedBy', actor);
+		yrecord.set('lastEditedAt', Date.now());
+	});
+}
+
+export function setRecordCollapsed(
+	doc: Y.Doc,
+	id: string,
+	collapsed: boolean,
+	actor: ActorId
+): void {
+	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
+	doc.transact(() => {
+		yrecord.set('collapsed', collapsed);
+		yrecord.set('lastEditedBy', actor);
+		yrecord.set('lastEditedAt', Date.now());
+	});
+}
+
+export function setRecordReferencedId(
+	doc: Y.Doc,
+	id: string,
+	referencedRecordId: string,
+	actor: ActorId
+): void {
+	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
+	doc.transact(() => {
+		yrecord.set('referencedRecordId', referencedRecordId);
 		yrecord.set('lastEditedBy', actor);
 		yrecord.set('lastEditedAt', Date.now());
 	});

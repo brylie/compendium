@@ -19,17 +19,18 @@
 		PropertyValue,
 		WorkspaceRecord
 	} from '$lib/data/types';
+	import Icon from '$lib/components/Icon.svelte';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
 
-	let title = $state(data.title);
+	let ydoc: ReturnType<typeof getClientDoc> | undefined = $state();
+	let currentCollection = $derived(ydoc ? getCollection(ydoc, data.collectionId) : undefined);
+	let title = $derived(currentCollection?.title ?? data.title);
 	let schema: PropertyDefinition[] = $state([]);
 	let rows: WorkspaceRecord[] = $state([]);
 	let newPropertyLabel = $state('');
 	let newPropertyType: PropertyType = $state('text');
-
-	let ydoc: ReturnType<typeof getClientDoc> | undefined = $state();
 
 	const PROPERTY_TYPES: PropertyType[] = [
 		'text',
@@ -130,31 +131,60 @@
 	<title>{title || 'Untitled'} · AgentSpace</title>
 </svelte:head>
 
-<main>
-	<a class="back" href={resolve('/')}>← Workspace</a>
-	<input class="title" value={title} oninput={handleTitleInput} placeholder="Untitled" />
+<div class="mx-auto max-w-5xl px-6 py-10">
+	<nav class="mb-4 flex items-center gap-1.5 text-xs text-muted">
+		<a href={resolve('/')} class="flex items-center gap-1 transition-colors hover:text-accent">
+			<span>Workspace</span>
+		</a>
+		<span>/</span>
+		<span class="font-medium text-fg">{title || 'Untitled'}</span>
+	</nav>
 
-	<div class="table-scroll">
-		<table>
+	<input
+		class="mb-6 w-full border-none bg-transparent font-display text-3xl font-semibold tracking-tight text-fg outline-none placeholder:text-muted/50 focus:ring-0 md:text-4xl"
+		value={title}
+		oninput={handleTitleInput}
+		placeholder="Untitled Collection"
+	/>
+
+	<!-- Table Canvas -->
+	<div class="overflow-x-auto rounded-lg border border-border bg-bg shadow-xs">
+		<table class="w-full border-collapse text-left text-sm">
 			<thead>
-				<tr>
+				<tr
+					class="border-b border-border bg-surface text-xs font-semibold tracking-wider text-muted"
+				>
 					{#each schema as property (property.key)}
-						<th>
-							{property.label}
-							<span class="type">{property.type}</span>
-							<button type="button" class="remove-col" onclick={() => removeProperty(property.key)}
-								>×</button
-							>
+						<th class="border-r border-border/60 px-3.5 py-2.5">
+							<div class="flex items-center justify-between gap-2">
+								<span class="font-medium text-fg">{property.label}</span>
+								<div class="flex items-center gap-1.5">
+									<span
+										class="py-0.2 rounded border border-border bg-bg px-1 font-mono text-[10px] text-muted"
+									>
+										{property.type}
+									</span>
+									<button
+										type="button"
+										onclick={() => removeProperty(property.key)}
+										class="rounded p-0.5 text-muted hover:text-red-500"
+										title="Remove column"
+										aria-label="Remove column"
+									>
+										×
+									</button>
+								</div>
+							</div>
 						</th>
 					{/each}
-					<th></th>
+					<th class="w-12 px-3 py-2.5"></th>
 				</tr>
 			</thead>
-			<tbody>
+			<tbody class="divide-y divide-border">
 				{#each rows as row (row.id)}
-					<tr>
+					<tr class="group transition-colors hover:bg-surface/40">
 						{#each schema as property (property.key)}
-							<td>
+							<td class="border-r border-border/60 p-1.5">
 								{#if property.type === 'text'}
 									<input
 										type="text"
@@ -164,6 +194,7 @@
 												type: 'text',
 												value: (e.target as HTMLInputElement).value
 											})}
+										class="w-full rounded border-0 bg-transparent px-2 py-1 text-sm text-fg focus:bg-bg focus:ring-1 focus:ring-accent"
 									/>
 								{:else if property.type === 'number'}
 									<input
@@ -174,6 +205,7 @@
 												type: 'number',
 												value: Number((e.target as HTMLInputElement).value)
 											})}
+										class="w-full rounded border-0 bg-transparent px-2 py-1 text-sm text-fg focus:bg-bg focus:ring-1 focus:ring-accent"
 									/>
 								{:else if property.type === 'date'}
 									<input
@@ -184,40 +216,50 @@
 												type: 'date',
 												value: (e.target as HTMLInputElement).value
 											})}
+										class="w-full rounded border-0 bg-transparent px-2 py-1 text-sm text-fg focus:bg-bg focus:ring-1 focus:ring-accent"
 									/>
 								{:else if property.type === 'checkbox'}
-									<input
-										type="checkbox"
-										checked={(cellValue(row, property) as { value?: boolean })?.value ?? false}
-										onchange={(e) =>
-											setCell(row, property, {
-												type: 'checkbox',
-												value: (e.target as HTMLInputElement).checked
-											})}
-									/>
+									<div class="flex items-center justify-center py-1">
+										<input
+											type="checkbox"
+											checked={(cellValue(row, property) as { value?: boolean })?.value ?? false}
+											onchange={(e) =>
+												setCell(row, property, {
+													type: 'checkbox',
+													value: (e.target as HTMLInputElement).checked
+												})}
+											class="h-4 w-4 rounded border-border text-accent focus:ring-accent"
+										/>
+									</div>
 								{:else if property.type === 'select'}
-									<select
-										value={(cellValue(row, property) as { value?: string })?.value ?? ''}
-										onchange={(e) =>
-											setCell(row, property, {
-												type: 'select',
-												value: (e.target as HTMLSelectElement).value
-											})}
-									>
-										<option value="">—</option>
-										{#each property.options ?? [] as option (option.id)}
-											<option value={option.id}>{option.label}</option>
-										{/each}
-									</select>
-									<button
-										type="button"
-										class="add-option"
-										onclick={() => addSelectOption(property.key)}>+</button
-									>
+									<div class="flex items-center gap-1">
+										<select
+											value={(cellValue(row, property) as { value?: string })?.value ?? ''}
+											onchange={(e) =>
+												setCell(row, property, {
+													type: 'select',
+													value: (e.target as HTMLSelectElement).value
+												})}
+											class="flex-1 rounded border-0 bg-transparent px-2 py-1 text-sm text-fg focus:bg-bg focus:ring-1 focus:ring-accent"
+										>
+											<option value="">—</option>
+											{#each property.options ?? [] as option (option.id)}
+												<option value={option.id}>{option.label}</option>
+											{/each}
+										</select>
+										<button
+											type="button"
+											onclick={() => addSelectOption(property.key)}
+											class="rounded p-1 text-xs text-muted hover:text-accent"
+											title="Add option"
+										>
+											+
+										</button>
+									</div>
 								{:else if property.type === 'relation'}
 									<input
 										type="text"
-										placeholder="record ids, comma-separated"
+										placeholder="record ids…"
 										value={(cellValue(row, property) as { value?: string[] })?.value?.join(', ') ??
 											''}
 										onchange={(e) =>
@@ -228,102 +270,71 @@
 													.map((s) => s.trim())
 													.filter(Boolean)
 											})}
+										class="w-full rounded border-0 bg-transparent px-2 py-1 text-sm text-fg focus:bg-bg focus:ring-1 focus:ring-accent"
 									/>
 								{/if}
 							</td>
 						{/each}
-						<td><button type="button" onclick={() => removeRow(row.id)}>Delete</button></td>
+						<td class="px-2 py-1.5 text-center">
+							<button
+								type="button"
+								onclick={() => removeRow(row.id)}
+								class="rounded p-1 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-500"
+								title="Delete row"
+								aria-label="Delete row"
+							>
+								<Icon name="trash" size={14} />
+							</button>
+						</td>
+					</tr>
+				{:else}
+					<tr>
+						<td colspan={schema.length + 1} class="py-6 text-center text-sm text-muted italic">
+							No rows in this collection.
+						</td>
 					</tr>
 				{/each}
 			</tbody>
 		</table>
 	</div>
 
-	<button type="button" class="add-row" onclick={addRow}>+ Add row</button>
+	<div class="mt-4 flex items-center gap-3">
+		<button
+			type="button"
+			onclick={addRow}
+			class="inline-flex items-center gap-1.5 rounded-md border border-dashed border-border px-3 py-1.5 text-xs text-muted transition-colors hover:border-accent hover:text-accent"
+		>
+			<Icon name="plus" size={13} />
+			<span>Add row</span>
+		</button>
+	</div>
 
-	<section class="schema-editor">
-		<h2>Add property</h2>
-		<div class="add-property">
-			<input type="text" placeholder="Property name" bind:value={newPropertyLabel} />
-			<select bind:value={newPropertyType}>
+	<!-- Schema Editor -->
+	<section class="mt-10 rounded-lg border border-border bg-surface/50 p-5">
+		<h2 class="font-display text-base font-semibold text-fg">Add Property Column</h2>
+		<div class="mt-3 flex flex-wrap gap-2">
+			<input
+				type="text"
+				placeholder="Property name…"
+				bind:value={newPropertyLabel}
+				class="min-w-48 rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg placeholder:text-muted focus:border-accent focus:outline-none"
+			/>
+			<select
+				bind:value={newPropertyType}
+				class="rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg focus:border-accent focus:outline-none"
+			>
 				{#each PROPERTY_TYPES as t (t)}
 					<option value={t}>{t}</option>
 				{/each}
 			</select>
-			<button type="button" onclick={addProperty}>Add</button>
+			<button
+				type="button"
+				onclick={addProperty}
+				class="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg transition-opacity hover:opacity-90"
+			>
+				<Icon name="plus" size={14} />
+				<span>Add property</span>
+			</button>
 		</div>
 	</section>
-</main>
-
-<style>
-	main {
-		max-width: 60rem;
-		margin: 0 auto;
-		padding: 2rem 1rem;
-		font-family:
-			system-ui,
-			-apple-system,
-			sans-serif;
-	}
-	.back {
-		display: inline-block;
-		margin-bottom: 1rem;
-		color: #666;
-		text-decoration: none;
-	}
-	.title {
-		font-size: 2rem;
-		font-weight: 700;
-		border: none;
-		outline: none;
-		width: 100%;
-		margin-bottom: 1.5rem;
-	}
-	.table-scroll {
-		overflow-x: auto;
-	}
-	table {
-		border-collapse: collapse;
-		width: 100%;
-	}
-	th,
-	td {
-		border: 1px solid #e5e5e5;
-		padding: 0.4rem 0.6rem;
-		text-align: left;
-		white-space: nowrap;
-	}
-	th {
-		background: #fafafa;
-		font-weight: 600;
-	}
-	.type {
-		color: #999;
-		font-weight: 400;
-		font-size: 0.7rem;
-		margin-left: 0.3rem;
-	}
-	.remove-col,
-	.add-option {
-		border: none;
-		background: none;
-		cursor: pointer;
-		color: #999;
-	}
-	.add-row {
-		margin-top: 0.75rem;
-		padding: 0.4rem 0.8rem;
-		border: 1px dashed #ccc;
-		border-radius: 4px;
-		background: none;
-		cursor: pointer;
-		color: #666;
-	}
-	.schema-editor {
-		margin-top: 2rem;
-	}
-	.add-property {
-		display: flex;
-		gap: 0.5rem;
-	}
-</style>
+</div>

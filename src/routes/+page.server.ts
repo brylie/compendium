@@ -3,6 +3,7 @@ import { getYDoc } from '$lib/server/ydoc';
 import {
 	createCollection,
 	createDocument,
+	createRecord,
 	listCollections,
 	listDocuments
 } from '$lib/data/records';
@@ -23,10 +24,12 @@ export const actions: Actions = {
 	createDocument: async ({ request }) => {
 		const data = await request.formData();
 		const title = String(data.get('title') ?? '').trim();
+		const parentDocumentId = String(data.get('parentDocumentId') ?? '').trim() || undefined;
 		if (!title) return fail(400, { error: 'Title is required' });
 
 		const doc = getYDoc();
-		const document = createDocument(doc, { title });
+		const document = createDocument(doc, { title, parentDocumentId });
+		createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, CURRENT_USER);
 		logAudit({ actor: CURRENT_USER, action: 'create_document', targetRecordId: document.id });
 		redirect(303, `/doc/${document.id}`);
 	},

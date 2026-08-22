@@ -8,6 +8,7 @@
 	let {
 		ytext,
 		placeholder = '',
+		class: className = '',
 		onInputText,
 		onEnter,
 		onBackspaceAtStart,
@@ -16,6 +17,7 @@
 	}: {
 		ytext: Y.Text;
 		placeholder?: string;
+		class?: string;
 		onInputText: () => void;
 		onEnter: () => void;
 		onBackspaceAtStart: () => void;
@@ -32,11 +34,13 @@
 
 	function runToHtml(text: string, marks: TextMarks): string {
 		let html = escapeHtml(text);
-		if (marks.code) html = `<code>${html}</code>`;
-		if (marks.bold) html = `<strong>${html}</strong>`;
+		if (marks.code)
+			html = `<code class="bg-surface px-1 py-0.5 rounded font-mono text-[0.9em] border border-border">${html}</code>`;
+		if (marks.bold) html = `<strong class="font-semibold">${html}</strong>`;
 		if (marks.italic) html = `<em>${html}</em>`;
-		if (marks.strikethrough) html = `<s>${html}</s>`;
-		if (marks.link) html = `<a href="${escapeHtml(marks.link)}">${html}</a>`;
+		if (marks.strikethrough) html = `<s class="line-through text-muted">${html}</s>`;
+		if (marks.link)
+			html = `<a href="${escapeHtml(marks.link)}" class="text-accent underline underline-offset-2">${html}</a>`;
 		return html;
 	}
 
@@ -127,7 +131,7 @@
 
 <div
 	bind:this={el}
-	class="block-editor"
+	class="block-editor min-h-[1.5em] py-0.5 leading-relaxed break-words text-fg outline-none {className}"
 	contenteditable="true"
 	role="textbox"
 	tabindex="0"
@@ -139,15 +143,10 @@
 ></div>
 
 <style>
-	.block-editor {
-		outline: none;
-		min-height: 1.4em;
-		padding: 0.15rem 0;
-		line-height: 1.5;
-	}
 	.block-editor:empty::before {
 		content: attr(data-placeholder);
-		color: #aaa;
+		color: var(--color-muted);
+		opacity: 0.7;
 		pointer-events: none;
 	}
 </style>

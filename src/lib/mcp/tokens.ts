@@ -88,6 +88,21 @@ export function revokeToken(tokenHash: string): void {
 		.run(Date.now(), tokenHash);
 }
 
+/** Persists an access grant for a newly created document to SQLite so subsequent tool calls succeed. */
+export function grantDocumentAccess(tokenHash: string, documentId: string): void {
+	const row = getDb()
+		.prepare('SELECT allowed_document_ids FROM access_tokens WHERE token_hash = ?')
+		.get(tokenHash) as { allowed_document_ids: string } | undefined;
+	if (!row) return;
+	const currentIds: string[] = JSON.parse(row.allowed_document_ids);
+	if (!currentIds.includes(documentId)) {
+		currentIds.push(documentId);
+		getDb()
+			.prepare('UPDATE access_tokens SET allowed_document_ids = ? WHERE token_hash = ?')
+			.run(JSON.stringify(currentIds), tokenHash);
+	}
+}
+
 export function tokenAllowsParent(token: AccessToken, parentId: string): boolean {
 	return (
 		token.allowedDocumentIds.includes(parentId) || token.allowedCollectionIds.includes(parentId)

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import {
+	buildDocumentTree,
 	createCollection,
 	createDocument,
 	createRecord,
+	deleteDocument,
 	deleteRecord,
 	getRecord,
 	listCollections,
@@ -71,10 +73,54 @@ describe('records: unified addressing', () => {
 	});
 });
 
+describe('document hierarchy and tree', () => {
+	it('creates nested documents and builds tree hierarchy correctly', () => {
+		const doc = new Y.Doc();
+		const parent1 = createDocument(doc, { title: 'Architecture' });
+		const child1 = createDocument(doc, {
+			title: 'Storage layer',
+			parentDocumentId: parent1.id
+		});
+		const child2 = createDocument(doc, {
+			title: 'CRDT Sync',
+			parentDocumentId: parent1.id,
+			afterDocumentId: child1.id
+		});
+		const grandchild = createDocument(doc, {
+			title: 'Awareness protocol',
+			parentDocumentId: child2.id
+		});
+		createDocument(doc, { title: 'Design System' });
+
+		const all = listDocuments(doc);
+		expect(all).toHaveLength(5);
+
+		const tree = buildDocumentTree(all);
+		expect(tree).toHaveLength(2); // parent1 and Design System
+		expect(tree[0].id).toBe(parent1.id);
+		expect(tree[0].level).toBe(0);
+		expect(tree[0].children).toHaveLength(2);
+		expect(tree[0].children[0].id).toBe(child1.id);
+		expect(tree[0].children[0].level).toBe(1);
+		expect(tree[0].children[1].id).toBe(child2.id);
+		expect(tree[0].children[1].level).toBe(1);
+		expect(tree[0].children[1].children).toHaveLength(1);
+		expect(tree[0].children[1].children[0].id).toBe(grandchild.id);
+		expect(tree[0].children[1].children[0].level).toBe(2);
+	});
+
+	it('deleting parent document recursively deletes child documents', () => {
+		const doc = new Y.Doc();
+		const parent = createDocument(doc, { title: 'Parent' });
+		createDocument(doc, { title: 'Child', parentDocumentId: parent.id });
+
+		deleteDocument(doc, parent.id);
+		expect(listDocuments(doc)).toHaveLength(0);
+	});
+});
+
 describe('records: CRDT merge acceptance criteria', () => {
 	it('merges concurrent overlapping bold/italic formatting with no corrupted or lost marks', () => {
-		// Two replicas of the same workspace, simulating two humans editing offline
-		// then syncing — the PRD's acceptance criterion for the rich-text model.
 		const docA = new Y.Doc();
 		const document = createDocument(docA, { title: 'Notes' });
 		const block = createRecord(docA, { parentId: document.id, blockType: 'paragraph' }, human);
