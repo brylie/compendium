@@ -1,10 +1,10 @@
 # Technical Design — Phase 0
 
-Translates [agent-workspace-prd.md](./agent-workspace-prd.md) into concrete engineering decisions for the personal MVP. Scope is Phase 0 only (single-tenant, local-trust, no login) — Phase 1+ concerns (multi-user auth, workspace admin, per-user OAuth) are explicitly out of scope for this doc and will get their own pass when that phase starts.
+Translates [agent-workspace-prd.md](../agent-workspace-prd.md) into concrete engineering decisions for the personal MVP. Scope is Phase 0 only (single-tenant, local-trust, no login) — Phase 1+ concerns (multi-user auth, workspace admin, per-user OAuth) are explicitly out of scope for this doc and will get their own pass when that phase starts.
 
 **Status:** Draft
 **Depends on:** agent-workspace-prd.md (all decisions there are inherited, not re-litigated here)
-**See also:** [`service-layer.specification.md`](./service-layer.specification.md) (centralizing permission/audit logic behind MCP and route handlers) and [`e2e-testing.specification.md`](./e2e-testing.specification.md) (testing MCP/UI parity across the real transport boundary) — split out as their own specs rather than folded in here, to keep this doc scoped to Phase 0's original architecture decisions.
+**See also:** [`service-layer.md`](./service-layer.md) (centralizing permission/audit logic behind MCP and route handlers) and [`e2e-testing.md`](./e2e-testing.md) (testing MCP/UI parity across the real transport boundary) — split out as their own specs rather than folded in here, to keep this doc scoped to Phase 0's original architecture decisions.
 
 ---
 

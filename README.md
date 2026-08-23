@@ -73,7 +73,7 @@ itself an implicit claim on it.
 Everything is saved centrally with a full history of who changed what.
 
 Full architecture, the sync engine, and the MCP tool surface live in
-[`docs/technical-design.md`](docs/technical-design.md).
+[`docs/specifications/technical-design.md`](docs/specifications/technical-design.md).
 
 ## Running it
 
@@ -104,7 +104,7 @@ yourself.
 
 Edits made this way appear live in any open browser tab, and vice versa —
 MCP and the UI are editing the same workspace (see
-[`docs/technical-design.md` §1](docs/technical-design.md)).
+[`docs/specifications/technical-design.md` §1](docs/specifications/technical-design.md)).
 
 ## Testing
 
@@ -118,27 +118,32 @@ npm run lint             # prettier + eslint
 The E2E suites exist specifically to prove MCP writes and UI edits stay in
 sync across the real transport boundary in both directions — human creates,
 agent edits and vice versa — not just that each side works in isolation. See
-[`docs/e2e-testing.specification.md`](docs/e2e-testing.specification.md).
+[`docs/specifications/e2e-testing.md`](docs/specifications/e2e-testing.md).
+
+## Roadmap
+
+Open work is tracked as [GitHub Issues](https://github.com/brylie/compendium/issues)
+and organized on the [project board](https://github.com/users/brylie/projects/6/views/1),
+not in local planning docs.
 
 ## Further reading
 
-Product rationale, architecture, and phase-by-phase build plans each have
-their own doc under [`docs/`](docs/) and are kept current there rather than
-mirrored here:
+Product rationale and the canonical specification for each implemented
+subsystem have their own doc under [`docs/`](docs/) and are kept current
+there rather than mirrored here:
 
 - [`agent-workspace-prd.md`](docs/agent-workspace-prd.md) — problem
   statement, goals/non-goals, requirements, and the build-vs-adopt decisions
   behind the editor.
-- [`technical-design.md`](docs/technical-design.md) — process architecture,
-  data model, sync engine, MCP tool surface.
-- [`service-layer.specification.md`](docs/service-layer.specification.md) /
-  [`service-layer-manifest-specification.md`](docs/service-layer-manifest-specification.md)
+- [`specifications/technical-design.md`](docs/specifications/technical-design.md)
+  — process architecture, data model, sync engine, MCP tool surface.
+- [`specifications/service-layer.md`](docs/specifications/service-layer.md) /
+  [`specifications/service-layer-manifest.md`](docs/specifications/service-layer-manifest.md)
   — how permission/audit logic is centralized once and shared by MCP and UI.
-- [`e2e-testing.specification.md`](docs/e2e-testing.specification.md) — the
+- [`specifications/e2e-testing.md`](docs/specifications/e2e-testing.md) — the
   MCP/UI parity testing strategy.
-- [`design-system.md`](docs/design-system.md) — UI tokens and conventions.
-- `phase-0-build-plan.md` through `phase-4-plan.md` — the sequenced build
-  plan; each stands on its own as the record of what that phase covers.
+- [`specifications/design-system.md`](docs/specifications/design-system.md)
+  — UI tokens and conventions.
 
 ## License
 

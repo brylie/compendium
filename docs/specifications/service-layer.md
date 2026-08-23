@@ -1,7 +1,7 @@
 # Specification — Service Layer (centralizing business logic)
 
 **Status:** Draft
-**Depends on:** [`technical-design.md`](./technical-design.md) §5 (MCP tool surface), §7 (persistence/audit) — this doc extends, not replaces, those; [`agent-workspace-prd.md`](./agent-workspace-prd.md)'s "Permissions model" and "Audit log" requirements are the acceptance bar everything here is built to satisfy.
+**Depends on:** [`technical-design.md`](./technical-design.md) §5 (MCP tool surface), §7 (persistence/audit) — this doc extends, not replaces, those; [`agent-workspace-prd.md`](../agent-workspace-prd.md)'s "Permissions model" and "Audit log" requirements are the acceptance bar everything here is built to satisfy.
 **Motivated by:** a live Phase 1 review that found the `create_document` MCP tool granting itself access to a newly-created document in a way that never persists (see §1 below) — a bug that exists specifically because no single piece of code owns "what must always happen when a document is created."
 
 ---
@@ -85,4 +85,4 @@ Incremental, not a rewrite:
 
 ## 6. Testing implications
 
-Service functions are the natural unit-test seam going forward: a test for `services/documents.ts#createDocument` can assert all three required side effects (document exists, audit entry exists, token's persisted grant includes the new ID) in one place, against an in-memory `Y.Doc` and a real (test) SQLite connection — no need to spin up the MCP or HTTP layer just to verify business-rule completeness. Protocol-boundary correctness (does a _second, independent_ MCP call actually see the persisted grant) is still the job of the E2E parity tests — see [`e2e-testing.specification.md`](./e2e-testing.specification.md); the service layer makes those tests more likely to pass, it doesn't replace the need for them.
+Service functions are the natural unit-test seam going forward: a test for `services/documents.ts#createDocument` can assert all three required side effects (document exists, audit entry exists, token's persisted grant includes the new ID) in one place, against an in-memory `Y.Doc` and a real (test) SQLite connection — no need to spin up the MCP or HTTP layer just to verify business-rule completeness. Protocol-boundary correctness (does a _second, independent_ MCP call actually see the persisted grant) is still the job of the E2E parity tests — see [`e2e-testing.md`](./e2e-testing.md); the service layer makes those tests more likely to pass, it doesn't replace the need for them.
