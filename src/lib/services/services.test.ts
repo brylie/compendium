@@ -14,6 +14,8 @@ import {
 } from './index';
 import { createToken, verifyToken } from '$lib/mcp/tokens';
 import { queryAuditLog } from '$lib/server/audit';
+import { getYDoc } from '$lib/server/ydoc';
+import { createRecord as crdtCreateRecord } from '$lib/data/records';
 import type { ActorId } from '$lib/data/types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
@@ -169,5 +171,35 @@ describe('service layer: centralized business rules & side effects', () => {
 
 		const humanResults = searchWorkspace(human, 'Alpha');
 		expect(humanResults.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it('omits a page_link target outside the caller token scope instead of leaking its title', () => {
+		const docPublic = createDocument(human, { title: 'Public Handbook' });
+		const docSecret = createDocument(human, { title: 'Secret Doc' });
+
+		// Only the UI's direct CRDT write path can set referencedRecordId today
+		// (see markdown-transcoding.md) — mirror that here rather than going
+		// through the service-layer createRecord, which doesn't accept it.
+		const link = crdtCreateRecord(
+			getYDoc(),
+			{ parentId: docPublic.id, blockType: 'page_link', referencedRecordId: docSecret.id },
+			human
+		);
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Scoped Bot',
+			allowedDocumentIds: [docPublic.id],
+			allowedCollectionIds: []
+		});
+
+		const scoped = getDocument(tokenRecord, docPublic.id);
+		const scopedLink = scoped?.records.find((r) => r.id === link.id);
+		expect(scopedLink?.referencedRecordId).toBeUndefined();
+		expect(scopedLink?.markdown).toBe('');
+
+		const full = getDocument(human, docPublic.id);
+		const fullLink = full?.records.find((r) => r.id === link.id);
+		expect(fullLink?.referencedRecordId).toBe(docSecret.id);
+		expect(fullLink?.markdown).toBe('[[Secret Doc]]');
 	});
 });

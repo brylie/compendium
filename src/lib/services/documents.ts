@@ -135,8 +135,15 @@ export function getDocument(
 
 	const records = crdtListRecordsForParent(doc, documentId).map((r) => {
 		const isPageLink = r.blockType === 'page_link';
+		// A page_link's target can be any Document, not just ones under this
+		// documentId — an out-of-scope target must not leak its title/id to a
+		// token that was never granted access to it.
+		const targetInScope =
+			!r.referencedRecordId ||
+			!isAccessToken(caller) ||
+			tokenAllowsParent(caller, r.referencedRecordId);
 		const targetTitle =
-			isPageLink && r.referencedRecordId
+			isPageLink && r.referencedRecordId && targetInScope
 				? (crdtGetDocument(doc, r.referencedRecordId)?.title ?? 'Untitled')
 				: '';
 		const markdown = isPageLink
@@ -153,7 +160,7 @@ export function getDocument(
 			blockType: r.blockType,
 			checked: r.checked,
 			collapsed: r.collapsed,
-			referencedRecordId: r.referencedRecordId,
+			referencedRecordId: targetInScope ? r.referencedRecordId : undefined,
 			markdown
 		};
 	});
