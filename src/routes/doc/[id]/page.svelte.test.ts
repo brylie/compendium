@@ -428,7 +428,7 @@ describe('doc/[id] +page', () => {
 		expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(1);
 	});
 
-	it('adds a block when clicking the empty canvas area below existing blocks', async () => {
+	it('focuses the last block when clicking the empty canvas area below existing blocks', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 		const user = userEvent.setup();

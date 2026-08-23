@@ -26,6 +26,7 @@ function entry(overrides: Partial<TestEntry> = {}): TestEntry {
 describe('audit +page', () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
 	});
 
 	it('shows an empty-state row when there are no entries', () => {
@@ -98,8 +99,7 @@ describe('audit +page', () => {
 	});
 
 	it('submits the filter form when the actor filter changes', async () => {
-		const submitSpy = vi.fn();
-		HTMLFormElement.prototype.submit = submitSpy;
+		const submitSpy = vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(() => {});
 		const user = userEvent.setup();
 		render(Page, {
 			params: {},

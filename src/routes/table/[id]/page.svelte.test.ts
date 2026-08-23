@@ -206,7 +206,10 @@ describe('table/[id] +page', () => {
 					key: 'status',
 					label: 'Status',
 					type: 'select',
-					options: [{ id: 'opt-1', label: 'Open' }]
+					options: [
+						{ id: 'opt-1', label: 'Open' },
+						{ id: 'opt-2', label: 'Done' }
+					]
 				},
 				{ key: 'links', label: 'Links', type: 'relation' }
 			]
@@ -242,7 +245,7 @@ describe('table/[id] +page', () => {
 		await user.tab();
 
 		const select = within(screen.getByRole('table')).getByRole('combobox');
-		await user.selectOptions(select, 'opt-1');
+		await user.selectOptions(select, 'opt-2');
 
 		const relationInput = screen.getByDisplayValue('rec-a');
 		await user.clear(relationInput);
@@ -252,6 +255,7 @@ describe('table/[id] +page', () => {
 		const stored = ydoc.getMap('records').get(row.id) as Y.Map<unknown>;
 		expect(stored.get('prop:qty')).toMatchObject({ value: 7 });
 		expect(stored.get('prop:due')).toMatchObject({ value: '2026-02-02' });
+		expect(stored.get('prop:status')).toMatchObject({ value: 'opt-2' });
 		expect(stored.get('prop:links')).toMatchObject({ value: ['rec-b', 'rec-c'] });
 	});
 });
