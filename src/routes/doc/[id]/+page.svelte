@@ -63,7 +63,6 @@
 	onMount(() => {
 		const doc = getClientDoc();
 		ydoc = doc;
-		refresh();
 
 		const recordsMap = doc.getMap('records');
 		const documentsMap = doc.getMap('documents');
@@ -81,6 +80,15 @@
 			unsubscribePresence();
 			releaseBlockPresence();
 		};
+	});
+
+	// SvelteKit reuses this component instance across client-side navigations
+	// between two /doc/[id] routes (onMount doesn't re-run) — refresh() must
+	// re-run whenever data.documentId changes, not just on mount/Yjs updates,
+	// or `blocks` keeps showing the previously-open document.
+	$effect(() => {
+		if (!ydoc) return;
+		refresh();
 	});
 
 	function handleTitleInput(event: Event): void {

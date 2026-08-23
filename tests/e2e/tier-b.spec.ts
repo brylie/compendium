@@ -190,4 +190,67 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 			);
 		}).toPass({ timeout: 5000 });
 	});
+	test("An agent batch-writes across two documents in one hold, and client-side sidebar navigation between them shows each document's own content", async ({
+		page
+	}) => {
+		// 1. Two documents already exist, each with one empty block
+		const docA = createDocument(human, {
+			title: 'Event Planning: Venue',
+			createInitialBlock: false
+		});
+		const blockA = createRecord(human, { parentId: docA.id, blockType: 'paragraph' });
+		const docB = createDocument(human, {
+			title: 'Event Planning: Catering',
+			createInitialBlock: false
+		});
+		const blockB = createRecord(human, { parentId: docB.id, blockType: 'paragraph' });
+		flush();
+
+		const { token } = harness.createToken({
+			clientLabel: 'Claude Code',
+			allowedDocumentIds: [docA.id, docB.id],
+			allowedCollectionIds: []
+		});
+		const mcp = await harness.getMcpClient(token);
+
+		// 2. Agent holds records from BOTH documents in a single batch call, then writes each
+		const holdRes = (await mcp.callTool({
+			name: 'hold_records',
+			arguments: { recordIds: [blockA.id, blockB.id] }
+		})) as { content?: Array<{ text?: string }> };
+		const holdResult = JSON.parse(holdRes.content?.[0]?.text ?? '{}') as { granted?: string[] };
+		expect(holdResult.granted).toEqual(expect.arrayContaining([blockA.id, blockB.id]));
+
+		await mcp.callTool({
+			name: 'write_record',
+			arguments: { recordId: blockA.id, markdown: 'Venue confirmed: The Old Foundry.' }
+		});
+		await mcp.callTool({
+			name: 'write_record',
+			arguments: { recordId: blockB.id, markdown: 'Catering confirmed: Thistle and Thyme.' }
+		});
+
+		// 3. A human opens Doc A in the browser, then navigates to Doc B purely client-side
+		// (sidebar click, not a full page load) -- each document's editor must show its own
+		// content, not the previously-open document's stale blocks.
+		await page.goto(`${harness.httpUrl}/doc/${docA.id}`);
+		await expect(page.locator('text=Venue confirmed: The Old Foundry.')).toBeVisible({
+			timeout: 5000
+		});
+
+		await page.locator('aside').getByText('Event Planning: Catering').click();
+		await page.waitForURL(new RegExp(`/doc/${docB.id}`));
+		await expect(page.locator('text=Catering confirmed: Thistle and Thyme.')).toBeVisible({
+			timeout: 5000
+		});
+		await expect(page.locator('text=Venue confirmed: The Old Foundry.')).not.toBeVisible();
+
+		// 4. And back again, the other direction
+		await page.locator('aside').getByText('Event Planning: Venue').click();
+		await page.waitForURL(new RegExp(`/doc/${docA.id}`));
+		await expect(page.locator('text=Venue confirmed: The Old Foundry.')).toBeVisible({
+			timeout: 5000
+		});
+		await expect(page.locator('text=Catering confirmed: Thistle and Thyme.')).not.toBeVisible();
+	});
 });
