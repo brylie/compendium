@@ -103,4 +103,91 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 			timeout: 5000
 		});
 	});
+
+	test('Document created via the browser UI is visible to MCP, and an MCP edit appears back in the browser live', async ({
+		page
+	}) => {
+		// 1. Human creates a document through the real UI form, not the service layer directly
+		await page.goto(harness.httpUrl);
+		const createForm = page.locator('form:has(input[placeholder="New document title…"])');
+		await createForm.locator('input[name="title"]').fill('Human-Created Doc');
+		await createForm.locator('button[type="submit"]').click();
+		await page.waitForURL(/\/doc\//);
+		const docId = new URL(page.url()).pathname.split('/doc/')[1];
+		expect(docId).toBeTruthy();
+
+		// 2. A client is granted access to the document a human just created (mirrors the
+		// settings/tokens "Allowed Documents" checkbox flow), then queries it via MCP
+		const { token } = harness.createToken({
+			clientLabel: 'Claude Code',
+			allowedDocumentIds: [docId],
+			allowedCollectionIds: []
+		});
+		const mcp = await harness.getMcpClient(token);
+
+		const listRes = (await mcp.callTool({ name: 'list_documents', arguments: {} })) as {
+			content?: Array<{ text?: string }>;
+		};
+		expect(listRes.content?.[0]?.text ?? '').toContain('Human-Created Doc');
+
+		// 3. Agent adds a block to the human-created document
+		const createRes = (await mcp.callTool({
+			name: 'create_record',
+			arguments: { parentId: docId, blockType: 'paragraph' }
+		})) as { content?: Array<{ text?: string }> };
+		const blockId = JSON.parse(createRes.content?.[0]?.text ?? '{}').recordId as string;
+		expect(blockId).toBeTruthy();
+
+		await mcp.callTool({ name: 'hold_records', arguments: { recordIds: [blockId] } });
+		await mcp.callTool({
+			name: 'write_record',
+			arguments: { recordId: blockId, markdown: 'Agent wrote this after a human created the page' }
+		});
+
+		// 4. The still-open browser tab should show the agent's edit without a reload
+		await expect(page.locator('text=Agent wrote this after a human created the page')).toBeVisible({
+			timeout: 5000
+		});
+	});
+
+	test('Document created via MCP appears live in the sidebar; a human edit typed in the browser is visible via MCP', async ({
+		page
+	}) => {
+		// 1. Human has the workspace open before the agent does anything
+		await page.goto(harness.httpUrl);
+
+		// 2. Agent creates a top-level document
+		const { token } = harness.createToken({
+			clientLabel: 'Claude Code',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+		const mcp = await harness.getMcpClient(token);
+		const createRes = (await mcp.callTool({
+			name: 'create_document',
+			arguments: { title: 'Agent-Created Page' }
+		})) as { content?: Array<{ text?: string }> };
+		const docId = JSON.parse(createRes.content?.[0]?.text ?? '{}').id as string;
+		expect(docId).toBeTruthy();
+
+		// 3. Sidebar reflects the new document without a page reload
+		await expect(page.locator('aside')).toContainText('Agent-Created Page', { timeout: 5000 });
+
+		// 4. Human clicks into the agent-created page and types directly in the editor
+		await page.locator('aside').getByText('Agent-Created Page').click();
+		await page.waitForURL(new RegExp(`/doc/${docId}`));
+		await page.getByRole('button', { name: /Type '\/' for commands/ }).click();
+		await page.keyboard.type('Human typed this after the agent created the page');
+
+		// 5. The agent's next read via MCP reflects the human's live keystrokes
+		await expect(async () => {
+			const getRes = (await mcp.callTool({
+				name: 'get_document',
+				arguments: { documentId: docId }
+			})) as { content?: Array<{ text?: string }> };
+			expect(getRes.content?.[0]?.text ?? '').toContain(
+				'Human typed this after the agent created the page'
+			);
+		}).toPass({ timeout: 5000 });
+	});
 });

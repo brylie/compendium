@@ -15,6 +15,24 @@ import { closeDb } from '$lib/server/store';
 import { resetYDocForTests } from '$lib/server/ydoc';
 import { resetAwarenessForTests } from '$lib/server/awareness';
 
+// adapter-node's built handler (build/handler.js) uses ORIGIN to construct
+// each request's trusted `url.origin` for its CSRF check — not the raw
+// request's Host header, since that isn't trustworthy on its own. It reads
+// process.env.ORIGIN exactly once, at first module load, into a frozen
+// constant; Node's module cache means every later import in this worker
+// process reuses that same frozen value regardless of what ORIGIN is set
+// to by then. Each test here binds its own ephemeral, randomly-chosen port
+// (needed because Vitest/Playwright can run multiple harnesses in
+// parallel), so ORIGIN can't be "this test's real httpUrl" — that would
+// only be correct for whichever test happened to import the handler
+// first. Instead ORIGIN is pinned to one fixed placeholder, set here at
+// module scope before anything can import the handler, and every incoming
+// request's real Origin header is rewritten to match it below — so the
+// two sides of the CSRF check always agree, independent of which port a
+// given test actually bound.
+process.env.ORIGIN = 'http://localhost:1';
+const CSRF_ORIGIN_PLACEHOLDER = process.env.ORIGIN;
+
 export interface TestHarness {
 	port: number;
 	httpUrl: string;
@@ -85,16 +103,6 @@ export async function createTestHarness(): Promise<TestHarness> {
 
 	let appHandler: ((req: IncomingMessage, res: ServerResponse, next: () => void) => void) | null =
 		null;
-	try {
-		const buildPath = join(process.cwd(), 'build/handler.js');
-		const dynamicImport = new Function('p', 'return import(p)');
-		const mod = (await dynamicImport(buildPath)) as {
-			handler?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
-		};
-		appHandler = mod.handler ?? null;
-	} catch {
-		// Build directory not present in unit test mode
-	}
 
 	const server: Server = createServer(async (req, res) => {
 		try {
@@ -129,6 +137,11 @@ export async function createTestHarness(): Promise<TestHarness> {
 			}
 
 			if (appHandler) {
+				// See the ORIGIN comment near the top of this file: this test
+				// server's real (random) port never matches the origin frozen into
+				// build/handler.js at first import, so the incoming Origin header
+				// is rewritten to the same placeholder before the CSRF check runs.
+				if (req.headers.origin) req.headers.origin = CSRF_ORIGIN_PLACEHOLDER;
 				appHandler(req, res, () => {
 					res.statusCode = 404;
 					res.end('Not found');
@@ -158,6 +171,17 @@ export async function createTestHarness(): Promise<TestHarness> {
 
 	const httpUrl = `http://localhost:${port}`;
 	const wsUrl = `ws://localhost:${port}/ws`;
+
+	try {
+		const buildPath = join(process.cwd(), 'build/handler.js');
+		const dynamicImport = new Function('p', 'return import(p)');
+		const mod = (await dynamicImport(buildPath)) as {
+			handler?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
+		};
+		appHandler = mod.handler ?? null;
+	} catch {
+		// Build directory not present in unit test mode
+	}
 
 	async function getMcpClient(token: string): Promise<Client> {
 		const transport = new StreamableHTTPClientTransport(new URL('/mcp', httpUrl), {

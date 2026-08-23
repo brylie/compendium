@@ -5,18 +5,26 @@ import { initHoldEviction, resetHoldEvictionForTests } from './holds.js';
 // Ephemeral, per-client state (cursor position, holds) that isn't part of
 // document content — never persisted, never CRDT-merged, auto-clears on
 // disconnect. See docs/technical-design.md §4.
-let awareness: Awareness | null = null;
+//
+// Stored on globalThis rather than a module-scoped variable — see ydoc.ts
+// for why: this file can be loaded through more than one separate module
+// graph in the same process, and each would otherwise get its own
+// disconnected Awareness instance bound to a possibly-different Y.Doc.
+declare global {
+	var __agentSpaceAwareness: Awareness | undefined;
+}
 
 export function getAwareness(): Awareness {
-	if (awareness) return awareness;
-	awareness = new Awareness(getYDoc());
+	if (globalThis.__agentSpaceAwareness) return globalThis.__agentSpaceAwareness;
+	const awareness = new Awareness(getYDoc());
 	initHoldEviction(awareness);
+	globalThis.__agentSpaceAwareness = awareness;
 	return awareness;
 }
 
 /** Test-only: drop the singleton so a fresh instance is created next call. */
 export function resetAwarenessForTests(): void {
-	awareness?.destroy();
-	awareness = null;
+	globalThis.__agentSpaceAwareness?.destroy();
+	globalThis.__agentSpaceAwareness = undefined;
 	resetHoldEvictionForTests();
 }
