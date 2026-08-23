@@ -73,7 +73,7 @@ itself an implicit claim on it.
 Everything is saved centrally with a full history of who changed what.
 
 Full architecture, the sync engine, and the MCP tool surface live in
-[`docs/specifications/technical-design.md`](docs/specifications/technical-design.md).
+[`docs/specifications/`](docs/specifications/).
 
 ## Running it
 
@@ -104,7 +104,7 @@ yourself.
 
 Edits made this way appear live in any open browser tab, and vice versa —
 MCP and the UI are editing the same workspace (see
-[`docs/specifications/technical-design.md` §1](docs/specifications/technical-design.md)).
+[`docs/specifications/architecture.md` §1](docs/specifications/architecture.md)).
 
 ## Testing
 
@@ -135,15 +135,10 @@ there rather than mirrored here:
 - [`agent-workspace-prd.md`](docs/agent-workspace-prd.md) — problem
   statement, goals/non-goals, requirements, and the build-vs-adopt decisions
   behind the editor.
-- [`specifications/technical-design.md`](docs/specifications/technical-design.md)
-  — process architecture, data model, sync engine, MCP tool surface.
-- [`specifications/service-layer.md`](docs/specifications/service-layer.md) /
-  [`specifications/service-layer-manifest.md`](docs/specifications/service-layer-manifest.md)
-  — how permission/audit logic is centralized once and shared by MCP and UI.
-- [`specifications/e2e-testing.md`](docs/specifications/e2e-testing.md) — the
-  MCP/UI parity testing strategy.
-- [`specifications/design-system.md`](docs/specifications/design-system.md)
-  — UI tokens and conventions.
+- [`specifications/`](docs/specifications/) — one doc per subsystem
+  (architecture, data model, collaboration/holds, MCP tools, markdown
+  transcoding, persistence, service layer, testing strategy, design system),
+  indexed in that folder's own [`README.md`](docs/specifications/README.md).
 
 ## License
 

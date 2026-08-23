@@ -1,7 +1,7 @@
 # Specification — End-to-End Testing (MCP/UI parity)
 
 **Status:** Draft
-**Depends on:** [`technical-design.md`](./technical-design.md) §1 (process architecture), §4 (holds/Awareness), §5 (MCP tool surface); [`agent-workspace-prd.md`](../agent-workspace-prd.md)'s acceptance criteria under "Real-time collaborative editing," "Agent read/write API," and "In-progress agent edit indicator" — the tests specified here exist to actually verify those criteria, most of which are not currently exercised by any test.
+**Depends on:** [`architecture.md`](./architecture.md) §1 (process architecture), [`collaboration.md`](./collaboration.md) (holds/Awareness), [`mcp-tools.md`](./mcp-tools.md) (MCP tool surface); [`agent-workspace-prd.md`](../agent-workspace-prd.md)'s acceptance criteria under "Real-time collaborative editing," "Agent read/write API," and "In-progress agent edit indicator" — the tests specified here exist to actually verify those criteria, most of which are not currently exercised by any test.
 **Motivated by:** a live Phase 1 review that found a bug (MCP `create_document` granting itself access in a way that never persists — see [`service-layer.md`](./service-layer.md) §1) invisible to both the existing unit test suite and to manual UI testing, because it only manifests across two independent calls crossing the actual MCP transport boundary.
 
 ---

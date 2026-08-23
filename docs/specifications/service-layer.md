@@ -1,14 +1,14 @@
 # Specification — Service Layer (centralizing business logic)
 
 **Status:** Draft
-**Depends on:** [`technical-design.md`](./technical-design.md) §5 (MCP tool surface), §7 (persistence/audit) — this doc extends, not replaces, those; [`agent-workspace-prd.md`](../agent-workspace-prd.md)'s "Permissions model" and "Audit log" requirements are the acceptance bar everything here is built to satisfy.
+**Depends on:** [`mcp-tools.md`](./mcp-tools.md) (MCP tool surface), [`persistence.md`](./persistence.md) §1 (persistence/audit) — this doc extends, not replaces, those; [`agent-workspace-prd.md`](../agent-workspace-prd.md)'s "Permissions model" and "Audit log" requirements are the acceptance bar everything here is built to satisfy.
 **Motivated by:** a live Phase 1 review that found the `create_document` MCP tool granting itself access to a newly-created document in a way that never persists (see §1 below) — a bug that exists specifically because no single piece of code owns "what must always happen when a document is created."
 
 ---
 
 ## 1. Problem
 
-`src/lib/data/records.ts` is, by design, the shared low-level data-access layer both the SvelteKit UI and the MCP server call into (`technical-design.md` §8). That part of the architecture is correct and should stay. What's missing is a layer _above_ it: today, every call site that performs a write is individually responsible for remembering to also (a) check permissions, (b) log the action to the audit trail, and (c) do whatever else that specific write implies (e.g. a token that creates a document needs its own access grant updated). There is no enforcement that a given use case always does all of its required side effects — it's up to whoever writes that call site to remember, correctly, every time.
+`src/lib/data/records.ts` is, by design, the shared low-level data-access layer both the SvelteKit UI and the MCP server call into (`architecture.md` §2). That part of the architecture is correct and should stay. What's missing is a layer _above_ it: today, every call site that performs a write is individually responsible for remembering to also (a) check permissions, (b) log the action to the audit trail, and (c) do whatever else that specific write implies (e.g. a token that creates a document needs its own access grant updated). There is no enforcement that a given use case always does all of its required side effects — it's up to whoever writes that call site to remember, correctly, every time.
 
 Concretely, as of the M2 (Sidebar + hierarchy) milestone, "create a document" is implemented three separate times, with three different completeness levels:
 
@@ -47,7 +47,7 @@ src/lib/mcp/server.ts          src/routes/**/+page.server.ts, +server.ts
 
 **Rule going forward: MCP tool handlers and SvelteKit route/action handlers must not call `records.ts` or `logAudit` directly.** If a handler needs to do either, that's a sign the operation belongs in the service layer, not inline in the handler.
 
-`Sidebar.svelte`'s client-side CRDT calls (`createDocument(ydoc, ...)`, `deleteDocument(ydoc, ...)`, etc., used for the _live-reactive_ read path and legitimate direct-to-Yjs UI writes) are a separate, already-correct pattern per `technical-design.md` §8 ("Shared `lib/yjs-client.ts`... UI and MCP code share one data-access layer") — those stay. What changes is specifically the _fallback_ path that bypasses the network API (and therefore the audit log) on a fetch failure: that fallback is removed as part of this work (see §4).
+`Sidebar.svelte`'s client-side CRDT calls (`createDocument(ydoc, ...)`, `deleteDocument(ydoc, ...)`, etc., used for the _live-reactive_ read path and legitimate direct-to-Yjs UI writes) are a separate, already-correct pattern per `architecture.md` §2 ("Shared `lib/yjs-client.ts`... UI and MCP code share one data-access layer") — those stay. What changes is specifically the _fallback_ path that bypasses the network API (and therefore the audit log) on a fetch failure: that fallback is removed as part of this work (see §4).
 
 ## 3. Module layout
 
@@ -66,7 +66,7 @@ src/lib/services/
   search.ts       searchWorkspace(actor, query) → { recordId, snippet }[]
 ```
 
-Each function's first parameter is whatever identifies the caller for permission purposes — an `AccessToken` for MCP-originated calls, the fixed `CURRENT_USER` `ActorId` for Phase 0/1 UI calls (see `technical-design.md` §2's `ActorId` union; this doesn't need to change). Where MCP and UI calls to the "same" use case need different permission rules (e.g. UI writes are currently unscoped, single-tenant; MCP writes are token-scoped), the service function is the one place that branches on that — not duplicated per adapter.
+Each function's first parameter is whatever identifies the caller for permission purposes — an `AccessToken` for MCP-originated calls, the fixed `CURRENT_USER` `ActorId` for Phase 0/1 UI calls (see `data-model.md` §1's `ActorId` union; this doesn't need to change). Where MCP and UI calls to the "same" use case need different permission rules (e.g. UI writes are currently unscoped, single-tenant; MCP writes are token-scoped), the service function is the one place that branches on that — not duplicated per adapter.
 
 ## 4. What this fixes, concretely
 

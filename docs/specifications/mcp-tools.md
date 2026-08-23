@@ -1,0 +1,22 @@
+# MCP tool surface
+
+**Depends on:** [`data-model.md`](./data-model.md) (Record shape), [`collaboration.md`](./collaboration.md) (holds)
+
+---
+
+All tools operate on `Record` uniformly — no separate "block tools" vs. "row tools," per the PRD's unified-model requirement.
+
+| Tool               | Input                                                 | Output                                              | Notes                                                                                                             |
+| ------------------ | ----------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `list_documents`   | —                                                     | `{id, title}[]`                                     |                                                                                                                   |
+| `get_document`     | `documentId`                                          | `{id, title, records: {id, blockType, markdown}[]}` | `content` transcoded to Markdown at this boundary (see [`markdown-transcoding.md`](./markdown-transcoding.md))    |
+| `list_collections` | —                                                     | `{id, title, schema}[]`                             |                                                                                                                   |
+| `query_collection` | `collectionId, filter?`                               | `Record[]`                                          | backed by the Drizzle-managed read model (see [`persistence.md`](./persistence.md) §2), not a direct `Y.Doc` walk |
+| `search_workspace` | `query`                                               | `{recordId, snippet}[]`                             | full-text over block content + text/select properties, via the same read model (SQLite FTS5)                      |
+| `hold_records`     | `recordIds: string[]`                                 | `{granted: string[], denied: string[]}`             | see [`collaboration.md`](./collaboration.md); permission-checked per record before Awareness is checked           |
+| `write_record`     | `recordId, markdown \| properties`                    | `{success: boolean}`                                | requires an active hold for existing block content; atomic content-write + hold-release                           |
+| `release_records`  | `recordIds: string[]`                                 | `{success: boolean}`                                | explicit abandon, without writing                                                                                 |
+| `create_record`    | `parentId, afterRecordId?, blockType? \| properties?` | `{recordId}`                                        | no hold needed — no prior content to protect                                                                      |
+| `delete_record`    | `recordId`                                            | `{success: boolean}`                                | no hold needed                                                                                                    |
+
+**Permission scoping:** each access token (see [`persistence.md`](./persistence.md) §1) carries an allowlist of Document/Collection IDs. Every tool call checks the target record's `parentId` against that allowlist before touching Awareness or the `Y.Doc` — this is what "per-agent permission scoping" means concretely, even single-tenant: a token scoped to one Document can't read or write anything else, which is directly testable per the PRD's permission-denied acceptance criterion.
