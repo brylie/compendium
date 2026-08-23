@@ -20,7 +20,10 @@ export function attachYjsWebSocket(
 		// The y-websocket client always appends a room name segment
 		// (serverUrl + '/' + roomname); Phase 0 serves one shared workspace
 		// doc regardless of room, so match by prefix rather than exact path.
-		if (pathname !== path && !pathname.startsWith(path + '/')) return;
+		if (pathname !== path && !pathname.startsWith(path + '/')) {
+			socket.destroy();
+			return;
+		}
 		wss.handleUpgrade(request, socket, head, (ws) => {
 			wss.emit('connection', ws, request);
 		});

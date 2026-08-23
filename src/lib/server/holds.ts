@@ -136,11 +136,15 @@ export function requestAgentHold(
 	permissionCheck: (recordId: string) => boolean
 ): HoldRequestResult {
 	const currentlyHeld = aggregateHolds(awareness);
+	const existing = readHoldState(awareness, clientId);
+	const alreadyOwn = new Set(existing?.heldRecordIds ?? []);
 	const granted: string[] = [];
 	const denied: string[] = [];
 
 	for (const id of recordIds) {
-		if (currentlyHeld.has(id)) {
+		if (alreadyOwn.has(id)) {
+			granted.push(id);
+		} else if (currentlyHeld.has(id)) {
 			denied.push(id);
 		} else if (!permissionCheck(id)) {
 			denied.push(id);
@@ -150,7 +154,6 @@ export function requestAgentHold(
 	}
 
 	if (granted.length > 0) {
-		const existing = readHoldState(awareness, clientId);
 		const nextHeld = Array.from(new Set([...(existing?.heldRecordIds ?? []), ...granted]));
 		writeRemoteState(awareness, clientId, { actor, heldRecordIds: nextHeld });
 		scheduleTtl(awareness, clientId);

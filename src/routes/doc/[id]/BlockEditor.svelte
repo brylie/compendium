@@ -29,7 +29,22 @@
 	let lastPlainText = '';
 
 	function escapeHtml(text: string): string {
-		return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+		return text
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#39;');
+	}
+
+	function safeHref(url: string): string {
+		try {
+			const parsed = new URL(url, window.location.origin);
+			if (['http:', 'https:', 'mailto:'].includes(parsed.protocol)) return parsed.href;
+		} catch {
+			// fall through to the inert value below
+		}
+		return '#';
 	}
 
 	function runToHtml(text: string, marks: TextMarks): string {
@@ -40,7 +55,7 @@
 		if (marks.italic) html = `<em>${html}</em>`;
 		if (marks.strikethrough) html = `<s class="line-through text-muted">${html}</s>`;
 		if (marks.link)
-			html = `<a href="${escapeHtml(marks.link)}" class="text-accent underline underline-offset-2">${html}</a>`;
+			html = `<a href="${escapeHtml(safeHref(marks.link))}" class="text-accent underline underline-offset-2" rel="noopener noreferrer nofollow">${html}</a>`;
 		return html;
 	}
 

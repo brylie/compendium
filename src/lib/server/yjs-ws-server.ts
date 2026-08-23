@@ -42,16 +42,21 @@ export function setupWSConnection(ws: WebSocket): void {
 		send(encoder);
 	};
 
-	const awarenessUpdateHandler = ({
-		added,
-		updated,
-		removed
-	}: {
-		added: number[];
-		updated: number[];
-		removed: number[];
-	}): void => {
-		for (const id of added) ownedClientIds.add(id);
+	const awarenessUpdateHandler = (
+		{
+			added,
+			updated,
+			removed
+		}: {
+			added: number[];
+			updated: number[];
+			removed: number[];
+		},
+		origin: unknown
+	): void => {
+		if (origin === ws) {
+			for (const id of added) ownedClientIds.add(id);
+		}
 		for (const id of removed) ownedClientIds.delete(id);
 		const changed = added.concat(updated, removed);
 		const encoder = encoding.createEncoder();
@@ -83,20 +88,29 @@ export function setupWSConnection(ws: WebSocket): void {
 	awareness.on('update', awarenessUpdateHandler);
 
 	ws.on('message', (data: ArrayBuffer) => {
-		const decoder = decoding.createDecoder(new Uint8Array(data));
-		const messageType = decoding.readVarUint(decoder);
-		switch (messageType) {
-			case MESSAGE_SYNC: {
-				const encoder = encoding.createEncoder();
-				encoding.writeVarUint(encoder, MESSAGE_SYNC);
-				syncProtocol.readSyncMessage(decoder, encoder, doc, ws);
-				if (encoding.length(encoder) > 1) send(encoder);
-				break;
+		try {
+			const decoder = decoding.createDecoder(new Uint8Array(data));
+			const messageType = decoding.readVarUint(decoder);
+			switch (messageType) {
+				case MESSAGE_SYNC: {
+					const encoder = encoding.createEncoder();
+					encoding.writeVarUint(encoder, MESSAGE_SYNC);
+					syncProtocol.readSyncMessage(decoder, encoder, doc, ws);
+					if (encoding.length(encoder) > 1) send(encoder);
+					break;
+				}
+				case MESSAGE_AWARENESS: {
+					awarenessProtocol.applyAwarenessUpdate(
+						awareness,
+						decoding.readVarUint8Array(decoder),
+						ws
+					);
+					break;
+				}
 			}
-			case MESSAGE_AWARENESS: {
-				awarenessProtocol.applyAwarenessUpdate(awareness, decoding.readVarUint8Array(decoder), ws);
-				break;
-			}
+		} catch (err) {
+			console.error('[yjs-ws] malformed message, closing connection', err);
+			closeConn();
 		}
 	});
 
