@@ -1,0 +1,122 @@
+import * as documents from './documents';
+import * as records from './records';
+import * as holds from './holds';
+import * as collections from './collections';
+import * as search from './search';
+
+export const serviceModules = { documents, records, holds, collections, search } as const;
+
+export type ServiceModuleName = keyof typeof serviceModules;
+
+// Filters module exports down to callable functions only, excluding classes/errors/types
+export type MethodOf<M extends ServiceModuleName> = {
+	[K in keyof (typeof serviceModules)[M]]: (typeof serviceModules)[M][K] extends (
+		...args: never[]
+	) => unknown
+		? K
+		: never;
+}[keyof (typeof serviceModules)[M]];
+
+export type ServiceMethod = {
+	[M in ServiceModuleName]: `${M}.${MethodOf<M> & string}`;
+}[ServiceModuleName];
+
+export interface ServiceSurfaceDefinition {
+	mcp: boolean;
+	ui: boolean;
+	mcpToolName?: string;
+	mcpDescription?: string;
+}
+
+export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = {
+	'documents.createDocument': {
+		mcp: true,
+		ui: true,
+		mcpToolName: 'create_document',
+		mcpDescription: 'Create a new Document, optionally nested under an accessible parent Document.'
+	},
+	'documents.moveDocument': {
+		mcp: true,
+		ui: false,
+		mcpToolName: 'move_document',
+		mcpDescription: 'Move or reorder a Document in the hierarchy, optionally under a new parent.'
+	},
+	'documents.deleteDocument': {
+		mcp: true,
+		ui: true,
+		mcpToolName: 'delete_document',
+		mcpDescription: 'Delete a Document and its child tree.'
+	},
+	'documents.updateDocumentTitle': { mcp: false, ui: true },
+	'documents.getDocument': {
+		mcp: true,
+		ui: true,
+		mcpToolName: 'get_document',
+		mcpDescription: "Get a Document's ordered blocks, with content transcoded to Markdown."
+	},
+	'documents.listDocuments': {
+		mcp: true,
+		ui: true,
+		mcpToolName: 'list_documents',
+		mcpDescription: 'List Documents this connection has access to, including tree hierarchy.'
+	},
+
+	'records.createRecord': {
+		mcp: true,
+		ui: true,
+		mcpToolName: 'create_record',
+		mcpDescription: 'Create a new block (in a Document) or row (in a Collection). No hold needed.'
+	},
+	'records.writeRecord': {
+		mcp: true,
+		ui: true,
+		mcpToolName: 'write_record',
+		mcpDescription:
+			'Write a record. `markdown` overwrites block content (requires an active hold) and `properties` merges into a Collection row.'
+	},
+	'records.deleteRecord': {
+		mcp: true,
+		ui: true,
+		mcpToolName: 'delete_record',
+		mcpDescription: 'Delete a record. No hold needed.'
+	},
+	'records.getRecord': { mcp: false, ui: true },
+
+	'holds.holdRecords': {
+		mcp: true,
+		ui: true,
+		mcpToolName: 'hold_records',
+		mcpDescription:
+			'Request a hold on a set of block/record IDs before writing — advisory, per-record.'
+	},
+	'holds.releaseRecords': {
+		mcp: true,
+		ui: true,
+		mcpToolName: 'release_records',
+		mcpDescription: 'Release a hold on a set of record IDs without writing.'
+	},
+
+	'collections.createCollection': { mcp: false, ui: true },
+	'collections.listCollections': {
+		mcp: true,
+		ui: true,
+		mcpToolName: 'list_collections',
+		mcpDescription: 'List Collections this connection has access to.'
+	},
+	'collections.queryCollection': {
+		mcp: true,
+		ui: true,
+		mcpToolName: 'query_collection',
+		mcpDescription: 'Query rows from a Collection.'
+	},
+	'collections.deleteCollection': { mcp: false, ui: true },
+	'collections.updateCollectionTitle': { mcp: false, ui: true },
+
+	'search.searchWorkspace': {
+		mcp: true,
+		ui: true,
+		mcpToolName: 'search_workspace',
+		mcpDescription:
+			'Search all Documents and Collections the caller has access to, returning matching record IDs and short snippets.'
+	}
+};

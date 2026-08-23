@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+	<style>
+		.bg {
+			fill: oklch(58% 0.09 220);
+		}
+		.mark {
+			fill: none;
+			stroke: oklch(99% 0.004 235);
+			stroke-width: 1.8;
+			stroke-linecap: round;
+			stroke-linejoin: round;
+		}
+		@media (prefers-color-scheme: dark) {
+			.bg {
+				fill: oklch(70% 0.1 215);
+			}
+			.mark {
+				stroke: oklch(15% 0.01 235);
+			}
+		}
+	</style>
+	<rect class="bg" width="32" height="32" rx="8" />
+	<g transform="translate(6,6)">
+		<path class="mark" d="M4 5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5Z" />
+		<path class="mark" d="M7 7.5h6M7 11h4M7 14.5h5" />
+	</g>
+</svg>

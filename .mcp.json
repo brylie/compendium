@@ -1,0 +1,11 @@
+{
+	"mcpServers": {
+		"compendium": {
+			"type": "http",
+			"url": "http://localhost:5173/mcp",
+			"headers": {
+				"Authorization": "Bearer ${COMPENDIUM_MCP_TOKEN}"
+			}
+		}
+	}
+}

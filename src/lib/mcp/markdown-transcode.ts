@@ -1,0 +1,132 @@
+import { remark } from 'remark';
+import remarkGfm from 'remark-gfm';
+import type * as Y from 'yjs';
+import { getCollection, getDocument, listCollections, listDocuments } from '$lib/data/records';
+import type { RichText, TextMarks } from '$lib/data/types';
+
+// Per docs/technical-design.md §6: CommonMark + GFM as the baseline, plus two
+// workspace-specific extensions Markdown has no syntax for — @mention and
+// [[Record Title]] wiki-links for relation-typed links. A [[...]] link is
+// represented internally as an ordinary `link` mark whose href uses a
+// `record:` scheme, so the rich-text model doesn't need a dedicated mark
+// type for it.
+
+const RECORD_LINK_SCHEME = 'record:';
+const SPECIAL_TOKEN = /(@[\w-]+)|(\[\[[^\]]+\]\])/g;
+
+interface MutableRun {
+	text: string;
+	marks: TextMarks;
+}
+
+// ---------------------------------------------------------------------------
+// RichText -> Markdown
+// ---------------------------------------------------------------------------
+
+export function richTextToMarkdown(doc: Y.Doc, richText: RichText): string {
+	return richText.runs.map((run) => runToMarkdown(doc, run.text, run.marks)).join('');
+}
+
+function runToMarkdown(doc: Y.Doc, text: string, marks: TextMarks): string {
+	if (marks.mention) return `@${text}`;
+	if (marks.link?.startsWith(RECORD_LINK_SCHEME)) {
+		const id = marks.link.slice(RECORD_LINK_SCHEME.length);
+		return `[[${resolveIdToTitle(doc, id) ?? text}]]`;
+	}
+
+	let out = escapeMarkdown(text);
+	if (marks.code) out = `\`${out}\``;
+	if (marks.bold) out = `**${out}**`;
+	if (marks.italic) out = `_${out}_`;
+	if (marks.strikethrough) out = `~~${out}~~`;
+	if (marks.link) out = `[${out}](${marks.link})`;
+	return out;
+}
+
+function escapeMarkdown(text: string): string {
+	return text.replace(/([\\`*_{}[\]()#+\-.!~])/g, '\\$1');
+}
+
+function resolveIdToTitle(doc: Y.Doc, id: string): string | undefined {
+	return getDocument(doc, id)?.title ?? getCollection(doc, id)?.title;
+}
+
+// ---------------------------------------------------------------------------
+// Markdown -> RichText
+// ---------------------------------------------------------------------------
+
+interface MdastNode {
+	type: string;
+	value?: string;
+	url?: string;
+	children?: MdastNode[];
+}
+
+export function markdownToRichText(doc: Y.Doc, markdown: string): RichText {
+	const tree = remark().use(remarkGfm).parse(markdown) as unknown as MdastNode;
+	const runs: MutableRun[] = [];
+	collectRuns(doc, tree, {}, runs);
+	return { runs: runs.filter((r) => r.text.length > 0) };
+}
+
+function collectRuns(doc: Y.Doc, node: MdastNode, marks: TextMarks, runs: MutableRun[]): void {
+	switch (node.type) {
+		case 'text':
+			splitSpecialTokens(doc, node.value ?? '', marks, runs);
+			return;
+		case 'strong':
+			for (const c of node.children ?? []) collectRuns(doc, c, { ...marks, bold: true }, runs);
+			return;
+		case 'emphasis':
+			for (const c of node.children ?? []) collectRuns(doc, c, { ...marks, italic: true }, runs);
+			return;
+		case 'delete':
+			for (const c of node.children ?? [])
+				collectRuns(doc, c, { ...marks, strikethrough: true }, runs);
+			return;
+		case 'inlineCode':
+			runs.push({ text: node.value ?? '', marks: { ...marks, code: true } });
+			return;
+		case 'link':
+			for (const c of node.children ?? []) collectRuns(doc, c, { ...marks, link: node.url }, runs);
+			return;
+		default:
+			for (const c of node.children ?? []) collectRuns(doc, c, marks, runs);
+			if (!node.children && node.value) splitSpecialTokens(doc, node.value, marks, runs);
+	}
+}
+
+function splitSpecialTokens(doc: Y.Doc, text: string, marks: TextMarks, runs: MutableRun[]): void {
+	let lastIndex = 0;
+	for (const match of text.matchAll(SPECIAL_TOKEN)) {
+		const index = match.index ?? 0;
+		if (index > lastIndex) runs.push({ text: text.slice(lastIndex, index), marks });
+
+		if (match[1]) {
+			const name = match[1].slice(1);
+			runs.push({ text: name, marks: { ...marks, mention: resolveMentionId(name) } });
+		} else if (match[2]) {
+			const title = match[2].slice(2, -2);
+			const recordId = resolveTitleToId(doc, title);
+			runs.push({
+				text: title,
+				marks: recordId ? { ...marks, link: RECORD_LINK_SCHEME + recordId } : marks
+			});
+		}
+		lastIndex = index + match[0].length;
+	}
+	if (lastIndex < text.length) runs.push({ text: text.slice(lastIndex), marks });
+}
+
+function resolveMentionId(name: string): string {
+	const lower = name.toLowerCase();
+	if (lower === 'local' || lower === 'you') return 'local';
+	return name;
+}
+
+function resolveTitleToId(doc: Y.Doc, title: string): string | undefined {
+	return (
+		listDocuments(doc).find((d) => d.title === title)?.id ??
+		listCollections(doc).find((c) => c.title === title)?.id
+	);
+}

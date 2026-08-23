@@ -1,0 +1,50 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/forms';
+@plugin '@tailwindcss/typography';
+
+@theme {
+	--color-bg: oklch(98% 0.006 235);
+	--color-surface: oklch(95.5% 0.008 235);
+	--color-sidebar-bg: oklch(95% 0.009 235);
+	--color-fg: oklch(22% 0.012 235);
+	--color-muted: oklch(50% 0.008 235);
+	--color-border: oklch(89% 0.008 235);
+	--color-accent: oklch(58% 0.09 220);
+	--color-accent-fg: oklch(99% 0.004 235);
+
+	--font-display: 'Lora', Georgia, serif;
+	--font-sans: 'Source Sans 3', system-ui, -apple-system, sans-serif;
+	--font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+.dark {
+	--color-bg: oklch(20% 0.014 240);
+	--color-surface: oklch(25% 0.016 240);
+	--color-sidebar-bg: oklch(17% 0.015 240);
+	--color-fg: oklch(93% 0.006 235);
+	--color-muted: oklch(67% 0.01 235);
+	--color-border: oklch(33% 0.016 240);
+	--color-accent: oklch(70% 0.1 215);
+	--color-accent-fg: oklch(15% 0.01 235);
+}
+
+:root {
+	color-scheme: light;
+}
+
+:root.dark {
+	color-scheme: dark;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+	min-height: 100vh;
+	font-family: var(--font-sans);
+	background-color: var(--color-bg);
+	color: var(--color-fg);
+	-webkit-font-smoothing: antialiased;
+}
