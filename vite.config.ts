@@ -66,6 +66,12 @@ export default defineConfig({
 					setupFiles: ['./tests/setup/isolate-persistence.ts']
 				}
 			}
-		]
+		],
+		coverage: {
+			provider: 'v8',
+			reporter: ['text', 'text-summary', 'html'],
+			include: ['src/**/*.{js,ts}'],
+			exclude: ['src/**/*.{test,spec}.{js,ts}', 'src/**/*.svelte.{test,spec}.{js,ts}']
+		}
 	}
 });
