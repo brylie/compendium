@@ -9,7 +9,7 @@ describe('ydoc: snapshot persistence survives a process restart', () => {
 	let dir: string;
 
 	beforeEach(() => {
-		dir = mkdtempSync(join(tmpdir(), 'agentspace-ydoc-'));
+		dir = mkdtempSync(join(tmpdir(), 'ydoc-'));
 		process.env.DATABASE_URL = join(dir, 'test.db');
 	});
 

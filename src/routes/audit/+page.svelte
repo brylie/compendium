@@ -7,7 +7,7 @@
 </script>
 
 <svelte:head>
-	<title>Audit Log · AgentSpace</title>
+	<title>Audit Log · Compendium</title>
 </svelte:head>
 
 <div class="mx-auto max-w-4xl px-6 py-10">

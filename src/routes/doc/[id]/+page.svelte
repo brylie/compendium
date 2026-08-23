@@ -230,7 +230,7 @@
 </script>
 
 <svelte:head>
-	<title>{title || 'Untitled'} · AgentSpace</title>
+	<title>{title || 'Untitled'} · Compendium</title>
 </svelte:head>
 
 <div class="mx-auto max-w-3xl px-6 py-10">

@@ -8,7 +8,7 @@
 </script>
 
 <svelte:head>
-	<title>Access Tokens · AgentSpace</title>
+	<title>Access Tokens · Compendium</title>
 </svelte:head>
 
 <div class="mx-auto max-w-4xl px-6 py-10">

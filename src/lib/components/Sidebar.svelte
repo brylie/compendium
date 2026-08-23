@@ -201,7 +201,7 @@
 				class="flex items-center gap-2 overflow-hidden font-display text-sm font-semibold tracking-tight text-ellipsis whitespace-nowrap text-fg hover:text-accent"
 			>
 				<Icon name="logo" size={18} class="flex-shrink-0 text-accent" />
-				<span class="truncate">AgentSpace</span>
+				<span class="truncate">Compendium</span>
 			</a>
 			<button
 				type="button"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { createAgentSpaceMcpServer } from './server';
+import { createMcpServer } from './server';
 import { createToken } from './tokens';
 import { getYDoc } from '$lib/server/ydoc';
 import { createDocument } from '$lib/data/records';
@@ -26,7 +26,7 @@ interface ToolHolder {
 }
 
 async function invokeTool(
-	mcpServer: ReturnType<typeof createAgentSpaceMcpServer>,
+	mcpServer: ReturnType<typeof createMcpServer>,
 	toolName: string,
 	args: Record<string, unknown>,
 	token: string
@@ -57,7 +57,7 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 			allowedCollectionIds: []
 		});
 
-		const mcpServer = createAgentSpaceMcpServer();
+		const mcpServer = createMcpServer();
 
 		// 1. Agent calls create_document to create a child page
 		const createResult = await invokeTool(
@@ -112,7 +112,7 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 			allowedCollectionIds: []
 		});
 
-		const mcpServer = createAgentSpaceMcpServer();
+		const mcpServer = createMcpServer();
 
 		// Move childDoc from Folder A to Folder B
 		const moveResult = await invokeTool(
@@ -150,7 +150,7 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 			allowedCollectionIds: []
 		});
 
-		const mcpServer = createAgentSpaceMcpServer();
+		const mcpServer = createMcpServer();
 
 		// Attempt to move allowedDoc under secretDoc
 		const moveResult = await invokeTool(
@@ -178,7 +178,7 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 			allowedCollectionIds: []
 		});
 
-		const mcpServer = createAgentSpaceMcpServer();
+		const mcpServer = createMcpServer();
 
 		// Create a page-link block pointing to docA
 		const createBlockResult = await invokeTool(

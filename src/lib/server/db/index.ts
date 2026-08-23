@@ -17,7 +17,7 @@ interface DbState {
 // separate module graph in the same process, and each would otherwise open
 // its own disconnected SQLite connection against the same file.
 declare global {
-	var __agentSpaceDb: DbState | undefined;
+	var __db: DbState | undefined;
 }
 
 // Lazy + resettable (via closeDb) rather than a top-level singleton: each
@@ -25,9 +25,9 @@ declare global {
 // connection, which a module-scope `export const db = drizzle(...)` can't
 // give since ESM only evaluates a module body once per process.
 export function getDb(): Db {
-	if (globalThis.__agentSpaceDb) return globalThis.__agentSpaceDb.db;
+	if (globalThis.__db) return globalThis.__db.db;
 
-	const url = process.env.DATABASE_URL ?? '.data/agentspace.db';
+	const url = process.env.DATABASE_URL ?? '.data/compendium.db';
 	mkdirSync(dirname(url), { recursive: true });
 
 	const client = new Database(url);
@@ -35,11 +35,11 @@ export function getDb(): Db {
 	const db = drizzle(client, { schema });
 	migrate(db, { migrationsFolder: 'drizzle' });
 
-	globalThis.__agentSpaceDb = { client, db };
+	globalThis.__db = { client, db };
 	return db;
 }
 
 export function closeDb(): void {
-	globalThis.__agentSpaceDb?.client.close();
-	globalThis.__agentSpaceDb = undefined;
+	globalThis.__db?.client.close();
+	globalThis.__db = undefined;
 }

@@ -1,10 +1,10 @@
 {
 	"mcpServers": {
-		"agentspace": {
+		"compendium": {
 			"type": "http",
 			"url": "http://localhost:5173/mcp",
 			"headers": {
-				"Authorization": "Bearer ${AGENTSPACE_MCP_TOKEN}"
+				"Authorization": "Bearer ${COMPENDIUM_MCP_TOKEN}"
 			}
 		}
 	}

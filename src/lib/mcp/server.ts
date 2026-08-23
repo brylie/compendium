@@ -85,8 +85,8 @@ function registerFromManifest<Args extends z.ZodRawShape>(
 }
 
 /** Builds a fresh McpServer with all Phase 0/1 tools registered from serviceSurfaces manifest (service-layer-manifest-specification.md §3.1). */
-export function createAgentSpaceMcpServer(): McpServer {
-	const server = new McpServer({ name: 'agentspace', version: '0.1.0' });
+export function createMcpServer(): McpServer {
+	const server = new McpServer({ name: 'compendium', version: '0.1.0' });
 
 	// 1. documents.listDocuments
 	registerFromManifest(server, 'documents.listDocuments', {}, async (_args, extra) => {

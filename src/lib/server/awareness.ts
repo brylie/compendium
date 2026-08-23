@@ -11,20 +11,20 @@ import { initHoldEviction, resetHoldEvictionForTests } from './holds.js';
 // graph in the same process, and each would otherwise get its own
 // disconnected Awareness instance bound to a possibly-different Y.Doc.
 declare global {
-	var __agentSpaceAwareness: Awareness | undefined;
+	var __awareness: Awareness | undefined;
 }
 
 export function getAwareness(): Awareness {
-	if (globalThis.__agentSpaceAwareness) return globalThis.__agentSpaceAwareness;
+	if (globalThis.__awareness) return globalThis.__awareness;
 	const awareness = new Awareness(getYDoc());
 	initHoldEviction(awareness);
-	globalThis.__agentSpaceAwareness = awareness;
+	globalThis.__awareness = awareness;
 	return awareness;
 }
 
 /** Test-only: drop the singleton so a fresh instance is created next call. */
 export function resetAwarenessForTests(): void {
-	globalThis.__agentSpaceAwareness?.destroy();
-	globalThis.__agentSpaceAwareness = undefined;
+	globalThis.__awareness?.destroy();
+	globalThis.__awareness = undefined;
 	resetHoldEvictionForTests();
 }

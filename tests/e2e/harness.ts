@@ -8,7 +8,7 @@ import { WebsocketProvider } from 'y-websocket';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { createAgentSpaceMcpServer } from '$lib/mcp/server';
+import { createMcpServer } from '$lib/mcp/server';
 import { attachYjsWebSocket } from '$lib/server/attach-ws';
 import { createToken, type AccessToken } from '$lib/mcp/tokens';
 import { closeDb } from '$lib/server/store';
@@ -88,7 +88,7 @@ async function nodeRequestToWebRequest(
 }
 
 export async function createTestHarness(): Promise<TestHarness> {
-	const tempDir = mkdtempSync(join(tmpdir(), 'agentspace-e2e-'));
+	const tempDir = mkdtempSync(join(tmpdir(), 'e2e-'));
 	const dbPath = join(tempDir, 'test.db');
 	process.env.DATABASE_URL = dbPath;
 
@@ -111,7 +111,7 @@ export async function createTestHarness(): Promise<TestHarness> {
 				const auth = webReq.headers.get('authorization');
 				const token = auth?.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : undefined;
 
-				const mcpServer = createAgentSpaceMcpServer();
+				const mcpServer = createMcpServer();
 				const transport = new WebStandardStreamableHTTPServerTransport({
 					sessionIdGenerator: undefined
 				});

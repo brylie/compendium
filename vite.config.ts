@@ -11,7 +11,7 @@ import { attachYjsWebSocket } from './src/lib/server/attach-ws.js';
 // docs/technical-design.md §1 (production uses server.js for the same thing).
 function yjsWebSocketPlugin(): Plugin {
 	return {
-		name: 'agentspace-yjs-ws',
+		name: 'yjs-ws',
 		async configureServer(server) {
 			if (!server.httpServer) return;
 			// Vite loads vite.config.ts itself through a separate module-resolution

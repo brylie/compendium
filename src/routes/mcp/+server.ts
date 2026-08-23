@@ -1,5 +1,5 @@
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { createAgentSpaceMcpServer } from '$lib/mcp/server';
+import { createMcpServer } from '$lib/mcp/server';
 import type { RequestHandler } from './$types';
 
 // Phase 0: HTTP MCP transport, stateless (no sessionIdGenerator) — each
@@ -13,7 +13,7 @@ function extractBearerToken(request: Request): string | undefined {
 }
 
 async function handle(request: Request): Promise<Response> {
-	const server = createAgentSpaceMcpServer();
+	const server = createMcpServer();
 	const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 	await server.connect(transport);
 

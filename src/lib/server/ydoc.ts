@@ -25,11 +25,11 @@ interface YDocState {
 }
 
 declare global {
-	var __agentSpaceYDocState: YDocState | undefined;
+	var __yDocState: YDocState | undefined;
 }
 
 export function getYDoc(): Y.Doc {
-	if (globalThis.__agentSpaceYDocState) return globalThis.__agentSpaceYDocState.doc;
+	if (globalThis.__yDocState) return globalThis.__yDocState.doc;
 
 	const doc = new Y.Doc();
 	const store = getSnapshotStore();
@@ -39,7 +39,7 @@ export function getYDoc(): Y.Doc {
 	}
 
 	const state: YDocState = { doc, saveTimer: null, dirty: false };
-	globalThis.__agentSpaceYDocState = state;
+	globalThis.__yDocState = state;
 
 	doc.on('update', () => {
 		state.dirty = true;
@@ -61,7 +61,7 @@ export function getYDoc(): Y.Doc {
 }
 
 export function flush(): void {
-	const state = globalThis.__agentSpaceYDocState;
+	const state = globalThis.__yDocState;
 	if (!state || !state.dirty) return;
 	getSnapshotStore().save(Y.encodeStateAsUpdate(state.doc));
 	state.dirty = false;
@@ -69,8 +69,8 @@ export function flush(): void {
 
 /** Test-only: drop the singleton so a fresh in-memory doc is created next call. */
 export function resetYDocForTests(): void {
-	if (globalThis.__agentSpaceYDocState?.saveTimer) {
-		clearInterval(globalThis.__agentSpaceYDocState.saveTimer);
+	if (globalThis.__yDocState?.saveTimer) {
+		clearInterval(globalThis.__yDocState.saveTimer);
 	}
-	globalThis.__agentSpaceYDocState = undefined;
+	globalThis.__yDocState = undefined;
 }

@@ -1,6 +1,6 @@
 # Design System
 
-The visual language for AgentSpace, settled through a design-canvas exploration (three directions compared, one chosen and refined with a persistent sidebar and a recolor). This doc is cross-cutting — it applies to the Phase 0 UI getting its first real visual pass and to everything Phase 1 adds — not phase-specific like the plan docs.
+The visual language for Compendium, settled through a design-canvas exploration (three directions compared, one chosen and refined with a persistent sidebar and a recolor). This doc is cross-cutting — it applies to the Phase 0 UI getting its first real visual pass and to everything Phase 1 adds — not phase-specific like the plan docs.
 
 **Status:** Settled direction, ready to implement.
 **Stack:** Tailwind CSS v4 (`@tailwindcss/vite`, CSS-first config — confirmed from the actual `package.json`/`vite.config.ts`), currently just boilerplate in `src/routes/layout.css` (`@import 'tailwindcss'` plus the forms/typography plugins, no `@theme` block yet).

@@ -13,5 +13,5 @@ const server = createServer(handler);
 attachYjsWebSocket(server);
 
 server.listen(port, () => {
-	console.log(`AgentSpace listening on http://localhost:${port}`);
+	console.log(`Compendium listening on http://localhost:${port}`);
 });
