@@ -108,6 +108,10 @@ A Collection is the source of truth for structured data: its schema and its memb
 
 A view is a non-owning projection of one Collection. Table, Board, Calendar, Gallery, Timeline, Form, and Chart are renderers or interaction modes over the same records. A view may have configuration such as filters, sorts, grouping, visible properties, and a layout-specific driving property, but it never copies records, changes their identity, or introduces view-specific row fields. The exact persistence and ownership of saved view configuration is deferred until the view work is prioritized; this invariant is not.
 
+GitLab projects are the interaction reference for the initial Board and data-grid configuration: users can choose visible fields, a grouping property (Board columns or Table groups), optional Board swimlanes, manual or property-based sort, filtering, and field summaries. These choices are declarative view configuration, not Collection schema changes. Moving a card between Board columns updates the selected existing property; rearranging a manually sorted view updates only its view ordering. A Table view is an application data grid with this configuration, distinct from the `table` Document block, which is inline narrative content.
+
+Column summaries are computed view output rather than stored properties. Later work may offer count, sum, mean, median, mode, and other type-appropriate aggregations across the records currently included by a view's filter. Relation rollups are a separate computed-property concern. Neither creates a second write path or persisted aggregate record.
+
 An inline or linked Collection view in a Document is likewise a reference plus view configuration, not an embedded copy of the Collection. A full-page Collection is a navigation/rendering choice, not a different data type. Dashboards compose these non-owning views rather than creating another store of aggregate data.
 
 ## 3. Document hierarchy and block-type rules
