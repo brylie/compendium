@@ -77,14 +77,27 @@ export default defineConfig({
 					environment: 'jsdom',
 					include: ['src/lib/client/**/*.{test,spec}.{js,ts}']
 				}
+			},
+			{
+				extends: './vite.config.ts',
+				// Vitest runs in Node, so Vite's package resolution defaults to the
+				// server (SSR) condition — which for the `svelte` package points at
+				// index-server.js, a build that doesn't implement mount(). Component
+				// tests need the client runtime instead, per
+				// https://svelte.dev/docs/svelte/testing#Using-vitest.
+				resolve: { conditions: ['browser'] },
+				test: {
+					name: 'component',
+					environment: 'jsdom',
+					include: ['src/**/*.svelte.{test,spec}.{js,ts}'],
+					setupFiles: ['./tests/setup/component.ts']
+				}
 			}
 		],
 		coverage: {
 			provider: 'v8',
 			reporter: ['text', 'text-summary', 'html'],
-			include: ['src/**/*.{js,ts}'],
-			// .svelte components aren't instrumented here — see GitHub issue for
-			// bringing them under coverage via @testing-library/svelte.
+			include: ['src/**/*.{js,ts}', 'src/**/*.svelte'],
 			exclude: ['src/**/*.{test,spec}.{js,ts}', 'src/**/*.svelte.{test,spec}.{js,ts}'],
 			thresholds: {
 				statements: 80,
