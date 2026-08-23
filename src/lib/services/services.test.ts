@@ -3,11 +3,20 @@ import {
 	createCollection,
 	createDocument,
 	createRecord,
+	deleteCollection,
+	deleteDocument,
+	deleteRecord,
 	getDocument,
+	getRecord,
 	holdRecords,
+	listCollections,
+	listDocuments,
 	moveDocument,
 	queryCollection,
+	releaseRecords,
 	searchWorkspace,
+	updateCollectionTitle,
+	updateDocumentTitle,
 	writeRecord,
 	PermissionDeniedError,
 	HoldRequiredError
@@ -201,5 +210,180 @@ describe('service layer: centralized business rules & side effects', () => {
 		const fullLink = full?.records.find((r) => r.id === link.id);
 		expect(fullLink?.referencedRecordId).toBe(docSecret.id);
 		expect(fullLink?.markdown).toBe('[[Secret Doc]]');
+	});
+
+	it('renders a page_link block with rich text but no referencedRecordId via its own content', () => {
+		const docPublic = createDocument(human, { title: 'Public Handbook' });
+		const link = crdtCreateRecord(
+			getYDoc(),
+			{ parentId: docPublic.id, blockType: 'page_link' },
+			human
+		);
+		writeRecord(human, link.id, { markdown: 'unresolved link text' });
+
+		const result = getDocument(human, docPublic.id);
+		const linkRecord = result?.records.find((r) => r.id === link.id);
+		expect(linkRecord?.markdown).toBe('unresolved link text');
+	});
+});
+
+describe('service layer: documents — unfiltered listing, delete, and rename', () => {
+	it('listDocuments returns every document, unfiltered, for a human caller', () => {
+		createDocument(human, { title: 'Doc One' });
+		createDocument(human, { title: 'Doc Two' });
+		const docs = listDocuments(human);
+		expect(docs.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it('listDocuments filters to only what a token was granted', () => {
+		const docAllowed = createDocument(human, { title: 'Allowed' });
+		createDocument(human, { title: 'Not Allowed' });
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Scoped Lister',
+			allowedDocumentIds: [docAllowed.id],
+			allowedCollectionIds: []
+		});
+		const docs = listDocuments(tokenRecord);
+		expect(docs).toHaveLength(1);
+		expect(docs[0].id).toBe(docAllowed.id);
+	});
+
+	it('updateDocumentTitle renames a document and logs the change', () => {
+		const doc = createDocument(human, { title: 'Before' });
+		updateDocumentTitle(human, doc.id, 'After');
+		expect(getDocument(human, doc.id)?.title).toBe('After');
+	});
+
+	it('deleteDocument removes a document a caller can access', () => {
+		const doc = createDocument(human, { title: 'To Delete' });
+		deleteDocument(human, doc.id);
+		expect(getDocument(human, doc.id)).toBeNull();
+	});
+
+	it('deleteDocument is denied for a token without access to the parent', () => {
+		const doc = createDocument(human, { title: 'Protected' });
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'No Access Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+		expect(() => deleteDocument(tokenRecord, doc.id)).toThrow(PermissionDeniedError);
+	});
+});
+
+describe('service layer: collections — grants, listing, query, delete, rename', () => {
+	it('a token creating a collection is granted access to it and can query it back', () => {
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Collection Creator Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+		const collection = createCollection(tokenRecord, { title: 'Bot-created Table' });
+		const { collection: queried } = queryCollection(tokenRecord, collection.id);
+		expect(queried?.id).toBe(collection.id);
+	});
+
+	it('listCollections filters to only what a token was granted', () => {
+		const colAllowed = createCollection(human, { title: 'Allowed Table' });
+		createCollection(human, { title: 'Not Allowed Table' });
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Scoped Collection Lister',
+			allowedDocumentIds: [],
+			allowedCollectionIds: [colAllowed.id]
+		});
+		const collections = listCollections(tokenRecord);
+		expect(collections).toHaveLength(1);
+		expect(collections[0].id).toBe(colAllowed.id);
+	});
+
+	it('queryCollection returns an undefined collection for an id the caller is scoped to but that was never created', () => {
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Dangling Scope Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: ['never-created']
+		});
+		const { collection, records } = queryCollection(tokenRecord, 'never-created');
+		expect(collection).toBeUndefined();
+		expect(records).toEqual([]);
+	});
+
+	it('updateCollectionTitle renames a collection', () => {
+		const collection = createCollection(human, { title: 'Before' });
+		updateCollectionTitle(human, collection.id, 'After');
+		const { collection: updated } = queryCollection(human, collection.id);
+		expect(updated?.title).toBe('After');
+	});
+
+	it('deleteCollection removes a collection a caller can access', () => {
+		const collection = createCollection(human, { title: 'To Delete' });
+		deleteCollection(human, collection.id);
+		const { collection: after } = queryCollection(human, collection.id);
+		expect(after).toBeUndefined();
+	});
+});
+
+describe('service layer: records — write validation, delete, and direct read', () => {
+	it('writeRecord throws when given neither markdown nor properties', () => {
+		const doc = createDocument(human, { title: 'Doc' });
+		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+		expect(() => writeRecord(human, block.id, {})).toThrow(/markdown or properties/);
+	});
+
+	it('writeRecord as a human caller applies markdown without needing a hold', () => {
+		const doc = createDocument(human, { title: 'Doc' });
+		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+		writeRecord(human, block.id, { markdown: 'human authored text' });
+		expect(getDocument(human, doc.id)?.records[0].markdown).toBe('human authored text');
+	});
+
+	it('writeRecord applies properties to a collection row', () => {
+		const collection = createCollection(human, {
+			title: 'Tasks',
+			schema: [{ key: 'status', label: 'Status', type: 'select' }]
+		});
+		const row = createRecord(human, {
+			parentId: collection.id,
+			properties: { status: { type: 'select', value: 'todo' } }
+		});
+		writeRecord(human, row.id, { properties: { status: { type: 'select', value: 'done' } } });
+		expect(getRecord(human, row.id)?.properties?.status).toEqual({
+			type: 'select',
+			value: 'done'
+		});
+	});
+
+	it('deleteRecord removes a record a caller can access', () => {
+		const doc = createDocument(human, { title: 'Doc' });
+		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+		deleteRecord(human, block.id);
+		expect(() => getRecord(human, block.id)).toThrow(PermissionDeniedError);
+	});
+
+	it('getRecord returns the record for a caller who can access its parent', () => {
+		const doc = createDocument(human, { title: 'Doc' });
+		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+		expect(getRecord(human, block.id)?.id).toBe(block.id);
+	});
+});
+
+describe('service layer: holds — human caller path and permission-denied records', () => {
+	it('a human caller holding an inaccessible/nonexistent record is denied that one record only', () => {
+		const doc = createDocument(human, { title: 'Doc' });
+		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+		const result = holdRecords(human, [block.id, 'nonexistent']);
+		expect(result.granted).toContain(block.id);
+		expect(result.denied).toContain('nonexistent');
+	});
+
+	it('releaseRecords for a human caller is a logged no-op (holds are agent-only)', () => {
+		const doc = createDocument(human, { title: 'Doc' });
+		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+		expect(() => releaseRecords(human, [block.id])).not.toThrow();
+	});
+});
+
+describe('service layer: permissions — record-not-found path', () => {
+	it('throws PermissionDeniedError for a nonexistent record before any parent check', () => {
+		expect(() => getRecord(human, 'nonexistent')).toThrow(PermissionDeniedError);
 	});
 });

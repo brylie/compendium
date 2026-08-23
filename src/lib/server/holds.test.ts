@@ -167,4 +167,26 @@ describe('holds: agent hold requests', () => {
 			expect(isHeldByClient(awareness, clientId, 'r1')).toBe(false);
 		});
 	});
+
+	it('initHoldEviction is idempotent — a second call does not double-wire the listener', () => {
+		expect(() => initHoldEviction(awareness)).not.toThrow();
+		const clientId = clientIdForToken('token-a');
+		requestAgentHold(awareness, clientId, agent, ['r1'], () => true);
+		setHumanCursor(awareness, 'r1');
+		expect(isHeldByClient(awareness, clientId, 'r1')).toBe(false);
+	});
+
+	it('releaseAgentHold is a no-op for a client with no recorded hold state', () => {
+		const clientId = clientIdForToken('token-never-held');
+		expect(() => releaseAgentHold(awareness, clientId, ['r1'])).not.toThrow();
+		expect(isHeldByClient(awareness, clientId, 'r1')).toBe(false);
+	});
+
+	it('releaseAgentHold with no recordIds releases every record the client holds', () => {
+		const clientId = clientIdForToken('token-a');
+		requestAgentHold(awareness, clientId, agent, ['r1', 'r2'], () => true);
+		releaseAgentHold(awareness, clientId);
+		expect(isHeldByClient(awareness, clientId, 'r1')).toBe(false);
+		expect(isHeldByClient(awareness, clientId, 'r2')).toBe(false);
+	});
 });

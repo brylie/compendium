@@ -62,8 +62,20 @@ export default defineConfig({
 					name: 'server',
 					environment: 'node',
 					include: ['src/**/*.{test,spec}.{js,ts}', 'tests/**/*.test.{js,ts}'],
-					exclude: ['src/**/*.svelte.{test,spec}.{js,ts}', 'tests/**/*.spec.{js,ts}'],
+					exclude: [
+						'src/**/*.svelte.{test,spec}.{js,ts}',
+						'tests/**/*.spec.{js,ts}',
+						'src/lib/client/**/*.{test,spec}.{js,ts}'
+					],
 					setupFiles: ['./tests/setup/isolate-persistence.ts']
+				}
+			},
+			{
+				extends: './vite.config.ts',
+				test: {
+					name: 'client',
+					environment: 'jsdom',
+					include: ['src/lib/client/**/*.{test,spec}.{js,ts}']
 				}
 			}
 		],
@@ -71,7 +83,15 @@ export default defineConfig({
 			provider: 'v8',
 			reporter: ['text', 'text-summary', 'html'],
 			include: ['src/**/*.{js,ts}'],
-			exclude: ['src/**/*.{test,spec}.{js,ts}', 'src/**/*.svelte.{test,spec}.{js,ts}']
+			// .svelte components aren't instrumented here — see GitHub issue for
+			// bringing them under coverage via @testing-library/svelte.
+			exclude: ['src/**/*.{test,spec}.{js,ts}', 'src/**/*.svelte.{test,spec}.{js,ts}'],
+			thresholds: {
+				statements: 80,
+				branches: 80,
+				functions: 80,
+				lines: 80
+			}
 		}
 	}
 });

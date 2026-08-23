@@ -1,0 +1,25 @@
+import { describe, expect, it } from 'vitest';
+import { POST } from './+server';
+
+function jsonRequest(body: unknown): Parameters<typeof POST>[0] {
+	return {
+		request: new Request('http://localhost/api/collections', {
+			method: 'POST',
+			body: JSON.stringify(body)
+		})
+	} as Parameters<typeof POST>[0];
+}
+
+describe('routes/api/collections', () => {
+	it('creates a collection with the given title', async () => {
+		const response = await POST(jsonRequest({ title: 'API Table' }));
+		const data = await response.json();
+		expect(data.title).toBe('API Table');
+	});
+
+	it('defaults to "Untitled Collection" when no title is given', async () => {
+		const response = await POST(jsonRequest({}));
+		const data = await response.json();
+		expect(data.title).toBe('Untitled Collection');
+	});
+});

@@ -33,4 +33,10 @@ describe('ydoc: snapshot persistence survives a process restart', () => {
 		const doc2 = getYDoc();
 		expect(doc2.getMap('workspace').get('greeting')).toBe('hello from before restart');
 	});
+
+	it('flush() is a no-op when there is nothing dirty to save', () => {
+		getYDoc();
+		flush(); // nothing written yet -> dirty is false
+		expect(() => flush()).not.toThrow();
+	});
 });

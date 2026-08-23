@@ -3,7 +3,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpServer } from './server';
 import { createToken } from './tokens';
 import { getYDoc } from '$lib/server/ydoc';
-import { createDocument } from '$lib/data/records';
+import { createCollection, createDocument, createRecord } from '$lib/data/records';
 
 interface ToolHolder {
 	_registeredTools: Record<
@@ -215,5 +215,196 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 		);
 		expect(pageLinkRecord).toBeDefined();
 		expect(pageLinkRecord.markdown).toContain('[[Target Document]]');
+	});
+});
+
+describe('mcp server: authentication', () => {
+	it('rejects a tool call with no bearer token', async () => {
+		const mcpServer = createMcpServer();
+		const result = await invokeTool(mcpServer, 'list_documents', {}, '');
+		expect(result.isError).toBe(true);
+		expect(getTextContent(result)).toContain('Permission denied');
+	});
+
+	it('rejects a tool call with an invalid or revoked token', async () => {
+		const mcpServer = createMcpServer();
+		const result = await invokeTool(mcpServer, 'list_documents', {}, 'not-a-real-token');
+		expect(result.isError).toBe(true);
+		expect(getTextContent(result)).toContain('Permission denied');
+	});
+});
+
+describe('mcp server: full tool surface', () => {
+	it('list_documents, delete_document, list_collections, and query_collection round-trip', async () => {
+		const doc = getYDoc();
+		const docA = createDocument(doc, { title: 'Doc A' });
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [{ key: 'status', label: 'Status', type: 'select' }]
+		});
+		createRecord(
+			doc,
+			{ parentId: collection.id, properties: { status: { type: 'select', value: 'todo' } } },
+			{
+				kind: 'human',
+				userId: 'brylie'
+			}
+		);
+
+		const { token } = createToken({
+			clientLabel: 'Full Surface Bot',
+			allowedDocumentIds: [docA.id],
+			allowedCollectionIds: [collection.id, 'nonexistent']
+		});
+		const mcpServer = createMcpServer();
+
+		const listDocsResult = await invokeTool(mcpServer, 'list_documents', {}, token);
+		expect(JSON.parse(getTextContent(listDocsResult))).toEqual([
+			expect.objectContaining({ id: docA.id, title: 'Doc A' })
+		]);
+
+		const listCollectionsResult = await invokeTool(mcpServer, 'list_collections', {}, token);
+		expect(JSON.parse(getTextContent(listCollectionsResult))).toEqual([
+			expect.objectContaining({ id: collection.id, title: 'Tasks' })
+		]);
+
+		const queryResult = await invokeTool(
+			mcpServer,
+			'query_collection',
+			{ collectionId: collection.id },
+			token
+		);
+		const queried = JSON.parse(getTextContent(queryResult));
+		expect(queried.title).toBe('Tasks');
+		expect(queried.rows).toHaveLength(1);
+
+		const queryMissingResult = await invokeTool(
+			mcpServer,
+			'query_collection',
+			{ collectionId: 'nonexistent' },
+			token
+		);
+		expect(queryMissingResult.isError).toBe(true);
+		expect(getTextContent(queryMissingResult)).toContain('not found');
+
+		const deleteResult = await invokeTool(
+			mcpServer,
+			'delete_document',
+			{ documentId: docA.id },
+			token
+		);
+		expect(deleteResult.isError).toBeFalsy();
+		const getAfterDeleteResult = await invokeTool(
+			mcpServer,
+			'get_document',
+			{ documentId: docA.id },
+			token
+		);
+		expect(getAfterDeleteResult.isError).toBe(true);
+	});
+
+	it('search_workspace, hold_records, release_records, write_record, and delete_record round-trip', async () => {
+		const doc = getYDoc();
+		const docA = createDocument(doc, { title: 'Searchable Doc' });
+
+		const { token } = createToken({
+			clientLabel: 'Full Surface Bot 2',
+			allowedDocumentIds: [docA.id],
+			allowedCollectionIds: []
+		});
+		const mcpServer = createMcpServer();
+
+		const createBlockResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{ parentId: docA.id, blockType: 'paragraph' },
+			token
+		);
+		const blockId = JSON.parse(getTextContent(createBlockResult)).recordId;
+
+		const holdResult = await invokeTool(mcpServer, 'hold_records', { recordIds: [blockId] }, token);
+		expect(JSON.parse(getTextContent(holdResult)).granted).toContain(blockId);
+
+		const writeResult = await invokeTool(
+			mcpServer,
+			'write_record',
+			{ recordId: blockId, markdown: 'Alpha findings' },
+			token
+		);
+		expect(writeResult.isError).toBeFalsy();
+
+		const searchResult = await invokeTool(mcpServer, 'search_workspace', { query: 'Alpha' }, token);
+		const results = JSON.parse(getTextContent(searchResult));
+		expect(results.some((r: { recordId: string }) => r.recordId === blockId)).toBe(true);
+
+		const secondHold = await invokeTool(mcpServer, 'hold_records', { recordIds: [blockId] }, token);
+		expect(JSON.parse(getTextContent(secondHold)).granted).toContain(blockId);
+		const releaseResult = await invokeTool(
+			mcpServer,
+			'release_records',
+			{ recordIds: [blockId] },
+			token
+		);
+		expect(releaseResult.isError).toBeFalsy();
+
+		const deleteRecordResult = await invokeTool(
+			mcpServer,
+			'delete_record',
+			{ recordId: blockId },
+			token
+		);
+		expect(deleteRecordResult.isError).toBeFalsy();
+	});
+
+	it('surfaces a HoldRequiredError as a non-throwing tool error', async () => {
+		const doc = getYDoc();
+		const docA = createDocument(doc, { title: 'Unheld Doc' });
+		const { token } = createToken({
+			clientLabel: 'No Hold Bot',
+			allowedDocumentIds: [docA.id],
+			allowedCollectionIds: []
+		});
+		const mcpServer = createMcpServer();
+
+		const createBlockResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{ parentId: docA.id, blockType: 'paragraph' },
+			token
+		);
+		const blockId = JSON.parse(getTextContent(createBlockResult)).recordId;
+
+		const writeResult = await invokeTool(
+			mcpServer,
+			'write_record',
+			{ recordId: blockId, markdown: 'no hold acquired' },
+			token
+		);
+		expect(writeResult.isError).toBe(true);
+		expect(getTextContent(writeResult)).toMatch(/hold_records/);
+	});
+
+	it('surfaces an unexpected error generically', async () => {
+		const doc = getYDoc();
+		const docA = createDocument(doc, { title: 'Doc' });
+		const { token } = createToken({
+			clientLabel: 'Bad Write Bot',
+			allowedDocumentIds: [docA.id],
+			allowedCollectionIds: []
+		});
+		const mcpServer = createMcpServer();
+
+		const createBlockResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{ parentId: docA.id, blockType: 'paragraph' },
+			token
+		);
+		const blockId = JSON.parse(getTextContent(createBlockResult)).recordId;
+
+		// write_record with neither markdown nor properties throws a plain Error.
+		const writeResult = await invokeTool(mcpServer, 'write_record', { recordId: blockId }, token);
+		expect(writeResult.isError).toBe(true);
+		expect(getTextContent(writeResult)).toContain('markdown or properties');
 	});
 });
