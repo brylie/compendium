@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import {
@@ -103,5 +103,52 @@ describe('holds: agent hold requests', () => {
 	it('the same token always maps to the same synthetic clientID', () => {
 		expect(clientIdForToken('token-a')).toBe(clientIdForToken('token-a'));
 		expect(clientIdForToken('token-a')).not.toBe(clientIdForToken('token-b'));
+	});
+
+	it('permission revoked on an already-held record evicts it instead of renewing it', () => {
+		const clientId = clientIdForToken('token-a');
+		requestAgentHold(awareness, clientId, agent, ['r1', 'r2'], () => true);
+		expect(isHeldByClient(awareness, clientId, 'r1')).toBe(true);
+
+		const result = requestAgentHold(awareness, clientId, agent, ['r1'], () => false);
+
+		expect(result).toEqual({ granted: [], denied: ['r1'] });
+		expect(isHeldByClient(awareness, clientId, 'r1')).toBe(false);
+		expect(isHeldByClient(awareness, clientId, 'r2')).toBe(true);
+	});
+
+	describe('TTL (AGENT_HOLD_TTL_MS = 100s)', () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it('auto-releases a hold at the 100s boundary, not before', () => {
+			const clientId = clientIdForToken('token-a');
+			requestAgentHold(awareness, clientId, agent, ['r1'], () => true);
+
+			vi.advanceTimersByTime(99_999);
+			expect(isHeldByClient(awareness, clientId, 'r1')).toBe(true);
+
+			vi.advanceTimersByTime(1);
+			expect(isHeldByClient(awareness, clientId, 'r1')).toBe(false);
+		});
+
+		it('re-requesting an already-held record resets the 100s window from the re-request, not the original grant', () => {
+			const clientId = clientIdForToken('token-a');
+			requestAgentHold(awareness, clientId, agent, ['r1'], () => true);
+
+			vi.advanceTimersByTime(80_000);
+			requestAgentHold(awareness, clientId, agent, ['r1'], () => true);
+
+			vi.advanceTimersByTime(80_000); // 160s since the original grant, 80s since the renewal
+			expect(isHeldByClient(awareness, clientId, 'r1')).toBe(true);
+
+			vi.advanceTimersByTime(20_000); // 100s since the renewal
+			expect(isHeldByClient(awareness, clientId, 'r1')).toBe(false);
+		});
 	});
 });

@@ -26,14 +26,12 @@ export interface PropertyDefinition {
 
 export type BlockType =
 	| 'paragraph'
-	| 'heading'
 	| 'heading_1'
 	| 'heading_2'
 	| 'heading_3'
 	| 'heading_4'
 	| 'bulleted_list_item'
 	| 'numbered_list_item'
-	| 'list-item'
 	| 'to_do'
 	| 'quote'
 	| 'divider'
@@ -44,7 +42,6 @@ export type BlockType =
 	| 'table_of_contents'
 	| 'synced_block'
 	| 'page-link'
-	| 'page_link'
 	| 'embed';
 
 export interface TextMarks {

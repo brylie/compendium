@@ -23,7 +23,9 @@ Three of four call sites silently diverge from what "create a document" is suppo
 
 ## 2. Decision
 
-Introduce a **service layer** between `records.ts` (pure CRDT primitives, no policy) and the two thin adapters (SvelteKit routes/actions, MCP tool handlers). Each use case — "create a document," "move a document," "write a record," "hold records" — gets exactly one implementation, in the service layer, that owns its full contract: permission check, mutation, audit log, and any other required side effect, all in one place, in one transaction.
+Introduce a **service layer** between `records.ts` (pure CRDT primitives, no policy) and the two thin adapters (SvelteKit routes/actions, MCP tool handlers). Each use case — "create a document," "move a document," "write a record," "hold records" — gets exactly one implementation, in the service layer, that owns its full contract: permission check, mutation, audit log, and any other required side effect, all called from one place, in a fixed order.
+
+**Not a literal atomic transaction.** The Y.Doc mutation and the SQLite writes (access grant, audit log) are two different storage engines with no shared transaction boundary — a service function that mutates the CRDT successfully and then throws on the SQLite step (e.g. `grantDocumentAccess`) leaves the document created but its grant/audit entry missing, with no automatic rollback or retry. "One transaction" in the sense meant here is "one function is the single owner of the full contract, called synchronously end-to-end" — not a cross-engine ACID guarantee. If that gap matters in practice (e.g. `createDocument` partially failing leaves an inaccessible orphan document), it needs an explicit compensation step or a change to the persistence boundary (see [`persistence.md`](./persistence.md)); Phase 0/1 accepts the gap as-is, consistent with single-tenant, local-trust scope.
 
 ```
 src/lib/data/records.ts        — pure Yjs/CRDT operations. No permission checks, no audit
@@ -47,7 +49,7 @@ src/lib/mcp/server.ts          src/routes/**/+page.server.ts, +server.ts
 
 **Rule going forward: MCP tool handlers and SvelteKit route/action handlers must not call `records.ts` or `logAudit` directly.** If a handler needs to do either, that's a sign the operation belongs in the service layer, not inline in the handler.
 
-`Sidebar.svelte`'s client-side CRDT calls (`createDocument(ydoc, ...)`, `deleteDocument(ydoc, ...)`, etc., used for the _live-reactive_ read path and legitimate direct-to-Yjs UI writes) are a separate, already-correct pattern per `architecture.md` §2 ("Shared `lib/yjs-client.ts`... UI and MCP code share one data-access layer") — those stay. What changes is specifically the _fallback_ path that bypasses the network API (and therefore the audit log) on a fetch failure: that fallback is removed as part of this work (see §4).
+`Sidebar.svelte`'s client-side CRDT calls (`createDocument(ydoc, ...)`, `deleteDocument(ydoc, ...)`, etc., used for the _live-reactive_ read path and legitimate direct-to-Yjs UI writes) are a separate, already-correct pattern per `architecture.md` §2 ("Shared `lib/yjs-client.ts`... UI and MCP code share one data-access layer") — those stay. What changed is specifically the _fallback_ path that used to bypass the network API (and therefore the audit log) on a fetch failure: that fallback has been removed (see §4) — a failed `/api/documents` or `/api/collections` request now surfaces as an error to the user instead of silently falling through to an unaudited direct `Y.Doc` write.
 
 ## 3. Module layout
 
@@ -71,7 +73,7 @@ Each function's first parameter is whatever identifies the caller for permission
 ## 4. What this fixes, concretely
 
 - **The `create_document` self-grant bug.** `services/documents.ts#createDocument` becomes the single place that creates the document _and_ persists the calling token's new grant (via a real `grantDocumentAccess(tokenHash, documentId)` function added to `tokens.ts`, doing an actual `UPDATE access_tokens SET allowed_document_ids = ...`) _and_ logs the audit entry, as one unit. The MCP tool handler shrinks to: verify token → call `createDocument(token, input)` → return result.
-- **The Sidebar audit-log gap.** Once the MCP/route handlers are the only sanctioned way to reach a mutating service function over the network, the client-side fetch-failure fallback that skipped `logAudit` no longer has a lower-level function to silently fall back to — removing it (per the fix list, finding #4) becomes the obvious move rather than an isolated patch.
+- **The Sidebar audit-log gap.** Now that the MCP/route handlers are the only sanctioned way to reach a mutating service function over the network, `Sidebar.svelte` no longer has a lower-level function to silently fall back to on a fetch failure — that fallback (finding #4) has been removed rather than left as an isolated patch.
 - **Future write operations** (starting with `move_document`, from the same review) get built against this layer from day one instead of accumulating the same inconsistency a fourth time.
 
 ## 5. Migration plan

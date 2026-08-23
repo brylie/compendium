@@ -27,6 +27,7 @@
 
 	let el: HTMLDivElement | undefined = $state();
 	let lastPlainText = '';
+	let isComposing = false;
 
 	function escapeHtml(text: string): string {
 		return text
@@ -73,8 +74,23 @@
 		if (caret !== null) setCaretOffset(el, Math.min(caret, lastPlainText.length));
 	}
 
+	function handleCompositionStart(): void {
+		isComposing = true;
+	}
+
+	function handleCompositionEnd(): void {
+		isComposing = false;
+		handleInput();
+	}
+
 	function handleInput(): void {
 		if (!el) return;
+		// While an IME composition is in progress, `innerText` only reflects an
+		// uncommitted intermediate string. Syncing that to Y.Text now — and, via
+		// the ytext.observe(render) below, immediately rewriting el.innerHTML out
+		// from under the browser's own composition UI — corrupts CJK/other IME
+		// input. Defer until compositionend commits the final text instead.
+		if (isComposing) return;
 		const newText = el.innerText.replace(/\n$/, '');
 		const diff = diffPlainText(lastPlainText, newText);
 		if (diff.deleteCount === 0 && diff.insertText === '') return;
@@ -100,6 +116,11 @@
 	};
 
 	function handleKeydown(event: KeyboardEvent): void {
+		// keyCode 229 is the legacy signal some browsers still send instead of
+		// isComposing for IME-driven key events (e.g. committing a composition
+		// with Enter). Either way, structural shortcuts like the Enter-splits-
+		// block behavior below must not fire mid-composition.
+		if (event.isComposing || event.keyCode === 229) return;
 		if (event.key === 'Enter') {
 			event.preventDefault();
 			onEnter();
@@ -146,14 +167,18 @@
 
 <div
 	bind:this={el}
-	class="block-editor min-h-[1.5em] py-0.5 leading-relaxed break-words text-fg outline-none {className}"
+	class="block-editor min-h-[1.5em] py-0.5 leading-relaxed break-words text-fg outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent {className}"
 	contenteditable="true"
 	role="textbox"
 	tabindex="0"
 	aria-multiline="false"
+	aria-label={placeholder || 'Block content'}
+	aria-placeholder={placeholder || undefined}
 	data-placeholder={placeholder}
 	oninput={handleInput}
 	onkeydown={handleKeydown}
+	oncompositionstart={handleCompositionStart}
+	oncompositionend={handleCompositionEnd}
 	onfocus={onFocusBlock}
 ></div>
 

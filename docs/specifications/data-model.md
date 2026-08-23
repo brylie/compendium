@@ -30,18 +30,44 @@ interface PropertyDefinition {
 // A block IS a record — this isn't a separate type, just a record whose
 // parent is a Document rather than a Collection. Kept as one shape so the
 // MCP tool surface never needs to special-case "block vs. row."
-interface Record {
+// Named WorkspaceRecord (not Record) in the implementation, to avoid
+// shadowing TypeScript's built-in Record<K, V> — the `properties` field
+// below still uses the built-in generic.
+interface WorkspaceRecord {
 	id: string; // stable, globally unique
 	parentId: string; // Document ID or Collection ID
 	order: string; // fractional index, orders records within parentId
-	blockType?: string; // set when parent is a Document: 'paragraph' | 'heading' | 'list-item' | 'table' | 'code' | 'embed'
+	blockType?: BlockType; // set when parent is a Document
 	content?: RichText; // set when parent is a Document — the block's text
 	properties?: Record<string, PropertyValue>; // set when parent is a Collection
+	checked?: boolean; // for to_do blocks
+	collapsed?: boolean; // for toggle blocks
+	referencedRecordId?: string; // for synced_block / page-link blocks
 	createdBy: ActorId;
 	createdAt: number;
 	lastEditedBy: ActorId;
 	lastEditedAt: number;
 }
+
+type BlockType =
+	| 'paragraph'
+	| 'heading_1'
+	| 'heading_2'
+	| 'heading_3'
+	| 'heading_4'
+	| 'bulleted_list_item'
+	| 'numbered_list_item'
+	| 'to_do'
+	| 'quote'
+	| 'divider'
+	| 'callout'
+	| 'toggle'
+	| 'table'
+	| 'code'
+	| 'table_of_contents'
+	| 'synced_block'
+	| 'page-link'
+	| 'embed';
 
 interface RichText {
 	// Conceptually a run array (see PRD's Core Architectural Principle). Concretely,
@@ -63,6 +89,8 @@ interface TextMarks {
 interface Document {
 	id: string;
 	title: string;
+	parentDocumentId?: string; // absent (not null) for a root/top-level Document
+	order: string; // fractional index, orders sibling Documents under the same parent
 	recordIds: string[]; // ordered — the Document's blocks, in order
 }
 
@@ -80,7 +108,7 @@ One `Y.Doc` for the whole workspace (single-tenant, single workspace — no need
 
 | Concept           | Yjs type                        | Notes                                                                                                                                                                                                                                                                                                                                                                     |
 | ----------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Documents index   | `Y.Map<string, DocumentMeta>`   | keyed by Document ID; `DocumentMeta` is `{title, recordIds: Y.Array<string>}`                                                                                                                                                                                                                                                                                             |
+| Documents index   | `Y.Map<string, DocumentMeta>`   | keyed by Document ID; `DocumentMeta` is `{title, parentDocumentId?, order, recordIds: Y.Array<string>}` — a Document nested under a parent stores that parent's ID directly on its own meta entry, alongside its sibling-ordering `order`                                                                                                                                 |
 | Collections index | `Y.Map<string, CollectionMeta>` | keyed by Collection ID; includes `schema` as a plain JSON value (schema edits are rare, don't need fine-grained CRDT merge)                                                                                                                                                                                                                                               |
 | Records           | `Y.Map<string, Y.Map>`          | keyed by record ID; each record's own `Y.Map` holds `parentId`, `order`, `blockType`, `properties` (plain JSON), and — for block-records — `content`                                                                                                                                                                                                                      |
 | Block rich text   | `Y.Text`                        | one per block-record, stored as the record's `content` field. **Not** a custom run array — Yjs's own `Y.Text.format()` already stores marks as attribute ranges over the text and merges concurrent overlapping formatting correctly (see PRD's rich-text acceptance criterion). The `RichText.runs` shape in §1 is derived from `Y.Text` on read, not stored separately. |

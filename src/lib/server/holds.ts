@@ -140,10 +140,20 @@ export function requestAgentHold(
 	const alreadyOwn = new Set(existing?.heldRecordIds ?? []);
 	const granted: string[] = [];
 	const denied: string[] = [];
+	const revoked: string[] = [];
 
 	for (const id of recordIds) {
 		if (alreadyOwn.has(id)) {
-			granted.push(id);
+			// Re-checked on every request rather than trusted from the prior grant:
+			// permissions can change between calls (e.g. a token's document access
+			// is revoked mid-session), so a stale "already own it" must not bypass
+			// the check the record would otherwise be subject to.
+			if (permissionCheck(id)) {
+				granted.push(id);
+			} else {
+				denied.push(id);
+				revoked.push(id);
+			}
 		} else if (currentlyHeld.has(id)) {
 			denied.push(id);
 		} else if (!permissionCheck(id)) {
@@ -153,10 +163,16 @@ export function requestAgentHold(
 		}
 	}
 
-	if (granted.length > 0) {
-		const nextHeld = Array.from(new Set([...(existing?.heldRecordIds ?? []), ...granted]));
-		writeRemoteState(awareness, clientId, { actor, heldRecordIds: nextHeld });
-		scheduleTtl(awareness, clientId);
+	if (granted.length > 0 || revoked.length > 0) {
+		const retained = (existing?.heldRecordIds ?? []).filter((id) => !revoked.includes(id));
+		const nextHeld = Array.from(new Set([...retained, ...granted]));
+		if (nextHeld.length > 0) {
+			writeRemoteState(awareness, clientId, { actor, heldRecordIds: nextHeld });
+			scheduleTtl(awareness, clientId);
+		} else {
+			writeRemoteState(awareness, clientId, null);
+			clearTtl(clientId);
+		}
 	}
 
 	return { granted, denied };

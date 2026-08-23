@@ -134,7 +134,7 @@ export function getDocument(
 	if (!document) return null;
 
 	const records = crdtListRecordsForParent(doc, documentId).map((r) => {
-		const isPageLink = r.blockType === 'page-link' || r.blockType === 'page_link';
+		const isPageLink = r.blockType === 'page-link';
 		const targetTitle =
 			isPageLink && r.referencedRecordId
 				? (crdtGetDocument(doc, r.referencedRecordId)?.title ?? 'Untitled')

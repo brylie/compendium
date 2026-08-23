@@ -180,7 +180,7 @@
 	// Computed heading list for Table of Contents blocks
 	let headings = $derived(
 		blocks.filter((b) =>
-			['heading', 'heading_1', 'heading_2', 'heading_3', 'heading_4'].includes(b.blockType ?? '')
+			['heading_1', 'heading_2', 'heading_3', 'heading_4'].includes(b.blockType ?? '')
 		)
 	);
 
@@ -309,7 +309,7 @@
 							<Icon name="check" size={13} class="stroke-[2.5] text-accent-fg" />
 						{/if}
 					</button>
-				{:else if bt === 'bulleted_list_item' || bt === 'list-item'}
+				{:else if bt === 'bulleted_list_item'}
 					<span
 						class="mt-1 mr-2.5 flex h-4 w-3.5 flex-shrink-0 items-center justify-center font-bold text-muted select-none"
 					>
@@ -457,7 +457,7 @@
 								</p>
 							{/if}
 						</div>
-					{:else if bt === 'page-link' || bt === 'page_link'}
+					{:else if bt === 'page-link'}
 						{@const linkedDoc =
 							block.referencedRecordId && ydoc
 								? getDocument(ydoc, block.referencedRecordId)
@@ -518,7 +518,7 @@
 									{ytext}
 									class={bt === 'heading_1'
 										? 'font-display text-2xl font-bold text-fg'
-										: bt === 'heading_2' || bt === 'heading'
+										: bt === 'heading_2'
 											? 'font-display text-xl font-semibold text-fg'
 											: bt === 'heading_3'
 												? 'font-display text-lg font-semibold text-fg'
