@@ -378,24 +378,24 @@
 		<div class="flex flex-1 flex-col items-center gap-3 py-3">
 			<a
 				href={resolve('/')}
-				class="rounded p-2 text-muted transition-colors hover:bg-surface hover:text-fg"
-				class:bg-surface={currentPath === '/'}
-				class:text-accent={currentPath === '/'}
-				title="Workspace Home"
-				aria-label="Workspace Home"
+				class="rounded p-2 text-muted transition-colors hover:bg-surface hover:text-accent"
+				class:bg-surface={currentPath === '/' || currentDocId !== null}
+				class:text-accent={currentPath === '/' || currentDocId !== null}
+				title="Documents"
+				aria-label="Documents"
 			>
 				<Icon name="document" size={18} />
 			</a>
-			{#if currentDocId}
-				<div class="rounded bg-accent/20 p-2 text-accent" title="Current Document">
-					<Icon name="document" size={18} />
-				</div>
-			{/if}
-			{#if currentTableId}
-				<div class="rounded bg-accent/20 p-2 text-accent" title="Current Collection">
-					<Icon name="table" size={18} />
-				</div>
-			{/if}
+			<a
+				href={resolve('/')}
+				class="rounded p-2 text-muted transition-colors hover:bg-surface hover:text-accent"
+				class:bg-surface={currentTableId !== null}
+				class:text-accent={currentTableId !== null}
+				title="Collections"
+				aria-label="Collections"
+			>
+				<Icon name="table" size={18} />
+			</a>
 		</div>
 	{/if}
 
