@@ -41,7 +41,7 @@ export type BlockType =
 	| 'code'
 	| 'table_of_contents'
 	| 'synced_block'
-	| 'page-link'
+	| 'page_link'
 	| 'embed';
 
 export interface TextMarks {

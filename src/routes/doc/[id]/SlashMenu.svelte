@@ -134,7 +134,7 @@
 			keywords: 'synced block sync reference mirror link'
 		},
 		{
-			blockType: 'page-link',
+			blockType: 'page_link',
 			label: 'Page link',
 			description: 'Link to another document.',
 			icon: 'link',

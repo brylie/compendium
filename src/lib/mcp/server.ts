@@ -37,7 +37,7 @@ const blockTypeSchema = z.enum([
 	'code',
 	'table_of_contents',
 	'synced_block',
-	'page-link',
+	'page_link',
 	'embed'
 ]);
 

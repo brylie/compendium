@@ -122,9 +122,9 @@ agent edits and vice versa — not just that each side works in isolation. See
 
 ## Roadmap
 
-Open work is tracked as [GitHub Issues](https://github.com/brylie/compendium/issues)
-and organized on the [project board](https://github.com/users/brylie/projects/6/views/1),
-not in local planning docs.
+The [Compendium GitHub Project](https://github.com/users/brylie/projects/6) is the
+canonical roadmap. Open work is tracked as [GitHub Issues](https://github.com/brylie/compendium/issues)
+and organized there, not in local planning docs.
 
 ## Further reading
 

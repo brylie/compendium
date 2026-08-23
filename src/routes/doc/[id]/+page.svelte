@@ -457,7 +457,7 @@
 								</p>
 							{/if}
 						</div>
-					{:else if bt === 'page-link'}
+					{:else if bt === 'page_link'}
 						{@const linkedDoc =
 							block.referencedRecordId && ydoc
 								? getDocument(ydoc, block.referencedRecordId)

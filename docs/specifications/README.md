@@ -14,4 +14,6 @@ Canonical specification for each implemented subsystem, translating [`agent-work
 
 ## Out of scope for the current architecture
 
-Multi-user auth, workspace admin, per-user OAuth, and hybrid search are explicitly not covered by these specs — the architecture above is single-tenant, local-trust, no login. They're tracked as roadmap issues instead of speculatively specced here: [#3 multi-tenant support](https://github.com/brylie/compendium/issues/3), [#2 hybrid search](https://github.com/brylie/compendium/issues/2). Each gets its own technical-design pass under `docs/specifications/` once actually prioritized, rather than being guessed at in advance.
+Multi-user auth, workspace admin, per-user OAuth, and hybrid search are explicitly not covered by these specs — the architecture above is single-tenant, local-trust, no login. They are tracked on the [canonical GitHub Project roadmap](https://github.com/users/brylie/projects/6), rather than speculatively specified here. Each gets its own technical-design pass under `docs/specifications/` once actually prioritized, rather than being guessed at in advance.
+
+When hybrid search is prioritized, its starting point is a disposable Postgres projection of the Y.Doc, combining full-text search and pgvector semantic search with a fusion ranking strategy such as reciprocal-rank fusion. The embedding provider remains a deliberate privacy decision: hosted embeddings send workspace content to a third party, while a local model trades operational simplicity for data locality.

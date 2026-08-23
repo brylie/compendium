@@ -167,7 +167,7 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 		expect(getTextContent(moveResult)).toContain('Permission denied');
 	});
 
-	it('creates and transcodes page-link blocks as [[Document Title]] references', async () => {
+	it('creates and transcodes page_link blocks as [[Document Title]] references', async () => {
 		const doc = getYDoc();
 		const docA = createDocument(doc, { title: 'Target Document' });
 		const docB = createDocument(doc, { title: 'Source Document' });
@@ -180,13 +180,13 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 
 		const mcpServer = createMcpServer();
 
-		// Create a page-link block pointing to docA
+		// Create a page_link block pointing to docA
 		const createBlockResult = await invokeTool(
 			mcpServer,
 			'create_record',
 			{
 				parentId: docB.id,
-				blockType: 'page-link'
+				blockType: 'page_link'
 			},
 			token
 		);

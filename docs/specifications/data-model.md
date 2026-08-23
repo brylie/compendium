@@ -42,7 +42,7 @@ interface WorkspaceRecord {
 	properties?: Record<string, PropertyValue>; // set when parent is a Collection
 	checked?: boolean; // for to_do blocks
 	collapsed?: boolean; // for toggle blocks
-	referencedRecordId?: string; // for synced_block / page-link blocks
+	referencedRecordId?: string; // for synced_block / page_link blocks
 	createdBy: ActorId;
 	createdAt: number;
 	lastEditedBy: ActorId;
@@ -66,7 +66,7 @@ type BlockType =
 	| 'code'
 	| 'table_of_contents'
 	| 'synced_block'
-	| 'page-link'
+	| 'page_link'
 	| 'embed';
 
 interface RichText {
@@ -102,7 +102,18 @@ interface Collection {
 }
 ```
 
-## 2. Yjs mapping
+## 2. Document hierarchy and block-type rules
+
+Document hierarchy is represented by `Document.parentDocumentId`, not by a block. A child Document remains a first-class Document with its own `recordIds`; `order` orders it among the same parent's children. A `page_link` block is therefore only an explicit navigation reference to another Document, never the source of containment.
+
+Blocks are deliberately a small, documentation-oriented set rather than one type per external service. All CRDT, permission, hold, and MCP behavior operates on `WorkspaceRecord` generically. Adding a text-based block type therefore requires its discriminator, UI renderer and slash-menu entry, and Markdown transcoding behavior—not a new storage or coordination primitive.
+
+- `table_of_contents` is a computed block: its rendered entries are derived from the containing Document's headings rather than a copied `Y.Text` outline.
+- `synced_block` references the source record through `referencedRecordId`; editing or holding the rendered block operates on that source record rather than an independent copy.
+- `embed` is the generic external-content mechanism. Dedicated per-service block types are intentionally out of scope.
+- Binary media (`image`, `file`, `pdf`, `video`, and `audio`) is deferred until an asset-storage design defines stable references, backups, and sync behavior; it is not merely another text-block discriminator.
+
+## 3. Yjs mapping
 
 One `Y.Doc` for the whole workspace (single-tenant, single workspace — no need for multiple docs yet).
 
