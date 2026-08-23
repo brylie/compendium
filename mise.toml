@@ -1,4 +1,5 @@
 [tools]
+gh = "latest"
 prek = "latest"
 
 [env]
