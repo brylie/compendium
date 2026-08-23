@@ -102,7 +102,15 @@ interface Collection {
 }
 ```
 
-## 2. Document hierarchy and block-type rules
+## 2. Collections and views
+
+A Collection is the source of truth for structured data: its schema and its member records. A Collection record is a row with typed properties, **not** a hidden Document or a page-shaped wrapper around one. Long-form, block-based knowledge remains a first-class Document; when a workflow needs to connect it to a row, it uses a relation rather than making the row own a second content model.
+
+A view is a non-owning projection of one Collection. Table, Board, Calendar, Gallery, Timeline, Form, and Chart are renderers or interaction modes over the same records. A view may have configuration such as filters, sorts, grouping, visible properties, and a layout-specific driving property, but it never copies records, changes their identity, or introduces view-specific row fields. The exact persistence and ownership of saved view configuration is deferred until the view work is prioritized; this invariant is not.
+
+An inline or linked Collection view in a Document is likewise a reference plus view configuration, not an embedded copy of the Collection. A full-page Collection is a navigation/rendering choice, not a different data type. Dashboards compose these non-owning views rather than creating another store of aggregate data.
+
+## 3. Document hierarchy and block-type rules
 
 Document hierarchy is represented by `Document.parentDocumentId`, not by a block. A child Document remains a first-class Document with its own `recordIds`; `order` orders it among the same parent's children. A `page_link` block is therefore only an explicit navigation reference to another Document, never the source of containment.
 
@@ -113,7 +121,7 @@ Blocks are deliberately a small, documentation-oriented set rather than one type
 - `embed` is the generic external-content mechanism. Dedicated per-service block types are intentionally out of scope.
 - Binary media (`image`, `file`, `pdf`, `video`, and `audio`) is deferred until an asset-storage design defines stable references, backups, and sync behavior; it is not merely another text-block discriminator.
 
-## 3. Yjs mapping
+## 4. Yjs mapping
 
 One `Y.Doc` for the whole workspace (single-tenant, single workspace — no need for multiple docs yet).
 
