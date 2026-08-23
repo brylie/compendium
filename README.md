@@ -1,13 +1,79 @@
-# AgentSpace
+# Compendium
 
-A personal, single-tenant, agent-first workspace: a CRDT-backed document and
-table editor where a human (via the web UI) and AI agents (via MCP) read and
-write the same content with the same fidelity, live.
+A shared knowledge workspace where people and AI agents read and write the
+same pages and tables — live, in the same place, with nothing to export,
+import, or paste between them.
 
-This is the **Phase 0** build — see [`docs/agent-workspace-prd.md`](docs/agent-workspace-prd.md),
-[`docs/technical-design.md`](docs/technical-design.md), and
-[`docs/phase-0-build-plan.md`](docs/phase-0-build-plan.md) for the full spec
-and rationale. Phase 0 is trusted-local, single-user, no login.
+## Why
+
+Most knowledge tools were built for humans and had agents bolted on
+afterward: a chat sidebar, or a one-shot "generate this page" button. They
+can't reliably read the rest of a workspace, hold a durable identity, or
+write back into a document the way a human collaborator would. In practice
+this means pasting agent output between chat windows and documents by hand —
+which breaks the audit trail, duplicates work, and lets the document drift
+out of sync with what the agent actually knows or did.
+
+It's not that in-place agent editing is impossible — Gemini edits Google
+Docs in place now, Copilot edits Word in place — it's that it's walled to
+each vendor's own ecosystem. An assistant reaching into a file format
+outside its home turf creates a new file instead of updating the one that's
+open. **MCP-based editing sidesteps that by construction**: the workspace,
+not any one vendor's document format, is the shared surface, so any
+MCP-compatible agent — Claude, ChatGPT, Gemini, a custom bot — gets the same
+in-place read/write access as a human editing in the native UI.
+
+The other half of the bet: documentation, structured data, kanban, and
+calendars are usually separate tools, each with their own data model, so
+neither humans nor agents can treat "what the team knows" as one queryable
+thing. Compendium models all of it as one thing — see below.
+
+Full product rationale, including the persona/market thesis and what's
+explicitly _not_ being built, lives in
+[`docs/agent-workspace-prd.md`](docs/agent-workspace-prd.md).
+
+## What it is
+
+Everything — a paragraph, a heading, a table row, a kanban card — is the
+same underlying kind of thing, addressed the same way by the UI, the
+permission model, the audit log, and the MCP tools an agent uses. That's
+what lets an agent treat a Document and a Table as one connected workspace
+instead of two disconnected apps.
+
+- A **Document** is a page: an ordered sequence of blocks, the
+  prose-editing surface.
+- A **Collection** is a structured dataset: a set of records sharing a
+  schema (text, number, date, select, checkbox, relation).
+- A **View** renders a Collection (Table today; Kanban and Calendar are
+  planned as new renderers over the same data, not a migration).
+- Text within a block can be independently formatted (bold, italic, code,
+  links, `@mentions`), and two people — or a person and an agent — can edit
+  the same paragraph at the same time without clobbering each other.
+
+Because a Document block and a Collection row are the same kind of thing
+under the hood, an agent can update several at once as a single step — e.g.
+an event's description in a Document, its task row in a Table, and a draft
+announcement in a separate Document, updated together instead of by three
+hand-propagated edits.
+
+## How it works
+
+One server holds the whole workspace and keeps every connected client in
+sync in real time. The web UI and any connected MCP agent are looking at
+the same live workspace, not separate copies — there's no import/export
+step and no polling delay, so a change from either side shows up everywhere
+else immediately.
+
+Before an agent overwrites existing content, it visibly claims the blocks
+it's about to change — they show a shimmer and the agent's name — so a
+human working nearby doesn't get overwritten mid-edit, and so two agents
+don't collide. A human's own cursor works the same way: being in a block is
+itself an implicit claim on it.
+
+Everything is saved centrally with a full history of who changed what.
+
+Full architecture, the sync engine, and the MCP tool surface live in
+[`docs/technical-design.md`](docs/technical-design.md).
 
 ## Running it
 
@@ -16,16 +82,16 @@ npm install
 npm run dev          # http://localhost:5173, with /ws and /mcp on the same port
 ```
 
-For a production-style run (one process, adapter-node build):
+For a production-style run (one process, built for production):
 
 ```sh
 npm run build
 ORIGIN=http://localhost:3000 npm start
 ```
 
-`ORIGIN` should match whatever host/port you're actually serving on — SvelteKit's
-CSRF protection checks the request's `Origin` header against it for POSTs
-(browsers send this automatically; only matters if you're scripting requests).
+Set `ORIGIN` to whatever host/port you're actually serving on — it's used
+to validate incoming requests and only matters if you're scripting requests
+yourself.
 
 ## Connecting an MCP client
 
@@ -36,29 +102,44 @@ CSRF protection checks the request's `Origin` header against it for POSTs
    `http://localhost:3000/mcp` with that token as a bearer token, per your
    client's own remote-MCP-server configuration.
 
-Edits made this way appear live in any open browser tab — MCP writes and UI
-edits go through the same in-memory `Y.Doc` (see `docs/technical-design.md §1`).
-
-## Project layout
-
-- `src/lib/data/` — the record/Document/Collection model and CRDT access
-  layer (`records.ts`), shared verbatim by the UI and the MCP server.
-- `src/lib/server/` — the Yjs document singleton, SQLite persistence,
-  Awareness-based holds, and the audit log. Server-only (SvelteKit enforces
-  this by directory convention).
-- `src/lib/mcp/` — the MCP tool surface, Markdown transcoding
-  (CommonMark+GFM plus `@mention`/`[[wiki-link]]`), and access tokens.
-- `src/lib/client/` — browser-side Yjs connection, presence/hold publishing,
-  and the bespoke contenteditable rich-text binding's caret/diff helpers.
-- `src/routes/` — the SvelteKit UI: workspace home, Document view, Table
-  view, token settings, and the audit log.
-- `server.ts` — production entry point; wraps the adapter-node build's
-  request handler with a raw `http.Server` so `/ws` can share the port.
+Edits made this way appear live in any open browser tab, and vice versa —
+MCP and the UI are editing the same workspace (see
+[`docs/technical-design.md` §1](docs/technical-design.md)).
 
 ## Testing
 
 ```sh
-npm run test    # vitest — data layer, holds, and markdown transcoding
-npm run check   # svelte-check
-npm run lint    # prettier + eslint
+npm run test           # vitest — data layer, holds, and markdown transcoding
+npm run test:e2e       # tier-a (vitest, protocol-level) + tier-b (playwright, DOM-level)
+npm run check           # svelte-check
+npm run lint             # prettier + eslint
 ```
+
+The E2E suites exist specifically to prove MCP writes and UI edits stay in
+sync across the real transport boundary in both directions — human creates,
+agent edits and vice versa — not just that each side works in isolation. See
+[`docs/e2e-testing.specification.md`](docs/e2e-testing.specification.md).
+
+## Further reading
+
+Product rationale, architecture, and phase-by-phase build plans each have
+their own doc under [`docs/`](docs/) and are kept current there rather than
+mirrored here:
+
+- [`agent-workspace-prd.md`](docs/agent-workspace-prd.md) — problem
+  statement, goals/non-goals, requirements, and the build-vs-adopt decisions
+  behind the editor.
+- [`technical-design.md`](docs/technical-design.md) — process architecture,
+  data model, sync engine, MCP tool surface.
+- [`service-layer.specification.md`](docs/service-layer.specification.md) /
+  [`service-layer-manifest-specification.md`](docs/service-layer-manifest-specification.md)
+  — how permission/audit logic is centralized once and shared by MCP and UI.
+- [`e2e-testing.specification.md`](docs/e2e-testing.specification.md) — the
+  MCP/UI parity testing strategy.
+- [`design-system.md`](docs/design-system.md) — UI tokens and conventions.
+- `phase-0-build-plan.md` through `phase-4-plan.md` — the sequenced build
+  plan; each stands on its own as the record of what that phase covers.
+
+## License
+
+Apache 2.0 — see [`LICENSE`](LICENSE).
