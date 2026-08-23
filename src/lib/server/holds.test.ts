@@ -110,11 +110,27 @@ describe('holds: agent hold requests', () => {
 		requestAgentHold(awareness, clientId, agent, ['r1', 'r2'], () => true);
 		expect(isHeldByClient(awareness, clientId, 'r1')).toBe(true);
 
-		const result = requestAgentHold(awareness, clientId, agent, ['r1'], () => false);
+		const result = requestAgentHold(awareness, clientId, agent, ['r1'], (id) => id !== 'r1');
 
 		expect(result).toEqual({ granted: [], denied: ['r1'] });
 		expect(isHeldByClient(awareness, clientId, 'r1')).toBe(false);
 		expect(isHeldByClient(awareness, clientId, 'r2')).toBe(true);
+	});
+
+	it('revokes an already-held record even when a later request omits it entirely', () => {
+		const clientId = clientIdForToken('token-a');
+		requestAgentHold(awareness, clientId, agent, ['r1', 'r2'], () => true);
+		expect(isHeldByClient(awareness, clientId, 'r1')).toBe(true);
+		expect(isHeldByClient(awareness, clientId, 'r2')).toBe(true);
+
+		// r1's permission is revoked, but this next request is about a wholly
+		// unrelated record — r1 must still be evicted, not silently renewed.
+		const result = requestAgentHold(awareness, clientId, agent, ['r3'], (id) => id !== 'r1');
+
+		expect(result).toEqual({ granted: ['r3'], denied: [] });
+		expect(isHeldByClient(awareness, clientId, 'r1')).toBe(false);
+		expect(isHeldByClient(awareness, clientId, 'r2')).toBe(true);
+		expect(isHeldByClient(awareness, clientId, 'r3')).toBe(true);
 	});
 
 	describe('TTL (AGENT_HOLD_TTL_MS = 100s)', () => {

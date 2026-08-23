@@ -99,8 +99,9 @@ yourself.
 2. Go to **Tokens** (`/settings/tokens`), create a token scoped to the
    documents/collections you want to grant access to.
 3. Point your MCP client (Claude Desktop, Claude Code, ChatGPT, etc.) at
-   `http://localhost:3000/mcp` with that token as a bearer token, per your
-   client's own remote-MCP-server configuration.
+   `http://localhost:5173/mcp` (the `npm run dev` port above) with that token
+   as a bearer token, per your client's own remote-MCP-server configuration.
+   Substitute your actual host/port if running the production build instead.
 
 Edits made this way appear live in any open browser tab, and vice versa —
 MCP and the UI are editing the same workspace (see

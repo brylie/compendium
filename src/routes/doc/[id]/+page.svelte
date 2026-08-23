@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { getClientDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
@@ -32,8 +32,11 @@
 	let { data }: PageProps = $props();
 
 	let ydoc: ReturnType<typeof getClientDoc> | undefined = $state();
-	let currentDoc = $derived(ydoc ? getDocument(ydoc, data.documentId) : undefined);
-	let title = $derived(currentDoc?.title ?? data.title);
+	// Initial-render-only snapshot of the SSR-loaded title, shown before ydoc
+	// mounts; refresh() (below) is what keeps it in sync with the Y.Doc
+	// afterwards, including on navigation to a different document and on
+	// remote title edits — untrack() here just tells Svelte that's deliberate.
+	let title = $state(untrack(() => data.title));
 	let blocks: WorkspaceRecord[] = $state([]);
 	let slashMenuBlockId: string | null = $state(null);
 	let slashQuery = $state('');
@@ -52,6 +55,7 @@
 		if (!ydoc) return;
 		blocks = listRecordsForParent(ydoc, data.documentId);
 		const docMeta = getDocument(ydoc, data.documentId);
+		title = docMeta?.title ?? data.title;
 		if (docMeta?.parentDocumentId) {
 			const parent = getDocument(ydoc, docMeta.parentDocumentId);
 			parentDocTitle = parent?.title || 'Parent document';

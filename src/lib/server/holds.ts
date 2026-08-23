@@ -137,22 +137,27 @@ export function requestAgentHold(
 ): HoldRequestResult {
 	const currentlyHeld = aggregateHolds(awareness);
 	const existing = readHoldState(awareness, clientId);
-	const alreadyOwn = new Set(existing?.heldRecordIds ?? []);
+	const existingHeldIds = existing?.heldRecordIds ?? [];
 	const granted: string[] = [];
 	const denied: string[] = [];
-	const revoked: string[] = [];
+
+	// Revalidate every record this client currently holds, not just the ones
+	// named in this request: permissions can change between calls (e.g. a
+	// token's document access is revoked mid-session), and a hold on a record
+	// this request doesn't mention must not silently persist — and keep
+	// having its TTL renewed forever — just because a later call happens to
+	// be about unrelated records.
+	const retained = existingHeldIds.filter((id) => permissionCheck(id));
+	const anyRevoked = retained.length !== existingHeldIds.length;
+	const alreadyOwn = new Set(existingHeldIds);
+	const stillAuthorized = new Set(retained);
 
 	for (const id of recordIds) {
 		if (alreadyOwn.has(id)) {
-			// Re-checked on every request rather than trusted from the prior grant:
-			// permissions can change between calls (e.g. a token's document access
-			// is revoked mid-session), so a stale "already own it" must not bypass
-			// the check the record would otherwise be subject to.
-			if (permissionCheck(id)) {
+			if (stillAuthorized.has(id)) {
 				granted.push(id);
 			} else {
 				denied.push(id);
-				revoked.push(id);
 			}
 		} else if (currentlyHeld.has(id)) {
 			denied.push(id);
@@ -163,8 +168,7 @@ export function requestAgentHold(
 		}
 	}
 
-	if (granted.length > 0 || revoked.length > 0) {
-		const retained = (existing?.heldRecordIds ?? []).filter((id) => !revoked.includes(id));
+	if (granted.length > 0 || anyRevoked) {
 		const nextHeld = Array.from(new Set([...retained, ...granted]));
 		if (nextHeld.length > 0) {
 			writeRemoteState(awareness, clientId, { actor, heldRecordIds: nextHeld });

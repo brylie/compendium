@@ -1,10 +1,10 @@
 # MCP tool surface
 
-**Depends on:** [`data-model.md`](./data-model.md) (Record shape), [`collaboration.md`](./collaboration.md) (holds)
+**Depends on:** [`data-model.md`](./data-model.md) (WorkspaceRecord shape), [`collaboration.md`](./collaboration.md) (holds)
 
 ---
 
-All tools operate on `Record` uniformly — no separate "block tools" vs. "row tools," per the PRD's unified-model requirement.
+All tools operate on `WorkspaceRecord` uniformly — no separate "block tools" vs. "row tools," per the PRD's unified-model requirement.
 
 | Tool               | Input                                                 | Output                                                                 | Notes                                                                                                                                                                                                |
 | ------------------ | ----------------------------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -14,7 +14,7 @@ All tools operate on `Record` uniformly — no separate "block tools" vs. "row t
 | `move_document`    | `documentId, parentDocumentId?, afterDocumentId?`     | `{success: boolean}`                                                   | permission-checked against both `documentId` and the new `parentDocumentId`                                                                                                                          |
 | `delete_document`  | `documentId`                                          | `{success: boolean}`                                                   | deletes the Document and its child tree                                                                                                                                                              |
 | `list_collections` | —                                                     | `{id, title, schema}[]`                                                |                                                                                                                                                                                                      |
-| `query_collection` | `collectionId, filter?`                               | `Record[]`                                                             | backed by the Drizzle-managed read model (see [`persistence.md`](./persistence.md) §2), not a direct `Y.Doc` walk                                                                                    |
+| `query_collection` | `collectionId, filter?`                               | `WorkspaceRecord[]`                                                    | backed by the Drizzle-managed read model (see [`persistence.md`](./persistence.md) §2), not a direct `Y.Doc` walk                                                                                    |
 | `search_workspace` | `query`                                               | `{recordId, snippet}[]`                                                | full-text over block content + text/select properties, via the same read model (SQLite FTS5)                                                                                                         |
 | `hold_records`     | `recordIds: string[]`                                 | `{granted: string[], denied: string[]}`                                | see [`collaboration.md`](./collaboration.md); permission-checked per record before Awareness is checked                                                                                              |
 | `write_record`     | `recordId, markdown \| properties`                    | `{success: boolean}`                                                   | requires an active hold for existing block content; atomic content-write + hold-release                                                                                                              |

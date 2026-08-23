@@ -172,24 +172,34 @@
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
+			e.stopPropagation();
 			selectedIndex = (selectedIndex + 1) % Math.max(1, filtered.length);
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
+			e.stopPropagation();
 			selectedIndex = (selectedIndex - 1 + filtered.length) % Math.max(1, filtered.length);
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
+			e.stopPropagation();
 			if (filtered[selectedIndex]) {
 				onSelect(filtered[selectedIndex].blockType);
 			}
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
+			e.stopPropagation();
 			onClose?.();
 		}
 	}
 
 	onMount(() => {
-		window.addEventListener('keydown', handleKeydown);
-		return () => window.removeEventListener('keydown', handleKeydown);
+		// Capture phase + stopPropagation: this menu only exists while a block
+		// is focused, and BlockEditor's own keydown handler (bound directly on
+		// that contenteditable) would otherwise see these same keys first —
+		// e.g. Enter would both select a command here AND split the block
+		// there. Capturing on window intercepts before the event ever reaches
+		// the block's element.
+		window.addEventListener('keydown', handleKeydown, true);
+		return () => window.removeEventListener('keydown', handleKeydown, true);
 	});
 </script>
 

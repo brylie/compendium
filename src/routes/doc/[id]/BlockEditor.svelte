@@ -62,6 +62,11 @@
 
 	export function render(): void {
 		if (!el) return;
+		// A remote peer can edit this same block while the user is mid-IME-
+		// composition. Rewriting el.innerHTML in that window would blow away
+		// the browser's own composition UI, so defer to compositionend, which
+		// re-derives the DOM from the now-current ytext (local edit included).
+		if (isComposing) return;
 		const richText = yTextToRichText(ytext);
 		const html = richText.runs.map((r) => runToHtml(r.text, r.marks)).join('');
 		const caret = document.activeElement === el ? getCaretOffset(el) : null;
@@ -81,6 +86,11 @@
 	function handleCompositionEnd(): void {
 		isComposing = false;
 		handleInput();
+		// Whether or not handleInput() itself mutated ytext (and so already
+		// re-triggered render() via the observer below), re-render once more
+		// so any remote edit that arrived — and was skipped — during
+		// composition is guaranteed to be reflected.
+		render();
 	}
 
 	function handleInput(): void {
