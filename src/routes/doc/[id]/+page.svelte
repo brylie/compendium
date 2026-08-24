@@ -127,13 +127,18 @@
 	// (e.g. starting an empty Document from the toolbar).
 	function insertToolbarBlock(blockType: BlockType): void {
 		slashMenuBlockId = null;
-		if (activeBlockId && ydoc && blockHoldsFreeformText(blockType)) {
+		const active = activeBlockId ? blocks.find((b) => b.id === activeBlockId) : undefined;
+		if (
+			activeBlockId &&
+			ydoc &&
+			blockHoldsFreeformText(blockType) &&
+			blockHoldsFreeformText(active?.blockType)
+		) {
 			// Toggle off: clicking the control for the block's own current
 			// type converts it back to a plain paragraph — the same toggle
 			// convention as clicking "Bulleted List" again on an
 			// already-bulleted line in Word/Docs to remove the list
 			// formatting, rather than the button being a one-way street.
-			const active = blocks.find((b) => b.id === activeBlockId);
 			const targetType = active?.blockType === blockType ? 'paragraph' : blockType;
 			setBlockType(ydoc, activeBlockId, targetType, CURRENT_USER);
 			return;
@@ -572,7 +577,7 @@
 										recordId={block.id}
 										placeholder="Callout note…"
 										onInputText={() => handleBlockInput(block.id)}
-										onEnter={() => addBlockAfter(block.id)}
+										onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 										onBackspaceAtStart={() => handleBackspace(block, index)}
 										onFocusBlock={() => handleFocusBlock(block.id)}
 										onSlashKey={() => openSlashMenu(block.id)}
@@ -589,7 +594,7 @@
 									recordId={block.id}
 									placeholder="Quote…"
 									onInputText={() => handleBlockInput(block.id)}
-									onEnter={() => addBlockAfter(block.id)}
+									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
 									onSlashKey={() => openSlashMenu(block.id)}
@@ -606,7 +611,7 @@
 									class="font-mono text-[13.5px]"
 									placeholder="Code snippet…"
 									onInputText={() => handleBlockInput(block.id)}
-									onEnter={() => addBlockAfter(block.id)}
+									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
 									onSlashKey={() => openSlashMenu(block.id)}

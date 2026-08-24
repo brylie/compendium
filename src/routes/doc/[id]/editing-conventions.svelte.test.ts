@@ -171,6 +171,39 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			expect(textOf(record.id)).toBe('Buy milk');
 		});
 
+		it('inserts after a synced block rather than converting it in place, leaving its referenced content untouched', async () => {
+			// Regression test: the in-place-conversion gate previously checked
+			// only the *target* control's type, not the active block's own type.
+			// A synced block renders a BlockEditor bound to its referenced
+			// record's Y.Text, so converting the synced block itself in place
+			// changed its blockType away from 'synced_block' — at which point
+			// the block stops resolving to the referenced text at all and
+			// starts reading its own (empty) Y.Text instead, so the previously
+			// displayed content silently disappears.
+			const referenced = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, referenced.id)!.insert(0, 'Shared content');
+			const synced = createRecord(
+				ydoc,
+				{ parentId: 'doc-1', blockType: 'synced_block', referencedRecordId: referenced.id },
+				HUMAN
+			);
+			const user = userEvent.setup();
+			const { container } = renderDoc();
+
+			// Two blocks render: the referenced paragraph first, then the synced
+			// block — target the synced block's editor specifically, not
+			// whichever happens to be first in the DOM.
+			const editors = container.querySelectorAll('[contenteditable]');
+			await user.click(editors[1] as HTMLElement);
+			await user.click(screen.getByRole('button', { name: 'Insert Bulleted list' }));
+
+			const recordIds = getDocument(ydoc, 'doc-1')!.recordIds;
+			expect(recordIds).toHaveLength(3); // referenced + synced + newly inserted
+			const syncedRecord = ydoc.getMap('records').get(synced.id) as Y.Map<unknown>;
+			expect(syncedRecord.get('blockType')).toBe('synced_block');
+			expect(textOf(referenced.id)).toBe('Shared content');
+		});
+
 		it('keeps the active block through a toolbar insert click, inserting after it rather than at the end', async () => {
 			const first = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 			const middle = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
@@ -262,6 +295,33 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			expect(textOf(record.id)).toBe('Hello');
 			expect(textOf(recordIds[1])).toBe(' world');
 		});
+
+		it.each(['quote', 'callout', 'code'] as const)(
+			'splits a %s block at the caret, not just paragraphs/headings/lists',
+			async (blockType) => {
+				// Regression test: quote, callout, and code blocks used to wire
+				// Enter straight to addBlockAfter instead of routing through
+				// handleEnter/splitBlockOnEnter, so Enter mid-text appended an
+				// empty block instead of splitting at the caret.
+				const record = createRecord(ydoc, { parentId: 'doc-1', blockType }, HUMAN);
+				getRecordYText(ydoc, record.id)!.insert(0, 'Hello world');
+				const { container } = renderDoc();
+
+				const editor = container.querySelector('[contenteditable]') as HTMLElement;
+				selectRange(editor, 5, 5); // caret right after "Hello"
+				editor.dispatchEvent(
+					new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+				);
+				await tick();
+
+				const recordIds = getDocument(ydoc, 'doc-1')!.recordIds;
+				expect(recordIds).toHaveLength(2);
+				expect(textOf(record.id)).toBe('Hello');
+				expect(textOf(recordIds[1])).toBe(' world');
+				const newRecord = ydoc.getMap('records').get(recordIds[1]) as Y.Map<unknown>;
+				expect(newRecord.get('blockType')).toBe('paragraph');
+			}
+		);
 
 		it('preserves marks on both halves of the text when splitting', async () => {
 			const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
