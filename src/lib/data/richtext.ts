@@ -31,6 +31,58 @@ export function applyRichTextToYText(ytext: Y.Text, richText: RichText): void {
 	}
 }
 
+/**
+ * Appends a RichText onto the end of an existing Y.Text, preserving both
+ * sides' marks — unlike applyRichTextToYText, it does not clear ytext
+ * first. Used for Backspace-at-the-start-of-a-block joining that block's
+ * text onto the end of the previous one, the word-processor "backspace
+ * merges this line into the line above" behavior.
+ */
+export function appendRichTextToYText(ytext: Y.Text, richText: RichText): void {
+	const apply = () => {
+		let offset = ytext.length;
+		for (const run of richText.runs) {
+			if (!run.text) continue;
+			ytext.insert(offset, run.text, run.marks as Record<string, unknown>);
+			offset += run.text.length;
+		}
+	};
+	if (ytext.doc) {
+		ytext.doc.transact(apply);
+	} else {
+		apply();
+	}
+}
+
 export function plainText(richText: RichText): string {
 	return richText.runs.map((r) => r.text).join('');
+}
+
+/**
+ * Splits a RichText at a plain-text character offset, dividing a run in two
+ * (each half keeping the original marks) when the offset falls inside it.
+ * Used for Enter-splits-a-block: the text after the caret becomes a new
+ * block rather than being silently discarded.
+ */
+export function splitRichTextAt(
+	richText: RichText,
+	offset: number
+): { before: RichText; after: RichText } {
+	const before: RichText['runs'] = [];
+	const after: RichText['runs'] = [];
+	let pos = 0;
+	for (const run of richText.runs) {
+		const runEnd = pos + run.text.length;
+		if (runEnd <= offset) {
+			before.push(run);
+		} else if (pos >= offset) {
+			after.push(run);
+		} else {
+			const splitAt = offset - pos;
+			before.push({ text: run.text.slice(0, splitAt), marks: run.marks });
+			after.push({ text: run.text.slice(splitAt), marks: run.marks });
+		}
+		pos = runEnd;
+	}
+	return { before: { runs: before }, after: { runs: after } };
 }

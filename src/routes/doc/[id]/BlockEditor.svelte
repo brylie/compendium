@@ -21,7 +21,7 @@
 		placeholder?: string;
 		class?: string;
 		onInputText: () => void;
-		onEnter: () => void;
+		onEnter: (caretOffset: number) => void;
 		onBackspaceAtStart: () => void;
 		onFocusBlock: () => void;
 		onSlashKey: () => void;
@@ -135,13 +135,26 @@
 		if (event.isComposing || event.keyCode === 229) return;
 		if (event.key === 'Enter') {
 			event.preventDefault();
-			onEnter();
+			onEnter(el ? getCaretOffset(el) : lastPlainText.length);
 			return;
 		}
-		if (event.key === 'Backspace' && el && lastPlainText === '' && getCaretOffset(el) === 0) {
-			event.preventDefault();
-			onBackspaceAtStart();
-			return;
+		if (event.key === 'Backspace' && el) {
+			// Word-processor convention: Backspace at the very start of a
+			// block's text joins it onto the end of the previous block, same
+			// as it would join two lines of a single document — not just
+			// when this block happens to be empty. An empty block always
+			// counts as "at the start" (there's only one possible caret
+			// position in it); a non-empty one needs an actual collapsed
+			// caret at offset 0. +page.svelte's handleBackspace decides how
+			// to join based on both blocks' content.
+			const offsets = getSelectionOffsets(el);
+			const atStart =
+				lastPlainText === '' || (offsets !== null && offsets.start === 0 && offsets.end === 0);
+			if (atStart) {
+				event.preventDefault();
+				onBackspaceAtStart();
+				return;
+			}
 		}
 		if ((event.metaKey || event.ctrlKey) && SHORTCUT_MARKS[event.key.toLowerCase()]) {
 			event.preventDefault();
@@ -203,9 +216,15 @@
 		else apply();
 	}
 
-	export function focusEditor(atStart = false): void {
+	// `position` is either the boolean shorthand (start/end) most callers
+	// want, or an exact character offset — used to land the caret at the
+	// join point when Backspace merges a block's text onto the end of this
+	// one, rather than always at its very end.
+	export function focusEditor(position: boolean | number = false): void {
 		el?.focus();
-		if (el) setCaretOffset(el, atStart ? 0 : lastPlainText.length);
+		if (!el) return;
+		const offset = typeof position === 'number' ? position : position ? 0 : lastPlainText.length;
+		setCaretOffset(el, offset);
 	}
 
 	$effect(() => {

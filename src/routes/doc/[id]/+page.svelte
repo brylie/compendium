@@ -16,7 +16,13 @@
 		setRecordReferencedId,
 		updateDocumentTitle
 	} from '$lib/data/records';
-	import { plainText, yTextToRichText } from '$lib/data/richtext';
+	import {
+		appendRichTextToYText,
+		applyRichTextToYText,
+		plainText,
+		splitRichTextAt,
+		yTextToRichText
+	} from '$lib/data/richtext';
 	import { formatActor, formatTimestamp } from '$lib/data/format';
 	import {
 		claimBlockPresence,
@@ -50,7 +56,7 @@
 		render: () => void;
 		applyFormat: (mark: keyof TextMarks, value?: unknown) => void;
 		getFormatState: () => Partial<Record<keyof TextMarks, boolean>>;
-		focusEditor: (atStart?: boolean) => void;
+		focusEditor: (position?: boolean | number) => void;
 	}
 
 	let blockRefs: Record<string, BlockEditorHandle | undefined> = $state({});
@@ -111,8 +117,27 @@
 		activeMarks = editor.getFormatState();
 	}
 
+	// Word-processor convention: clicking a text-formatting control (a
+	// heading level, a list type, quote, etc.) while a block is active
+	// converts *that* block in place — the same way Word/Docs' toolbar
+	// turns the current paragraph into a bulleted list rather than
+	// inserting a new empty list item after it. Structural types (table,
+	// divider, embed, ...) aren't a "turn this text into" operation, so
+	// those still insert a new block; so does clicking with nothing active
+	// (e.g. starting an empty Document from the toolbar).
 	function insertToolbarBlock(blockType: BlockType): void {
 		slashMenuBlockId = null;
+		if (activeBlockId && ydoc && blockHoldsFreeformText(blockType)) {
+			// Toggle off: clicking the control for the block's own current
+			// type converts it back to a plain paragraph — the same toggle
+			// convention as clicking "Bulleted List" again on an
+			// already-bulleted line in Word/Docs to remove the list
+			// formatting, rather than the button being a one-way street.
+			const active = blocks.find((b) => b.id === activeBlockId);
+			const targetType = active?.blockType === blockType ? 'paragraph' : blockType;
+			setBlockType(ydoc, activeBlockId, targetType, CURRENT_USER);
+			return;
+		}
 		void addBlockAfter(activeBlockId ?? blocks.at(-1)?.id, blockType);
 	}
 
@@ -173,10 +198,81 @@
 		'to_do'
 	];
 
+	// Every Document-kind record gets a `content` Y.Text at creation
+	// regardless of blockType (see createRecord), so its mere presence can't
+	// distinguish a block that holds free-form inline text from one that
+	// doesn't — these block types have a structurally different content
+	// shape (a table's rows, a divider's absence of content, a reference to
+	// another record) where "append/merge plain text into it" isn't a
+	// meaningful operation. Used to gate both Backspace-joins-the-previous-
+	// block and the toolbar's convert-current-block-in-place behavior.
+	const STRUCTURAL_BLOCK_TYPES: readonly BlockType[] = [
+		'divider',
+		'table',
+		'table_of_contents',
+		'page_link',
+		'embed',
+		'synced_block'
+	];
+
+	function blockHoldsFreeformText(blockType?: BlockType): boolean {
+		return !!blockType && !STRUCTURAL_BLOCK_TYPES.includes(blockType);
+	}
+
 	function isBlockTextEmpty(blockId: string): boolean {
 		if (!ydoc) return true;
 		const ytext = getRecordYText(ydoc, blockId);
 		return !ytext || plainText(yTextToRichText(ytext)).length === 0;
+	}
+
+	// Splits `block`'s text at caretOffset: text before the caret stays in
+	// the existing block, text after it (with marks intact) moves into a new
+	// block of `nextBlockType`, created immediately after — the standard
+	// "Enter splits the line" behavior, not just "Enter appends an empty
+	// line" (which silently discarded the caret position). Which of the two
+	// blocks ends up focused depends on the caret position — see below.
+	async function splitBlockOnEnter(
+		block: WorkspaceRecord,
+		caretOffset: number,
+		nextBlockType: BlockType
+	): Promise<void> {
+		if (!ydoc) return;
+		const ytext = getRecordYText(ydoc, block.id);
+		const richText = ytext ? yTextToRichText(ytext) : { runs: [] };
+		const offset = ytext ? Math.min(Math.max(0, caretOffset), ytext.length) : 0;
+		const { after } = splitRichTextAt(richText, offset);
+
+		if (ytext && offset < ytext.length) {
+			const doc = ytext.doc;
+			const trim = () => ytext.delete(offset, ytext.length - offset);
+			if (doc) doc.transact(trim);
+			else trim();
+		}
+
+		const record = createRecord(
+			ydoc,
+			{ parentId: data.documentId, blockType: nextBlockType, afterRecordId: block.id },
+			CURRENT_USER
+		);
+		if (after.runs.length > 0) {
+			const newYtext = getRecordYText(ydoc, record.id);
+			if (newYtext) applyRichTextToYText(newYtext, after);
+		}
+		await tick();
+		// Caret at the very start (offset 0): `block` becomes the empty line
+		// inserted above, and `record` (the new block right after it) is the
+		// one that ends up holding all the real content. Focus follows
+		// `block` — the empty one — not the content, so a second Enter there
+		// hits the ordinary "empty list item exits the list" rule instead of
+		// cascading into more empty items while the real content keeps
+		// hopping into fresh blocks (the original bug this branch fixes).
+		// Any other caret position focuses the new block as usual — it's the
+		// one that picked up whatever came after the caret.
+		if (offset === 0) {
+			blockRefs[block.id]?.focusEditor(true);
+		} else {
+			blockRefs[record.id]?.focusEditor(true);
+		}
 	}
 
 	// Enter on a list item continues the list (same block type) so a person
@@ -185,30 +281,46 @@
 	// converting that item to a paragraph in place, rather than adding yet
 	// another empty item — mirroring the standard list-editing convention
 	// (Notion, Google Docs, etc.) of using an empty item as the "done" signal.
-	async function handleEnter(block: WorkspaceRecord): Promise<void> {
+	async function handleEnter(block: WorkspaceRecord, caretOffset: number): Promise<void> {
 		const blockType = block.blockType ?? 'paragraph';
-		if (!LIST_BLOCK_TYPES.includes(blockType)) {
-			await addBlockAfter(block.id);
-			return;
-		}
-		if (isBlockTextEmpty(block.id)) {
+		const isList = LIST_BLOCK_TYPES.includes(blockType);
+		if (isList && isBlockTextEmpty(block.id)) {
 			if (!ydoc) return;
 			setBlockType(ydoc, block.id, 'paragraph', CURRENT_USER);
 			await tick();
 			blockRefs[block.id]?.focusEditor(true);
 			return;
 		}
-		await addBlockAfter(block.id, blockType);
+		await splitBlockOnEnter(block, caretOffset, isList ? blockType : 'paragraph');
 	}
 
+	// Backspace at the very start of a block: word-processor convention
+	// joins its text onto the end of the previous block, same as it would
+	// join two lines of a single document, rather than just discarding the
+	// current block. An empty current block still "joins" — there's simply
+	// nothing to append — matching the previous, simpler delete-and-move-
+	// focus behavior. If the previous block can't hold text (e.g. a
+	// divider), a non-empty current block is left alone rather than
+	// deleted with its content silently lost.
 	async function handleBackspace(block: WorkspaceRecord, index: number): Promise<void> {
-		if (!ydoc || blocks.length <= 1) return;
+		if (!ydoc) return;
 		const previous = blocks[index - 1];
-		deleteRecord(ydoc, block.id);
-		if (previous) {
-			await tick();
-			blockRefs[previous.id]?.focusEditor(false);
+		if (!previous) return;
+
+		const currentYtext = getRecordYText(ydoc, block.id);
+		const currentIsEmpty = !currentYtext || currentYtext.length === 0;
+		const previousHoldsText = blockHoldsFreeformText(previous.blockType);
+		if (!currentIsEmpty && !previousHoldsText) return;
+
+		const previousYtext = previousHoldsText ? getRecordYText(ydoc, previous.id) : undefined;
+		const joinOffset = previousYtext?.length ?? 0;
+		if (!currentIsEmpty && previousYtext && currentYtext) {
+			appendRichTextToYText(previousYtext, yTextToRichText(currentYtext));
 		}
+
+		deleteRecord(ydoc, block.id);
+		await tick();
+		blockRefs[previous.id]?.focusEditor(joinOffset);
 	}
 
 	function handleBlockInput(blockId: string): void {
@@ -632,7 +744,7 @@
 													: 'text-base text-fg'}
 									placeholder={index === 0 ? "Type '/' for commands, or start typing..." : ''}
 									onInputText={() => handleBlockInput(block.id)}
-									onEnter={() => handleEnter(block)}
+									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
 									onSlashKey={() => openSlashMenu(block.id)}
