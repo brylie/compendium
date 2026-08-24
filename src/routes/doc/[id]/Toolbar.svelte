@@ -96,7 +96,7 @@
 			>
 				<Undo2 size={16} strokeWidth={2} aria-hidden="true" />
 			</button>
-			<span class="toolbar-tooltip" role="tooltip" aria-hidden="true">Undo (⌘Z)</span>
+			<span class="toolbar-tooltip" role="tooltip" aria-hidden="true">Undo (⌘/Ctrl+Z)</span>
 		</span>
 		<span class="group relative">
 			<button
@@ -109,7 +109,8 @@
 			>
 				<Redo2 size={16} strokeWidth={2} aria-hidden="true" />
 			</button>
-			<span class="toolbar-tooltip" role="tooltip" aria-hidden="true">Redo (⌘⇧Z)</span>
+			<span class="toolbar-tooltip" role="tooltip" aria-hidden="true">Redo (⌘/Ctrl+⇧Z, Ctrl+Y)</span
+			>
 		</span>
 	</div>
 

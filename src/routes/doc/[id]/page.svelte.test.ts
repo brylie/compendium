@@ -458,6 +458,23 @@ describe('doc/[id] +page', () => {
 		expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(1);
 	});
 
+	it('also redoes via Ctrl+Y, the Windows/Linux convention', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const user = userEvent.setup();
+		render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Add block' }));
+		await user.keyboard('{Control>}z{/Control}');
+		expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(0);
+
+		await user.keyboard('{Control>}y{/Control}');
+		expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(1);
+	});
+
 	it('enables the toolbar Undo button after a local edit, and disables it again once undone', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const user = userEvent.setup();

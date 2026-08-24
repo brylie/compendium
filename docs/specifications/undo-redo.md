@@ -25,6 +25,14 @@ All four properties are exercised directly against real `Y.Doc` pairs (a local d
 
 ## 4. UI surface
 
-- **Shortcuts:** Cmd/Ctrl+Z (undo) and Cmd/Ctrl+Shift+Z (redo), bound at the document level in `/doc/[id]` (`+page.svelte`) rather than scoped to a single block — the action being undone might not be the block currently focused (e.g. undoing a delete brings back a block with nothing yet to focus).
-- **Toolbar affordance:** Undo/Redo buttons in the persistent document toolbar (`Toolbar.svelte`), disabled when their respective stack is empty, reflecting `subscribeUndoRedoState`'s reactive `{ canUndo, canRedo }`.
+- **Shortcuts:** Cmd/Ctrl+Z (undo) and Cmd/Ctrl+Shift+Z or Ctrl+Y (redo — the latter is the Windows/Linux convention, kept alongside Cmd/Ctrl+Shift+Z rather than instead of it), bound at the document level in `/doc/[id]` (`+page.svelte`) rather than scoped to a single block — the action being undone might not be the block currently focused (e.g. undoing a delete brings back a block with nothing yet to focus).
+- **Toolbar affordance:** Undo/Redo buttons in the persistent document toolbar (`Toolbar.svelte`), disabled when their respective stack is empty, reflecting `subscribeUndoRedoState`'s reactive `{ canUndo, canRedo }`. Tooltips show both the `⌘` and `Ctrl` forms together (`⌘/Ctrl+Z`), matching the footer hint's existing convention (`+page.svelte`'s formatting-shortcuts footer) rather than detecting the platform at runtime.
 - The UndoManager instance is created lazily on first use and is bound to whichever `Y.Doc` `getClientDoc()` currently returns; `+page.svelte` forces it into existence on mount (before any local edit can happen), since Y.UndoManager only tracks transactions made after it's constructed.
+
+## 5. Scope is workspace-wide, not per open Document (deliberate)
+
+The UndoManager is a single per-tab instance scoped to the whole workspace `Y.Doc`'s top-level maps (§2), not re-created or filtered per `/doc/[id]` route. This is an intentional consequence of the existing single-`Y.Doc`-per-workspace architecture (`data-model.md` §4: "One `Y.Doc` for the whole workspace... no need for multiple docs yet"), not an oversight:
+
+- Editing Document A, navigating to Document B, and pressing Cmd/Ctrl+Z reverts the last edit in A, not something in B — there is currently no per-open-document undo history, only one per browser tab.
+- This matches the issue's (#8) acceptance criterion as written ("each actor's undo/redo affects only their own locally-originated changes") — actor isolation, not document isolation — and keeps the UndoManager as simple, singleton, non-reactive-to-navigation state.
+- Scoping undo per open Document instead would require either a new `Y.UndoManager` per navigation (recreated on every route change, discarding history for the document just left) or a `captureTransaction` predicate filtering by which Document a transaction's records belong to (nontrivial: a transaction can touch a Collection row with no owning Document, and a single transaction can span more than one Document, e.g. `move_document`). Given the added complexity and no current product requirement forcing it, this is deferred rather than spec'd speculatively — revisit if user feedback shows the cross-document behavior is actually confusing in practice.

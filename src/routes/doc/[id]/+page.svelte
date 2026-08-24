@@ -183,15 +183,23 @@
 	// Word-processor convention: Cmd/Ctrl+Z undoes this tab's own last local
 	// action wherever it happened (a keystroke, a block insert/delete, a
 	// title edit — anything under the Y.UndoManager's scope), and
-	// Cmd/Ctrl+Shift+Z redoes it. Global on the document rather than scoped
-	// to a single block, since the action being undone might not be in the
-	// block that currently has focus (e.g. undoing a delete brings back a
-	// block that no longer exists to focus).
+	// Cmd/Ctrl+Shift+Z (or Ctrl+Y, the Windows/Linux convention) redoes it.
+	// Global on the document rather than scoped to a single block, since the
+	// action being undone might not be in the block that currently has focus
+	// (e.g. undoing a delete brings back a block that no longer exists to
+	// focus).
 	function handleGlobalKeydown(event: KeyboardEvent): void {
-		if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z') return;
-		event.preventDefault();
-		if (event.shiftKey) redo();
-		else undo();
+		const key = event.key.toLowerCase();
+		if ((event.metaKey || event.ctrlKey) && key === 'z') {
+			event.preventDefault();
+			if (event.shiftKey) redo();
+			else undo();
+			return;
+		}
+		if (event.ctrlKey && !event.metaKey && key === 'y') {
+			event.preventDefault();
+			redo();
+		}
 	}
 
 	// SvelteKit reuses this component instance across client-side navigations
