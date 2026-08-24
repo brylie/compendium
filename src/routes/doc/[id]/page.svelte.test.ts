@@ -143,13 +143,23 @@ describe('doc/[id] +page', () => {
 		await user.click(editor);
 		expect(screen.getByRole('button', { name: 'Bold' })).not.toBeDisabled();
 
-		// e.g. the title input or the sidebar — anywhere without a block
-		// editor ancestor. The previously focused block must stop being
-		// treated as active, or a stray click on a format control would
-		// silently reformat text the user can no longer see is "selected".
+		// Focus a real non-editor control (the title input stands in for
+		// "the title, the sidebar, anywhere without a block editor
+		// ancestor"). jsdom doesn't replicate a real browser's side effect
+		// of clearing document.getSelection() when focus leaves a
+		// contenteditable, so clearSelection() still does that part — but
+		// the focus transition itself must actually happen here too, or
+		// this only tests syncToolbarSelection's branch logic in isolation
+		// rather than the real interaction it exists to guard: the
+		// previously focused block must stop being treated as active, or a
+		// stray click on a format control would silently reformat text the
+		// user can no longer see is "selected".
+		const titleInput = screen.getByPlaceholderText('Untitled document');
+		await user.click(titleInput);
 		clearSelection();
 		await tick();
 
+		expect(titleInput).toHaveFocus();
 		expect(screen.getByRole('button', { name: 'Bold' })).toBeDisabled();
 	});
 
@@ -292,14 +302,22 @@ describe('doc/[id] +page', () => {
 		const h1 = createRecord(ydoc, { parentId: 'doc-1', blockType: 'heading_1' }, HUMAN);
 		getRecordYText(ydoc, h1.id)!.insert(0, 'Section One');
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'table_of_contents' }, HUMAN);
-		render(Page, {
+		const { container } = render(Page, {
 			params: { id: 'doc-1' },
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
 
-		expect(screen.getAllByText('Table of contents').length).toBeGreaterThan(0);
-		expect(screen.getAllByText('Section One').length).toBeGreaterThan(0);
+		// Scoped to the rendered block itself, not a document-wide text
+		// query: the toolbar's "Insert Table of contents" control shares the
+		// same "Table of contents" label text, so an unscoped query would
+		// pass even if the block itself failed to render.
+		const tocBlock = container.querySelector(
+			'.rounded-lg.border-border.bg-surface\\/60'
+		) as HTMLElement;
+		expect(tocBlock).toBeInTheDocument();
+		expect(within(tocBlock).getByText('Table of contents')).toBeInTheDocument();
+		expect(within(tocBlock).getByText('Section One')).toBeInTheDocument();
 	});
 
 	it('shows a set-target prompt for a synced block with no target yet', () => {
