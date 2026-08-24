@@ -20,6 +20,16 @@ function selectRange(el: HTMLElement, start: number, end: number): void {
 	document.dispatchEvent(new Event('selectionchange'));
 }
 
+// Stands in for the selection moving to non-editor page UI (the title
+// input, the sidebar, anywhere without a [data-block-editor-id] ancestor):
+// syncToolbarSelection reads document.getSelection(), not which element was
+// clicked, so an empty selection exercises the same "outside any block
+// editor" branch regardless of what the user actually clicked.
+function clearSelection(): void {
+	window.getSelection()!.removeAllRanges();
+	document.dispatchEvent(new Event('selectionchange'));
+}
+
 let ydoc: Y.Doc;
 vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
 
@@ -116,6 +126,58 @@ describe('doc/[id] +page', () => {
 		}[];
 		expect(delta[0]).toMatchObject({ insert: 'Hello', attributes: { bold: true } });
 		expect(screen.getByRole('button', { name: 'Bold' })).toHaveAttribute('aria-pressed', 'true');
+	});
+
+	it('disables formatting controls once the selection moves outside any block editor', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		getRecordYText(ydoc, record.id)!.insert(0, 'Hello');
+		const user = userEvent.setup();
+		const { container } = render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		});
+
+		const editor = container.querySelector('[contenteditable]') as HTMLElement;
+		await user.click(editor);
+		expect(screen.getByRole('button', { name: 'Bold' })).not.toBeDisabled();
+
+		// e.g. the title input or the sidebar — anywhere without a block
+		// editor ancestor. The previously focused block must stop being
+		// treated as active, or a stray click on a format control would
+		// silently reformat text the user can no longer see is "selected".
+		clearSelection();
+		await tick();
+
+		expect(screen.getByRole('button', { name: 'Bold' })).toBeDisabled();
+	});
+
+	it('keeps the active block through a toolbar insert click, inserting after it rather than at the end', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const first = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		const middle = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		getRecordYText(ydoc, first.id)!.insert(0, 'First');
+		getRecordYText(ydoc, middle.id)!.insert(0, 'Middle');
+		const user = userEvent.setup();
+		const { container } = render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		});
+
+		const editors = container.querySelectorAll('[contenteditable]');
+		await user.click(editors[1] as HTMLElement); // the "Middle" block, not the last one
+
+		await user.click(screen.getByRole('button', { name: 'Insert Divider' }));
+
+		const recordIds = getDocument(ydoc, 'doc-1')!.recordIds;
+		const middleIndex = recordIds.indexOf(middle.id);
+		const newRecordId = recordIds.find(
+			(id) => (ydoc.getMap('records').get(id) as Y.Map<unknown>).get('blockType') === 'divider'
+		)!;
+		expect(recordIds.indexOf(newRecordId)).toBe(middleIndex + 1);
 	});
 
 	it('renders the SSR title before mount, then the live document title', () => {
