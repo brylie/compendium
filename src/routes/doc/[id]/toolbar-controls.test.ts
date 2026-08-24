@@ -13,15 +13,18 @@ describe('computeVisibleInsertCount', () => {
 		expect(computeVisibleInsertCount(18, 1000)).toBe(18);
 	});
 
-	it('reserves room for the overflow trigger once content does not fit', () => {
+	it('overflows at least one control once the full row does not quite fit', () => {
 		// One px short of the full row: still must overflow at least one
 		// control, even though every control individually would fit.
 		expect(computeVisibleInsertCount(18, 571)).toBeLessThan(18);
 	});
 
-	it('fits as many controls as the width allows, minus the trigger', () => {
-		// width 200 -> reserve 32px for trigger -> 168px usable -> (168+4)/32 = 5.375 -> 5
-		expect(computeVisibleInsertCount(18, 200)).toBe(5);
+	it('fits as many controls as the measured width allows', () => {
+		// width 200 -> (200+4)/32 = 6.375 -> 6. No extra reservation for the
+		// overflow trigger: it's a flex sibling of the measured container,
+		// not a child of it, so its footprint is already excluded from
+		// containerWidth once the layout settles (see computeVisibleInsertCount).
+		expect(computeVisibleInsertCount(18, 200)).toBe(6);
 	});
 
 	it('never shows zero controls, even at an unusably narrow width', () => {

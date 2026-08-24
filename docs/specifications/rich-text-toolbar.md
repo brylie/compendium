@@ -21,7 +21,7 @@ This is an editor interaction specification, not a second product PRD. Product r
 
 `Toolbar.svelte` is rendered at the top of `/doc/[id]` and remains sticky while the Document scrolls. Its formatting controls are disabled until a block editor is active; block-insert controls remain available so an empty Document can be started from the toolbar.
 
-The formatting group and the insert group are visually separated. The toolbar is a single row, always: the outer layout never wraps, and the insert group scrolls horizontally on narrow viewports rather than hiding supported block types or pushing either group onto a second line. Every control has an accessible label and, for formatting controls, `aria-pressed` reflects the active selection state.
+The formatting group and the insert group are visually separated. The toolbar is a single row, always: the outer layout never wraps, and insert controls that don't fit the available width collapse into a "More blocks" dropdown rather than being hidden outright or pushing either group onto a second line. Every insert control remains reachable — via the dropdown if not shown inline — and every control has an accessible label; for formatting controls, `aria-pressed` reflects the active selection state.
 
 Clicking a formatting control must not collapse the native text selection before applying the operation. The toolbar prevents the control's pointer-down default for that reason; focus remains in the active `BlockEditor` and the operation applies to the selected range.
 
@@ -82,7 +82,7 @@ The toolbar does not alter holds, presence, permissions, or attribution. Focusin
 - A user can create any supported block type from the toolbar, including heading, table, and embed.
 - A toolbar insertion is a normal Document record creation and is visible to other Yjs clients.
 - A control registration can be added without modifying `Toolbar.svelte`.
-- The toolbar never wraps onto a second row; the insert group scrolls horizontally instead.
+- The toolbar never wraps onto a second row; insert controls that don't fit collapse into the "More blocks" dropdown instead, and every one of them stays reachable there.
 - Every control shows an `aria-hidden` visible tooltip naming it, without duplicating its accessible name for assistive tech.
 - Enter on a non-empty list item (`bulleted_list_item`, `numbered_list_item`, `to_do`) continues the list; Enter on an empty one converts it to a `paragraph` in place.
-- Component tests cover control rendering/dispatch, selected-mark state, tooltip presence, layout (no wrap, insert group scrolls), and formatting/insertion/list-continuation through the Document page. The full repository lint, Svelte check, and production build remain required before merge.
+- Component tests cover control rendering/dispatch, selected-mark state, tooltip presence, layout (no wrap; overflow controls move to the dropdown, are all listed there, and are insertable from it), and formatting/insertion/list-continuation through the Document page. The full repository lint, Svelte check, and production build remain required before merge.

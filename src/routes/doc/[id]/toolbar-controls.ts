@@ -158,10 +158,14 @@ export function computeVisibleInsertCount(
 	const fullWidth = total * buttonSize + (total - 1) * gap;
 	if (fullWidth <= containerWidth) return total;
 
-	// Reserve room for the overflow ("more blocks") trigger itself, which
-	// takes the same footprint as any other control.
-	const usable = containerWidth - (buttonSize + gap);
-	const fit = Math.floor((usable + gap) / (buttonSize + gap));
+	// containerWidth is measured on the insert group alone (bind:clientWidth
+	// in Toolbar.svelte), and the overflow ("more blocks") trigger is a flex
+	// *sibling* of that group, not a child of it — once the trigger renders,
+	// the flex layout already shrinks the insert group's own measured width
+	// to make room for it. Reserving additional space for the trigger here
+	// on top of that double-counts it and hides one more control than
+	// necessary.
+	const fit = Math.floor((containerWidth + gap) / (buttonSize + gap));
 	// At least one control stays visible, and at least one must overflow
 	// (otherwise there'd be nothing for the trigger to reveal).
 	return Math.max(1, Math.min(fit, total - 1));

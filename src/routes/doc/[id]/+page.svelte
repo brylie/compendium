@@ -79,7 +79,15 @@
 		const element = anchor instanceof Element ? anchor : anchor?.parentElement;
 		const editor = element?.closest<HTMLElement>('[data-block-editor-id]');
 		const blockId = editor?.dataset.blockEditorId;
-		if (!blockId || !blockRefs[blockId]) return;
+		if (!blockId || !blockRefs[blockId]) {
+			// Selection moved outside any block editor (e.g. into the
+			// sidebar or the title input) — without this, the toolbar kept
+			// showing the previously focused block as active and would
+			// silently reformat it if a format button were clicked.
+			activeBlockId = null;
+			activeMarks = {};
+			return;
+		}
 		activeBlockId = blockId;
 		activeMarks = blockRefs[blockId]?.getFormatState() ?? {};
 	}
