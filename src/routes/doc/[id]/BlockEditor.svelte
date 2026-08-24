@@ -7,6 +7,7 @@
 
 	let {
 		ytext,
+		recordId = '',
 		placeholder = '',
 		class: className = '',
 		onInputText,
@@ -16,10 +17,11 @@
 		onSlashKey
 	}: {
 		ytext: Y.Text;
+		recordId?: string;
 		placeholder?: string;
 		class?: string;
 		onInputText: () => void;
-		onEnter: () => void;
+		onEnter: (caretOffset: number) => void;
 		onBackspaceAtStart: () => void;
 		onFocusBlock: () => void;
 		onSlashKey: () => void;
@@ -133,13 +135,26 @@
 		if (event.isComposing || event.keyCode === 229) return;
 		if (event.key === 'Enter') {
 			event.preventDefault();
-			onEnter();
+			onEnter(el ? getCaretOffset(el) : lastPlainText.length);
 			return;
 		}
-		if (event.key === 'Backspace' && el && lastPlainText === '' && getCaretOffset(el) === 0) {
-			event.preventDefault();
-			onBackspaceAtStart();
-			return;
+		if (event.key === 'Backspace' && el) {
+			// Word-processor convention: Backspace at the very start of a
+			// block's text joins it onto the end of the previous block, same
+			// as it would join two lines of a single document — not just
+			// when this block happens to be empty. An empty block always
+			// counts as "at the start" (there's only one possible caret
+			// position in it); a non-empty one needs an actual collapsed
+			// caret at offset 0. +page.svelte's handleBackspace decides how
+			// to join based on both blocks' content.
+			const offsets = getSelectionOffsets(el);
+			const atStart =
+				lastPlainText === '' || (offsets !== null && offsets.start === 0 && offsets.end === 0);
+			if (atStart) {
+				event.preventDefault();
+				onBackspaceAtStart();
+				return;
+			}
 		}
 		if ((event.metaKey || event.ctrlKey) && SHORTCUT_MARKS[event.key.toLowerCase()]) {
 			event.preventDefault();
@@ -153,19 +168,63 @@
 		}
 	}
 
-	export function applyFormat(mark: keyof TextMarks, value: unknown = true): void {
+	export function getFormatState(): Partial<Record<keyof TextMarks, boolean>> {
+		if (!el) return {};
+		const offsets = getSelectionOffsets(el);
+		if (!offsets || ytext.length === 0) return {};
+
+		// A collapsed selection inherits the character immediately after the
+		// caret, or the preceding character at the end of a block. A ranged
+		// selection is active only when every selected run carries that mark.
+		const start =
+			offsets.start === offsets.end && offsets.start === ytext.length
+				? Math.max(0, offsets.start - 1)
+				: offsets.start;
+		const end = offsets.start === offsets.end ? start + 1 : offsets.end;
+		const runs = yTextToRichText(ytext).runs;
+		const marks: (keyof TextMarks)[] = ['bold', 'italic', 'strikethrough', 'code', 'link'];
+		const state: Partial<Record<keyof TextMarks, boolean>> = {};
+		let offset: number;
+
+		for (const mark of marks) {
+			let hasSelection = false;
+			let markedThroughout = true;
+			offset = 0;
+			for (const run of runs) {
+				const runEnd = offset + run.text.length;
+				if (start < runEnd && end > offset) {
+					hasSelection = true;
+					if (!run.marks[mark]) markedThroughout = false;
+				}
+				offset = runEnd;
+			}
+			if (hasSelection && markedThroughout) state[mark] = true;
+		}
+
+		return state;
+	}
+
+	export function applyFormat(mark: keyof TextMarks, value?: unknown): void {
 		if (!el) return;
 		const offsets = getSelectionOffsets(el);
 		if (!offsets || offsets.start === offsets.end) return;
+		const nextValue = value === undefined ? (getFormatState()[mark] ? null : true) : value;
 		const doc = ytext.doc;
-		const apply = () => ytext.format(offsets.start, offsets.end - offsets.start, { [mark]: value });
+		const apply = () =>
+			ytext.format(offsets.start, offsets.end - offsets.start, { [mark]: nextValue });
 		if (doc) doc.transact(apply);
 		else apply();
 	}
 
-	export function focusEditor(atStart = false): void {
+	// `position` is either the boolean shorthand (start/end) most callers
+	// want, or an exact character offset — used to land the caret at the
+	// join point when Backspace merges a block's text onto the end of this
+	// one, rather than always at its very end.
+	export function focusEditor(position: boolean | number = false): void {
 		el?.focus();
-		if (el) setCaretOffset(el, atStart ? 0 : lastPlainText.length);
+		if (!el) return;
+		const offset = typeof position === 'number' ? position : position ? 0 : lastPlainText.length;
+		setCaretOffset(el, offset);
 	}
 
 	$effect(() => {
@@ -178,6 +237,7 @@
 <div
 	bind:this={el}
 	class="block-editor min-h-[1.5em] py-0.5 leading-relaxed break-words text-fg outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent {className}"
+	data-block-editor-id={recordId}
 	contenteditable="true"
 	role="textbox"
 	tabindex="0"

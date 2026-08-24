@@ -60,6 +60,7 @@
 		"vitest": "^4.1.8"
 	},
 	"dependencies": {
+		"@lucide/svelte": "^1.33.0",
 		"@modelcontextprotocol/sdk": "^1.30.0",
 		"better-sqlite3": "^13.0.2",
 		"fractional-indexing": "^4.0.0",

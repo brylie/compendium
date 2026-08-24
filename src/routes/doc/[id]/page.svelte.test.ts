@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import { createDocument, createRecord, getDocument, getRecordYText } from '$lib/data/records';
 import type { ActorId } from '$lib/data/types';
 import Page from './+page.svelte';
+
+// Enter/Backspace/toolbar block-conversion behavior has its own dedicated
+// suite: editing-conventions.svelte.test.ts. This file covers everything
+// else — rendering each block type, navigation, presence, and the
+// non-editing-convention UI flows (slash menu, synced/page-link targets).
 
 const HUMAN: ActorId = { kind: 'human', userId: 'local' };
 
@@ -176,14 +181,22 @@ describe('doc/[id] +page', () => {
 		const h1 = createRecord(ydoc, { parentId: 'doc-1', blockType: 'heading_1' }, HUMAN);
 		getRecordYText(ydoc, h1.id)!.insert(0, 'Section One');
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'table_of_contents' }, HUMAN);
-		render(Page, {
+		const { container } = render(Page, {
 			params: { id: 'doc-1' },
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
 
-		expect(screen.getByText('Table of contents')).toBeInTheDocument();
-		expect(screen.getAllByText('Section One').length).toBeGreaterThan(0);
+		// Scoped to the rendered block itself, not a document-wide text
+		// query: the toolbar's "Insert Table of contents" control shares the
+		// same "Table of contents" label text, so an unscoped query would
+		// pass even if the block itself failed to render.
+		const tocBlock = container.querySelector(
+			'.rounded-lg.border-border.bg-surface\\/60'
+		) as HTMLElement;
+		expect(tocBlock).toBeInTheDocument();
+		expect(within(tocBlock).getByText('Table of contents')).toBeInTheDocument();
+		expect(within(tocBlock).getByText('Section One')).toBeInTheDocument();
 	});
 
 	it('shows a set-target prompt for a synced block with no target yet', () => {
@@ -275,7 +288,7 @@ describe('doc/[id] +page', () => {
 
 		expect(screen.getByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
 
-		await user.click(screen.getByText('Heading 1'));
+		await user.click(within(screen.getByRole('listbox')).getByText('Heading 1'));
 
 		expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
 		const doc = getDocument(ydoc, 'doc-1')!;
@@ -309,12 +322,14 @@ describe('doc/[id] +page', () => {
 		const rec2 = createRecord(ydoc, { parentId: 'doc-2', blockType: 'paragraph' }, HUMAN);
 		getRecordYText(ydoc, rec2.id)!.insert(0, 'From doc two');
 
-		const { rerender } = render(Page, {
+		const user = userEvent.setup();
+		const { container, rerender } = render(Page, {
 			params: { id: 'doc-1' },
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'First' }
 		});
 		expect(screen.getByText('From doc one')).toBeInTheDocument();
+		await user.click(container.querySelector('[contenteditable]') as HTMLElement);
 
 		await rerender({
 			data: { documents: [], collections: [], documentId: 'doc-2', title: 'Second' }
@@ -373,43 +388,6 @@ describe('doc/[id] +page', () => {
 
 		expect(screen.getByText('1.')).toBeInTheDocument();
 		expect(screen.getByText('2.')).toBeInTheDocument();
-	});
-
-	it('deletes a block on Backspace at the start and focuses the previous block', async () => {
-		createDocument(ydoc, { id: 'doc-1', title: 'D' });
-		const first = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
-		getRecordYText(ydoc, first.id)!.insert(0, 'First');
-		createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
-		const { container } = render(Page, {
-			params: { id: 'doc-1' },
-			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
-		});
-
-		const editors = container.querySelectorAll('[contenteditable]');
-		const second = editors[1] as HTMLElement;
-		second.dispatchEvent(
-			new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true })
-		);
-
-		expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(1);
-	});
-
-	it('does not delete the only remaining block on Backspace', () => {
-		createDocument(ydoc, { id: 'doc-1', title: 'D' });
-		createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
-		const { container } = render(Page, {
-			params: { id: 'doc-1' },
-			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
-		});
-
-		const editor = container.querySelector('[contenteditable]') as HTMLElement;
-		editor.dispatchEvent(
-			new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true })
-		);
-
-		expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(1);
 	});
 
 	it('moves focus into the first block when Enter is pressed in the title, creating one if needed', async () => {

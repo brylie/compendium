@@ -4,7 +4,7 @@ import * as Y from 'yjs';
 import BlockEditor from './BlockEditor.svelte';
 
 function selectRange(el: HTMLElement, start: number, end: number): void {
-	const textNode = el.firstChild as Text;
+	const textNode = document.createTreeWalker(el, NodeFilter.SHOW_TEXT).nextNode() as Text;
 	const range = document.createRange();
 	range.setStart(textNode, start);
 	range.setEnd(textNode, end);
@@ -199,6 +199,32 @@ describe('BlockEditor', () => {
 
 		const delta = ytext.toDelta() as { insert: string; attributes?: unknown }[];
 		expect(delta[0].attributes).toBeUndefined();
+	});
+
+	it('reports marks that apply throughout the current selection', () => {
+		const ytext = doc.getText('a');
+		ytext.insert(0, 'bold', { bold: true });
+		const { container, component } = render(BlockEditor, { ytext, ...handlers() });
+		const el = container.querySelector('[contenteditable]') as HTMLElement;
+
+		selectRange(el, 0, 4);
+
+		expect(component.getFormatState()).toMatchObject({ bold: true });
+		expect(component.getFormatState().italic).toBeUndefined();
+	});
+
+	it('toggles an existing mark off when formatting from an active selection', () => {
+		const ytext = doc.getText('a');
+		ytext.insert(0, 'bold', { bold: true });
+		const { container, component } = render(BlockEditor, { ytext, ...handlers() });
+		const el = container.querySelector('[contenteditable]') as HTMLElement;
+
+		selectRange(el, 0, 4);
+		component.applyFormat('bold');
+
+		const delta = ytext.toDelta() as { insert: string; attributes?: { bold?: boolean } }[];
+		expect(delta[0]).toMatchObject({ insert: 'bold' });
+		expect(delta[0].attributes?.bold).toBeUndefined();
 	});
 
 	it('prompts for a URL and applies a link mark on Cmd/Ctrl+K', async () => {
