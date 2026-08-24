@@ -19,6 +19,21 @@ if (!('innerText' in HTMLElement.prototype)) {
 	});
 }
 
+// jsdom has no layout engine and doesn't implement ResizeObserver at all, but
+// Svelte's `bind:clientWidth` uses one internally to react to size changes.
+// Every component test that mounts an element using `bind:clientWidth`
+// (Toolbar.svelte's responsive insert-group overflow) would otherwise throw
+// "ResizeObserver is not defined" before it ever gets to observe anything —
+// a no-op stub is enough since these tests drive the bound value directly
+// via props rather than relying on real layout.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+	globalThis.ResizeObserver = class ResizeObserver {
+		observe(): void {}
+		unobserve(): void {}
+		disconnect(): void {}
+	};
+}
+
 afterEach(() => {
 	cleanup();
 });

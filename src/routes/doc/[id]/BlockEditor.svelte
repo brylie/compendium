@@ -7,6 +7,7 @@
 
 	let {
 		ytext,
+		recordId = '',
 		placeholder = '',
 		class: className = '',
 		onInputText,
@@ -16,6 +17,7 @@
 		onSlashKey
 	}: {
 		ytext: Y.Text;
+		recordId?: string;
 		placeholder?: string;
 		class?: string;
 		onInputText: () => void;
@@ -153,12 +155,50 @@
 		}
 	}
 
-	export function applyFormat(mark: keyof TextMarks, value: unknown = true): void {
+	export function getFormatState(): Partial<Record<keyof TextMarks, boolean>> {
+		if (!el) return {};
+		const offsets = getSelectionOffsets(el);
+		if (!offsets || ytext.length === 0) return {};
+
+		// A collapsed selection inherits the character immediately after the
+		// caret, or the preceding character at the end of a block. A ranged
+		// selection is active only when every selected run carries that mark.
+		const start =
+			offsets.start === offsets.end && offsets.start === ytext.length
+				? Math.max(0, offsets.start - 1)
+				: offsets.start;
+		const end = offsets.start === offsets.end ? start + 1 : offsets.end;
+		const runs = yTextToRichText(ytext).runs;
+		const marks: (keyof TextMarks)[] = ['bold', 'italic', 'strikethrough', 'code', 'link'];
+		const state: Partial<Record<keyof TextMarks, boolean>> = {};
+		let offset: number;
+
+		for (const mark of marks) {
+			let hasSelection = false;
+			let markedThroughout = true;
+			offset = 0;
+			for (const run of runs) {
+				const runEnd = offset + run.text.length;
+				if (start < runEnd && end > offset) {
+					hasSelection = true;
+					if (!run.marks[mark]) markedThroughout = false;
+				}
+				offset = runEnd;
+			}
+			if (hasSelection && markedThroughout) state[mark] = true;
+		}
+
+		return state;
+	}
+
+	export function applyFormat(mark: keyof TextMarks, value?: unknown): void {
 		if (!el) return;
 		const offsets = getSelectionOffsets(el);
 		if (!offsets || offsets.start === offsets.end) return;
+		const nextValue = value === undefined ? (getFormatState()[mark] ? null : true) : value;
 		const doc = ytext.doc;
-		const apply = () => ytext.format(offsets.start, offsets.end - offsets.start, { [mark]: value });
+		const apply = () =>
+			ytext.format(offsets.start, offsets.end - offsets.start, { [mark]: nextValue });
 		if (doc) doc.transact(apply);
 		else apply();
 	}
@@ -178,6 +218,7 @@
 <div
 	bind:this={el}
 	class="block-editor min-h-[1.5em] py-0.5 leading-relaxed break-words text-fg outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent {className}"
+	data-block-editor-id={recordId}
 	contenteditable="true"
 	role="textbox"
 	tabindex="0"

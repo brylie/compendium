@@ -154,6 +154,7 @@ Chat/channels are explicitly not part of this model (see Non-Goals) — that gap
 - A slash-command menu (typing `/`) inserts or transforms blocks — heading, list, table, code, embed — following the convention established by Notion, Coda, and WordPress's Gutenberg block inserter.
 - _Acceptance:_ Selecting text and applying bold/italic/etc. from the toolbar or a shortcut updates that block's rich-text run structure with no Markdown or other syntax ever visible in the editor.
 - _Acceptance:_ Typing `/` opens a filterable command menu; selecting a command inserts or converts the current block without leaving the keyboard.
+- **Implementation contract:** [`specifications/rich-text-toolbar.md`](./specifications/rich-text-toolbar.md) defines the persistent toolbar, selection semantics, block insertion, and its relationship to slash commands.
 
 **Table view (minimal Collection UI)**
 

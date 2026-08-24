@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { tick } from 'svelte';
+import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import { createDocument, createRecord, getDocument, getRecordYText } from '$lib/data/records';
@@ -7,6 +8,17 @@ import type { ActorId } from '$lib/data/types';
 import Page from './+page.svelte';
 
 const HUMAN: ActorId = { kind: 'human', userId: 'local' };
+
+function selectRange(el: HTMLElement, start: number, end: number): void {
+	const textNode = el.firstChild as Text;
+	const range = document.createRange();
+	range.setStart(textNode, start);
+	range.setEnd(textNode, end);
+	const selection = window.getSelection()!;
+	selection.removeAllRanges();
+	selection.addRange(range);
+	document.dispatchEvent(new Event('selectionchange'));
+}
 
 let ydoc: Y.Doc;
 vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
@@ -62,6 +74,48 @@ describe('doc/[id] +page', () => {
 
 		expect(screen.queryByRole('button', { name: /start typing/ })).not.toBeInTheDocument();
 		expect(screen.getByRole('textbox', { name: /Block content|Type/ })).toBeInTheDocument();
+	});
+
+	it('inserts a block directly from the persistent toolbar', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const user = userEvent.setup();
+		render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Insert Table' }));
+
+		const doc = getDocument(ydoc, 'doc-1')!;
+		expect(doc.recordIds).toHaveLength(1);
+		expect((ydoc.getMap('records').get(doc.recordIds[0]) as Y.Map<unknown>).get('blockType')).toBe(
+			'table'
+		);
+	});
+
+	it('formats the active text selection directly from the persistent toolbar', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		getRecordYText(ydoc, record.id)!.insert(0, 'Hello');
+		const user = userEvent.setup();
+		const { container } = render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		});
+
+		const editor = container.querySelector('[contenteditable]') as HTMLElement;
+		await user.click(editor);
+		selectRange(editor, 0, 5);
+		await user.click(screen.getByRole('button', { name: 'Bold' }));
+
+		const delta = getRecordYText(ydoc, record.id)!.toDelta() as {
+			insert: string;
+			attributes?: { bold?: boolean };
+		}[];
+		expect(delta[0]).toMatchObject({ insert: 'Hello', attributes: { bold: true } });
+		expect(screen.getByRole('button', { name: 'Bold' })).toHaveAttribute('aria-pressed', 'true');
 	});
 
 	it('renders the SSR title before mount, then the live document title', () => {
@@ -182,7 +236,7 @@ describe('doc/[id] +page', () => {
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
 
-		expect(screen.getByText('Table of contents')).toBeInTheDocument();
+		expect(screen.getAllByText('Table of contents').length).toBeGreaterThan(0);
 		expect(screen.getAllByText('Section One').length).toBeGreaterThan(0);
 	});
 
@@ -275,7 +329,7 @@ describe('doc/[id] +page', () => {
 
 		expect(screen.getByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
 
-		await user.click(screen.getByText('Heading 1'));
+		await user.click(within(screen.getByRole('listbox')).getByText('Heading 1'));
 
 		expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
 		const doc = getDocument(ydoc, 'doc-1')!;
@@ -309,12 +363,14 @@ describe('doc/[id] +page', () => {
 		const rec2 = createRecord(ydoc, { parentId: 'doc-2', blockType: 'paragraph' }, HUMAN);
 		getRecordYText(ydoc, rec2.id)!.insert(0, 'From doc two');
 
-		const { rerender } = render(Page, {
+		const user = userEvent.setup();
+		const { container, rerender } = render(Page, {
 			params: { id: 'doc-1' },
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'First' }
 		});
 		expect(screen.getByText('From doc one')).toBeInTheDocument();
+		await user.click(container.querySelector('[contenteditable]') as HTMLElement);
 
 		await rerender({
 			data: { documents: [], collections: [], documentId: 'doc-2', title: 'Second' }
@@ -394,6 +450,56 @@ describe('doc/[id] +page', () => {
 
 		expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(1);
 	});
+
+	it.each([
+		['bulleted_list_item', 'Milk'],
+		['numbered_list_item', 'Eggs'],
+		['to_do', 'Bread']
+	] as const)('continues a %s on Enter when the current item has text', async (blockType, text) => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const record = createRecord(ydoc, { parentId: 'doc-1', blockType }, HUMAN);
+		getRecordYText(ydoc, record.id)!.insert(0, text);
+		const { container } = render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		});
+
+		const editor = container.querySelector('[contenteditable]') as HTMLElement;
+		editor.dispatchEvent(
+			new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+		);
+		await tick();
+
+		const recordIds = getDocument(ydoc, 'doc-1')!.recordIds;
+		expect(recordIds).toHaveLength(2);
+		const newRecord = ydoc.getMap('records').get(recordIds[1]) as Y.Map<unknown>;
+		expect(newRecord.get('blockType')).toBe(blockType);
+	});
+
+	it.each(['bulleted_list_item', 'numbered_list_item', 'to_do'] as const)(
+		'exits a %s on Enter when the current item is empty, converting it to a paragraph in place',
+		async (blockType) => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const record = createRecord(ydoc, { parentId: 'doc-1', blockType }, HUMAN);
+			const { container } = render(Page, {
+				params: { id: 'doc-1' },
+				form: null,
+				data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			});
+
+			const editor = container.querySelector('[contenteditable]') as HTMLElement;
+			editor.dispatchEvent(
+				new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+			);
+			await tick();
+
+			const recordIds = getDocument(ydoc, 'doc-1')!.recordIds;
+			expect(recordIds).toHaveLength(1);
+			const yrecord = ydoc.getMap('records').get(record.id) as Y.Map<unknown>;
+			expect(yrecord.get('blockType')).toBe('paragraph');
+		}
+	);
 
 	it('does not delete the only remaining block on Backspace', () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });

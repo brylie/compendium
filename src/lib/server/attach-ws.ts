@@ -21,7 +21,14 @@ export function attachYjsWebSocket(
 		// (serverUrl + '/' + roomname); Phase 0 serves one shared workspace
 		// doc regardless of room, so match by prefix rather than exact path.
 		if (pathname !== path && !pathname.startsWith(path + '/')) {
-			socket.destroy();
+			// Don't touch the socket here: this 'upgrade' listener runs
+			// alongside others on the same httpServer (notably Vite's own HMR
+			// websocket in dev), and Node delivers 'upgrade' to every
+			// listener regardless of whether an earlier one already
+			// completed the handshake. Destroying the socket for a path we
+			// don't own tore down connections other listeners had already
+			// upgraded, causing the Vite HMR client to reconnect/reload in a
+			// tight loop.
 			return;
 		}
 		wss.handleUpgrade(request, socket, head, (ws) => {
