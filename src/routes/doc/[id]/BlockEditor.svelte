@@ -58,15 +58,22 @@
 	// break it and deleting its target renders as an explicit broken state
 	// instead of a silently dead generic link.
 	function runToHtml(text: string, marks: TextMarks, doc: Y.Doc | null | undefined): string {
-		let html = escapeHtml(text);
+		// Resolved up front (not just to decide the branch below) because a
+		// live target's *label* must track its current title too — the stored
+		// run text is whatever the title was at link-creation time, and a
+		// rename since then must not leave the visible label stale even
+		// though the href/broken-check already re-resolve live.
+		const target =
+			marks.link?.startsWith(RECORD_LINK_SCHEME) && doc
+				? resolveInternalLinkTarget(doc, marks.link.slice(RECORD_LINK_SCHEME.length))
+				: undefined;
+		let html = escapeHtml(target ? target.title : text);
 		if (marks.code)
 			html = `<code class="bg-surface px-1 py-0.5 rounded font-mono text-[0.9em] border border-border">${html}</code>`;
 		if (marks.bold) html = `<strong class="font-semibold">${html}</strong>`;
 		if (marks.italic) html = `<em>${html}</em>`;
 		if (marks.strikethrough) html = `<s class="line-through text-muted">${html}</s>`;
 		if (marks.link?.startsWith(RECORD_LINK_SCHEME)) {
-			const id = marks.link.slice(RECORD_LINK_SCHEME.length);
-			const target = doc ? resolveInternalLinkTarget(doc, id) : undefined;
 			if (target) {
 				const href = target.kind === 'collection' ? `/table/${target.id}` : `/doc/${target.id}`;
 				html = `<a href="${escapeHtml(href)}" class="text-accent underline underline-offset-2">${html}</a>`;
