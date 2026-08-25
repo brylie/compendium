@@ -225,6 +225,39 @@ describe('service layer: centralized business rules & side effects', () => {
 		const linkRecord = result?.records.find((r) => r.id === link.id);
 		expect(linkRecord?.markdown).toBe('unresolved link text');
 	});
+
+	it('marks a page_link explicitly broken, not silently unset, once its target Document is deleted', () => {
+		const docPublic = createDocument(human, { title: 'Public Handbook' });
+		const docTarget = createDocument(human, { title: 'Will Be Deleted' });
+		const link = crdtCreateRecord(
+			getYDoc(),
+			{ parentId: docPublic.id, blockType: 'page_link', referencedRecordId: docTarget.id },
+			human
+		);
+
+		deleteDocument(human, docTarget.id);
+
+		const result = getDocument(human, docPublic.id);
+		const linkRecord = result?.records.find((r) => r.id === link.id);
+		expect(linkRecord?.linkBroken).toBe(true);
+		expect(linkRecord?.markdown).toBe('[[Deleted page]]');
+		// The ID itself is preserved (not cleared) — the link is broken, not
+		// silently forgotten, so a caller can still see what it used to point at.
+		expect(linkRecord?.referencedRecordId).toBe(docTarget.id);
+	});
+
+	it('does not mark linkBroken for a page_link with no target set yet', () => {
+		const docPublic = createDocument(human, { title: 'Public Handbook' });
+		const link = crdtCreateRecord(
+			getYDoc(),
+			{ parentId: docPublic.id, blockType: 'page_link' },
+			human
+		);
+
+		const result = getDocument(human, docPublic.id);
+		const linkRecord = result?.records.find((r) => r.id === link.id);
+		expect(linkRecord?.linkBroken).toBeUndefined();
+	});
 });
 
 describe('service layer: documents — unfiltered listing, delete, and rename', () => {

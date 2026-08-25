@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/svelte';
 import * as Y from 'yjs';
+import { createDocument, deleteDocument, updateDocumentTitle } from '$lib/data/records';
 import BlockEditor from './BlockEditor.svelte';
 
 function selectRange(el: HTMLElement, start: number, end: number): void {
@@ -64,6 +65,59 @@ describe('BlockEditor', () => {
 		ytext.insert(0, 'danger', { link: 'javascript:alert(1)' });
 		const { container } = render(BlockEditor, { ytext, ...handlers() });
 		expect(container.querySelector('a')).toHaveAttribute('href', '#');
+	});
+
+	it('renders an inline wiki-link mark as a navigable link to its current target', () => {
+		const target = createDocument(doc, { title: 'Q3 Roadmap' });
+		const ytext = doc.getText('a');
+		ytext.insert(0, 'Q3 Roadmap', { link: `record:${target.id}` });
+		const { container } = render(BlockEditor, { ytext, ...handlers() });
+		const anchor = container.querySelector('a')!;
+		expect(anchor).toHaveAttribute('href', `/doc/${target.id}`);
+		expect(anchor).toHaveTextContent('Q3 Roadmap');
+	});
+
+	it('renders an inline wiki-link mark as a distinct broken state once its target is deleted', () => {
+		const target = createDocument(doc, { title: 'Q3 Roadmap' });
+		const ytext = doc.getText('a');
+		ytext.insert(0, 'Q3 Roadmap', { link: `record:${target.id}` });
+		deleteDocument(doc, target.id);
+
+		const { container } = render(BlockEditor, { ytext, ...handlers() });
+		expect(container.querySelector('a')).toBeNull();
+		const span = container.querySelector('[title="Linked page was deleted"]')!;
+		expect(span).toHaveTextContent('Q3 Roadmap');
+	});
+
+	it('re-renders an already-mounted inline wiki-link to show the current title, not the stale stored text, when its target is renamed', () => {
+		const target = createDocument(doc, { title: 'Draft' });
+		const ytext = doc.getText('a');
+		ytext.insert(0, 'Draft', { link: `record:${target.id}` });
+
+		const { container } = render(BlockEditor, { ytext, ...handlers() });
+		expect(container.querySelector('a')).toHaveTextContent('Draft');
+
+		updateDocumentTitle(doc, target.id, 'Published');
+
+		const anchor = container.querySelector('a')!;
+		expect(anchor).toHaveTextContent('Published');
+		expect(anchor).toHaveAttribute('href', `/doc/${target.id}`);
+	});
+
+	it('re-renders an already-mounted inline wiki-link to the broken state when its target is deleted afterward', () => {
+		const target = createDocument(doc, { title: 'Q3 Roadmap' });
+		const ytext = doc.getText('a');
+		ytext.insert(0, 'Q3 Roadmap', { link: `record:${target.id}` });
+
+		const { container } = render(BlockEditor, { ytext, ...handlers() });
+		expect(container.querySelector('a')).toHaveAttribute('href', `/doc/${target.id}`);
+
+		deleteDocument(doc, target.id);
+
+		expect(container.querySelector('a')).toBeNull();
+		expect(container.querySelector('[title="Linked page was deleted"]')).toHaveTextContent(
+			'Q3 Roadmap'
+		);
 	});
 
 	it('escapes HTML special characters in the plain text', () => {

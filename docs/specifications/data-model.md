@@ -116,7 +116,7 @@ An inline or linked Collection view in a Document is likewise a reference plus v
 
 ## 3. Document hierarchy and block-type rules
 
-Document hierarchy is represented by `Document.parentDocumentId`, not by a block. A child Document remains a first-class Document with its own `recordIds`; `order` orders it among the same parent's children. A `page_link` block is therefore only an explicit navigation reference to another Document, never the source of containment.
+Document hierarchy is represented by `Document.parentDocumentId`, not by a block. A child Document remains a first-class Document with its own `recordIds`; `order` orders it among the same parent's children. A `page_link` block is therefore only an explicit navigation reference to another Document, never the source of containment — see [`internal-links.md`](./internal-links.md) for how it (and inline `[[wiki links]]`) resolve their `referencedRecordId`/target ID to a title, and what happens once that target is deleted.
 
 Blocks are deliberately a small, documentation-oriented set rather than one type per external service. All CRDT, permission, hold, and MCP behavior operates on `WorkspaceRecord` generically. Adding a text-based block type therefore requires its discriminator, UI renderer and slash-menu entry, and Markdown transcoding behavior—not a new storage or coordination primitive.
 

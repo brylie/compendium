@@ -257,6 +257,25 @@ describe('doc/[id] +page', () => {
 		expect(screen.getByRole('link', { name: /Other Doc/ })).toHaveAttribute('href', '/doc/other');
 	});
 
+	it('shows an explicit "deleted" state for a page_link whose target no longer exists, distinct from an unlinked block', () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		// 'gone' was never created (or was since deleted) — referencedRecordId
+		// still points at it, same shape as a real delete-after-link scenario.
+		createRecord(
+			ydoc,
+			{ parentId: 'doc-1', blockType: 'page_link', referencedRecordId: 'gone' },
+			HUMAN
+		);
+		render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		});
+		expect(screen.getByText('Linked page was deleted')).toBeInTheDocument();
+		expect(screen.queryByText('Link to page:')).not.toBeInTheDocument();
+		expect(screen.queryByRole('link', { name: /gone/ })).not.toBeInTheDocument();
+	});
+
 	it('adds a new block from the "Add block" button at the bottom', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);

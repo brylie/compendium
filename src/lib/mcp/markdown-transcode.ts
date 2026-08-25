@@ -1,7 +1,8 @@
 import { remark } from 'remark';
 import remarkGfm from 'remark-gfm';
 import type * as Y from 'yjs';
-import { getCollection, getDocument, listCollections, listDocuments } from '$lib/data/records';
+import { listCollections, listDocuments } from '$lib/data/records';
+import { RECORD_LINK_SCHEME, resolveInternalLinkTarget } from '$lib/data/links';
 import type { RichText, TextMarks } from '$lib/data/types';
 
 // Per docs/technical-design.md §6: CommonMark + GFM as the baseline, plus two
@@ -11,8 +12,13 @@ import type { RichText, TextMarks } from '$lib/data/types';
 // `record:` scheme, so the rich-text model doesn't need a dedicated mark
 // type for it.
 
-const RECORD_LINK_SCHEME = 'record:';
 const SPECIAL_TOKEN = /(@[\w-]+)|(\[\[[^\]]+\]\])/g;
+
+// Rendered in place of the target's title when a wiki-link's target ID no
+// longer resolves to any Document/Collection (see docs/specifications/
+// internal-links.md) — deliberately not the stale cached title, which would
+// silently mislabel a broken link as a working one.
+const DELETED_LINK_LABEL = 'Deleted page';
 
 interface MutableRun {
 	text: string;
@@ -31,7 +37,8 @@ function runToMarkdown(doc: Y.Doc, text: string, marks: TextMarks): string {
 	if (marks.mention) return `@${text}`;
 	if (marks.link?.startsWith(RECORD_LINK_SCHEME)) {
 		const id = marks.link.slice(RECORD_LINK_SCHEME.length);
-		return `[[${resolveIdToTitle(doc, id) ?? text}]]`;
+		const target = resolveInternalLinkTarget(doc, id);
+		return `[[${target?.title ?? DELETED_LINK_LABEL}]]`;
 	}
 
 	let out = escapeMarkdown(text);
@@ -45,10 +52,6 @@ function runToMarkdown(doc: Y.Doc, text: string, marks: TextMarks): string {
 
 function escapeMarkdown(text: string): string {
 	return text.replace(/([\\`*_{}[\]()#+\-.!~])/g, '\\$1');
-}
-
-function resolveIdToTitle(doc: Y.Doc, id: string): string | undefined {
-	return getDocument(doc, id)?.title ?? getCollection(doc, id)?.title;
 }
 
 // ---------------------------------------------------------------------------
