@@ -151,6 +151,39 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 			expect(recentActions(record.id).filter((a) => a === 'update_record')).toHaveLength(1);
 		});
 
+		it('preserves update-before-delete ordering when a record is deleted within its edit’s debounce window', () => {
+			const record = crdtCreateRecord(
+				doc,
+				{ parentId: makeDoc(doc), blockType: 'paragraph' },
+				human
+			);
+			const yrecord = doc.getMap('records').get(record.id) as Y.Map<unknown>;
+			const content = yrecord.get('content') as Y.Text;
+
+			// Edit, then delete moments later — still well inside the 3s debounce
+			// window, so the update event is still only pending, not yet written.
+			doc.transact(() => content.insert(0, 'edited just before deletion'), 'fake-ws-connection');
+			vi.advanceTimersByTime(500);
+			doc.transact(() => {
+				doc.getMap('records').delete(record.id);
+			}, 'fake-ws-connection');
+
+			// Without the fix, the pending update wouldn't surface until the full
+			// debounce window elapses — after the delete already logged — putting
+			// update_record after delete_record for the same, now-deleted target.
+			const actions = recentActions(record.id);
+			expect(actions.filter((a) => a === 'update_record')).toHaveLength(1);
+			expect(actions.filter((a) => a === 'delete_record')).toHaveLength(1);
+			// queryAuditLog orders newest-first, so delete (written second, right
+			// after the flush) appears before update (written first, by the flush).
+			expect(actions.indexOf('delete_record')).toBeLessThan(actions.indexOf('update_record'));
+
+			// The debounce timer must actually be gone, not just already fired —
+			// letting the full window elapse must not log a second update_record.
+			vi.advanceTimersByTime(3_000);
+			expect(recentActions(record.id).filter((a) => a === 'update_record')).toHaveLength(1);
+		});
+
 		it('logs update_document when a document’s recordIds order changes without touching its own record', () => {
 			const documentId = makeDoc(doc);
 			const a = crdtCreateRecord(doc, { parentId: documentId, blockType: 'paragraph' }, human);

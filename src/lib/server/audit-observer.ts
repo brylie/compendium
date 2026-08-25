@@ -105,13 +105,28 @@ function scheduleUpdateAudit(kind: EntryKind, id: string): void {
 	pendingUpdateTimers.set(key, timer);
 }
 
+/**
+ * Writes a single pending debounced update immediately, if one is armed for
+ * this entry. Called before logging a create/delete for the same (kind, id)
+ * so an edit that happened moments before a delete — still sitting in the
+ * debounce window — is written in the order it actually happened, instead of
+ * surfacing later as an `update_*` row that appears *after* the `delete_*`
+ * row for the same, now-gone target.
+ */
+function flushPendingFor(kind: EntryKind, id: string): void {
+	const key = `${kind}:${id}`;
+	const timer = pendingUpdateTimers.get(key);
+	if (!timer) return;
+	clearTimeout(timer);
+	pendingUpdateTimers.delete(key);
+	logAudit({ actor: CURRENT_USER, action: ACTIONS[kind].update, targetRecordId: id });
+}
+
 /** Test/shutdown hook: write any debounced update events immediately instead of waiting out the window. */
 export function flushPendingAuditEvents(): void {
-	for (const [key, timer] of pendingUpdateTimers) {
-		clearTimeout(timer);
-		pendingUpdateTimers.delete(key);
+	for (const key of [...pendingUpdateTimers.keys()]) {
 		const [kind, id] = key.split(':') as [EntryKind, string];
-		logAudit({ actor: CURRENT_USER, action: ACTIONS[kind].update, targetRecordId: id });
+		flushPendingFor(kind, id);
 	}
 }
 
@@ -169,6 +184,11 @@ export function attachDocAuditObserver(doc: Y.Doc): void {
 			if (action === ACTIONS[kind].update) {
 				scheduleUpdateAudit(kind, id);
 			} else {
+				// A create/delete resolves any edit still sitting in the debounce
+				// window for this same entry first, so it's written in the order it
+				// actually happened rather than surfacing later, after the entry is
+				// already gone.
+				flushPendingFor(kind, id);
 				logAudit({ actor: CURRENT_USER, action, targetRecordId: id });
 			}
 		}
