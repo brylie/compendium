@@ -8,6 +8,7 @@ Canonical specification for each implemented subsystem, translating [`agent-work
 - [`mcp-tools.md`](./mcp-tools.md) — the MCP tool surface and permission scoping.
 - [`markdown-transcoding.md`](./markdown-transcoding.md) — the `Y.Text` ⇄ Markdown boundary.
 - [`rich-text-toolbar.md`](./rich-text-toolbar.md) — persistent editor toolbar, selected-mark state, block insertion, and its relationship to slash commands.
+- [`undo-redo.md`](./undo-redo.md) — local, per-actor undo/redo via Y.UndoManager, and why it never reverts a collaborator's or agent's edit.
 - [`persistence.md`](./persistence.md) — SQLite via Drizzle: snapshots, audit log, access tokens, and the query read model.
 - [`service-layer.md`](./service-layer.md) / [`service-layer-manifest.md`](./service-layer-manifest.md) — how permission/audit logic is centralized once and shared by MCP and UI.
 - [`e2e-testing.md`](./e2e-testing.md) — the MCP/UI parity testing strategy.

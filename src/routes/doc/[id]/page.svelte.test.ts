@@ -439,6 +439,100 @@ describe('doc/[id] +page', () => {
 		expect(yrecord.get('referencedRecordId')).toBeUndefined();
 	});
 
+	it('undoes and redoes the last local block creation via Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const user = userEvent.setup();
+		render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Add block' }));
+		expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(1);
+
+		await user.keyboard('{Control>}z{/Control}');
+		expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(0);
+
+		await user.keyboard('{Control>}{Shift>}z{/Shift}{/Control}');
+		expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(1);
+	});
+
+	it('also redoes via Ctrl+Y, the Windows/Linux convention', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const user = userEvent.setup();
+		render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Add block' }));
+		await user.keyboard('{Control>}z{/Control}');
+		expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(0);
+
+		await user.keyboard('{Control>}y{/Control}');
+		expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(1);
+	});
+
+	it('enables the toolbar Undo button after a local edit, and disables it again once undone', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const user = userEvent.setup();
+		render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		});
+
+		expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+
+		await user.click(screen.getByRole('button', { name: 'Add block' }));
+		expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled();
+
+		await user.click(screen.getByRole('button', { name: 'Undo' }));
+		expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+		expect(screen.getByRole('button', { name: 'Redo' })).toBeEnabled();
+	});
+
+	it("never undoes a remote actor's concurrent block creation, only this tab's own last local action", async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const user = userEvent.setup();
+		render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		});
+
+		// This tab's own local action, made through the UI after mount so
+		// it's actually tracked by this tab's Y.UndoManager.
+		await user.click(screen.getByRole('button', { name: 'Add block' }));
+		const localId = getDocument(ydoc, 'doc-1')!.recordIds[0];
+
+		// A remote peer's edit arrives over the shared Y.Doc the same way a
+		// real second browser tab's write would sync in over /ws: applied
+		// with a non-null transaction origin, which Y.UndoManager's default
+		// trackedOrigins (only `null`) never tracks.
+		const remoteDoc = new Y.Doc();
+		Y.applyUpdate(remoteDoc, Y.encodeStateAsUpdate(ydoc));
+		const remote: ActorId = { kind: 'human', userId: 'collaborator' };
+		const remoteRecord = createRecord(
+			remoteDoc,
+			{ parentId: 'doc-1', blockType: 'paragraph' },
+			remote
+		);
+		Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(remoteDoc, Y.encodeStateVector(ydoc)), {});
+		remoteDoc.destroy();
+
+		expect(getDocument(ydoc, 'doc-1')?.recordIds).toEqual([localId, remoteRecord.id]);
+
+		await user.keyboard('{Control>}z{/Control}');
+
+		// Only the local actor's own block is gone...
+		expect(getDocument(ydoc, 'doc-1')?.recordIds).toEqual([remoteRecord.id]);
+		// ...the remote actor's concurrent, independent block survives untouched.
+		expect(getRecordYText(ydoc, remoteRecord.id)).toBeDefined();
+	});
+
 	it('changes the target of an already-linked page_link block', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		createDocument(ydoc, { id: 'target-a', title: 'Target A' });

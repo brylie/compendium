@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronsRight } from '@lucide/svelte';
+	import { ChevronsRight, Redo2, Undo2 } from '@lucide/svelte';
 	import type { TextMarks } from '$lib/data/types';
 	import {
 		TOOLBAR_CONTROLS,
@@ -11,13 +11,19 @@
 		controls = TOOLBAR_CONTROLS,
 		activeMarks = {},
 		hasActiveEditor = false,
+		canUndo = false,
+		canRedo = false,
 		insertGroupWidthOverride,
 		onFormat,
-		onInsert
+		onInsert,
+		onUndo = () => {},
+		onRedo = () => {}
 	}: {
 		controls?: readonly ToolbarControl[];
 		activeMarks?: Partial<Record<keyof TextMarks, boolean>>;
 		hasActiveEditor?: boolean;
+		canUndo?: boolean;
+		canRedo?: boolean;
 		// Test-only: forces the width computeVisibleInsertCount() sees,
 		// bypassing bind:clientWidth below entirely. Real usage never passes
 		// this — measuredInsertGroupWidth (real DOM measurement) drives it.
@@ -28,6 +34,8 @@
 		insertGroupWidthOverride?: number;
 		onFormat: (mark: keyof TextMarks) => void;
 		onInsert: (blockType: Extract<ToolbarControl, { group: 'insert' }>['blockType']) => void;
+		onUndo?: () => void;
+		onRedo?: () => void;
 	} = $props();
 
 	const formatControls = $derived(controls.filter((control) => control.group === 'format'));
@@ -76,6 +84,38 @@
 	role="toolbar"
 	aria-label="Document toolbar"
 >
+	<div role="group" class="flex shrink-0 items-center gap-1" aria-label="History">
+		<span class="group relative">
+			<button
+				type="button"
+				aria-label="Undo"
+				disabled={!canUndo}
+				onmousedown={(event) => event.preventDefault()}
+				onclick={onUndo}
+				class={CONTROL_CLASS}
+			>
+				<Undo2 size={16} strokeWidth={2} aria-hidden="true" />
+			</button>
+			<span class="toolbar-tooltip" role="tooltip" aria-hidden="true">Undo (⌘/Ctrl+Z)</span>
+		</span>
+		<span class="group relative">
+			<button
+				type="button"
+				aria-label="Redo"
+				disabled={!canRedo}
+				onmousedown={(event) => event.preventDefault()}
+				onclick={onRedo}
+				class={CONTROL_CLASS}
+			>
+				<Redo2 size={16} strokeWidth={2} aria-hidden="true" />
+			</button>
+			<span class="toolbar-tooltip" role="tooltip" aria-hidden="true">Redo (⌘/Ctrl+⇧Z, Ctrl+Y)</span
+			>
+		</span>
+	</div>
+
+	<div class="h-5 shrink-0 border-l border-border" aria-hidden="true"></div>
+
 	<div role="group" class="flex shrink-0 items-center gap-1" aria-label="Text formatting">
 		{#each formatControls as control (control.id)}
 			{@const Icon = control.icon}

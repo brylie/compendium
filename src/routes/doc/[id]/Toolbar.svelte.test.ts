@@ -130,6 +130,33 @@ describe('Toolbar', () => {
 		expect(screen.queryByRole('listbox', { name: 'More blocks' })).not.toBeInTheDocument();
 	});
 
+	it('disables Undo/Redo by default and enables them per canUndo/canRedo', () => {
+		render(Toolbar, { hasActiveEditor: false, onFormat: vi.fn(), onInsert: vi.fn() });
+		expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
+		expect(screen.getByRole('button', { name: 'Redo' })).toBeDisabled();
+	});
+
+	it('dispatches onUndo/onRedo when their buttons are enabled and clicked', async () => {
+		const onUndo = vi.fn();
+		const onRedo = vi.fn();
+		const user = userEvent.setup();
+		render(Toolbar, {
+			hasActiveEditor: false,
+			canUndo: true,
+			canRedo: true,
+			onFormat: vi.fn(),
+			onInsert: vi.fn(),
+			onUndo,
+			onRedo
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Undo' }));
+		await user.click(screen.getByRole('button', { name: 'Redo' }));
+
+		expect(onUndo).toHaveBeenCalledOnce();
+		expect(onRedo).toHaveBeenCalledOnce();
+	});
+
 	it('gives every control in both groups the identical visual treatment', () => {
 		render(Toolbar, { hasActiveEditor: true, onFormat: vi.fn(), onInsert: vi.fn() });
 

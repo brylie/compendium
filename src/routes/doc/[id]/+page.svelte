@@ -29,6 +29,7 @@
 		releaseBlockPresence,
 		subscribeHeldByOthers
 	} from '$lib/client/presence';
+	import { redo, subscribeUndoRedoState, undo } from '$lib/client/undo';
 	import type { ActorId, BlockType, TextMarks, WorkspaceRecord } from '$lib/data/types';
 	import BlockEditor from './BlockEditor.svelte';
 	import SlashMenu from './SlashMenu.svelte';
@@ -51,6 +52,8 @@
 	let parentDocTitle: string | null = $state(null);
 	let activeBlockId: string | null = $state(null);
 	let activeMarks: Partial<Record<keyof TextMarks, boolean>> = $state({});
+	let canUndo = $state(false);
+	let canRedo = $state(false);
 
 	interface BlockEditorHandle {
 		render: () => void;
@@ -160,13 +163,44 @@
 			heldByOthers = held;
 		});
 
+		// Subscribed immediately on mount, before any local edit can happen —
+		// this is what puts the tab's Y.UndoManager in place from the start of
+		// the session, since it only tracks transactions made after it exists.
+		const unsubscribeUndoRedo = subscribeUndoRedoState((state) => {
+			canUndo = state.canUndo;
+			canRedo = state.canRedo;
+		});
+
 		return () => {
 			recordsMap.unobserveDeep(observer);
 			documentsMap.unobserveDeep(observer);
 			unsubscribePresence();
+			unsubscribeUndoRedo();
 			releaseBlockPresence();
 		};
 	});
+
+	// Word-processor convention: Cmd/Ctrl+Z undoes this tab's own last local
+	// action wherever it happened (a keystroke, a block insert/delete, a
+	// title edit — anything under the Y.UndoManager's scope), and
+	// Cmd/Ctrl+Shift+Z (or Ctrl+Y, the Windows/Linux convention) redoes it.
+	// Global on the document rather than scoped to a single block, since the
+	// action being undone might not be in the block that currently has focus
+	// (e.g. undoing a delete brings back a block that no longer exists to
+	// focus).
+	function handleGlobalKeydown(event: KeyboardEvent): void {
+		const key = event.key.toLowerCase();
+		if ((event.metaKey || event.ctrlKey) && key === 'z') {
+			event.preventDefault();
+			if (event.shiftKey) redo();
+			else undo();
+			return;
+		}
+		if (event.ctrlKey && !event.metaKey && key === 'y') {
+			event.preventDefault();
+			redo();
+		}
+	}
 
 	// SvelteKit reuses this component instance across client-side navigations
 	// between two /doc/[id] routes (onMount doesn't re-run) — refresh() must
@@ -436,7 +470,7 @@
 	}
 </script>
 
-<svelte:document onselectionchange={syncToolbarSelection} />
+<svelte:document onselectionchange={syncToolbarSelection} onkeydown={handleGlobalKeydown} />
 
 <svelte:head>
 	<title>{title || 'Untitled'} · Compendium</title>
@@ -445,8 +479,12 @@
 <Toolbar
 	{activeMarks}
 	hasActiveEditor={activeBlockId !== null}
+	{canUndo}
+	{canRedo}
 	onFormat={applyToolbarFormat}
 	onInsert={insertToolbarBlock}
+	onUndo={undo}
+	onRedo={redo}
 />
 
 <div class="mx-auto max-w-3xl px-6 py-10">
