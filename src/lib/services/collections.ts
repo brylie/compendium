@@ -66,7 +66,7 @@ export function queryCollection(
 	const doc = getYDoc();
 	const actor = actorForCaller(caller);
 
-	requireAccessibleParent(caller, collectionId);
+	requireAccessibleParent(caller, collectionId, 'query_collection');
 	const collection = crdtGetCollection(doc, collectionId);
 	const records = crdtListRecordsForParent(doc, collectionId);
 
@@ -78,7 +78,7 @@ export function deleteCollection(caller: CallerIdentity, collectionId: string): 
 	const doc = getYDoc();
 	const actor = actorForCaller(caller);
 
-	requireAccessibleParent(caller, collectionId);
+	requireAccessibleParent(caller, collectionId, 'delete_collection');
 	crdtDeleteCollection(doc, collectionId);
 	logAudit({ actor, action: 'delete_collection', targetRecordId: collectionId });
 }
@@ -91,7 +91,7 @@ export function updateCollectionTitle(
 	const doc = getYDoc();
 	const actor = actorForCaller(caller);
 
-	requireAccessibleParent(caller, collectionId);
+	requireAccessibleParent(caller, collectionId, 'update_collection_title');
 	crdtUpdateCollectionTitle(doc, collectionId, title);
 	logAudit({
 		actor,

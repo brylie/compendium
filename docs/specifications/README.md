@@ -11,6 +11,7 @@ Canonical specification for each implemented subsystem, translating [`agent-work
 - [`rich-text-toolbar.md`](./rich-text-toolbar.md) — persistent editor toolbar, selected-mark state, block insertion, and its relationship to slash commands.
 - [`undo-redo.md`](./undo-redo.md) — local, per-actor undo/redo via Y.UndoManager, and why it never reverts a collaborator's or agent's edit.
 - [`persistence.md`](./persistence.md) — SQLite via Drizzle: snapshots, audit log, access tokens, and the query read model.
+- [`audit-coverage.md`](./audit-coverage.md) — how direct UI mutations (which bypass the service layer entirely) and denied MCP attempts get an audit trail, and what's deliberately excluded.
 - [`service-layer.md`](./service-layer.md) / [`service-layer-manifest.md`](./service-layer-manifest.md) — how permission/audit logic is centralized once and shared by MCP and UI.
 - [`e2e-testing.md`](./e2e-testing.md) — the MCP/UI parity testing strategy.
 - [`design-system.md`](./design-system.md) — UI tokens and conventions.

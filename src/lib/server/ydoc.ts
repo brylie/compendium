@@ -1,5 +1,10 @@
 import * as Y from 'yjs';
 import { getSnapshotStore } from './store.js';
+import {
+	attachDocAuditObserver,
+	flushPendingAuditEvents,
+	resetAuditObserverForTests
+} from './audit-observer.js';
 
 // Phase 0 is single-tenant, single workspace — one Y.Doc for everything.
 // Both the y-websocket endpoint and the MCP server's tool handlers mutate
@@ -37,6 +42,9 @@ export function getYDoc(): Y.Doc {
 	if (snapshot) {
 		Y.applyUpdate(doc, snapshot);
 	}
+	// Attached only after the snapshot load above, so replaying prior state on
+	// process start never produces a spurious audit trail for it.
+	attachDocAuditObserver(doc);
 
 	const state: YDocState = { doc, saveTimer: null, dirty: false };
 	globalThis.__yDocState = state;
@@ -51,6 +59,7 @@ export function getYDoc(): Y.Doc {
 	state.saveTimer.unref?.();
 
 	const shutdown = () => {
+		flushPendingAuditEvents();
 		flush();
 		process.exit(0);
 	};
@@ -73,4 +82,5 @@ export function resetYDocForTests(): void {
 		clearInterval(globalThis.__yDocState.saveTimer);
 	}
 	globalThis.__yDocState = undefined;
+	resetAuditObserverForTests();
 }
