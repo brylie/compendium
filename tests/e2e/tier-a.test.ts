@@ -5,6 +5,9 @@ import { getAwareness } from '$lib/server/awareness';
 import { queryAuditLog } from '$lib/server/audit';
 import { plainText, yTextToRichText } from '$lib/data/richtext';
 import { serviceModules, serviceSurfaces } from '$lib/services/manifest';
+import { flushPendingAuditEvents } from '$lib/server/audit-observer';
+import { getYDoc } from '$lib/server/ydoc';
+import { deleteRecord as crdtDeleteRecord } from '$lib/data/records';
 import type { ActorId } from '$lib/data/types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
@@ -609,5 +612,65 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					throw new Error(`Unhandled ui: true manifest entry: ${method}`);
 			}
 		}
+	});
+
+	it('11. A real Yjs websocket client editing directly (no MCP/service call) is still audited exactly once per action (issue #34)', async () => {
+		const yjs = harness.getYjsClient();
+
+		// This mirrors exactly what the UI does today (src/routes/doc/[id]/+page.svelte,
+		// BlockEditor.svelte): mutate the client's own Y.Doc directly via
+		// src/lib/data/records.ts, with no service-layer/MCP call in the loop at
+		// all. Only y-websocket sync carries it to the server. Before this
+		// feature, the server-side audit_log had no way to know this ever
+		// happened — see docs/specifications/audit-coverage.md.
+		const docMeta = createDocument(yjs.doc, { title: 'Directly Edited Doc' });
+		const block = createRecord(yjs.doc, { parentId: docMeta.id, blockType: 'paragraph' }, human);
+
+		await harness.waitForCondition(() =>
+			queryAuditLog().some((a) => a.action === 'create_document' && a.targetRecordId === docMeta.id)
+		);
+		await harness.waitForCondition(() =>
+			queryAuditLog().some((a) => a.action === 'create_record' && a.targetRecordId === block.id)
+		);
+		expect(
+			queryAuditLog().filter(
+				(a) => a.action === 'create_document' && a.targetRecordId === docMeta.id
+			)
+		).toHaveLength(1);
+		expect(
+			queryAuditLog().filter((a) => a.action === 'create_record' && a.targetRecordId === block.id)
+		).toHaveLength(1);
+
+		const createEntry = queryAuditLog().find(
+			(a) => a.action === 'create_record' && a.targetRecordId === block.id
+		);
+		expect(createEntry?.actor).toEqual({ kind: 'human', userId: 'local' });
+
+		// Content edits are debounced (docs/specifications/audit-coverage.md §4) —
+		// force the pending event to write immediately rather than waiting out
+		// the real debounce window in this test.
+		const ytext = getRecordYText(yjs.doc, block.id);
+		await harness.waitForCondition(() => ytext !== undefined);
+		yjs.doc.transact(() => ytext!.insert(0, 'edited directly by the UI'));
+
+		// Wait for the SERVER's own doc (not just the local client doc, which
+		// updates instantly) to actually receive the sync before flushing —
+		// otherwise there's nothing pending yet to flush.
+		await harness.waitForCondition(() => {
+			const serverText = getRecordYText(getYDoc(), block.id);
+			return serverText !== undefined && plainText(yTextToRichText(serverText)).length > 0;
+		});
+		flushPendingAuditEvents();
+		expect(
+			queryAuditLog().filter((a) => a.action === 'update_record' && a.targetRecordId === block.id)
+		).toHaveLength(1);
+
+		crdtDeleteRecord(yjs.doc, block.id);
+		await harness.waitForCondition(() =>
+			queryAuditLog().some((a) => a.action === 'delete_record' && a.targetRecordId === block.id)
+		);
+		expect(
+			queryAuditLog().filter((a) => a.action === 'delete_record' && a.targetRecordId === block.id)
+		).toHaveLength(1);
 	});
 });

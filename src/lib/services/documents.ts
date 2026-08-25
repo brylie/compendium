@@ -36,7 +36,7 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 	// Decision: In single-tenant Phase 0/1, any authenticated caller is permitted
 	// to create top-level documents; when nested, access to parentDocumentId is verified.
 	if (input.parentDocumentId) {
-		requireAccessibleParent(caller, input.parentDocumentId);
+		requireAccessibleParent(caller, input.parentDocumentId, 'create_document');
 	}
 
 	const document = crdtCreateDocument(doc, {
@@ -70,9 +70,9 @@ export function moveDocument(
 	const doc = getYDoc();
 	const actor = actorForCaller(caller);
 
-	requireAccessibleParent(caller, documentId);
+	requireAccessibleParent(caller, documentId, 'move_document');
 	if (options.parentDocumentId) {
-		requireAccessibleParent(caller, options.parentDocumentId);
+		requireAccessibleParent(caller, options.parentDocumentId, 'move_document');
 	}
 
 	crdtUpdateDocumentParent(doc, documentId, options.parentDocumentId, options.afterDocumentId);
@@ -88,7 +88,7 @@ export function deleteDocument(caller: CallerIdentity, documentId: string): void
 	const doc = getYDoc();
 	const actor = actorForCaller(caller);
 
-	requireAccessibleParent(caller, documentId);
+	requireAccessibleParent(caller, documentId, 'delete_document');
 	crdtDeleteDocument(doc, documentId);
 	logAudit({ actor, action: 'delete_document', targetRecordId: documentId });
 }
@@ -101,7 +101,7 @@ export function updateDocumentTitle(
 	const doc = getYDoc();
 	const actor = actorForCaller(caller);
 
-	requireAccessibleParent(caller, documentId);
+	requireAccessibleParent(caller, documentId, 'update_document_title');
 	crdtUpdateDocumentTitle(doc, documentId, title);
 	logAudit({
 		actor,
@@ -137,7 +137,7 @@ export function getDocument(
 	const doc = getYDoc();
 	const actor = actorForCaller(caller);
 
-	requireAccessibleParent(caller, documentId);
+	requireAccessibleParent(caller, documentId, 'get_document');
 	const document = crdtGetDocument(doc, documentId);
 	if (!document) return null;
 

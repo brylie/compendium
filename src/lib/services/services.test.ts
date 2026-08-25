@@ -420,3 +420,62 @@ describe('service layer: permissions — record-not-found path', () => {
 		expect(() => getRecord(human, 'nonexistent')).toThrow(PermissionDeniedError);
 	});
 });
+
+describe('service layer: denied access attempts are themselves audited (docs/specifications/audit-coverage.md §3)', () => {
+	it('logs a create_record_denied event, attributed to the token, when a token lacks access to the parent', () => {
+		const doc = createDocument(human, { title: 'Denial Audit Doc' });
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Denied Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+
+		expect(() => createRecord(tokenRecord, { parentId: doc.id, blockType: 'paragraph' })).toThrow(
+			PermissionDeniedError
+		);
+
+		const entry = queryAuditLog().find(
+			(a) => a.action === 'create_record_denied' && a.targetRecordId === doc.id
+		);
+		expect(entry).toBeDefined();
+		expect(entry?.actor.kind).toBe('human-via-client');
+	});
+
+	it('logs a get_document_denied event when a token requests a document outside its grant', () => {
+		const doc = createDocument(human, { title: 'Denial Audit Get Doc' });
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Denied Bot 2',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+
+		expect(() => getDocument(tokenRecord, doc.id)).toThrow(PermissionDeniedError);
+		expect(
+			queryAuditLog().some((a) => a.action === 'get_document_denied' && a.targetRecordId === doc.id)
+		).toBe(true);
+	});
+
+	it('does not log a denial for a human caller (requireAccessibleParent never denies CURRENT_USER)', () => {
+		const doc = createDocument(human, { title: 'Human Never Denied Doc' });
+		getDocument(human, doc.id); // succeeds — not a denial
+		expect(
+			queryAuditLog().some((a) => a.action === 'get_document_denied' && a.targetRecordId === doc.id)
+		).toBe(false);
+	});
+
+	it('a token requesting a nonexistent record logs a denial without leaking any content about it', () => {
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Denied Bot 3',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+		expect(() => writeRecord(tokenRecord, 'nonexistent-record-id', { markdown: 'x' })).toThrow(
+			PermissionDeniedError
+		);
+		const entry = queryAuditLog().find(
+			(a) => a.action === 'write_record_denied' && a.targetRecordId === 'nonexistent-record-id'
+		);
+		expect(entry).toBeDefined();
+		expect(entry?.diff).toBeUndefined();
+	});
+});

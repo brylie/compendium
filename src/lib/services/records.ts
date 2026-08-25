@@ -39,7 +39,7 @@ export function createRecord(
 	const doc = getYDoc();
 	const actor = actorForCaller(caller);
 
-	requireAccessibleParent(caller, input.parentId);
+	requireAccessibleParent(caller, input.parentId, 'create_record');
 	const record = crdtCreateRecord(
 		doc,
 		{
@@ -69,7 +69,7 @@ export function writeRecord(
 
 	const doc = getYDoc();
 	const actor = actorForCaller(caller);
-	requireAccessibleRecord(caller, recordId);
+	requireAccessibleRecord(caller, recordId, 'write_record');
 
 	if (input.markdown !== undefined) {
 		if (isAccessToken(caller)) {
@@ -123,11 +123,11 @@ export function deleteRecord(caller: CallerIdentity, recordId: string): void {
 	const doc = getYDoc();
 	const actor = actorForCaller(caller);
 
-	requireAccessibleRecord(caller, recordId);
+	requireAccessibleRecord(caller, recordId, 'delete_record');
 	crdtDeleteRecord(doc, recordId);
 	logAudit({ actor, action: 'delete_record', targetRecordId: recordId });
 }
 
 export function getRecord(caller: CallerIdentity, recordId: string): WorkspaceRecord | undefined {
-	return requireAccessibleRecord(caller, recordId);
+	return requireAccessibleRecord(caller, recordId, 'get_record');
 }

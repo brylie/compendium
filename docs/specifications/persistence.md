@@ -9,7 +9,7 @@
 [Drizzle](https://orm.drizzle.team/) (Apache 2.0 — same license as this project's own goal, not just compatible with it) manages every SQLite table, including the read model in §2 — one schema/migration story (`drizzle-kit`) instead of hand-written SQL for some tables and a separate library for others. It's also the SvelteKit-idiomatic choice: the Svelte CLI ships a built-in `drizzle` setup command.
 
 - `snapshots` — periodic binary snapshots of the `Y.Doc` state (via `Y.encodeStateAsUpdate`), loaded on process start. Simpler than an update-log replay for now; revisit if snapshot size becomes a problem.
-- `audit_log` — append-only: `id, actor_json, action, target_record_id, timestamp, diff_json`. Populated on every write/delete tool call and every UI-originated write, satisfying the PRD's audit-log requirement.
+- `audit_log` — append-only: `id, actor_json, action, target_record_id, timestamp, diff_json`. Populated on every write/delete tool call, denied MCP attempt, and UI-originated write — including UI writes that bypass the service layer entirely, via a generic `Y.Doc`-level observer — satisfying the PRD's audit-log requirement; see [`audit-coverage.md`](./audit-coverage.md) for exactly what's covered, what's deliberately excluded, and how attribution and volume are handled.
 - `access_tokens` — `token_hash, client_label, allowed_document_ids, allowed_collection_ids, created_at`. `client_label` is a free-text field set when the token is created (e.g., "Claude Desktop") — this is what powers the "Brylie · via Claude Desktop" attribution tag, since there's no per-vendor OAuth to source it from otherwise.
 
 ## 2. Query read model — Drizzle, not a reactive database
