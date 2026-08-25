@@ -44,7 +44,7 @@ npm run db:push               # drizzle-kit push
 npm run db:studio             # drizzle-kit studio
 ```
 
-Pre-commit (`prek`, see `.pre-commit-config.yaml`) runs prettier, `eslint --max-warnings 0`, and `svelte-check` on staged files — CI (`.github/workflows/ci.yml`) runs the same plus full coverage, build, and both E2E tiers.
+Pre-commit (`prek`, see `.pre-commit-config.yaml`) runs prettier, `eslint --max-warnings 0`, and `svelte-check` — each hook uses `pass_filenames: false`, so they run across the whole repo rather than only staged files. CI (`.github/workflows/ci.yml`) runs the same plus full coverage, build, and both E2E tiers.
 
 ## Workflow: linking PRs to issues
 
@@ -54,7 +54,7 @@ When a PR implements a tracked GitHub issue, link it in the PR description with 
 
 **One Node process, one `Y.Doc`, three surfaces onto it** — not a client/server split with a real API. The UI's WebSocket sync, the MCP server's tool handlers, and SQLite persistence all read/write the _same_ in-memory `Y.Doc`; this is deliberate (see `architecture.md` §1) because the core acceptance bet is that MCP writes and UI edits are indistinguishable and appear live to each other with zero polling.
 
-```
+```text
 SvelteKit UI  ◄──/ws (y-websocket)──►  Y.Doc (in-memory, whole workspace)  ◄──/mcp (HTTP)──►  MCP client
                                               │
                                               ▼
@@ -74,7 +74,7 @@ SvelteKit UI  ◄──/ws (y-websocket)──►  Y.Doc (in-memory, whole works
 
 Unit tests calling `records.ts`/`services/*.ts` directly, and manual/Playwright-only UI testing, both structurally miss bugs at the MCP↔Yjs transport boundary (a real bug of this shape already happened: a token's document grant was correct in-memory for one MCP call and gone on the next). Per `e2e-testing.md`:
 
-- **Tier A** (`tests/e2e/tier-a.test.ts`, vitest): boots the real server and opens two _independent_ real clients — an actual `@modelcontextprotocol/sdk` `Client` over HTTP, and a real `y-websocket` client — asserting convergence between them. Never calls internal modules directly to set up/observe state. Write a Tier A test for anything permission-, grant-, hold-, or attribution-related.
+- **Tier A** (`tests/e2e/tier-a.test.ts`, vitest): boots the real server and opens two _independent_ real clients — an actual `@modelcontextprotocol/sdk` `Client` over HTTP, and a real `y-websocket` client — asserting convergence between them. Tests do import internal modules directly for setup and assertions (e.g. `createDocument`, `getRecordYText`, `queryAuditLog`); what makes a test Tier A is that the actual read/write being verified goes through the two real client protocols, not that internal modules are off-limits. Write a Tier A test for anything permission-, grant-, hold-, or attribution-related.
 - **Tier B** (`tests/e2e/tier-b.spec.ts`, Playwright): real browser, but the triggering action still comes from a real MCP client call in the test's Node context. Reserved for behavior that specifically needs a rendered DOM (held-block shimmer, live sidebar tree updates) — keep this tier small.
 - Shared harness: `tests/e2e/harness.ts` (the only place that should know how to boot a full server instance for tests).
 - Vitest is split into three projects (`vite.config.ts`): `server` (node env, most of `src/**` + `tests/**`), `client` (jsdom, `src/lib/client/**`), `component` (jsdom + `browser` resolve condition, `src/**/*.svelte.test.ts` — needed because Vitest's default SSR condition resolves `svelte` to a build without `mount()`).

@@ -89,6 +89,22 @@ describe('BlockEditor', () => {
 		expect(span).toHaveTextContent('Q3 Roadmap');
 	});
 
+	it('re-renders an already-mounted inline wiki-link to the broken state when its target is deleted afterward', () => {
+		const target = createDocument(doc, { title: 'Q3 Roadmap' });
+		const ytext = doc.getText('a');
+		ytext.insert(0, 'Q3 Roadmap', { link: `record:${target.id}` });
+
+		const { container } = render(BlockEditor, { ytext, ...handlers() });
+		expect(container.querySelector('a')).toHaveAttribute('href', `/doc/${target.id}`);
+
+		deleteDocument(doc, target.id);
+
+		expect(container.querySelector('a')).toBeNull();
+		expect(container.querySelector('[title="Linked page was deleted"]')).toHaveTextContent(
+			'Q3 Roadmap'
+		);
+	});
+
 	it('escapes HTML special characters in the plain text', () => {
 		const ytext = doc.getText('a');
 		ytext.insert(0, '<b>&"\'');

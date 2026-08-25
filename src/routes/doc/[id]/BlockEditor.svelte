@@ -247,7 +247,20 @@
 	$effect(() => {
 		ytext.observe(render);
 		render();
-		return () => ytext.unobserve(render);
+		// An inline record: link (§ runToHtml) resolves its target live against
+		// the Documents/Collections index, not just this block's own ytext — so
+		// a rename or delete of that target elsewhere must also re-render this
+		// already-mounted block, not just the next time its own text changes.
+		const doc = ytext.doc;
+		const documentsMap = doc?.getMap('documents');
+		const collectionsMap = doc?.getMap('collections');
+		documentsMap?.observeDeep(render);
+		collectionsMap?.observeDeep(render);
+		return () => {
+			ytext.unobserve(render);
+			documentsMap?.unobserveDeep(render);
+			collectionsMap?.unobserveDeep(render);
+		};
 	});
 </script>
 
