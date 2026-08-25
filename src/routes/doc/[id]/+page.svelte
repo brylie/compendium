@@ -721,6 +721,7 @@
 							block.referencedRecordId && ydoc
 								? getDocument(ydoc, block.referencedRecordId)
 								: undefined}
+						{@const isBroken = !!block.referencedRecordId && !linkedDoc}
 						<div class="my-1 rounded-lg border border-border bg-surface/50 p-2.5 shadow-xs">
 							{#if linkedDoc}
 								<div class="flex items-center justify-between">
@@ -733,6 +734,21 @@
 											>{linkedDoc.title || 'Untitled Document'}</span
 										>
 									</a>
+									<button
+										type="button"
+										onclick={() => handleLinkPage(block.id)}
+										class="rounded px-2 py-0.5 text-xs text-muted hover:text-accent"
+										title="Change target document"
+									>
+										Change
+									</button>
+								</div>
+							{:else if isBroken}
+								<div class="flex items-center justify-between" role="alert">
+									<span class="flex items-center gap-2 text-sm text-muted italic">
+										<Icon name="link" size={16} class="flex-shrink-0 opacity-50" />
+										Linked page was deleted
+									</span>
 									<button
 										type="button"
 										onclick={() => handleLinkPage(block.id)}

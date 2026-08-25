@@ -12,6 +12,7 @@ import {
 import { logAudit } from '$lib/server/audit';
 import { grantDocumentAccess, tokenAllowsParent } from '$lib/mcp/tokens';
 import { richTextToMarkdown } from '$lib/mcp/markdown-transcode';
+import { resolveInternalLinkTarget } from '$lib/data/links';
 import type { DocumentMeta } from '$lib/data/types';
 import {
 	actorForCaller,
@@ -123,6 +124,13 @@ export function getDocument(
 		checked?: boolean;
 		collapsed?: boolean;
 		referencedRecordId?: string;
+		// True when referencedRecordId is set but no longer names an existing
+		// Document/Collection — the target was deleted after this page_link was
+		// created. Exposed as its own field (not just inferred from markdown
+		// text) so callers, including MCP agents, can detect a broken link
+		// without string-matching "Deleted page". See
+		// docs/specifications/internal-links.md.
+		linkBroken?: boolean;
 		markdown: string;
 	}>;
 } | null {
@@ -142,13 +150,15 @@ export function getDocument(
 			!r.referencedRecordId ||
 			!isAccessToken(caller) ||
 			tokenAllowsParent(caller, r.referencedRecordId);
-		const targetTitle =
+		const linkedTarget =
 			isPageLink && r.referencedRecordId && targetInScope
-				? (crdtGetDocument(doc, r.referencedRecordId)?.title ?? 'Untitled')
-				: '';
+				? resolveInternalLinkTarget(doc, r.referencedRecordId)
+				: undefined;
+		const linkBroken =
+			isPageLink && r.referencedRecordId && targetInScope && !linkedTarget ? true : undefined;
 		const markdown = isPageLink
-			? targetTitle
-				? `[[${targetTitle}]]`
+			? r.referencedRecordId && targetInScope
+				? `[[${linkedTarget?.title ?? 'Deleted page'}]]`
 				: r.content
 					? richTextToMarkdown(doc, r.content)
 					: ''
@@ -161,6 +171,7 @@ export function getDocument(
 			checked: r.checked,
 			collapsed: r.collapsed,
 			referencedRecordId: targetInScope ? r.referencedRecordId : undefined,
+			linkBroken,
 			markdown
 		};
 	});

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/svelte';
 import * as Y from 'yjs';
+import { createDocument, deleteDocument } from '$lib/data/records';
 import BlockEditor from './BlockEditor.svelte';
 
 function selectRange(el: HTMLElement, start: number, end: number): void {
@@ -64,6 +65,28 @@ describe('BlockEditor', () => {
 		ytext.insert(0, 'danger', { link: 'javascript:alert(1)' });
 		const { container } = render(BlockEditor, { ytext, ...handlers() });
 		expect(container.querySelector('a')).toHaveAttribute('href', '#');
+	});
+
+	it('renders an inline wiki-link mark as a navigable link to its current target', () => {
+		const target = createDocument(doc, { title: 'Q3 Roadmap' });
+		const ytext = doc.getText('a');
+		ytext.insert(0, 'Q3 Roadmap', { link: `record:${target.id}` });
+		const { container } = render(BlockEditor, { ytext, ...handlers() });
+		const anchor = container.querySelector('a')!;
+		expect(anchor).toHaveAttribute('href', `/doc/${target.id}`);
+		expect(anchor).toHaveTextContent('Q3 Roadmap');
+	});
+
+	it('renders an inline wiki-link mark as a distinct broken state once its target is deleted', () => {
+		const target = createDocument(doc, { title: 'Q3 Roadmap' });
+		const ytext = doc.getText('a');
+		ytext.insert(0, 'Q3 Roadmap', { link: `record:${target.id}` });
+		deleteDocument(doc, target.id);
+
+		const { container } = render(BlockEditor, { ytext, ...handlers() });
+		expect(container.querySelector('a')).toBeNull();
+		const span = container.querySelector('[title="Linked page was deleted"]')!;
+		expect(span).toHaveTextContent('Q3 Roadmap');
 	});
 
 	it('escapes HTML special characters in the plain text', () => {

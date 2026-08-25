@@ -7,6 +7,7 @@ Canonical specification for each implemented subsystem, translating [`agent-work
 - [`collaboration.md`](./collaboration.md) — presence and holds, built on Yjs Awareness.
 - [`mcp-tools.md`](./mcp-tools.md) — the MCP tool surface and permission scoping.
 - [`markdown-transcoding.md`](./markdown-transcoding.md) — the `Y.Text` ⇄ Markdown boundary.
+- [`internal-links.md`](./internal-links.md) — the shared, ID-backed representation behind `page_link` blocks and inline wiki-links, and why a deleted target becomes an explicit broken link rather than a silent one.
 - [`rich-text-toolbar.md`](./rich-text-toolbar.md) — persistent editor toolbar, selected-mark state, block insertion, and its relationship to slash commands.
 - [`undo-redo.md`](./undo-redo.md) — local, per-actor undo/redo via Y.UndoManager, and why it never reverts a collaborator's or agent's edit.
 - [`persistence.md`](./persistence.md) — SQLite via Drizzle: snapshots, audit log, access tokens, and the query read model.

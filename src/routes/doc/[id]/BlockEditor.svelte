@@ -3,6 +3,7 @@
 	import { diffPlainText } from '$lib/client/text-diff';
 	import { getCaretOffset, getSelectionOffsets, setCaretOffset } from '$lib/client/caret';
 	import { plainText, yTextToRichText } from '$lib/data/richtext';
+	import { RECORD_LINK_SCHEME, resolveInternalLinkTarget } from '$lib/data/links';
 	import type { TextMarks } from '$lib/data/types';
 
 	let {
@@ -50,15 +51,31 @@
 		return '#';
 	}
 
-	function runToHtml(text: string, marks: TextMarks): string {
+	// A `record:` scheme link is an internal wiki-link (page_link's inline
+	// sibling — see docs/specifications/internal-links.md), not an external
+	// URL: it's resolved live against the current Documents/Collections index
+	// rather than passed through safeHref, so renaming its target doesn't
+	// break it and deleting its target renders as an explicit broken state
+	// instead of a silently dead generic link.
+	function runToHtml(text: string, marks: TextMarks, doc: Y.Doc | null | undefined): string {
 		let html = escapeHtml(text);
 		if (marks.code)
 			html = `<code class="bg-surface px-1 py-0.5 rounded font-mono text-[0.9em] border border-border">${html}</code>`;
 		if (marks.bold) html = `<strong class="font-semibold">${html}</strong>`;
 		if (marks.italic) html = `<em>${html}</em>`;
 		if (marks.strikethrough) html = `<s class="line-through text-muted">${html}</s>`;
-		if (marks.link)
+		if (marks.link?.startsWith(RECORD_LINK_SCHEME)) {
+			const id = marks.link.slice(RECORD_LINK_SCHEME.length);
+			const target = doc ? resolveInternalLinkTarget(doc, id) : undefined;
+			if (target) {
+				const href = target.kind === 'collection' ? `/table/${target.id}` : `/doc/${target.id}`;
+				html = `<a href="${escapeHtml(href)}" class="text-accent underline underline-offset-2">${html}</a>`;
+			} else {
+				html = `<span class="text-muted italic line-through decoration-dotted" title="Linked page was deleted">${html}</span>`;
+			}
+		} else if (marks.link) {
 			html = `<a href="${escapeHtml(safeHref(marks.link))}" class="text-accent underline underline-offset-2" rel="noopener noreferrer nofollow">${html}</a>`;
+		}
 		return html;
 	}
 
@@ -70,7 +87,7 @@
 		// re-derives the DOM from the now-current ytext (local edit included).
 		if (isComposing) return;
 		const richText = yTextToRichText(ytext);
-		const html = richText.runs.map((r) => runToHtml(r.text, r.marks)).join('');
+		const html = richText.runs.map((r) => runToHtml(r.text, r.marks, ytext.doc)).join('');
 		const caret = document.activeElement === el ? getCaretOffset(el) : null;
 		// Bespoke rich-text rendering: this contenteditable's content is derived
 		// entirely from the Y.Text CRDT, not from Svelte-owned markup, so direct

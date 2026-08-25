@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { createCollection, createDocument } from '$lib/data/records';
+import { createCollection, createDocument, deleteDocument } from '$lib/data/records';
 import { markdownToRichText, richTextToMarkdown } from './markdown-transcode';
 
 describe('markdown transcoding', () => {
@@ -77,5 +77,19 @@ describe('markdown transcoding', () => {
 		const doc = new Y.Doc();
 		const richText = markdownToRichText(doc, 'before <br> after');
 		expect(richText.runs.map((r) => r.text).join('')).toContain('before');
+	});
+
+	it('renders a wiki-link whose target Document was deleted as an explicit broken marker, not the stale title', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Q3 Roadmap' });
+		const richText = markdownToRichText(doc, 'see [[Q3 Roadmap]] for details');
+		const linkRun = richText.runs.find((r) => r.marks.link?.startsWith('record:'));
+		expect(linkRun?.marks.link).toBe(`record:${document.id}`);
+
+		deleteDocument(doc, document.id);
+
+		const markdown = richTextToMarkdown(doc, richText);
+		expect(markdown).toContain('[[Deleted page]]');
+		expect(markdown).not.toContain('Q3 Roadmap');
 	});
 });

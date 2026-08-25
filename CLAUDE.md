@@ -11,6 +11,7 @@ Compendium is a shared, real-time knowledge workspace: one SvelteKit app where a
 - [`collaboration.md`](docs/specifications/collaboration.md) — presence & holds (Yjs Awareness)
 - [`mcp-tools.md`](docs/specifications/mcp-tools.md) — the MCP tool surface
 - [`markdown-transcoding.md`](docs/specifications/markdown-transcoding.md) — `Y.Text` ⇄ Markdown boundary
+- [`internal-links.md`](docs/specifications/internal-links.md) — ID-backed `page_link`/wiki-link representation, deleted-target handling
 - [`rich-text-toolbar.md`](docs/specifications/rich-text-toolbar.md) — editor toolbar / slash-menu contract
 - [`undo-redo.md`](docs/specifications/undo-redo.md) — local, per-actor undo/redo via Y.UndoManager
 - [`persistence.md`](docs/specifications/persistence.md) — SQLite via Drizzle (snapshots, audit, tokens, read model)
