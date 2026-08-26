@@ -118,6 +118,9 @@ export function writeRecord(
 		if (record.blockType !== 'page_link') {
 			throw new Error('referencedRecordId can only be written on a page_link block.');
 		}
+		if (!crdtGetDocument(doc, record.parentId)) {
+			throw new Error('page_link blocks can only exist inside a Document.');
+		}
 		validatePageLinkTarget(caller, input.referencedRecordId);
 	}
 
