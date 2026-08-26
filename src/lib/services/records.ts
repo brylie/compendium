@@ -33,7 +33,7 @@ export class HoldRequiredError extends Error {
 // A page_link's target must be a Document the caller can already reach —
 // deliberately a single generic message for "doesn't exist" and "exists but
 // out of token scope" alike, so a probing caller can't use this as an oracle
-// to learn whether a given ID exists (docs/specifications/internal-links.md §2,
+// to learn whether a given ID exists (docs/specifications/internal-links.md §4,
 // audit-coverage.md §3's "never leak more than what the caller already
 // supplied" principle).
 export class InvalidLinkTargetError extends Error {
@@ -110,6 +110,17 @@ export function writeRecord(
 	const actor = actorForCaller(caller);
 	const record = requireAccessibleRecord(caller, recordId, 'write_record');
 
+	// Validated up front, before any mutation below: a call combining markdown
+	// (or properties) with an invalid referencedRecordId must reject cleanly,
+	// not commit the content write, release the hold, and audit it before
+	// throwing on the retarget.
+	if (input.referencedRecordId !== undefined) {
+		if (record.blockType !== 'page_link') {
+			throw new Error('referencedRecordId can only be written on a page_link block.');
+		}
+		validatePageLinkTarget(caller, input.referencedRecordId);
+	}
+
 	if (input.markdown !== undefined) {
 		if (isAccessToken(caller)) {
 			const awareness = getAwareness();
@@ -158,11 +169,6 @@ export function writeRecord(
 	}
 
 	if (input.referencedRecordId !== undefined) {
-		if (record.blockType !== 'page_link') {
-			throw new Error('referencedRecordId can only be written on a page_link block.');
-		}
-		validatePageLinkTarget(caller, input.referencedRecordId);
-
 		// A retarget is a metadata write, not a content write — there's no Y.Text
 		// for a human cursor to be inside, so unlike the markdown branch above
 		// this needs no hold (same exemption already applied to `properties`,

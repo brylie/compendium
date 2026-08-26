@@ -426,6 +426,34 @@ describe('service layer: MCP authoring and repair of page_link targets (issue #4
 		const result = getDocument(tokenRecord, source.id);
 		expect(result?.records.find((r) => r.id === link.id)?.referencedRecordId).toBe(target.id);
 	});
+
+	it('rejects a combined write_record call with an invalid referencedRecordId before applying its markdown', () => {
+		const secret = createDocument(human, { title: 'Secret Doc' });
+		const source = createDocument(human, { title: 'Source Doc' });
+		const link = createRecord(human, { parentId: source.id, blockType: 'page_link' });
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Combined Write Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: []
+		});
+		holdRecords(tokenRecord, [link.id]);
+
+		expect(() =>
+			writeRecord(tokenRecord, link.id, {
+				markdown: 'unresolved link text',
+				referencedRecordId: secret.id
+			})
+		).toThrow(InvalidLinkTargetError);
+
+		// The markdown write never committed, and the hold was never consumed —
+		// validation ran before any mutation (docs/specifications/mcp-tools.md).
+		const result = getDocument(human, source.id);
+		const linkRecord = result?.records.find((r) => r.id === link.id);
+		expect(linkRecord?.markdown).toBe('');
+		expect(linkRecord?.referencedRecordId).toBeUndefined();
+		expect(holdRecords(tokenRecord, [link.id]).granted).toContain(link.id);
+	});
 });
 
 describe('service layer: documents — unfiltered listing, delete, and rename', () => {
