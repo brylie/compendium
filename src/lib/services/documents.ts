@@ -13,7 +13,7 @@ import { logAudit } from '$lib/server/audit';
 import { grantDocumentAccess, tokenAllowsParent } from '$lib/mcp/tokens';
 import { richTextToMarkdown } from '$lib/mcp/markdown-transcode';
 import { resolveInternalLinkTarget } from '$lib/data/links';
-import type { DocumentMeta } from '$lib/data/types';
+import type { DocumentMeta, EmbeddedViewConfig } from '$lib/data/types';
 import {
 	actorForCaller,
 	isAccessToken,
@@ -131,6 +131,11 @@ export function getDocument(
 		// without string-matching "Deleted page". See
 		// docs/specifications/internal-links.md.
 		linkBroken?: boolean;
+		// Only set for collection_view blocks, and only when the target
+		// Collection is in scope — same omission rule as referencedRecordId,
+		// since it names properties/filters from a Collection whose schema an
+		// out-of-scope caller was never granted visibility into either.
+		viewConfig?: EmbeddedViewConfig;
 		markdown: string;
 	}>;
 } | null {
@@ -143,28 +148,40 @@ export function getDocument(
 
 	const records = crdtListRecordsForParent(doc, documentId).map((r) => {
 		const isPageLink = r.blockType === 'page_link';
-		// A page_link's target can be any Document, not just ones under this
-		// documentId — an out-of-scope target must not leak its title/id to a
-		// token that was never granted access to it.
+		const isCollectionView = r.blockType === 'collection_view';
+		// A referenced target can be any Document or Collection, not just ones
+		// under this documentId — an out-of-scope target must not leak its
+		// title/id/schema to a token that was never granted access to it.
 		const targetInScope =
 			!r.referencedRecordId ||
 			!isAccessToken(caller) ||
 			tokenAllowsParent(caller, r.referencedRecordId);
-		const linkedTarget =
-			isPageLink && r.referencedRecordId && targetInScope
+		const resolvedTarget =
+			(isPageLink || isCollectionView) && r.referencedRecordId && targetInScope
 				? resolveInternalLinkTarget(doc, r.referencedRecordId)
 				: undefined;
+		const linkedTarget = isCollectionView
+			? resolvedTarget?.kind === 'collection'
+				? resolvedTarget
+				: undefined
+			: resolvedTarget;
 		const linkBroken =
-			isPageLink && r.referencedRecordId && targetInScope && !linkedTarget ? true : undefined;
+			(isPageLink || isCollectionView) && r.referencedRecordId && targetInScope && !linkedTarget
+				? true
+				: undefined;
 		const markdown = isPageLink
 			? r.referencedRecordId && targetInScope
 				? `[[${linkedTarget?.title ?? 'Deleted page'}]]`
 				: r.content
 					? richTextToMarkdown(doc, r.content)
 					: ''
-			: r.content
-				? richTextToMarkdown(doc, r.content)
-				: '';
+			: isCollectionView
+				? r.referencedRecordId && targetInScope
+					? `[collection view: ${linkedTarget?.title ?? 'Deleted collection'}]`
+					: '[collection view: unconfigured]'
+				: r.content
+					? richTextToMarkdown(doc, r.content)
+					: '';
 		return {
 			id: r.id,
 			blockType: r.blockType,
@@ -172,6 +189,7 @@ export function getDocument(
 			collapsed: r.collapsed,
 			referencedRecordId: targetInScope ? r.referencedRecordId : undefined,
 			linkBroken,
+			viewConfig: isCollectionView && linkedTarget ? r.viewConfig : undefined,
 			markdown
 		};
 	});

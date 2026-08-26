@@ -7,6 +7,7 @@ import type {
 	CollectionMeta,
 	DocumentMeta,
 	DocumentTreeNode,
+	EmbeddedViewConfig,
 	ParentKind,
 	PropertyDefinition,
 	PropertyValue,
@@ -340,6 +341,7 @@ function readRecord(yrecord: Y.Map<unknown>): WorkspaceRecord {
 		checked: yrecord.get('checked') as boolean | undefined,
 		collapsed: yrecord.get('collapsed') as boolean | undefined,
 		referencedRecordId: yrecord.get('referencedRecordId') as string | undefined,
+		viewConfig: yrecord.get('viewConfig') as EmbeddedViewConfig | undefined,
 		createdBy: yrecord.get('createdBy') as ActorId,
 		createdAt: yrecord.get('createdAt') as number,
 		lastEditedBy: yrecord.get('lastEditedBy') as ActorId,
@@ -356,6 +358,7 @@ export interface CreateRecordInput {
 	checked?: boolean;
 	collapsed?: boolean;
 	referencedRecordId?: string;
+	viewConfig?: EmbeddedViewConfig; // for collection_view blocks
 }
 
 export function createRecord(
@@ -393,6 +396,7 @@ export function createRecord(
 			if (input.checked !== undefined) yrecord.set('checked', input.checked);
 			if (input.collapsed !== undefined) yrecord.set('collapsed', input.collapsed);
 			if (input.referencedRecordId) yrecord.set('referencedRecordId', input.referencedRecordId);
+			if (input.viewConfig) yrecord.set('viewConfig', input.viewConfig);
 		} else {
 			yrecord.set('isCollectionRow', true);
 			for (const [key, value] of Object.entries(input.properties ?? {})) {
@@ -495,6 +499,27 @@ export function setRecordReferencedId(
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	doc.transact(() => {
 		yrecord.set('referencedRecordId', referencedRecordId);
+		yrecord.set('lastEditedBy', actor);
+		yrecord.set('lastEditedAt', Date.now());
+	});
+}
+
+// A collection_view block's view type + filters/sort/visible-properties/
+// grouping-property choice — whole-value LWW, same pattern as
+// setRecordReferencedId. One person is expected to be editing a given
+// embed's config at a time, so field-level merge granularity (splitting
+// into prop:-style sub-keys, like Collection row properties do) isn't
+// needed here.
+export function setRecordViewConfig(
+	doc: Y.Doc,
+	id: string,
+	viewConfig: EmbeddedViewConfig,
+	actor: ActorId
+): void {
+	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
+	doc.transact(() => {
+		yrecord.set('viewConfig', viewConfig);
 		yrecord.set('lastEditedBy', actor);
 		yrecord.set('lastEditedAt', Date.now());
 	});

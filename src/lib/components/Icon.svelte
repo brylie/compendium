@@ -35,7 +35,11 @@
 			| 'heading-4'
 			| 'list-bullet'
 			| 'list-number'
-			| 'logo';
+			| 'logo'
+			| 'board'
+			| 'calendar'
+			| 'filter'
+			| 'sort';
 		size?: number;
 		class?: string;
 	} = $props();
@@ -139,5 +143,15 @@
 	{:else if name === 'logo'}
 		<path d="M4 5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5Z" />
 		<path d="M7 7.5h6M7 11h4M7 14.5h5" />
+	{:else if name === 'board'}
+		<rect x="2.5" y="3.5" width="15" height="13" rx="1.5" />
+		<path d="M7.5 3.5v13M12.5 3.5v13" />
+	{:else if name === 'calendar'}
+		<rect x="3" y="4" width="14" height="13" rx="1.5" />
+		<path d="M3 8h14M7 2.5V5.5M13 2.5V5.5" />
+	{:else if name === 'filter'}
+		<path d="M3 4h14l-5.5 6.5V16l-3-1.5v-4Z" />
+	{:else if name === 'sort'}
+		<path d="M6 4v12M6 4 3.5 6.5M6 4l2.5 2.5M14 16V4M14 16l2.5-2.5M14 16l-2.5-2.5" />
 	{/if}
 </svg>

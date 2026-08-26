@@ -46,6 +46,7 @@ One long-running local Node process, no separate backend/frontend deployment:
 
 - `/` — workspace home: list of Documents and Collections.
 - `/doc/[id]` — Document view: renders `recordIds` in order, each as an editable block component bound to that record's `Y.Text` (for content) via a Yjs Svelte binding; slash-command menu and formatting toolbar live here. See [`rich-text-toolbar.md`](./rich-text-toolbar.md) for their shared interaction contract.
-- `/table/[id]` — Table view: schema editor + row grid, bound to the Collection's `recordIds` and each record's `properties`.
+- `/table/[id]` — Table view: schema editor + row grid, bound to the Collection's `recordIds` and each record's `properties`. Pre-existing, full-page route.
+- Board and Calendar have no route of their own — they, and a second Table renderer, are `collection_view` Document blocks (`/doc/[id]`, inserted via the slash menu, rendered by `CollectionViewBlock.svelte`), embedded inline the same way a `page_link` block is. All three renderers share one query/projection path (`$lib/data/views.ts`) over the identical live record set `/table/[id]` uses — see [`collection-views.md`](./collection-views.md).
 - `/settings/tokens` — create/revoke local access tokens (the current stand-in for OAuth), each with a document/collection allowlist.
 - Shared `lib/yjs-client.ts` — wraps the y-websocket connection and exposes the same `Record`/`Document`/`Collection` read/write functions the MCP server uses server-side, so UI and MCP code share one data-access layer rather than duplicating it.

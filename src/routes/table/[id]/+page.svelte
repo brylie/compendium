@@ -8,11 +8,11 @@
 		createRecord,
 		deleteRecord,
 		getCollection,
-		listRecordsForParent,
 		updateCollectionSchema,
 		updateCollectionTitle,
 		updateRecordProperties
 	} from '$lib/data/records';
+	import { getCollectionView } from '$lib/data/views';
 	import type {
 		PropertyDefinition,
 		PropertyType,
@@ -20,6 +20,7 @@
 		WorkspaceRecord
 	} from '$lib/data/types';
 	import Icon from '$lib/components/Icon.svelte';
+	import PropertyValueCell from '$lib/components/PropertyValueCell.svelte';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -43,9 +44,9 @@
 
 	function refresh(): void {
 		if (!ydoc) return;
-		const collection = getCollection(ydoc, data.collectionId);
-		schema = collection?.schema ?? [];
-		rows = listRecordsForParent(ydoc, data.collectionId);
+		const view = getCollectionView(ydoc, data.collectionId);
+		schema = view.collection?.schema ?? [];
+		rows = view.records;
 	}
 
 	onMount(() => {
@@ -185,94 +186,12 @@
 					<tr class="group transition-colors hover:bg-surface/40">
 						{#each schema as property (property.key)}
 							<td class="border-r border-border/60 p-1.5">
-								{#if property.type === 'text'}
-									<input
-										type="text"
-										value={(cellValue(row, property) as { value?: string })?.value ?? ''}
-										onchange={(e) =>
-											setCell(row, property, {
-												type: 'text',
-												value: (e.target as HTMLInputElement).value
-											})}
-										class="w-full rounded border-0 bg-transparent px-2 py-1 text-sm text-fg focus:bg-bg focus:ring-1 focus:ring-accent"
-									/>
-								{:else if property.type === 'number'}
-									<input
-										type="number"
-										value={(cellValue(row, property) as { value?: number })?.value ?? ''}
-										onchange={(e) =>
-											setCell(row, property, {
-												type: 'number',
-												value: Number((e.target as HTMLInputElement).value)
-											})}
-										class="w-full rounded border-0 bg-transparent px-2 py-1 text-sm text-fg focus:bg-bg focus:ring-1 focus:ring-accent"
-									/>
-								{:else if property.type === 'date'}
-									<input
-										type="date"
-										value={(cellValue(row, property) as { value?: string })?.value ?? ''}
-										onchange={(e) =>
-											setCell(row, property, {
-												type: 'date',
-												value: (e.target as HTMLInputElement).value
-											})}
-										class="w-full rounded border-0 bg-transparent px-2 py-1 text-sm text-fg focus:bg-bg focus:ring-1 focus:ring-accent"
-									/>
-								{:else if property.type === 'checkbox'}
-									<div class="flex items-center justify-center py-1">
-										<input
-											type="checkbox"
-											checked={(cellValue(row, property) as { value?: boolean })?.value ?? false}
-											onchange={(e) =>
-												setCell(row, property, {
-													type: 'checkbox',
-													value: (e.target as HTMLInputElement).checked
-												})}
-											class="h-4 w-4 rounded border-border text-accent focus:ring-accent"
-										/>
-									</div>
-								{:else if property.type === 'select'}
-									<div class="flex items-center gap-1">
-										<select
-											value={(cellValue(row, property) as { value?: string })?.value ?? ''}
-											onchange={(e) =>
-												setCell(row, property, {
-													type: 'select',
-													value: (e.target as HTMLSelectElement).value
-												})}
-											class="flex-1 rounded border-0 bg-transparent px-2 py-1 text-sm text-fg focus:bg-bg focus:ring-1 focus:ring-accent"
-										>
-											<option value="">—</option>
-											{#each property.options ?? [] as option (option.id)}
-												<option value={option.id}>{option.label}</option>
-											{/each}
-										</select>
-										<button
-											type="button"
-											onclick={() => addSelectOption(property.key)}
-											class="rounded p-1 text-xs text-muted hover:text-accent"
-											title="Add option"
-										>
-											+
-										</button>
-									</div>
-								{:else if property.type === 'relation'}
-									<input
-										type="text"
-										placeholder="record ids…"
-										value={(cellValue(row, property) as { value?: string[] })?.value?.join(', ') ??
-											''}
-										onchange={(e) =>
-											setCell(row, property, {
-												type: 'relation',
-												value: (e.target as HTMLInputElement).value
-													.split(',')
-													.map((s) => s.trim())
-													.filter(Boolean)
-											})}
-										class="w-full rounded border-0 bg-transparent px-2 py-1 text-sm text-fg focus:bg-bg focus:ring-1 focus:ring-accent"
-									/>
-								{/if}
+								<PropertyValueCell
+									{property}
+									value={cellValue(row, property)}
+									oninput={(value) => setCell(row, property, value)}
+									onAddOption={() => addSelectOption(property.key)}
+								/>
 							</td>
 						{/each}
 						<td class="px-2 py-1.5 text-center">

@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import { createDocument, createRecord, getDocument, getRecordYText } from '$lib/data/records';
+import {
+	createCollection,
+	createDocument,
+	createRecord,
+	getDocument,
+	getRecordYText
+} from '$lib/data/records';
 import type { ActorId } from '$lib/data/types';
 import Page from './+page.svelte';
 
@@ -274,6 +280,39 @@ describe('doc/[id] +page', () => {
 		expect(screen.getByText('Linked page was deleted')).toBeInTheDocument();
 		expect(screen.queryByText('Link to page:')).not.toBeInTheDocument();
 		expect(screen.queryByRole('link', { name: /gone/ })).not.toBeInTheDocument();
+	});
+
+	it('renders a collection_view block inline as an embedded picker when unconfigured', () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		createRecord(ydoc, { parentId: 'doc-1', blockType: 'collection_view' }, HUMAN);
+		render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		});
+		expect(screen.getByText('Embed a collection view:')).toBeInTheDocument();
+	});
+
+	it('renders a configured collection_view block as an embedded Board inline in the document', () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const collection = createCollection(ydoc, { title: 'Sprint Tasks', schema: [] });
+		createRecord(
+			ydoc,
+			{
+				parentId: 'doc-1',
+				blockType: 'collection_view',
+				referencedRecordId: collection.id,
+				viewConfig: { viewType: 'board' }
+			},
+			HUMAN
+		);
+		render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		});
+		expect(screen.getByText('Sprint Tasks')).toBeInTheDocument();
+		expect(screen.getByText('· board')).toBeInTheDocument();
 	});
 
 	it('adds a new block from the "Add block" button at the bottom', async () => {

@@ -260,6 +260,88 @@ describe('service layer: centralized business rules & side effects', () => {
 		const linkRecord = result?.records.find((r) => r.id === link.id);
 		expect(linkRecord?.linkBroken).toBeUndefined();
 	});
+
+	it('omits a collection_view target outside the caller token scope instead of leaking its schema', () => {
+		const docPublic = createDocument(human, { title: 'Team Page' });
+		const collectionSecret = createCollection(human, {
+			title: 'Secret Tasks',
+			schema: [{ key: 'status', label: 'Status', type: 'select' }]
+		});
+		const embed = crdtCreateRecord(
+			getYDoc(),
+			{
+				parentId: docPublic.id,
+				blockType: 'collection_view',
+				referencedRecordId: collectionSecret.id,
+				viewConfig: { viewType: 'board', groupBy: 'status' }
+			},
+			human
+		);
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Scoped Bot',
+			allowedDocumentIds: [docPublic.id],
+			allowedCollectionIds: []
+		});
+
+		const scoped = getDocument(tokenRecord, docPublic.id);
+		const scopedEmbed = scoped?.records.find((r) => r.id === embed.id);
+		expect(scopedEmbed?.referencedRecordId).toBeUndefined();
+		expect(scopedEmbed?.viewConfig).toBeUndefined();
+		expect(scopedEmbed?.markdown).toBe('[collection view: unconfigured]');
+
+		const full = getDocument(human, docPublic.id);
+		const fullEmbed = full?.records.find((r) => r.id === embed.id);
+		expect(fullEmbed?.referencedRecordId).toBe(collectionSecret.id);
+		expect(fullEmbed?.viewConfig).toEqual({ viewType: 'board', groupBy: 'status' });
+		expect(fullEmbed?.markdown).toBe('[collection view: Secret Tasks]');
+	});
+
+	it('marks a collection_view explicitly broken once its target Collection is deleted, preserving the id', () => {
+		const docPublic = createDocument(human, { title: 'Team Page' });
+		const collectionTarget = createCollection(human, { title: 'Will Be Deleted', schema: [] });
+		const embed = crdtCreateRecord(
+			getYDoc(),
+			{
+				parentId: docPublic.id,
+				blockType: 'collection_view',
+				referencedRecordId: collectionTarget.id,
+				viewConfig: { viewType: 'table' }
+			},
+			human
+		);
+
+		deleteCollection(human, collectionTarget.id);
+
+		const result = getDocument(human, docPublic.id);
+		const embedRecord = result?.records.find((r) => r.id === embed.id);
+		expect(embedRecord?.linkBroken).toBe(true);
+		expect(embedRecord?.markdown).toBe('[collection view: Deleted collection]');
+		expect(embedRecord?.referencedRecordId).toBe(collectionTarget.id);
+		expect(embedRecord?.viewConfig).toBeUndefined();
+	});
+
+	it('marks a collection_view broken when its referencedRecordId names a Document, not a Collection', () => {
+		const docPublic = createDocument(human, { title: 'Team Page' });
+		const docTarget = createDocument(human, { title: 'Not A Collection' });
+		const embed = crdtCreateRecord(
+			getYDoc(),
+			{
+				parentId: docPublic.id,
+				blockType: 'collection_view',
+				referencedRecordId: docTarget.id,
+				viewConfig: { viewType: 'table' }
+			},
+			human
+		);
+
+		const result = getDocument(human, docPublic.id);
+		const embedRecord = result?.records.find((r) => r.id === embed.id);
+		expect(embedRecord?.linkBroken).toBe(true);
+		expect(embedRecord?.markdown).toBe('[collection view: Deleted collection]');
+		expect(embedRecord?.referencedRecordId).toBe(docTarget.id);
+		expect(embedRecord?.viewConfig).toBeUndefined();
+	});
 });
 
 describe('service layer: MCP authoring and repair of page_link targets (issue #46)', () => {

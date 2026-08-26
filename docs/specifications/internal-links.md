@@ -15,6 +15,8 @@ Both resolve to a display title the same way, live, at read time — via `resolv
 
 `src/lib/data/links.ts` also exports `listOutgoingLinks(doc, documentId)`, which walks a Document's own records (`page_link` blocks and inline `record:` marks alike) and resolves each to the same `{ id, kind, title } | undefined` shape. This is the reusable, ID-backed building block a future incoming-link (backlink) index — [#21](https://github.com/brylie/compendium/issues/21) — scans across every Document to build its reverse index; outgoing and incoming views are meant to derive from this one function, not parallel ad hoc scans.
 
+A `collection_view` block (see [`collection-views.md`](./collection-views.md)) also stores a target ID on `referencedRecordId` and reuses `resolveInternalLinkTarget` to resolve it, but it's deliberately not counted as a third kind of "internal link" above — it's an embed reference ("render this Collection here"), not a navigational one, and doesn't currently participate in `listOutgoingLinks`. Its target-resolution and deleted-target handling otherwise follow the exact same pattern as `page_link`'s (§2): the ID is preserved rather than cleared once the target Collection is deleted, and the block renders an explicit "deleted" state rather than reverting to its unconfigured picker.
+
 ## 2. Deleted targets are explicit, not silent
 
 Before this feature, a `page_link` whose target had been deleted was indistinguishable from one that was never linked (both showed the "pick a document" picker), and a deleted wiki-link's target silently rendered its last-known title as if the link still worked. Neither state is acceptable: the first hides that a link needs fixing, the second actively lies.
