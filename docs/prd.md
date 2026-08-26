@@ -1,6 +1,6 @@
 # Compendium — Product Requirements Document
 
-_Formerly "AgentSpace" / working title "the Workspace." Product is now named **Compendium**; the filename of this document is left unchanged for link stability across specs and issues that reference it._
+_Formerly "AgentSpace" / working title "the Workspace." Product is now named **Compendium**. This document itself was renamed from `docs/agent-workspace-prd.md` to `docs/prd.md` on 2026-08-26, with every internal link and cross-referencing issue updated to match._
 
 **Status:** Draft for review
 **Owner:** Brylie Christopher Oxley

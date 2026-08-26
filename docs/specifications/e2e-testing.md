@@ -24,7 +24,7 @@ The fix: tests that hold open two _independent, real_ client connections — one
 - an **MCP client** — the official `@modelcontextprotocol/sdk` `Client`, using its HTTP transport, authenticated with a real bearer token issued through the same `createToken()` path production uses.
 - a **Yjs client** — a real `y-websocket` connection (or the same client wrapper the browser UI uses, `lib/client/yjs-client.ts`), connected to `/ws`, standing in for a browser tab.
 
-No test in this tier calls `records.ts`, a `services/*.ts` function, or any internal module directly to set up or observe state — everything happens through the same two client protocols a real MCP agent and a real browser use. This is what makes the tier catch transport-boundary bugs instead of just re-testing the CRDT.
+Tests do import internal modules directly — `records.ts`, a `services/*.ts` function, or another `$lib` module — for setup and assertions (e.g. seeding a document with `createDocument`, or reading back state with `getRecordYText`/`queryAuditLog`). What makes a test Tier A isn't that internal modules are off-limits; it's that the actual mutation and observation being verified goes through the two real client protocols (the MCP `Client` and the `y-websocket` client), not a direct in-process call standing in for either. This is what makes the tier catch transport-boundary bugs instead of just re-testing the CRDT.
 
 **Test shape — the general pattern:**
 
