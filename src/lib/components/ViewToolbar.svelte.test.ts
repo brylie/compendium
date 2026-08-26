@@ -69,4 +69,19 @@ describe('ViewToolbar', () => {
 		const lastCall: ViewConfig = onConfigChange.mock.calls.at(-1)![0];
 		expect(lastCall.visibleProperties).toEqual(['status']);
 	});
+
+	it('disables property sort mode when the schema has no properties', async () => {
+		const onConfigChange = vi.fn();
+		const user = userEvent.setup();
+		render(ViewToolbarHarness, { schema: [], onConfigChange });
+
+		const modeSelect = screen.getAllByRole('combobox')[0];
+		expect(screen.getByRole('option', { name: 'Sort by property' })).toBeDisabled();
+		const callsBeforeAttempt = onConfigChange.mock.calls.length;
+
+		await user.selectOptions(modeSelect, 'property').catch(() => {});
+
+		expect(onConfigChange.mock.calls.length).toBe(callsBeforeAttempt);
+		expect(screen.queryByRole('option', { name: 'Ascending' })).not.toBeInTheDocument();
+	});
 });

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { nanoid } from 'nanoid';
 	import { getClientDoc } from '$lib/client/yjs-client';
@@ -119,11 +119,20 @@
 		return result;
 	});
 
+	// Auto-picking a default groupBy is attempted at most once per
+	// collectionId, not on every refresh — refresh() re-runs on every Yjs
+	// change (including the auto-pick's own write), so re-attempting it each
+	// time would loop forever whenever config never actually changes back
+	// (e.g. no date property exists yet, so resolvedKey stays undefined).
+	let autoGroupByAttempted = false;
+
 	function refresh(): void {
 		if (!ydoc) return;
 		const view = getCollectionView(ydoc, collectionId);
 		schema = view.collection?.schema ?? [];
 		rows = view.records;
+		if (autoGroupByAttempted) return;
+		autoGroupByAttempted = true;
 		const resolvedKey =
 			config.groupBy && schema.some((p) => p.key === config.groupBy && p.type === 'date')
 				? config.groupBy
@@ -136,7 +145,6 @@
 	onMount(() => {
 		const doc = getClientDoc();
 		ydoc = doc;
-		refresh();
 
 		const recordsMap = doc.getMap('records');
 		const collectionsMap = doc.getMap('collections');
@@ -148,6 +156,12 @@
 			recordsMap.unobserveDeep(observer);
 			collectionsMap.unobserveDeep(observer);
 		};
+	});
+
+	$effect(() => {
+		void collectionId;
+		autoGroupByAttempted = false;
+		untrack(() => refresh());
 	});
 
 	function addDateProperty(): void {

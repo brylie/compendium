@@ -64,6 +64,7 @@
 	}
 
 	function setSortMode(mode: 'manual' | 'property'): void {
+		if (mode === 'property' && schema.length === 0) return;
 		config =
 			mode === 'manual'
 				? { ...config, sort: { mode: 'manual' } }
@@ -185,7 +186,7 @@
 			class="bg-transparent text-xs"
 		>
 			<option value="manual">Manual order</option>
-			<option value="property">Sort by property</option>
+			<option value="property" disabled={schema.length === 0}>Sort by property</option>
 		</select>
 		{#if config.sort?.mode === 'property'}
 			<select

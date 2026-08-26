@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { getClientDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
@@ -44,7 +44,6 @@
 	onMount(() => {
 		const doc = getClientDoc();
 		ydoc = doc;
-		refresh();
 
 		const recordsMap = doc.getMap('records');
 		const collectionsMap = doc.getMap('collections');
@@ -56,6 +55,11 @@
 			recordsMap.unobserveDeep(observer);
 			collectionsMap.unobserveDeep(observer);
 		};
+	});
+
+	$effect(() => {
+		void collectionId;
+		untrack(() => refresh());
 	});
 
 	function addRow(): void {

@@ -318,6 +318,7 @@ describe('service layer: centralized business rules & side effects', () => {
 		expect(embedRecord?.linkBroken).toBe(true);
 		expect(embedRecord?.markdown).toBe('[collection view: Deleted collection]');
 		expect(embedRecord?.referencedRecordId).toBe(collectionTarget.id);
+		expect(embedRecord?.viewConfig).toBeUndefined();
 	});
 
 	it('marks a collection_view broken when its referencedRecordId names a Document, not a Collection', () => {
@@ -339,6 +340,7 @@ describe('service layer: centralized business rules & side effects', () => {
 		expect(embedRecord?.linkBroken).toBe(true);
 		expect(embedRecord?.markdown).toBe('[collection view: Deleted collection]');
 		expect(embedRecord?.referencedRecordId).toBe(docTarget.id);
+		expect(embedRecord?.viewConfig).toBeUndefined();
 	});
 });
 

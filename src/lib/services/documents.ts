@@ -189,7 +189,7 @@ export function getDocument(
 			collapsed: r.collapsed,
 			referencedRecordId: targetInScope ? r.referencedRecordId : undefined,
 			linkBroken,
-			viewConfig: isCollectionView && targetInScope ? r.viewConfig : undefined,
+			viewConfig: isCollectionView && linkedTarget ? r.viewConfig : undefined,
 			markdown
 		};
 	});
