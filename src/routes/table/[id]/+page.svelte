@@ -21,7 +21,6 @@
 	} from '$lib/data/types';
 	import Icon from '$lib/components/Icon.svelte';
 	import PropertyValueCell from '$lib/components/PropertyValueCell.svelte';
-	import ViewSwitcher from '$lib/components/ViewSwitcher.svelte';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -148,8 +147,6 @@
 		oninput={handleTitleInput}
 		placeholder="Untitled Collection"
 	/>
-
-	<ViewSwitcher collectionId={data.collectionId} active="table" />
 
 	<!-- Table Canvas -->
 	<div class="overflow-x-auto rounded-lg border border-border bg-bg shadow-xs">

@@ -23,7 +23,8 @@
 			| 'divider'
 			| 'toc'
 			| 'sync'
-			| 'link';
+			| 'link'
+			| 'table';
 		keywords: string;
 	}
 
@@ -139,6 +140,13 @@
 			description: 'Link to another document.',
 			icon: 'link',
 			keywords: 'page link document subpage wiki mention reference'
+		},
+		{
+			blockType: 'collection_view',
+			label: 'Collection view',
+			description: 'Embed a Table, Board, or Calendar view of a collection.',
+			icon: 'table',
+			keywords: 'collection view table board kanban calendar database embed'
 		}
 	];
 

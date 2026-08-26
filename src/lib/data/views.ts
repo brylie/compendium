@@ -15,44 +15,43 @@
 
 import type * as Y from 'yjs';
 import { getCollection, listRecordsForParent } from './records';
-import type { CollectionMeta, PropertyDefinition, PropertyValue, WorkspaceRecord } from './types';
+import type {
+	CollectionMeta,
+	PropertyDefinition,
+	PropertyValue,
+	ViewConfig,
+	ViewFilter,
+	ViewSort,
+	WorkspaceRecord
+} from './types';
+
+// Re-exported so existing call sites (ViewToolbar.svelte etc.) can keep
+// importing view-config types from '$lib/data/views' — the canonical
+// definitions now live in types.ts alongside EmbeddedViewConfig, since a
+// collection_view block's persisted config needs them too.
+export type {
+	EmbeddedViewConfig,
+	SortDirection,
+	ViewConfig,
+	ViewFilter,
+	ViewFilterOp,
+	ViewSort,
+	ViewType
+} from './types';
 
 export interface CollectionView {
 	collection: CollectionMeta | undefined;
 	records: WorkspaceRecord[];
 }
 
-// The one Collection query/projection path Table, Board, and Calendar all
-// call — issue #9's "reuse one Collection query/projection path so Table,
-// Board, and Calendar immediately show the same record edits" requirement.
+// The one Collection query/projection path Table, Board, Calendar, and any
+// collection_view embed all call — issue #9's "reuse one Collection
+// query/projection path" requirement.
 export function getCollectionView(doc: Y.Doc, collectionId: string): CollectionView {
 	return {
 		collection: getCollection(doc, collectionId),
 		records: listRecordsForParent(doc, collectionId)
 	};
-}
-
-export type ViewFilterOp = 'is' | 'is_not' | 'is_empty' | 'is_not_empty';
-
-export interface ViewFilter {
-	propertyKey: string;
-	op: ViewFilterOp;
-	value?: string;
-}
-
-export type SortDirection = 'asc' | 'desc';
-
-export interface ViewSort {
-	mode: 'manual' | 'property';
-	propertyKey?: string; // required when mode === 'property'
-	direction?: SortDirection; // defaults to 'asc'
-}
-
-export interface ViewConfig {
-	filters?: ViewFilter[];
-	sort?: ViewSort;
-	visibleProperties?: string[]; // property keys; undefined = all visible
-	groupBy?: string; // property key driving Board columns / Calendar buckets
 }
 
 type Comparable = string | number | boolean | undefined;

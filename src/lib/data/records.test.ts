@@ -20,6 +20,7 @@ import {
 	setRecordChecked,
 	setRecordCollapsed,
 	setRecordReferencedId,
+	setRecordViewConfig,
 	touchRecordEditor,
 	updateCollectionSchema,
 	updateCollectionTitle,
@@ -410,6 +411,28 @@ describe('records: creation ordering, mutation, and not-found edge cases', () =>
 		setRecordReferencedId(doc, block.id, target.id, human);
 		expect(getRecord(doc, block.id)?.referencedRecordId).toBe(target.id);
 		expect(() => setRecordReferencedId(doc, 'missing', target.id, human)).toThrow(NotFoundError);
+	});
+
+	it("setRecordViewConfig stores a collection_view block's config and throws NotFoundError for an unknown record", () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(doc, { parentId: document.id, blockType: 'collection_view' }, human);
+		setRecordViewConfig(doc, block.id, { viewType: 'board', groupBy: 'status' }, human);
+		expect(getRecord(doc, block.id)?.viewConfig).toEqual({ viewType: 'board', groupBy: 'status' });
+		expect(() => setRecordViewConfig(doc, 'missing', { viewType: 'table' }, human)).toThrow(
+			NotFoundError
+		);
+	});
+
+	it('createRecord accepts an initial viewConfig for a collection_view block', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'collection_view', viewConfig: { viewType: 'calendar' } },
+			human
+		);
+		expect(getRecord(doc, block.id)?.viewConfig).toEqual({ viewType: 'calendar' });
 	});
 
 	it('deleteRecord is a no-op for a nonexistent id', () => {

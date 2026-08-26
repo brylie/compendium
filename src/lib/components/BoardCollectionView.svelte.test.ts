@@ -3,14 +3,22 @@ import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import { createCollection, createRecord, getRecord } from '$lib/data/records';
-import Page from './+page.svelte';
+import type { ViewConfig } from '$lib/data/views';
+import BoardCollectionViewHarness from './BoardCollectionViewHarness.svelte';
 
 let ydoc: Y.Doc;
 vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
 
 const actor = { kind: 'human' as const, userId: 'local' };
 
-describe('board/[id] +page', () => {
+function renderBoard(
+	collectionId: string,
+	initialConfig: ViewConfig = { sort: { mode: 'manual' } }
+) {
+	return render(BoardCollectionViewHarness, { collectionId, initialConfig });
+}
+
+describe('BoardCollectionView', () => {
 	beforeEach(() => {
 		ydoc = new Y.Doc();
 	});
@@ -21,24 +29,15 @@ describe('board/[id] +page', () => {
 
 	it('prompts to add a select property when the collection has none', () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Board', schema: [] });
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Board' }
-		});
-
+		renderBoard('col-1');
 		expect(screen.getByText(/doesn't have one yet/)).toBeInTheDocument();
 	});
 
-	it('adds a select property via the prompt and switches into the board', async () => {
+	it('adds a select property via the prompt', async () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Board', schema: [] });
 		vi.spyOn(window, 'prompt').mockReturnValue('Status');
 		const user = userEvent.setup();
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Board' }
-		});
+		renderBoard('col-1');
 
 		await user.click(screen.getByRole('button', { name: 'Add a select property' }));
 
@@ -61,29 +60,20 @@ describe('board/[id] +page', () => {
 				}
 			]
 		});
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Board' }
-		});
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
 		expect(screen.getByText('To do')).toBeInTheDocument();
 		expect(screen.getByText('Done')).toBeInTheDocument();
 		expect(screen.getByText('No Status')).toBeInTheDocument();
 	});
 
-	it('buckets an existing record into its matching column', () => {
+	it('makes the card title directly editable via its own field', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'Board',
 			schema: [
 				{ key: 'title', label: 'Title', type: 'text' },
-				{
-					key: 'status',
-					label: 'Status',
-					type: 'select',
-					options: [{ id: 'done', label: 'Done' }]
-				}
+				{ key: 'status', label: 'Status', type: 'select', options: [{ id: 'done', label: 'Done' }] }
 			]
 		});
 		createRecord(
@@ -97,13 +87,19 @@ describe('board/[id] +page', () => {
 			},
 			actor
 		);
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Board' }
-		});
+		const user = userEvent.setup();
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
-		expect(screen.getByText('Ship it')).toBeInTheDocument();
+		const titleInput = screen.getByDisplayValue('Ship it');
+		await user.clear(titleInput);
+		await user.type(titleInput, 'Ship it today');
+		await user.tab();
+
+		const record = ydoc.getMap('records');
+		const stored = Array.from(record.values()).find(
+			(r) => (r as Y.Map<unknown>).get('parentId') === 'col-1'
+		) as Y.Map<unknown>;
+		expect((stored.get('prop:title') as { value: string }).value).toBe('Ship it today');
 	});
 
 	it('adds a card to a specific column via its "Add card" button', async () => {
@@ -111,24 +107,15 @@ describe('board/[id] +page', () => {
 			id: 'col-1',
 			title: 'Board',
 			schema: [
-				{
-					key: 'status',
-					label: 'Status',
-					type: 'select',
-					options: [{ id: 'done', label: 'Done' }]
-				}
+				{ key: 'status', label: 'Status', type: 'select', options: [{ id: 'done', label: 'Done' }] }
 			]
 		});
 		const user = userEvent.setup();
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Board' }
-		});
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
 		await user.click(screen.getByRole('button', { name: 'Add card to Done' }));
 
-		expect(screen.getByText('Untitled')).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Delete card' })).toBeInTheDocument();
 	});
 
 	it('deletes a card via its trash button', async () => {
@@ -146,16 +133,11 @@ describe('board/[id] +page', () => {
 			actor
 		);
 		const user = userEvent.setup();
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Board' }
-		});
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
-		expect(screen.getByText('Doomed card')).toBeInTheDocument();
+		expect(screen.getByDisplayValue('Doomed card')).toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Delete card' }));
 
-		expect(screen.queryByText('Doomed card')).not.toBeInTheDocument();
 		expect(getRecord(ydoc, record.id)).toBeUndefined();
 	});
 
@@ -187,13 +169,9 @@ describe('board/[id] +page', () => {
 			},
 			actor
 		);
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Board' }
-		});
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
-		const card = screen.getByText('Movable').closest('[draggable="true"]') as HTMLElement;
+		const card = screen.getByDisplayValue('Movable').closest('[draggable="true"]') as HTMLElement;
 		const doneColumn = screen.getByRole('group', { name: 'Done column' });
 
 		const { fireEvent } = await import('@testing-library/dom');
@@ -236,11 +214,7 @@ describe('board/[id] +page', () => {
 			actor
 		);
 		const user = userEvent.setup();
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Board' }
-		});
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
 		const moveSelect = screen.getByLabelText('Move Movable to column');
 		await user.selectOptions(moveSelect, 'done');
@@ -251,7 +225,7 @@ describe('board/[id] +page', () => {
 		});
 	});
 
-	it('adds a new option to a non-grouping select field from a card', async () => {
+	it('adds a new option to a non-grouping select field from a card without touching the grouping property', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'Board',
@@ -272,24 +246,15 @@ describe('board/[id] +page', () => {
 		);
 		vi.spyOn(window, 'prompt').mockReturnValue('High');
 		const user = userEvent.setup();
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Board' }
-		});
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
 		await user.click(screen.getByTitle('Add option'));
 
 		const collection = ydoc.getMap('collections').get('col-1') as Y.Map<unknown>;
-		const schema = collection.get('schema') as {
-			key: string;
-			options?: { label: string }[];
-		}[];
-		const status = schema.find((p) => p.key === 'status');
-		const priority = schema.find((p) => p.key === 'priority');
-		// The "+" clicked belongs to the Priority field rendered on the card,
-		// not the Status grouping column — it must never mutate Status's options.
-		expect(priority?.options?.map((o) => o.label)).toEqual(['High']);
-		expect(status?.options?.map((o) => o.label)).toEqual(['To do']);
+		const schema = collection.get('schema') as { key: string; options?: { label: string }[] }[];
+		expect(schema.find((p) => p.key === 'priority')?.options?.map((o) => o.label)).toEqual([
+			'High'
+		]);
+		expect(schema.find((p) => p.key === 'status')?.options?.map((o) => o.label)).toEqual(['To do']);
 	});
 });

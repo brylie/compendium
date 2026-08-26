@@ -1,6 +1,12 @@
 <script lang="ts">
 	import type { PropertyDefinition } from '$lib/data/types';
-	import type { ViewConfig, ViewFilter, ViewFilterOp, SortDirection } from '$lib/data/views';
+	import type {
+		ViewConfig,
+		ViewFilter,
+		ViewFilterOp,
+		ViewSort,
+		SortDirection
+	} from '$lib/data/views';
 	import Icon from './Icon.svelte';
 
 	let {
@@ -22,33 +28,54 @@
 		return schema.find((p) => p.key === key);
 	}
 
+	// Every mutation below reassigns the whole `config` object rather than
+	// setting a nested field in place (config.filters = ... etc.) — that's
+	// what makes `bind:config` work identically whether the caller passes
+	// its own local $state (Board/Calendar's original usage) or bridges to
+	// an externally-owned value via Svelte's function-binding form
+	// (bind:config={() => value, callback}, as CollectionViewBlock does for
+	// a config that actually lives on a Yjs record) — nested-field writes
+	// only propagate through the former, not the latter.
 	function addFilter(): void {
 		const first = schema[0];
 		if (!first) return;
-		config.filters = [...(config.filters ?? []), { propertyKey: first.key, op: 'is' }];
+		config = {
+			...config,
+			filters: [...(config.filters ?? []), { propertyKey: first.key, op: 'is' }]
+		};
 	}
 
 	function removeFilter(index: number): void {
-		config.filters = (config.filters ?? []).filter((_, i) => i !== index);
+		config = { ...config, filters: (config.filters ?? []).filter((_, i) => i !== index) };
 	}
 
 	function updateFilter(index: number, patch: Partial<ViewFilter>): void {
-		config.filters = (config.filters ?? []).map((f, i) => (i === index ? { ...f, ...patch } : f));
+		config = {
+			...config,
+			filters: (config.filters ?? []).map((f, i) => (i === index ? { ...f, ...patch } : f))
+		};
 	}
 
 	function setSortMode(mode: 'manual' | 'property'): void {
-		if (mode === 'manual') {
-			config.sort = { mode: 'manual' };
-		} else {
-			config.sort = { mode: 'property', propertyKey: schema[0]?.key, direction: 'asc' };
-		}
+		config =
+			mode === 'manual'
+				? { ...config, sort: { mode: 'manual' } }
+				: { ...config, sort: { mode: 'property', propertyKey: schema[0]?.key, direction: 'asc' } };
+	}
+
+	function updateSort(patch: Partial<ViewSort>): void {
+		if (!config.sort) return;
+		config = { ...config, sort: { ...config.sort, ...patch } };
 	}
 
 	function toggleVisible(key: string): void {
 		const current = config.visibleProperties ?? schema.map((p) => p.key);
-		config.visibleProperties = current.includes(key)
-			? current.filter((k) => k !== key)
-			: [...current, key];
+		config = {
+			...config,
+			visibleProperties: current.includes(key)
+				? current.filter((k) => k !== key)
+				: [...current, key]
+		};
 	}
 
 	let visiblePanelOpen = $state(false);
@@ -156,9 +183,7 @@
 		{#if config.sort?.mode === 'property'}
 			<select
 				value={config.sort.propertyKey}
-				onchange={(e) => {
-					if (config.sort) config.sort.propertyKey = (e.target as HTMLSelectElement).value;
-				}}
+				onchange={(e) => updateSort({ propertyKey: (e.target as HTMLSelectElement).value })}
 				class="rounded border border-border bg-bg px-1.5 py-1 text-xs"
 			>
 				{#each schema as property (property.key)}
@@ -167,10 +192,8 @@
 			</select>
 			<select
 				value={config.sort.direction ?? 'asc'}
-				onchange={(e) => {
-					if (config.sort)
-						config.sort.direction = (e.target as HTMLSelectElement).value as SortDirection;
-				}}
+				onchange={(e) =>
+					updateSort({ direction: (e.target as HTMLSelectElement).value as SortDirection })}
 				class="rounded border border-border bg-bg px-1.5 py-1 text-xs"
 			>
 				<option value="asc">Ascending</option>

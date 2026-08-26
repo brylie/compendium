@@ -42,7 +42,45 @@ export type BlockType =
 	| 'table_of_contents'
 	| 'synced_block'
 	| 'page_link'
-	| 'embed';
+	| 'embed'
+	| 'collection_view'; // embeds a Table/Board/Calendar view of a Collection inline in a Document — see collection-views.md
+
+// "View" here means a Collection/database view (Table/Board/Calendar — a
+// rendering + configuration over a Collection's records), never an MVC-style
+// page/route view. A collection_view block is the only place a view exists
+// as a persisted thing; there is deliberately no standalone "view route."
+export type ViewType = 'table' | 'board' | 'calendar';
+
+export type ViewFilterOp = 'is' | 'is_not' | 'is_empty' | 'is_not_empty';
+
+export interface ViewFilter {
+	propertyKey: string;
+	op: ViewFilterOp;
+	value?: string;
+}
+
+export type SortDirection = 'asc' | 'desc';
+
+export interface ViewSort {
+	mode: 'manual' | 'property';
+	propertyKey?: string; // required when mode === 'property'
+	direction?: SortDirection; // defaults to 'asc'
+}
+
+export interface ViewConfig {
+	filters?: ViewFilter[];
+	sort?: ViewSort;
+	visibleProperties?: string[]; // property keys; undefined = all visible
+	groupBy?: string; // property key driving the layout: select for Board, date for Calendar
+}
+
+// The full persisted configuration of a collection_view block: which
+// renderer plus that renderer's ViewConfig. The target Collection itself is
+// referencedRecordId, not part of this — same split synced_block/page_link
+// already use (referencedRecordId for "what", a block-local field for "how").
+export interface EmbeddedViewConfig extends ViewConfig {
+	viewType: ViewType;
+}
 
 export interface TextMarks {
 	bold?: boolean;
@@ -69,7 +107,8 @@ export interface WorkspaceRecord {
 	properties?: Record<string, PropertyValue>; // set when parent is a Collection
 	checked?: boolean; // for to_do blocks
 	collapsed?: boolean; // for toggle blocks
-	referencedRecordId?: string; // for synced_block
+	referencedRecordId?: string; // for synced_block, page_link, and collection_view (the target Collection)
+	viewConfig?: EmbeddedViewConfig; // for collection_view blocks only
 	createdBy: ActorId;
 	createdAt: number;
 	lastEditedBy: ActorId;

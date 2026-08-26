@@ -35,6 +35,7 @@
 	import SlashMenu from './SlashMenu.svelte';
 	import Toolbar from './Toolbar.svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import CollectionViewBlock from '$lib/components/CollectionViewBlock.svelte';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -251,7 +252,8 @@
 		'table_of_contents',
 		'page_link',
 		'embed',
-		'synced_block'
+		'synced_block',
+		'collection_view'
 	];
 
 	function blockHoldsFreeformText(blockType?: BlockType): boolean {
@@ -781,6 +783,10 @@
 								</div>
 							{/if}
 						</div>
+					{:else if bt === 'collection_view'}
+						{#if ydoc}
+							<CollectionViewBlock {block} {ydoc} />
+						{/if}
 					{:else}
 						<!-- Standard text blocks: headings, paragraph, to_do text, toggle text -->
 						{#if ytext}

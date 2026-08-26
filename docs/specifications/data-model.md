@@ -42,7 +42,8 @@ interface WorkspaceRecord {
 	properties?: Record<string, PropertyValue>; // set when parent is a Collection
 	checked?: boolean; // for to_do blocks
 	collapsed?: boolean; // for toggle blocks
-	referencedRecordId?: string; // for synced_block / page_link blocks
+	referencedRecordId?: string; // for synced_block / page_link / collection_view blocks
+	viewConfig?: EmbeddedViewConfig; // for collection_view blocks only — see §2
 	createdBy: ActorId;
 	createdAt: number;
 	lastEditedBy: ActorId;
@@ -67,7 +68,25 @@ type BlockType =
 	| 'table_of_contents'
 	| 'synced_block'
 	| 'page_link'
-	| 'embed';
+	| 'embed'
+	| 'collection_view'; // embeds a Table/Board/Calendar view of a Collection — see §2
+
+// "View" always means a Collection/database view here (Notion's sense),
+// never an MVC-style page/route. There is no standalone view route — a View
+// is configuration that exists only as a collection_view block's viewConfig.
+type ViewType = 'table' | 'board' | 'calendar';
+
+interface EmbeddedViewConfig {
+	viewType: ViewType;
+	filters?: {
+		propertyKey: string;
+		op: 'is' | 'is_not' | 'is_empty' | 'is_not_empty';
+		value?: string;
+	}[];
+	sort?: { mode: 'manual' | 'property'; propertyKey?: string; direction?: 'asc' | 'desc' };
+	visibleProperties?: string[]; // property keys; undefined = all visible
+	groupBy?: string; // property key driving the layout: select for Board, date for Calendar
+}
 
 interface RichText {
 	// Conceptually a run array (see PRD's Core Architectural Principle). Concretely,
@@ -106,13 +125,15 @@ interface Collection {
 
 A Collection is the source of truth for structured data: its schema and its member records. A Collection record is a row with typed properties, **not** a hidden Document or a page-shaped wrapper around one. Long-form, block-based knowledge remains a first-class Document; when a workflow needs to connect it to a row, it uses a relation rather than making the row own a second content model.
 
-A view is a non-owning projection of one Collection. Table, Board, and Calendar (implemented; see [`collection-views.md`](./collection-views.md)) plus Gallery, Timeline, Form, and Chart (not yet built) are renderers or interaction modes over the same records. A view may have configuration such as filters, sorts, grouping, visible properties, and a layout-specific driving property, but it never copies records, changes their identity, or introduces view-specific row fields. Board and Calendar's initial cut keeps this configuration session-local (component `$state`, never written to the Collection or `Y.Doc`) rather than deciding saved-view persistence and ownership up front — `collection-views.md` covers why and what a later saved-view feature would need to add.
+A view is a non-owning projection of one Collection — Table, Board, and Calendar are implemented (see [`collection-views.md`](./collection-views.md)); Gallery, Timeline, Form, and Chart are not yet built. **"View" always means this — a database/Collection view, Notion's sense of the word — never an MVC-style page or route.** There is deliberately no standalone view route: a View exists only as `viewConfig` on a `collection_view` block, which is a Document block like any other (a paragraph, a heading, a `page_link`) rather than a page of its own. Placing one inside a Document — a "team page," a project page, any prose page — is how a Board or Calendar is surfaced at all; `/table/[id]` is the one exception, a pre-existing full-page Table route for a Collection that predates and is unrelated to this embedding mechanism.
 
-GitLab projects are the interaction reference for the initial Board and data-grid configuration: users can choose visible fields, a grouping property (Board columns or Table groups), optional Board swimlanes, manual or property-based sort, filtering, and field summaries. These choices are declarative view configuration, not Collection schema changes. Moving a card between Board columns updates the selected existing property; rearranging a manually sorted view updates only its view ordering. A Table view is an application data grid with this configuration, distinct from the `table` Document block, which is inline narrative content.
+A view may have configuration — filters, sorts, grouping, visible properties, and a layout-specific driving property — but it never copies records, changes their identity, or introduces view-specific row fields. That configuration lives on the embedding block's own `viewConfig` field (`EmbeddedViewConfig` above) — a `WorkspaceRecord` field like `referencedRecordId`, not a second write path. `referencedRecordId` names the target Collection (the same field `page_link`/`synced_block` already use for "what this block references"); `viewConfig` says how to render it. Both are set together when the block is created and can be changed later without changing the block's identity.
+
+GitLab projects are the interaction reference for Board and data-grid configuration: users can choose visible fields, a grouping property (Board columns or Table groups), optional Board swimlanes, manual or property-based sort, filtering, and field summaries. These choices are declarative view configuration, not Collection schema changes. Moving a card between Board columns updates the selected existing property; rearranging a manually sorted view updates only its view ordering. A Table view (whether the `/table/[id]` full page or a `collection_view` block with `viewType: 'table'`) is an application data grid with this configuration, distinct from the `table` Document block, which is inline narrative content.
 
 Column summaries are computed view output rather than stored properties. Later work may offer count, sum, mean, median, mode, and other type-appropriate aggregations across the records currently included by a view's filter. Relation rollups are a separate computed-property concern. Neither creates a second write path or persisted aggregate record.
 
-An inline or linked Collection view in a Document is likewise a reference plus view configuration, not an embedded copy of the Collection. A full-page Collection is a navigation/rendering choice, not a different data type. Dashboards compose these non-owning views rather than creating another store of aggregate data.
+A `collection_view` block is exactly the "inline or linked Collection view in a Document" this section used to describe as future work — a reference plus view configuration, not an embedded copy of the Collection. Two `collection_view` blocks pointing at the same Collection with different `viewConfig` are independent views of the same live records; editing either edits the source Collection directly. Dashboards, when built, would compose multiple such non-owning views rather than creating another store of aggregate data.
 
 ## 3. Document hierarchy and block-type rules
 
@@ -122,6 +143,7 @@ Blocks are deliberately a small, documentation-oriented set rather than one type
 
 - `table_of_contents` is a computed block: its rendered entries are derived from the containing Document's headings rather than a copied `Y.Text` outline.
 - `synced_block` references the source record through `referencedRecordId`; editing or holding the rendered block operates on that source record rather than an independent copy.
+- `collection_view` references a Collection through `referencedRecordId` and carries its rendering configuration in `viewConfig` (§2) — the mechanism behind Table/Board/Calendar embedding, see [`collection-views.md`](./collection-views.md).
 - `embed` is the generic external-content mechanism. Dedicated per-service block types are intentionally out of scope.
 - Binary media (`image`, `file`, `pdf`, `video`, and `audio`) is deferred until an asset-storage design defines stable references, backups, and sync behavior; it is not merely another text-block discriminator.
 
@@ -129,11 +151,11 @@ Blocks are deliberately a small, documentation-oriented set rather than one type
 
 One `Y.Doc` for the whole workspace (single-tenant, single workspace — no need for multiple docs yet).
 
-| Concept           | Yjs type                        | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ----------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Documents index   | `Y.Map<string, DocumentMeta>`   | keyed by Document ID; `DocumentMeta` is `{title, parentDocumentId?, order, recordIds: Y.Array<string>}` — a Document nested under a parent stores that parent's ID directly on its own meta entry, alongside its sibling-ordering `order`                                                                                                                                                                                                                                                                                                         |
-| Collections index | `Y.Map<string, CollectionMeta>` | keyed by Collection ID; includes `schema` as a plain JSON value (schema edits are rare, don't need fine-grained CRDT merge)                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Records           | `Y.Map<string, Y.Map>`          | keyed by record ID; each record's own `Y.Map` holds every `WorkspaceRecord` scalar field directly (`id`, `parentId`, `order`, `blockType`, `checked`, `collapsed`, `referencedRecordId`, `createdBy`, `createdAt`, `lastEditedBy`, `lastEditedAt`), an internal `isCollectionRow` flag distinguishing collection rows from Document blocks, one entry per property (so concurrent edits to different properties merge independently, per Yjs's own key-level CRDT semantics — not a single nested JSON blob), and — for block-records — `content` |
-| Block rich text   | `Y.Text`                        | one per block-record, stored as the record's `content` field. **Not** a custom run array — Yjs's own `Y.Text.format()` already stores marks as attribute ranges over the text and merges concurrent overlapping formatting correctly (see PRD's rich-text acceptance criterion). The `RichText.runs` shape in §1 is derived from `Y.Text` on read, not stored separately.                                                                                                                                                                         |
+| Concept           | Yjs type                        | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Documents index   | `Y.Map<string, DocumentMeta>`   | keyed by Document ID; `DocumentMeta` is `{title, parentDocumentId?, order, recordIds: Y.Array<string>}` — a Document nested under a parent stores that parent's ID directly on its own meta entry, alongside its sibling-ordering `order`                                                                                                                                                                                                                                                                                                                       |
+| Collections index | `Y.Map<string, CollectionMeta>` | keyed by Collection ID; includes `schema` as a plain JSON value (schema edits are rare, don't need fine-grained CRDT merge)                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Records           | `Y.Map<string, Y.Map>`          | keyed by record ID; each record's own `Y.Map` holds every `WorkspaceRecord` scalar field directly (`id`, `parentId`, `order`, `blockType`, `checked`, `collapsed`, `referencedRecordId`, `viewConfig`, `createdBy`, `createdAt`, `lastEditedBy`, `lastEditedAt`), an internal `isCollectionRow` flag distinguishing collection rows from Document blocks, one entry per property (so concurrent edits to different properties merge independently, per Yjs's own key-level CRDT semantics — not a single nested JSON blob), and — for block-records — `content` |
+| Block rich text   | `Y.Text`                        | one per block-record, stored as the record's `content` field. **Not** a custom run array — Yjs's own `Y.Text.format()` already stores marks as attribute ranges over the text and merges concurrent overlapping formatting correctly (see PRD's rich-text acceptance criterion). The `RichText.runs` shape in §1 is derived from `Y.Text` on read, not stored separately.                                                                                                                                                                                       |
 
 **Why not a `Y.Text` per Document instead of one per block:** merging at the whole-document level would make block-level hold/release (see [`collaboration.md`](./collaboration.md)) meaningless — the CRDT and the coordination layer need to operate at the same granularity. One `Y.Text` per block-record keeps them aligned.

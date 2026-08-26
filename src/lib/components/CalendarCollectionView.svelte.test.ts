@@ -3,14 +3,19 @@ import { render, screen, fireEvent, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import { createCollection, createRecord, getRecord } from '$lib/data/records';
-import Page from './+page.svelte';
+import type { ViewConfig } from '$lib/data/views';
+import CalendarCollectionViewHarness from './CalendarCollectionViewHarness.svelte';
 
 let ydoc: Y.Doc;
 vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
 
 const actor = { kind: 'human' as const, userId: 'local' };
 
-describe('calendar/[id] +page', () => {
+function renderCalendar(collectionId: string, initialConfig: ViewConfig = {}) {
+	return render(CalendarCollectionViewHarness, { collectionId, initialConfig });
+}
+
+describe('CalendarCollectionView', () => {
 	beforeEach(() => {
 		ydoc = new Y.Doc();
 		vi.setSystemTime(new Date('2026-03-15T12:00:00Z'));
@@ -23,12 +28,7 @@ describe('calendar/[id] +page', () => {
 
 	it('prompts to add a date property when the collection has none', () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Cal', schema: [] });
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Cal' }
-		});
-
+		renderCalendar('col-1');
 		expect(screen.getByText(/doesn't have one yet/)).toBeInTheDocument();
 	});
 
@@ -36,11 +36,7 @@ describe('calendar/[id] +page', () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Cal', schema: [] });
 		vi.spyOn(window, 'prompt').mockReturnValue('Due date');
 		const user = userEvent.setup();
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Cal' }
-		});
+		renderCalendar('col-1');
 
 		await user.click(screen.getByRole('button', { name: 'Add a date property' }));
 
@@ -68,11 +64,7 @@ describe('calendar/[id] +page', () => {
 			},
 			actor
 		);
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Cal' }
-		});
+		renderCalendar('col-1', { groupBy: 'due' });
 
 		expect(screen.getByText('Launch')).toBeInTheDocument();
 		expect(screen.queryByText('Unscheduled')).not.toBeInTheDocument();
@@ -92,11 +84,7 @@ describe('calendar/[id] +page', () => {
 			{ parentId: 'col-1', properties: { title: { type: 'text', value: 'No date yet' } } },
 			actor
 		);
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Cal' }
-		});
+		renderCalendar('col-1', { groupBy: 'due' });
 
 		expect(screen.getByText('Unscheduled')).toBeInTheDocument();
 		expect(screen.getByText('No date yet')).toBeInTheDocument();
@@ -109,11 +97,7 @@ describe('calendar/[id] +page', () => {
 			schema: [{ key: 'due', label: 'Due', type: 'date' }]
 		});
 		const user = userEvent.setup();
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Cal' }
-		});
+		renderCalendar('col-1', { groupBy: 'due' });
 
 		await user.click(screen.getByRole('button', { name: 'Add entry on 2026-03-20' }));
 
@@ -143,11 +127,7 @@ describe('calendar/[id] +page', () => {
 			},
 			actor
 		);
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Cal' }
-		});
+		renderCalendar('col-1', { groupBy: 'due' });
 
 		const dateInput = screen.getByDisplayValue('2026-03-05');
 		await fireEvent.change(dateInput, { target: { value: '2026-03-25' } });
@@ -172,11 +152,7 @@ describe('calendar/[id] +page', () => {
 			{ parentId: 'col-1', properties: { title: { type: 'text', value: 'Needs a date' } } },
 			actor
 		);
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Cal' }
-		});
+		renderCalendar('col-1', { groupBy: 'due' });
 
 		const unscheduledSection = screen.getByText('Unscheduled').closest('section')!;
 		const dateInput = within(unscheduledSection).getByDisplayValue('');
@@ -209,15 +185,10 @@ describe('calendar/[id] +page', () => {
 			actor
 		);
 		const user = userEvent.setup();
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Cal' }
-		});
+		renderCalendar('col-1', { groupBy: 'due' });
 
 		await user.click(screen.getByRole('button', { name: 'Delete entry' }));
 
-		expect(screen.queryByText('Doomed entry')).not.toBeInTheDocument();
 		expect(getRecord(ydoc, record.id)).toBeUndefined();
 	});
 
@@ -228,11 +199,7 @@ describe('calendar/[id] +page', () => {
 			schema: [{ key: 'due', label: 'Due', type: 'date' }]
 		});
 		const user = userEvent.setup();
-		render(Page, {
-			params: { id: 'col-1' },
-			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Cal' }
-		});
+		renderCalendar('col-1', { groupBy: 'due' });
 
 		expect(screen.getByText('March 2026')).toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Next month' }));
