@@ -1,6 +1,6 @@
 # Rich-text toolbar
 
-**Depends on:** [`agent-workspace-prd.md`](../agent-workspace-prd.md) — especially [Block editor interaction](../agent-workspace-prd.md#block-editor-interaction-formatting--slash-command-insertion); [`data-model.md`](./data-model.md) (§1 and §4); [`markdown-transcoding.md`](./markdown-transcoding.md).
+**Depends on:** [`prd.md`](../prd.md) — especially [Block editor interaction](../prd.md#block-editor-interaction-formatting--slash-command-insertion); [`data-model.md`](./data-model.md) (§1 and §4); [`markdown-transcoding.md`](./markdown-transcoding.md).
 
 ---
 

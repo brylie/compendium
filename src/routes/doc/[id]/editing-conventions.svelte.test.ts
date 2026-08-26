@@ -6,7 +6,7 @@
 // muscle memory for from Word, Google Docs, and Notion, so a change that
 // breaks that feel fails a test instead of shipping as a quiet regression.
 // See docs/specifications/rich-text-toolbar.md §5–5.3 for the written
-// contract these tests verify, and docs/agent-workspace-prd.md's "Block
+// contract these tests verify, and docs/prd.md's "Block
 // editor interaction" section for the product-level requirement.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
