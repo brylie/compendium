@@ -4,13 +4,16 @@ import { clientIdForToken, isHeldByClient, releaseAgentHold } from '$lib/server/
 import {
 	createRecord as crdtCreateRecord,
 	deleteRecord as crdtDeleteRecord,
+	getDocument as crdtGetDocument,
 	getRecordYText,
+	setRecordReferencedId as crdtSetRecordReferencedId,
 	updateRecordContent,
 	updateRecordProperties
 } from '$lib/data/records';
 import { logAudit } from '$lib/server/audit';
 import { markdownToRichText } from '$lib/mcp/markdown-transcode';
 import { yTextToRichText } from '$lib/data/richtext';
+import { tokenAllowsParent } from '$lib/mcp/tokens';
 import type { BlockType, PropertyValue, WorkspaceRecord } from '$lib/data/types';
 import {
 	actorForCaller,
@@ -27,6 +30,28 @@ export class HoldRequiredError extends Error {
 	}
 }
 
+// A page_link's target must be a Document the caller can already reach —
+// deliberately a single generic message for "doesn't exist" and "exists but
+// out of token scope" alike, so a probing caller can't use this as an oracle
+// to learn whether a given ID exists (docs/specifications/internal-links.md §2,
+// audit-coverage.md §3's "never leak more than what the caller already
+// supplied" principle).
+export class InvalidLinkTargetError extends Error {
+	constructor(targetId: string) {
+		super(`${targetId} is not an accessible Document — page_link can only target one.`);
+		this.name = 'InvalidLinkTargetError';
+	}
+}
+
+function validatePageLinkTarget(caller: CallerIdentity, targetId: string): void {
+	const doc = getYDoc();
+	const target = crdtGetDocument(doc, targetId);
+	if (!target) throw new InvalidLinkTargetError(targetId);
+	if (isAccessToken(caller) && !tokenAllowsParent(caller, targetId)) {
+		throw new InvalidLinkTargetError(targetId);
+	}
+}
+
 export function createRecord(
 	caller: CallerIdentity,
 	input: {
@@ -34,19 +59,32 @@ export function createRecord(
 		afterRecordId?: string;
 		blockType?: BlockType;
 		properties?: Record<string, PropertyValue>;
+		referencedRecordId?: string;
 	}
 ): WorkspaceRecord {
 	const doc = getYDoc();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, input.parentId, 'create_record');
+
+	if (input.referencedRecordId !== undefined) {
+		if (input.blockType !== 'page_link') {
+			throw new Error('referencedRecordId is only valid on a page_link block.');
+		}
+		if (!crdtGetDocument(doc, input.parentId)) {
+			throw new Error('page_link blocks can only be created inside a Document.');
+		}
+		validatePageLinkTarget(caller, input.referencedRecordId);
+	}
+
 	const record = crdtCreateRecord(
 		doc,
 		{
 			parentId: input.parentId,
 			afterRecordId: input.afterRecordId,
 			blockType: input.blockType,
-			properties: input.properties
+			properties: input.properties,
+			referencedRecordId: input.referencedRecordId
 		},
 		actor
 	);
@@ -61,15 +99,16 @@ export function writeRecord(
 	input: {
 		markdown?: string;
 		properties?: Record<string, PropertyValue>;
+		referencedRecordId?: string;
 	}
 ): void {
-	if (input.markdown === undefined && !input.properties) {
-		throw new Error('write_record requires markdown or properties');
+	if (input.markdown === undefined && !input.properties && input.referencedRecordId === undefined) {
+		throw new Error('write_record requires markdown, properties, or referencedRecordId');
 	}
 
 	const doc = getYDoc();
 	const actor = actorForCaller(caller);
-	requireAccessibleRecord(caller, recordId, 'write_record');
+	const record = requireAccessibleRecord(caller, recordId, 'write_record');
 
 	if (input.markdown !== undefined) {
 		if (isAccessToken(caller)) {
@@ -115,6 +154,28 @@ export function writeRecord(
 			action: 'write_record',
 			targetRecordId: recordId,
 			diff: { properties: input.properties }
+		});
+	}
+
+	if (input.referencedRecordId !== undefined) {
+		if (record.blockType !== 'page_link') {
+			throw new Error('referencedRecordId can only be written on a page_link block.');
+		}
+		validatePageLinkTarget(caller, input.referencedRecordId);
+
+		// A retarget is a metadata write, not a content write — there's no Y.Text
+		// for a human cursor to be inside, so unlike the markdown branch above
+		// this needs no hold (same exemption already applied to `properties`,
+		// which is also metadata-only; see docs/specifications/mcp-tools.md).
+		// Idempotent by construction: writing the same target twice is a no-op
+		// Y.Map.set, not a distinct state transition.
+		const before = record.referencedRecordId;
+		crdtSetRecordReferencedId(doc, recordId, input.referencedRecordId, actor);
+		logAudit({
+			actor,
+			action: 'write_record',
+			targetRecordId: recordId,
+			diff: { referencedRecordId: { before, after: input.referencedRecordId } }
 		});
 	}
 }

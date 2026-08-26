@@ -65,14 +65,15 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 		mcp: true,
 		ui: true,
 		mcpToolName: 'create_record',
-		mcpDescription: 'Create a new block (in a Document) or row (in a Collection). No hold needed.'
+		mcpDescription:
+			'Create a new block (in a Document) or row (in a Collection). No hold needed. `referencedRecordId` sets a page_link block\'s target in the same call — only valid when blockType is "page_link", the parent is a Document, and the target is an accessible Document.'
 	},
 	'records.writeRecord': {
 		mcp: true,
 		ui: true,
 		mcpToolName: 'write_record',
 		mcpDescription:
-			'Write a record. `markdown` overwrites block content (requires an active hold) and `properties` merges into a Collection row.'
+			'Write a record. `markdown` overwrites block content (requires an active hold); `properties` merges into a Collection row; `referencedRecordId` retargets an existing page_link block to a new, accessible Document (no hold needed, idempotent).'
 	},
 	'records.deleteRecord': {
 		mcp: true,

@@ -19,7 +19,8 @@ import {
 	updateDocumentTitle,
 	writeRecord,
 	PermissionDeniedError,
-	HoldRequiredError
+	HoldRequiredError,
+	InvalidLinkTargetError
 } from './index';
 import { createToken, verifyToken } from '$lib/mcp/tokens';
 import { queryAuditLog } from '$lib/server/audit';
@@ -186,14 +187,15 @@ describe('service layer: centralized business rules & side effects', () => {
 		const docPublic = createDocument(human, { title: 'Public Handbook' });
 		const docSecret = createDocument(human, { title: 'Secret Doc' });
 
-		// Only the UI's direct CRDT write path can set referencedRecordId today
-		// (see markdown-transcoding.md) — mirror that here rather than going
-		// through the service-layer createRecord, which doesn't accept it.
-		const link = crdtCreateRecord(
-			getYDoc(),
-			{ parentId: docPublic.id, blockType: 'page_link', referencedRecordId: docSecret.id },
-			human
-		);
+		// The human caller is unscoped, so createRecord's referencedRecordId
+		// validation (accessible-Document check) trivially passes here — the
+		// scoping under test below is entirely about the later *read* by a
+		// token restricted to docPublic only.
+		const link = createRecord(human, {
+			parentId: docPublic.id,
+			blockType: 'page_link',
+			referencedRecordId: docSecret.id
+		});
 
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Scoped Bot',
@@ -257,6 +259,172 @@ describe('service layer: centralized business rules & side effects', () => {
 		const result = getDocument(human, docPublic.id);
 		const linkRecord = result?.records.find((r) => r.id === link.id);
 		expect(linkRecord?.linkBroken).toBeUndefined();
+	});
+});
+
+describe('service layer: MCP authoring and repair of page_link targets (issue #46)', () => {
+	it('creates a page_link block with a valid, accessible target in one call', () => {
+		const target = createDocument(human, { title: 'Target Doc' });
+		const source = createDocument(human, { title: 'Source Doc' });
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Linker Bot',
+			allowedDocumentIds: [target.id, source.id],
+			allowedCollectionIds: []
+		});
+
+		const link = createRecord(tokenRecord, {
+			parentId: source.id,
+			blockType: 'page_link',
+			referencedRecordId: target.id
+		});
+
+		const result = getDocument(tokenRecord, source.id);
+		const linkRecord = result?.records.find((r) => r.id === link.id);
+		expect(linkRecord?.referencedRecordId).toBe(target.id);
+		expect(linkRecord?.markdown).toBe('[[Target Doc]]');
+	});
+
+	it('rejects referencedRecordId on create_record when blockType is not page_link', () => {
+		const target = createDocument(human, { title: 'Target Doc' });
+		const source = createDocument(human, { title: 'Source Doc' });
+
+		expect(() =>
+			createRecord(human, {
+				parentId: source.id,
+				blockType: 'paragraph',
+				referencedRecordId: target.id
+			})
+		).toThrow(/page_link/);
+	});
+
+	it('rejects referencedRecordId on create_record when the parent is a Collection, not a Document', () => {
+		const target = createDocument(human, { title: 'Target Doc' });
+		const col = createCollection(human, { title: 'Tasks', schema: [] });
+
+		expect(() =>
+			createRecord(human, {
+				parentId: col.id,
+				blockType: 'page_link',
+				referencedRecordId: target.id
+			})
+		).toThrow(/Document/);
+	});
+
+	it('rejects create_record with a referencedRecordId the token was never granted access to, without distinguishing "forbidden" from "nonexistent"', () => {
+		const secret = createDocument(human, { title: 'Secret Doc' });
+		const source = createDocument(human, { title: 'Source Doc' });
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Scoped Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: []
+		});
+
+		let forbiddenErr: Error | undefined;
+		try {
+			createRecord(tokenRecord, {
+				parentId: source.id,
+				blockType: 'page_link',
+				referencedRecordId: secret.id
+			});
+		} catch (err) {
+			forbiddenErr = err as Error;
+		}
+		expect(forbiddenErr).toBeInstanceOf(InvalidLinkTargetError);
+		expect(forbiddenErr!.message).not.toContain('Secret Doc');
+
+		let missingErr: Error | undefined;
+		try {
+			createRecord(tokenRecord, {
+				parentId: source.id,
+				blockType: 'page_link',
+				referencedRecordId: 'does-not-exist'
+			});
+		} catch (err) {
+			missingErr = err as Error;
+		}
+		expect(missingErr).toBeInstanceOf(InvalidLinkTargetError);
+
+		// Same generic message shape for "exists but forbidden" and "doesn't
+		// exist" — swapping each error's own target ID out for a placeholder
+		// makes the two messages identical, proving neither wording nor
+		// structure lets a caller distinguish the two cases.
+		expect(forbiddenErr!.message.replace(secret.id, 'X')).toBe(
+			missingErr!.message.replace('does-not-exist', 'X')
+		);
+
+		const result = getDocument(human, source.id);
+		expect(result?.records).toHaveLength(0);
+	});
+
+	it('retargets an existing page_link via write_record, without needing a hold, and is idempotent', () => {
+		const targetA = createDocument(human, { title: 'Target A' });
+		const targetB = createDocument(human, { title: 'Target B' });
+		const source = createDocument(human, { title: 'Source Doc' });
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Retarget Bot',
+			allowedDocumentIds: [targetA.id, targetB.id, source.id],
+			allowedCollectionIds: []
+		});
+
+		const link = createRecord(tokenRecord, {
+			parentId: source.id,
+			blockType: 'page_link',
+			referencedRecordId: targetA.id
+		});
+
+		// No hold_records call first — a metadata-only write is exempt.
+		writeRecord(tokenRecord, link.id, { referencedRecordId: targetB.id });
+		let result = getDocument(tokenRecord, source.id);
+		expect(result?.records.find((r) => r.id === link.id)?.referencedRecordId).toBe(targetB.id);
+
+		// Idempotent: writing the same target again is a no-op state transition.
+		writeRecord(tokenRecord, link.id, { referencedRecordId: targetB.id });
+		result = getDocument(tokenRecord, source.id);
+		expect(result?.records.find((r) => r.id === link.id)?.referencedRecordId).toBe(targetB.id);
+
+		const audits = queryAuditLog();
+		const retargetEntries = audits.filter(
+			(a) => a.action === 'write_record' && a.targetRecordId === link.id
+		);
+		expect(retargetEntries.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it('rejects retargeting a block that is not a page_link', () => {
+		const target = createDocument(human, { title: 'Target Doc' });
+		const doc = createDocument(human, { title: 'Doc' });
+		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+
+		expect(() => writeRecord(human, block.id, { referencedRecordId: target.id })).toThrow(
+			/page_link/
+		);
+	});
+
+	it('rejects retargeting a page_link to a Document outside the caller token scope', () => {
+		const secret = createDocument(human, { title: 'Secret Doc' });
+		const target = createDocument(human, { title: 'Target Doc' });
+		const source = createDocument(human, { title: 'Source Doc' });
+		const link = createRecord(human, {
+			parentId: source.id,
+			blockType: 'page_link',
+			referencedRecordId: target.id
+		});
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Scoped Retargeter',
+			allowedDocumentIds: [source.id, target.id],
+			allowedCollectionIds: []
+		});
+
+		expect(() => writeRecord(tokenRecord, link.id, { referencedRecordId: secret.id })).toThrow(
+			InvalidLinkTargetError
+		);
+
+		// Rejected retarget leaves the original target untouched.
+		const result = getDocument(tokenRecord, source.id);
+		expect(result?.records.find((r) => r.id === link.id)?.referencedRecordId).toBe(target.id);
 	});
 });
 
@@ -359,7 +527,9 @@ describe('service layer: records — write validation, delete, and direct read',
 	it('writeRecord throws when given neither markdown nor properties', () => {
 		const doc = createDocument(human, { title: 'Doc' });
 		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
-		expect(() => writeRecord(human, block.id, {})).toThrow(/markdown or properties/);
+		expect(() => writeRecord(human, block.id, {})).toThrow(
+			/markdown, properties, or referencedRecordId/
+		);
 	});
 
 	it('writeRecord as a human caller applies markdown without needing a hold', () => {
