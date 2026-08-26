@@ -33,8 +33,13 @@
 	<input
 		type="number"
 		value={(value as { value?: number })?.value ?? ''}
-		onchange={(e) =>
-			oninput({ type: 'number', value: Number((e.target as HTMLInputElement).value) })}
+		onchange={(e) => {
+			const raw = (e.target as HTMLInputElement).value;
+			// Number('') is 0 — clearing the field must not silently write a real
+			// zero value, so a cleared input is a no-op rather than a write.
+			if (raw === '') return;
+			oninput({ type: 'number', value: Number(raw) });
+		}}
 		class={fieldClass}
 	/>
 {:else if property.type === 'date'}
@@ -71,6 +76,7 @@
 				onclick={onAddOption}
 				class="rounded p-1 text-xs text-muted hover:text-accent"
 				title="Add option"
+				aria-label="Add option"
 			>
 				+
 			</button>

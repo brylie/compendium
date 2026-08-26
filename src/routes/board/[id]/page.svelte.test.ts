@@ -194,12 +194,56 @@ describe('board/[id] +page', () => {
 		});
 
 		const card = screen.getByText('Movable').closest('[draggable="true"]') as HTMLElement;
-		const doneColumn = screen.getByText('Done').closest('[role="list"]') as HTMLElement;
+		const doneColumn = screen.getByRole('group', { name: 'Done column' });
 
 		const { fireEvent } = await import('@testing-library/dom');
 		const dataTransfer = { setData: vi.fn(), getData: vi.fn() };
 		await fireEvent.dragStart(card, { dataTransfer });
 		await fireEvent.drop(doneColumn, { dataTransfer });
+
+		expect(getRecord(ydoc, record.id)?.properties?.status).toEqual({
+			type: 'select',
+			value: 'done'
+		});
+	});
+
+	it('moves a card between columns via the keyboard-accessible "Move to" select', async () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Board',
+			schema: [
+				{ key: 'title', label: 'Title', type: 'text' },
+				{
+					key: 'status',
+					label: 'Status',
+					type: 'select',
+					options: [
+						{ id: 'todo', label: 'To do' },
+						{ id: 'done', label: 'Done' }
+					]
+				}
+			]
+		});
+		const record = createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: {
+					title: { type: 'text', value: 'Movable' },
+					status: { type: 'select', value: 'todo' }
+				}
+			},
+			actor
+		);
+		const user = userEvent.setup();
+		render(Page, {
+			params: { id: 'col-1' },
+			form: null,
+			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Board' }
+		});
+
+		const moveSelect = screen.getByLabelText('Move Movable to column');
+		await user.selectOptions(moveSelect, 'done');
 
 		expect(getRecord(ydoc, record.id)?.properties?.status).toEqual({
 			type: 'select',

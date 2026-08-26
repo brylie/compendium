@@ -149,9 +149,16 @@
 		);
 	}
 
+	// Scoped by groupPropertyKey too — switching which property drives columns
+	// must not resurrect a stale manual order saved under the previous
+	// property's "unassigned" bucket (both share the same UNASSIGNED_KEY).
+	function orderKey(column: BoardColumn): string {
+		return `${groupPropertyKey ?? ''}:${column.optionId ?? UNASSIGNED_KEY}`;
+	}
+
 	function orderedRecords(column: BoardColumn): WorkspaceRecord[] {
 		if (config.sort?.mode !== 'manual') return column.records;
-		const key = column.optionId ?? UNASSIGNED_KEY;
+		const key = orderKey(column);
 		const order = manualOrder[key];
 		if (!order) return column.records;
 		const byId = new Map(column.records.map((r) => [r.id, r]));
@@ -176,7 +183,7 @@
 		event.stopPropagation();
 		if (!draggedRecordId || draggedRecordId === targetId) return;
 		moveToColumn(column, draggedRecordId);
-		const key = column.optionId ?? UNASSIGNED_KEY;
+		const key = orderKey(column);
 		const currentOrder = manualOrder[key] ?? column.records.map((r) => r.id);
 		const withoutDragged = currentOrder.filter((id) => id !== draggedRecordId);
 		const targetIndex = withoutDragged.indexOf(targetId);
@@ -247,7 +254,8 @@
 			{#each columns as column (column.optionId ?? UNASSIGNED_KEY)}
 				<div
 					class="w-72 flex-shrink-0 rounded-lg border border-border bg-surface/40"
-					role="list"
+					role="group"
+					aria-label="{column.label} column"
 					ondragover={(e) => e.preventDefault()}
 					ondrop={(e) => handleColumnDrop(e, column)}
 				>
@@ -270,7 +278,7 @@
 						</button>
 					</div>
 
-					<div class="space-y-2 p-2">
+					<div class="space-y-2 p-2" role="list">
 						{#each orderedRecords(column) as row (row.id)}
 							<div
 								class="group rounded-md border border-border bg-bg p-2.5 shadow-xs transition-colors hover:border-accent/50"
@@ -292,6 +300,23 @@
 										<Icon name="trash" size={12} />
 									</button>
 								</div>
+								<label class="sr-only" for="move-{row.id}">Move {cardTitle(row)} to column</label>
+								<select
+									id="move-{row.id}"
+									class="mb-1 w-full rounded border border-border bg-bg px-1.5 py-0.5 text-xs text-fg"
+									value={column.optionId ?? UNASSIGNED_KEY}
+									onchange={(e) => {
+										const targetKey = (e.target as HTMLSelectElement).value;
+										const target = columns.find(
+											(c) => (c.optionId ?? UNASSIGNED_KEY) === targetKey
+										);
+										if (target) moveToColumn(target, row.id);
+									}}
+								>
+									{#each columns as c (c.optionId ?? UNASSIGNED_KEY)}
+										<option value={c.optionId ?? UNASSIGNED_KEY}>{c.label}</option>
+									{/each}
+								</select>
 								{#each cardFields as property (property.key)}
 									<div class="mt-1">
 										<PropertyValueCell

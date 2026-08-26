@@ -8,11 +8,11 @@
 		createRecord,
 		deleteRecord,
 		getCollection,
-		listRecordsForParent,
 		updateCollectionSchema,
 		updateCollectionTitle,
 		updateRecordProperties
 	} from '$lib/data/records';
+	import { getCollectionView } from '$lib/data/views';
 	import type {
 		PropertyDefinition,
 		PropertyType,
@@ -45,9 +45,9 @@
 
 	function refresh(): void {
 		if (!ydoc) return;
-		const collection = getCollection(ydoc, data.collectionId);
-		schema = collection?.schema ?? [];
-		rows = listRecordsForParent(ydoc, data.collectionId);
+		const view = getCollectionView(ydoc, data.collectionId);
+		schema = view.collection?.schema ?? [];
+		rows = view.records;
 	}
 
 	onMount(() => {

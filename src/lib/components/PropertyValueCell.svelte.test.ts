@@ -36,6 +36,23 @@ describe('PropertyValueCell', () => {
 		expect(oninput).toHaveBeenCalledWith({ type: 'number', value: 9 });
 	});
 
+	it('does not write 0 when a number field is cleared', async () => {
+		const oninput = vi.fn();
+		const user = userEvent.setup();
+		const property: PropertyDefinition = { key: 'qty', label: 'Qty', type: 'number' };
+		render(PropertyValueCell, {
+			property,
+			value: { type: 'number', value: 5 },
+			oninput
+		});
+
+		const input = screen.getByDisplayValue('5');
+		await user.clear(input);
+		await user.tab();
+
+		expect(oninput).not.toHaveBeenCalled();
+	});
+
 	it('renders and edits a date property', async () => {
 		const oninput = vi.fn();
 		const user = userEvent.setup();
