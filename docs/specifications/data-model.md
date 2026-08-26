@@ -1,6 +1,6 @@
 # Data model
 
-**Depends on:** [`agent-workspace-prd.md`](../agent-workspace-prd.md) (all decisions there are inherited, not re-litigated here)
+**Depends on:** [`prd.md`](../prd.md) (all decisions there are inherited, not re-litigated here)
 
 ---
 

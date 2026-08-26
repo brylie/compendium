@@ -1,6 +1,6 @@
 # Specifications
 
-Canonical specification for each implemented subsystem, translating [`agent-workspace-prd.md`](../agent-workspace-prd.md) into concrete engineering decisions. Split by feature rather than kept as one document, so a change to one subsystem doesn't require editing (or risk going stale in) an unrelated one.
+Canonical specification for each implemented subsystem, translating [`prd.md`](../prd.md) into concrete engineering decisions. Split by feature rather than kept as one document, so a change to one subsystem doesn't require editing (or risk going stale in) an unrelated one.
 
 - [`architecture.md`](./architecture.md) — process model (one Node process, `/ws` + `/mcp`) and SvelteKit app structure.
 - [`data-model.md`](./data-model.md) — the Record/Document/Collection types and their Yjs mapping.

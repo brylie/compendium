@@ -30,7 +30,7 @@ thing. Compendium models all of it as one thing — see below.
 
 Full product rationale, including the persona/market thesis and what's
 explicitly _not_ being built, lives in
-[`docs/agent-workspace-prd.md`](docs/agent-workspace-prd.md).
+[`docs/prd.md`](docs/prd.md).
 
 ## What it is
 
@@ -133,7 +133,7 @@ Product rationale and the canonical specification for each implemented
 subsystem have their own doc under [`docs/`](docs/) and are kept current
 there rather than mirrored here:
 
-- [`agent-workspace-prd.md`](docs/agent-workspace-prd.md) — problem
+- [`prd.md`](docs/prd.md) — problem
   statement, goals/non-goals, requirements, and the build-vs-adopt decisions
   behind the editor.
 - [`specifications/`](docs/specifications/) — one doc per subsystem

@@ -1,10 +1,10 @@
-# Agent-First Workspace — Product Requirements Document
+# Compendium — Product Requirements Document
 
-_Working title: "the Workspace." Naming TBD — not a v1 blocker._
+_Formerly "AgentSpace" / working title "the Workspace." Product is now named **Compendium**; the filename of this document is left unchanged for link stability across specs and issues that reference it._
 
 **Status:** Draft for review
 **Owner:** Brylie Christopher Oxley
-**Last updated:** 2026-08-22
+**Last updated:** 2026-08-26
 **Licensing intent:** if the personal MVP (Phase 0) proves out, the plan is to open-source it — Apache 2.0 preferred over AGPL. This is a real constraint on dependency choice from here forward, not a someday detail (see Prior Art and technology candidates below).
 
 ---
@@ -33,10 +33,10 @@ _Workflow automation (documents that trigger an agent on a schedule or a change)
 ## Non-Goals
 
 1. **Not a general agent orchestration platform.** We integrate with existing agent runtimes (Claude Agent SDK, MCP-compatible agents) rather than building our own agent execution engine. Reinventing agent orchestration would dilute focus from the workspace/collaboration problem we're uniquely positioned to solve.
-2. **Not deep project-management features.** No Gantt charts, resource/capacity planning, sprint velocity, or dependency graphs. Kanban and calendar are _view types_ over the unified record model (P1) — cheap once the model exists — but we are not building PM-suite depth on top of them.
+2. **Not deep project-management features.** No Gantt charts, resource/capacity planning, sprint velocity, or dependency graphs. Kanban and calendar are _view types_ over the unified record model (P1) — cheap once the model exists — but we are not building PM-suite depth on top of them. Saved, shareable view configurations and embedding a Collection's filtered view inside a Document (P1, see Requirements) are still just view configuration over existing records, not new PM-specific primitives — they don't cross this line.
 3. **Not offline-first.** Real-time multi-agent collaboration requires a live connection to resolve concurrent edits; local-only editing is out of scope until the collaboration core is proven.
 4. **Not a proprietary model, and not a competing chat interface.** Agent capability is provided by pluggable model providers (starting with Claude); we are not training our own LLM or building a full chat assistant UI to rival Claude Desktop/ChatGPT/Gemini. Any lightweight in-app agent trigger (e.g., @-mentioning a Team agent) is a convenience, not a substitute for the deeper interaction users already have in their own AI apps — which is exactly what the MCP connection is for.
-5. **Not chat/discussion channels, in any phase, absent strong new evidence.** This is a deliberate non-goal, not just a deferral. Real-time human+agent chat is already well solved by tools like Buzz (buzz.xyz) — validated through direct hands-on use where chat and agent collaboration worked well, and the actual gap was that shared documents lived outside that workspace. Rebuilding chat would compete with tools that already do it well instead of shipping the thing that's actually missing. If coordination with a chat tool is ever needed, the path is integration (an agent operating inside Buzz connecting to this workspace over the same MCP surface as any other external agent — see Requirements) rather than building channels natively.
+5. **Not chat/discussion channels, in any phase, absent strong new evidence.** This is a deliberate non-goal, not just a deferral. Real-time human+agent chat is already well solved by tools like Buzz (buzz.xyz) — validated through direct hands-on use where chat and agent collaboration worked well, and the actual gap was that shared documents lived outside that workspace. Rebuilding chat would compete with tools that already do it well instead of shipping the thing that's actually missing. If coordination with a chat tool is ever needed, the path is integration (an agent operating inside Buzz connecting to this workspace over the same MCP surface as any other external agent — see Requirements) rather than building channels natively. _Explicitly revisited 2026-08-26: a design proposal to make conversations/comments a first-class entity was evaluated and rejected as out-of-scope. This non-goal stands; treat that decision as settled rather than re-opening it from first principles absent genuinely new evidence._
 6. **Not enterprise-certified in v1.** No SOC 2, HIPAA, or SSO/SCIM in this phase. Enterprise compliance is a distinct future phase once product-market fit is established.
 7. **Not multi-user authentication in the initial personal build.** Phase 0 runs single-tenant, trusted-local, for one person — no login/authorization system needed yet, since there's no second person to authenticate against. Auth is added deliberately in Phase 1, triggered by the actual need to share the tool, not built speculatively ahead of it.
 
@@ -70,6 +70,8 @@ Personas used throughout this spec (in Phase 0, Team member and Workspace admin 
 - As a team member, I want to revert an agent's edit with one action so that a bad or unwanted change doesn't require manual cleanup.
 - As a team member, I want to see a clear "this block is being generated" indicator — not a fake typing cursor — while an agent edits so that I understand a block is mid-change and don't confuse it with a human actively typing.
 - As a team member, I want to keep a set of structured records (e.g., project tasks) in a Table alongside my written docs, in the same workspace, so that I don't have to export/import between a docs tool and a separate database tool.
+- As a team member, I want to organize my Documents and Collections into separate Spaces per concurrent project so that switching context between projects doesn't mean wading through unrelated content.
+- As a team member, I want to save a filtered view of a shared Collection and embed it in a specific project's page so that I can track that project's workstream (e.g., its open tasks) without duplicating or re-filtering the underlying records by hand each time.
 
 ### Personal AI client (BYO — Claude Desktop, ChatGPT, Gemini, etc.)
 
@@ -113,6 +115,7 @@ This is the central bet of the spec, and it drives the requirements below more t
 - A **Document** is an ordered sequence of block-records (text, heading, list, table, code, embed) — this is the linear, prose-editing surface.
 - A **Collection** is a set of records that share a property schema (e.g., Status, Due Date, Owner) — this is the structured-data surface.
 - A **View** is a renderer over a Collection's records: Table, Kanban (grouped by a select property), Calendar (positioned by a date property), Gallery, etc. Views do not own data — they query it. Adding a new view type later is a rendering change, not a data migration.
+- A **Space** is an organizational container that owns a set of Documents and Collections — the boundary a person switches between when working across several concurrent projects (e.g., "Engineering," "Marketing," "Personal"). A Space is not itself a record; it's the addressing/permission tier that sits between the workspace as a whole and an individual Document or Collection, which is why the Permissions Model requirement below already speaks of "workspace, space, and document level" access. Phase 0 ships with exactly one (implicit, unnamed) Space; multi-Space support — creating additional Spaces and scoping the sidebar, search, and MCP token grants to the active one — is P1 (see Requirements). This is an organizational boundary within one tenant's workspace, orthogonal to and independent of the multi-_tenant_ auth boundary in Non-Goal #7/Phase 1 — a single person can have many Spaces long before there's a second person to authenticate.
 - Both Documents and Collections are addressed identically by the permission model, the audit log, and the agent API (MCP): "read/write this record" is the same operation whether the record is a paragraph in a doc or a row in a table.
 - A block's _content_ is a second, finer-grained structure: a sequence of text runs, each carrying marks (bold, italic, strikethrough, code, link, mention) — not a plain string, and not raw Markdown. Block-level operations (hold, write, permissions) don't reach inside this structure; it exists so two humans can concurrently format overlapping ranges of the same paragraph without corrupting each other's changes, the way raw Markdown delimiters would.
 
@@ -215,16 +218,37 @@ Chat/channels are explicitly not part of this model (see Non-Goals) — that gap
 
 ### Nice-to-Have (P1)
 
+_Reordered 2026-08-26 around dogfooding priority: agent/MCP parity with the UI, editing depth competitive with Notion/Obsidian/Confluence, and multi-space organization are the near-term drivers; items whose main value is multi-operator (external developers, rate limiting across untrusted agents) moved to Future Considerations since Phase 0 has exactly one operator._
+
+**Spaces and Collection views** — the PM-style, GitHub-Projects/Trello-like workstream tracking this phase is explicitly for:
+
+- **Multi-space support** — create additional Spaces beyond Phase 0's single default and switch between them, with the sidebar tree, search, and MCP token scoping all respecting the active Space (see Core Architectural Principle).
 - **Kanban view** — renders a Collection's records as cards grouped by a select-type property (e.g., Status). Pure view logic over P0's record model; no new storage.
 - **Calendar view** — renders a Collection's records positioned by a date-type property. Same records as Table/Kanban views of the same Collection.
 - **Filter and sort** on any view (Table, Kanban, Calendar) over the same underlying records.
+- **Saved, shareable view configuration** — a filtered/sorted/grouped view over a Collection can be named and persisted as its own addressable artifact rather than re-built ephemerally each session.
+- **Embedded Collection views** — a saved view embeds inside a Document page, so a filtered slice of a shared Collection (e.g., "this project's open tasks") appears on that project's own page without duplicating the underlying records. This is what lets one shared task Collection back several independent, page-scoped workstreams (e.g., an engineering workstream and a marketing workstream both filtered from the same Collection).
+
+**Editor completeness** — closing the gap with Notion/Obsidian/Confluence as a daily-driver editor:
+
+- **File and image attachment blocks** — upload/embed a file or image as a block, addressed and permissioned like any other record.
+- **Drag-and-drop block reordering.**
+- **Callout blocks** (note/tip/caution/danger style variants).
+- **Child-page listing block** — a Confluence-style block that lists a Document's child pages inline, supporting a browsable page hierarchy.
+- **Markdown/Obsidian import**, with a migration report of anything that couldn't map cleanly — the on-ramp for bringing an existing vault in, including its `[[wiki-links]]`.
+- **Backlinks** — for any Document, show what else links to it via `page_link`/`[[wiki-link]]` (see `internal-links.md`), completing the read half of the linking model the MCP write side already has in P0.
+- **Human-facing workspace search UI** — the P0 MCP `search_workspace` capability exposed as in-app search a person can use directly, not just agents.
+
+**Agent operations**
+
 - **Multi-agent concurrent editing on one document**, including visible "agent is editing this block" locks/indicators to avoid two agents corrupting the same block.
 - **One-click revert** for any agent edit, scoped to that edit's diff rather than a full document rollback.
-- **Rate and scope limits per agent** (max writes/hour, no-delete flag) configurable by admins.
-- **Sandbox workspace** for external agent developers to test integrations before requesting production access.
 
 ### Future Considerations (P2)
 
+- **Rate and scope limits per agent** (max writes/hour, no-delete flag) configurable by admins. Moved down from Nice-to-Have 2026-08-26: its value is protecting a workspace from _other_ operators' agents, which doesn't apply while there's exactly one operator — revisit when Phase 1 adds real multi-tenant use.
+- **Sandbox workspace** for external agent developers to test integrations before requesting production access. Moved down from Nice-to-Have 2026-08-26 for the same reason — no external developers exist to sandbox yet.
+- **Graph view of internal-link relationships** — a visual node/edge graph over the backlink data (P1), Obsidian/Foam-style. Wanted, but the backlink data itself (P1) is the higher-value near-term piece; the graph is a rendering layer on top of it once that data exists.
 - **Workflow automation / document-level triggers** — a document or block can declare a condition ("on schedule," "on linked-source change") that invokes a named agent to update it, reducing manual upkeep of living documents. Genuinely compelling, but deliberately post-MVP: it's an amplifier on top of collaborative editing and agent parity, which need to be proven solid first. Tracked here so it isn't lost, and revisited once P0/P1 usage data shows where automation would help most.
 - **Spreadsheet / formula view** — cell-level formulas and cross-record calculation. Aspirational and low-priority: reserve a "formula" property type in the schema so it isn't a migration later, and leave the design itself undecided until it's actually prioritized — too many open unknowns to spend spec effort on now.
 - **Gallery, list, and timeline views** — further renderers over the same Collection model.
@@ -272,7 +296,7 @@ No hard external deadlines (greenfield project, no existing codebase or committe
 
 - **Phase 0 — Personal MVP (single-tenant, local-trust, no login).** Solve the founder's own problem first, for one person on one machine: the unified record model, Document and Table views, the block editor UX (rich text + slash commands), and full agent parity — hold/placeholder with cursor-presence holds, per-agent permission scoping, audit log, MCP read/write, and a personal AI client connected via a simple local token rather than a multi-tenant OAuth flow. Real-time sync is still required — the user's own UI and their own connected AI client (e.g., Claude Desktop) are already two concurrent actors — but _multi-human_ collaboration, a login system, and a workspace-admin role distinct from the one user don't exist yet, because there's no second person to need them. Small enough to build and dogfood solo before anyone else is involved.
 - **Phase 1 — Multi-human collaboration + team parity (P0 above, the multi-tenant remainder).** Adds what Phase 0 skipped because it was solo: authentication, multiple humans co-editing with full CRDT conflict resolution between people (not just human+agent), a real workspace-admin role managing other people's membership and permissions, and per-user OAuth for external clients now that "per-user" means more than one person. Triggered by the actual need to share the tool with friends or collaborators, not built ahead of that need.
-- **Phase 2 — More views + multi-agent (P1 above).** Kanban and Calendar views (new renderers over Phase 1's model, not new data subsystems), filter/sort, concurrent multi-agent editing, revert, rate limits, sandbox. Depends on Phase 1's record model and attribution being solid; do not start before Phase 1's conflict-resolution behavior is validated with real users.
-- **Phase 3 — Scale, automation, and ecosystem (P2 above).** Workflow automation/document triggers, spreadsheet/formula view, additional view types, agent-to-agent handoff, cross-document workflows, enterprise compliance, offline support, agent marketplace. Sequencing within Phase 3 should be driven by whichever P1 metrics (adoption, retention, unified-model usage rate) point to as the binding constraint.
+- **Phase 2 — More views, multi-space, editor depth, and multi-agent (P1 above).** Multi-space support; Kanban and Calendar views plus saved/shareable and embedded view configuration; editor-completeness items (attachments, drag-and-drop reordering, callouts, child-page listing, Markdown/Obsidian import); backlinks and human-facing search; concurrent multi-agent editing and revert. Note that in practice several of these (multi-space, saved/embedded views, editor completeness, backlinks, search) are being pulled forward and dogfooded during Phase 0 itself, since they're direct requirements of the founder's own daily use — this phase boundary describes dependency order for a multi-tenant audience more than a hard gate for the solo build.
+- **Phase 3 — Scale, automation, and ecosystem (P2 above).** Rate/scope limits and a sandbox workspace (multi-operator safety, deferred until there are other operators), a link-relationship graph view, workflow automation/document triggers, spreadsheet/formula view, additional view types, agent-to-agent handoff, cross-document workflows, enterprise compliance, offline support, agent marketplace. Sequencing within Phase 3 should be driven by whichever P1 metrics (adoption, retention, unified-model usage rate) point to as the binding constraint.
 
 Each phase boundary is a natural checkpoint to re-validate the wedge persona and success metrics before committing engineering time to the next phase.

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Compendium is a shared, real-time knowledge workspace: one SvelteKit app where a browser UI and MCP-connected AI agents read and write the _same_ live document graph (Documents, Collections/Tables) with no import/export step. The full product rationale is in [`docs/agent-workspace-prd.md`](docs/agent-workspace-prd.md); per-subsystem specs live in [`docs/specifications/`](docs/specifications/) — **read the relevant spec before changing that subsystem**, since these docs are treated as canonical, not aspirational:
+Compendium is a shared, real-time knowledge workspace: one SvelteKit app where a browser UI and MCP-connected AI agents read and write the _same_ live document graph (Documents, Collections/Tables) with no import/export step. The full product rationale is in [`docs/prd.md`](docs/prd.md); per-subsystem specs live in [`docs/specifications/`](docs/specifications/) — **read the relevant spec before changing that subsystem**, since these docs are treated as canonical, not aspirational:
 
 - [`architecture.md`](docs/specifications/architecture.md) — process model, route structure
 - [`data-model.md`](docs/specifications/data-model.md) — `WorkspaceRecord`/Document/Collection types, Yjs mapping

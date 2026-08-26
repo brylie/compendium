@@ -1,14 +1,14 @@
 # Specification — End-to-End Testing (MCP/UI parity)
 
 **Status:** Draft
-**Depends on:** [`architecture.md`](./architecture.md) §1 (process architecture), [`collaboration.md`](./collaboration.md) (holds/Awareness), [`mcp-tools.md`](./mcp-tools.md) (MCP tool surface); [`agent-workspace-prd.md`](../agent-workspace-prd.md)'s acceptance criteria under "Real-time collaborative editing," "Agent read/write API," and "In-progress agent edit indicator" — the tests specified here exist to actually verify those criteria, most of which are not currently exercised by any test.
+**Depends on:** [`architecture.md`](./architecture.md) §1 (process architecture), [`collaboration.md`](./collaboration.md) (holds/Awareness), [`mcp-tools.md`](./mcp-tools.md) (MCP tool surface); [`prd.md`](../prd.md)'s acceptance criteria under "Real-time collaborative editing," "Agent read/write API," and "In-progress agent edit indicator" — the tests specified here exist to actually verify those criteria, most of which are not currently exercised by any test.
 **Motivated by:** a live Phase 1 review that found a bug (MCP `create_document` granting itself access in a way that never persists — see [`service-layer.md`](./service-layer.md) §1) invisible to both the existing unit test suite and to manual UI testing, because it only manifests across two independent calls crossing the actual MCP transport boundary.
 
 ---
 
 ## 1. Why unit tests and UI tests both miss this class of bug
 
-The PRD's central bet is that MCP writes and UI writes go through the _same_ sync engine and are indistinguishable in effect (`agent-workspace-prd.md`, Goal 1 and the "Real-time collaborative editing" acceptance criteria). The failure mode that actually threatens that bet isn't in the CRDT logic — Yjs is well-tested upstream, and `records.ts`'s unit tests already cover it adequately. It's in the **glue around the CRDT**: does a permission grant made by one MCP call actually survive to the next MCP call? Does a write made by one client (MCP or browser) actually reach the other within the latency bound the PRD promises?
+The PRD's central bet is that MCP writes and UI writes go through the _same_ sync engine and are indistinguishable in effect (`prd.md`, Goal 1 and the "Real-time collaborative editing" acceptance criteria). The failure mode that actually threatens that bet isn't in the CRDT logic — Yjs is well-tested upstream, and `records.ts`'s unit tests already cover it adequately. It's in the **glue around the CRDT**: does a permission grant made by one MCP call actually survive to the next MCP call? Does a write made by one client (MCP or browser) actually reach the other within the latency bound the PRD promises?
 
 - **Unit tests** (calling `records.ts` or a future `services/*.ts` function directly, in-process) never cross the MCP HTTP transport or the y-websocket transport at all — they can't see a bug where the _transport boundary itself_ is where state gets dropped (exactly what happened with the token grant: correct in memory for the duration of one call, gone the moment a fresh `verifyToken()` runs on the next).
 - **UI-only testing** (manual or Playwright driving only the browser) never issues an MCP call, so it can't see agent-side breakage at all — and it's exactly agent-side writes, not human-side ones, that the PRD singles out as the differentiator ("an AI app writes an edit... the web UI reflects it... with no manual refresh").
@@ -82,7 +82,7 @@ This harness is the only thing that should know how to boot a full server instan
 ## 4. Tooling and CI placement
 
 - **Tier A** uses Vitest (already the project's test runner — no new dependency for the runner itself; the MCP SDK client and a Yjs client are both already project dependencies via the server-side code). Fast enough (no browser) to run in the normal `npm run test` suite and in CI on every PR.
-- **Tier B** uses Playwright (new dev dependency). Slower and more flake-prone than Tier A by nature of driving a real browser — run it in CI on every PR too, but keep the tier small (per §2) precisely so this cost stays bounded rather than growing into a full UI-test suite; the PRD's UI is already covered qualitatively by manual dogfooding per the Phase 0/1 success-metrics framing (`agent-workspace-prd.md`, "Success Metrics").
+- **Tier B** uses Playwright (new dev dependency). Slower and more flake-prone than Tier A by nature of driving a real browser — run it in CI on every PR too, but keep the tier small (per §2) precisely so this cost stays bounded rather than growing into a full UI-test suite; the PRD's UI is already covered qualitatively by manual dogfooding per the Phase 0/1 success-metrics framing (`prd.md`, "Success Metrics").
 
 ## 5. Relationship to existing and future unit tests
 

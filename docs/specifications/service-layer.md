@@ -1,7 +1,7 @@
 # Specification — Service Layer (centralizing business logic)
 
 **Status:** Draft
-**Depends on:** [`mcp-tools.md`](./mcp-tools.md) (MCP tool surface), [`persistence.md`](./persistence.md) §1 (persistence/audit) — this doc extends, not replaces, those; [`agent-workspace-prd.md`](../agent-workspace-prd.md)'s "Permissions model" and "Audit log" requirements are the acceptance bar everything here is built to satisfy.
+**Depends on:** [`mcp-tools.md`](./mcp-tools.md) (MCP tool surface), [`persistence.md`](./persistence.md) §1 (persistence/audit) — this doc extends, not replaces, those; [`prd.md`](../prd.md)'s "Permissions model" and "Audit log" requirements are the acceptance bar everything here is built to satisfy.
 **Motivated by:** a live Phase 1 review that found the `create_document` MCP tool granting itself access to a newly-created document in a way that never persists (see §1 below) — a bug that exists specifically because no single piece of code owns "what must always happen when a document is created."
 
 ---
