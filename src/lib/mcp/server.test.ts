@@ -216,6 +216,75 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 		expect(pageLinkRecord).toBeDefined();
 		expect(pageLinkRecord.markdown).toContain('[[Target Document]]');
 	});
+
+	it('create_record sets a page_link target via referencedRecordId, and write_record retargets it, over the MCP transport (issue #46)', async () => {
+		const doc = getYDoc();
+		const targetA = createDocument(doc, { title: 'Doc A' });
+		const targetB = createDocument(doc, { title: 'Doc B' });
+		const source = createDocument(doc, { title: 'Source Doc' });
+
+		const { token } = createToken({
+			clientLabel: 'Linker Bot',
+			allowedDocumentIds: [targetA.id, targetB.id, source.id],
+			allowedCollectionIds: []
+		});
+		const mcpServer = createMcpServer();
+
+		const createResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{ parentId: source.id, blockType: 'page_link', referencedRecordId: targetA.id },
+			token
+		);
+		expect(createResult.isError).toBeFalsy();
+		const blockId = JSON.parse(getTextContent(createResult)).recordId;
+
+		let getResult = await invokeTool(mcpServer, 'get_document', { documentId: source.id }, token);
+		let linked = JSON.parse(getTextContent(getResult)).records.find(
+			(r: { id: string }) => r.id === blockId
+		);
+		expect(linked.referencedRecordId).toBe(targetA.id);
+		expect(linked.markdown).toBe('[[Doc A]]');
+
+		// Retarget via write_record's named field — no hold_records call first,
+		// since a target-only write is metadata, not block content.
+		const retargetResult = await invokeTool(
+			mcpServer,
+			'write_record',
+			{ recordId: blockId, referencedRecordId: targetB.id },
+			token
+		);
+		expect(retargetResult.isError).toBeFalsy();
+
+		getResult = await invokeTool(mcpServer, 'get_document', { documentId: source.id }, token);
+		linked = JSON.parse(getTextContent(getResult)).records.find(
+			(r: { id: string }) => r.id === blockId
+		);
+		expect(linked.referencedRecordId).toBe(targetB.id);
+		expect(linked.markdown).toBe('[[Doc B]]');
+	});
+
+	it('rejects a page_link target outside the token scope without leaking whether it exists', async () => {
+		const doc = getYDoc();
+		const secret = createDocument(doc, { title: 'Secret Doc' });
+		const source = createDocument(doc, { title: 'Source Doc' });
+
+		const { token } = createToken({
+			clientLabel: 'Scoped Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: []
+		});
+		const mcpServer = createMcpServer();
+
+		const createResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{ parentId: source.id, blockType: 'page_link', referencedRecordId: secret.id },
+			token
+		);
+		expect(createResult.isError).toBe(true);
+		expect(getTextContent(createResult)).not.toContain('Secret Doc');
+	});
 });
 
 describe('mcp server: authentication', () => {
@@ -402,9 +471,9 @@ describe('mcp server: full tool surface', () => {
 		);
 		const blockId = JSON.parse(getTextContent(createBlockResult)).recordId;
 
-		// write_record with neither markdown nor properties throws a plain Error.
+		// write_record with none of markdown/properties/referencedRecordId throws a plain Error.
 		const writeResult = await invokeTool(mcpServer, 'write_record', { recordId: blockId }, token);
 		expect(writeResult.isError).toBe(true);
-		expect(getTextContent(writeResult)).toContain('markdown or properties');
+		expect(getTextContent(writeResult)).toContain('markdown, properties, or referencedRecordId');
 	});
 });

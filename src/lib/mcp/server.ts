@@ -290,12 +290,17 @@ export function createMcpServer(): McpServer {
 		{
 			recordId: z.string(),
 			markdown: z.string().optional(),
-			properties: z.record(z.string(), propertyValueSchema).optional()
+			properties: z.record(z.string(), propertyValueSchema).optional(),
+			referencedRecordId: z.string().optional()
 		},
-		async ({ recordId, markdown, properties }, extra) => {
+		async ({ recordId, markdown, properties, referencedRecordId }, extra) => {
 			try {
 				const token = requireToken(extra);
-				serviceModules.records.writeRecord(token, recordId, { markdown, properties });
+				serviceModules.records.writeRecord(token, recordId, {
+					markdown,
+					properties,
+					referencedRecordId
+				});
 				return textResult({ success: true });
 			} catch (err) {
 				return handleToolError(err);
@@ -311,16 +316,18 @@ export function createMcpServer(): McpServer {
 			parentId: z.string(),
 			afterRecordId: z.string().optional(),
 			blockType: blockTypeSchema.optional(),
-			properties: z.record(z.string(), propertyValueSchema).optional()
+			properties: z.record(z.string(), propertyValueSchema).optional(),
+			referencedRecordId: z.string().optional()
 		},
-		async ({ parentId, afterRecordId, blockType, properties }, extra) => {
+		async ({ parentId, afterRecordId, blockType, properties, referencedRecordId }, extra) => {
 			try {
 				const token = requireToken(extra);
 				const record = serviceModules.records.createRecord(token, {
 					parentId,
 					afterRecordId,
 					blockType: blockType as BlockType | undefined,
-					properties
+					properties,
+					referencedRecordId
 				});
 				return textResult({ recordId: record.id });
 			} catch (err) {

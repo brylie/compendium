@@ -38,7 +38,13 @@ Before this feature, a `page_link` whose target had been deleted was indistingui
 - A silent cross-document edit as a side effect of deleting something else is a bigger surprise than a visibly broken link. The broken-link states in §2 are designed to be impossible to miss (an explicit label, not a blank field) specifically so this is safe to defer without leaving users guessing why a link silently disappeared.
 - Revisit once #21 lands: with a reverse index in hand, either an explicit "find broken links" scan or opt-in cascading cleanup becomes a cheap, well-scoped addition rather than a workspace scan bolted onto every delete.
 
-## 4. Known limitations, tracked separately
+## 4. MCP authoring and repair for `page_link` targets
 
-- **MCP agents cannot create or retarget a `page_link` block's `referencedRecordId`** — `create_record`/`write_record` don't accept it; only the editor UI's document picker can set it (see `mcp-tools.md`). Filed as a follow-up.
-- **Duplicate Document/Collection titles are ambiguous on wiki-link _creation_ only** — parsing typed/pasted `[[Title]]` Markdown resolves the first title match, same as before this feature; an already-created link (ID-backed) is never affected by a later duplicate title. Documented in `markdown-transcoding.md`.
+`create_record` and `write_record` (`mcp-tools.md`) accept an explicit `referencedRecordId` field, so an MCP agent can create and retarget a `page_link` block with the same safe-target semantics as the editor UI's document picker, not just read one:
+
+- `create_record` sets a new `page_link` block's target in the same call — only accepted when `blockType` is `page_link` and `parentId` names a Document.
+- `write_record` retargets an existing `page_link` block via the `referencedRecordId` field — a named field, not Markdown text, per this doc's "persist only a target ID" rule (§1). It's a metadata write, not a content write, so it needs no hold (same exemption `properties` already has) and is naturally idempotent.
+- Both call sites run the same validation: the target must be an existing Document the caller can already reach. A target that's missing, not a Document, or outside the caller's token scope is rejected with one generic error — deliberately not distinguishing "doesn't exist" from "exists but forbidden," so a probing caller can't use the error to learn whether an ID it doesn't have access to even exists (mirrors `audit-coverage.md` §3's rule that a denial never reveals more than the caller already supplied).
+- Deleting the target afterward still produces the explicit broken-link state in §2, not a cleared `referencedRecordId` — nothing about this capability changes that.
+
+**Duplicate Document/Collection titles are still ambiguous on wiki-link _creation_ only** — parsing typed/pasted `[[Title]]` Markdown resolves the first title match, same as before this feature; an already-created link (ID-backed) is never affected by a later duplicate title, and this doesn't apply to `page_link` at all since it never resolves by title. Documented in `markdown-transcoding.md`.

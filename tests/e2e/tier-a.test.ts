@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
-import { createDocument, createRecord, getRecordYText } from '$lib/data/records';
+import { createDocument, createRecord, getRecord, getRecordYText } from '$lib/data/records';
 import { getAwareness } from '$lib/server/awareness';
 import { queryAuditLog } from '$lib/server/audit';
 import { plainText, yTextToRichText } from '$lib/data/richtext';
@@ -672,5 +672,74 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		expect(
 			queryAuditLog().filter((a) => a.action === 'delete_record' && a.targetRecordId === block.id)
 		).toHaveLength(1);
+	});
+
+	it('12. MCP create_record/write_record author and retarget a page_link, visible to a real Yjs client, with the permission boundary enforced for an independently scoped caller (issue #46)', async () => {
+		const yjs = harness.getYjsClient();
+		const targetA = createDocument(yjs.doc, { title: 'Target A' });
+		const targetB = createDocument(yjs.doc, { title: 'Target B' });
+		const source = createDocument(yjs.doc, { title: 'Source Doc' });
+		const secret = createDocument(yjs.doc, { title: 'Secret Doc' });
+
+		const { token } = harness.createToken({
+			clientLabel: 'Linker Agent',
+			allowedDocumentIds: [targetA.id, targetB.id, source.id],
+			allowedCollectionIds: []
+		});
+
+		const mcp = await harness.getMcpClient(token);
+
+		// 1st call: create a page_link block with its target set in the same call.
+		const createRes = await mcp.callTool({
+			name: 'create_record',
+			arguments: {
+				parentId: source.id,
+				blockType: 'page_link',
+				referencedRecordId: targetA.id
+			}
+		});
+		const blockId = parseMcpText<{ recordId: string }>(createRes).recordId;
+
+		// The real Yjs websocket client (standing in for the browser UI) observes
+		// the referencedRecordId this MCP call set, with no separate write.
+		await harness.waitForCondition(() => {
+			const record = getRecord(yjs.doc, blockId);
+			return record?.referencedRecordId === targetA.id;
+		});
+
+		// 2nd, independent MCP client + call: retarget via write_record's named
+		// field, not Markdown — proves the retarget isn't tied to the same
+		// in-process call/connection that created the block.
+		const mcp2 = await harness.getMcpClient(token);
+		const retargetRes = await mcp2.callTool({
+			name: 'write_record',
+			arguments: { recordId: blockId, referencedRecordId: targetB.id }
+		});
+		expect(retargetRes.isError).toBeFalsy();
+
+		await harness.waitForCondition(() => {
+			const record = getRecord(yjs.doc, blockId);
+			return record?.referencedRecordId === targetB.id;
+		});
+
+		// A third, independently scoped caller (no access to `secret`) cannot
+		// retarget the link there — the permission boundary applies to a
+		// metadata-only write exactly like a content write.
+		const { token: scopedToken } = harness.createToken({
+			clientLabel: 'Scoped Retargeter',
+			allowedDocumentIds: [source.id, targetB.id],
+			allowedCollectionIds: []
+		});
+		const mcp3 = await harness.getMcpClient(scopedToken);
+		const deniedRes = await mcp3.callTool({
+			name: 'write_record',
+			arguments: { recordId: blockId, referencedRecordId: secret.id }
+		});
+		expect(deniedRes.isError).toBe(true);
+		expect(getResultText(deniedRes)).not.toContain('Secret Doc');
+
+		// The rejected retarget left the link pointing at targetB, unchanged.
+		const record = getRecord(yjs.doc, blockId);
+		expect(record?.referencedRecordId).toBe(targetB.id);
 	});
 });
