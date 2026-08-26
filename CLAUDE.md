@@ -8,6 +8,7 @@ Compendium is a shared, real-time knowledge workspace: one SvelteKit app where a
 
 - [`architecture.md`](docs/specifications/architecture.md) — process model, route structure
 - [`data-model.md`](docs/specifications/data-model.md) — `WorkspaceRecord`/Document/Collection types, Yjs mapping
+- [`collection-views.md`](docs/specifications/collection-views.md) — Table/Board/Calendar's shared view-projection model (`ViewConfig`, grouping, filtering)
 - [`collaboration.md`](docs/specifications/collaboration.md) — presence & holds (Yjs Awareness)
 - [`mcp-tools.md`](docs/specifications/mcp-tools.md) — the MCP tool surface
 - [`markdown-transcoding.md`](docs/specifications/markdown-transcoding.md) — `Y.Text` ⇄ Markdown boundary
