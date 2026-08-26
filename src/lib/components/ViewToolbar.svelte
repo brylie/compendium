@@ -52,7 +52,14 @@
 	function updateFilter(index: number, patch: Partial<ViewFilter>): void {
 		config = {
 			...config,
-			filters: (config.filters ?? []).map((f, i) => (i === index ? { ...f, ...patch } : f))
+			filters: (config.filters ?? []).map((f, i) => {
+				if (i !== index) return f;
+				const next = { ...f, ...patch };
+				if (patch.propertyKey !== undefined && patch.propertyKey !== f.propertyKey) {
+					delete next.value;
+				}
+				return next;
+			})
 		};
 	}
 

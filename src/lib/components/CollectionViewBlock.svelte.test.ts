@@ -98,6 +98,31 @@ describe('CollectionViewBlock', () => {
 		expect(getRecord(ydoc, block.id)?.referencedRecordId).toBe(collection.id);
 	});
 
+	it('does not preselect the deleted target when changing a broken embed, and keeps Insert disabled until a live collection is chosen', async () => {
+		const doc = createDocument(ydoc, { title: 'Team Page' });
+		const collection = createCollection(ydoc, { title: 'Doomed', schema: [] });
+		createCollection(ydoc, { title: 'Still Here', schema: [] });
+		const block = createRecord(
+			ydoc,
+			{
+				parentId: doc.id,
+				blockType: 'collection_view',
+				referencedRecordId: collection.id,
+				viewConfig: { viewType: 'table' }
+			},
+			actor
+		);
+		deleteCollection(ydoc, collection.id);
+		const user = userEvent.setup();
+
+		render(CollectionViewBlock, { block: getRecord(ydoc, block.id)!, ydoc });
+		await user.click(screen.getByRole('button', { name: 'Change' }));
+
+		const selects = screen.getAllByRole('combobox');
+		expect(selects[1]).toHaveValue('');
+		expect(screen.getByRole('button', { name: 'Insert' })).toBeDisabled();
+	});
+
 	it('lets the user change an already-configured embed to a different collection/view', async () => {
 		const doc = createDocument(ydoc, { title: 'Team Page' });
 		const collectionA = createCollection(ydoc, { title: 'Collection A', schema: [] });

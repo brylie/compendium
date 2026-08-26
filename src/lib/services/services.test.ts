@@ -319,6 +319,27 @@ describe('service layer: centralized business rules & side effects', () => {
 		expect(embedRecord?.markdown).toBe('[collection view: Deleted collection]');
 		expect(embedRecord?.referencedRecordId).toBe(collectionTarget.id);
 	});
+
+	it('marks a collection_view broken when its referencedRecordId names a Document, not a Collection', () => {
+		const docPublic = createDocument(human, { title: 'Team Page' });
+		const docTarget = createDocument(human, { title: 'Not A Collection' });
+		const embed = crdtCreateRecord(
+			getYDoc(),
+			{
+				parentId: docPublic.id,
+				blockType: 'collection_view',
+				referencedRecordId: docTarget.id,
+				viewConfig: { viewType: 'table' }
+			},
+			human
+		);
+
+		const result = getDocument(human, docPublic.id);
+		const embedRecord = result?.records.find((r) => r.id === embed.id);
+		expect(embedRecord?.linkBroken).toBe(true);
+		expect(embedRecord?.markdown).toBe('[collection view: Deleted collection]');
+		expect(embedRecord?.referencedRecordId).toBe(docTarget.id);
+	});
 });
 
 describe('service layer: MCP authoring and repair of page_link targets (issue #46)', () => {

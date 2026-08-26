@@ -156,10 +156,15 @@ export function getDocument(
 			!r.referencedRecordId ||
 			!isAccessToken(caller) ||
 			tokenAllowsParent(caller, r.referencedRecordId);
-		const linkedTarget =
+		const resolvedTarget =
 			(isPageLink || isCollectionView) && r.referencedRecordId && targetInScope
 				? resolveInternalLinkTarget(doc, r.referencedRecordId)
 				: undefined;
+		const linkedTarget = isCollectionView
+			? resolvedTarget?.kind === 'collection'
+				? resolvedTarget
+				: undefined
+			: resolvedTarget;
 		const linkBroken =
 			(isPageLink || isCollectionView) && r.referencedRecordId && targetInScope && !linkedTarget
 				? true

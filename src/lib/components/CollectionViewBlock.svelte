@@ -39,7 +39,7 @@
 	let changing = $state(false);
 
 	function insert(): void {
-		if (!pickerCollectionId) return;
+		if (!pickerCollectionId || !getCollection(ydoc, pickerCollectionId)) return;
 		setRecordReferencedId(ydoc, block.id, pickerCollectionId, CURRENT_USER);
 		setRecordViewConfig(ydoc, block.id, { viewType: pickerViewType }, CURRENT_USER);
 		changing = false;
@@ -59,7 +59,7 @@
 	}
 
 	function startChange(): void {
-		pickerCollectionId = block.referencedRecordId ?? '';
+		pickerCollectionId = collection?.id ?? '';
 		pickerViewType = block.viewConfig?.viewType ?? 'table';
 		changing = true;
 	}

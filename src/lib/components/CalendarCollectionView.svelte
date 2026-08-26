@@ -124,8 +124,12 @@
 		const view = getCollectionView(ydoc, collectionId);
 		schema = view.collection?.schema ?? [];
 		rows = view.records;
-		if (!config.groupBy || !schema.some((p) => p.key === config.groupBy && p.type === 'date')) {
-			onConfigChange({ ...config, groupBy: schema.find((p) => p.type === 'date')?.key });
+		const resolvedKey =
+			config.groupBy && schema.some((p) => p.key === config.groupBy && p.type === 'date')
+				? config.groupBy
+				: schema.find((p) => p.type === 'date')?.key;
+		if (resolvedKey !== config.groupBy) {
+			onConfigChange({ ...config, groupBy: resolvedKey });
 		}
 	}
 
@@ -301,7 +305,7 @@
 							<button
 								type="button"
 								onclick={() => addEntry(cell.year, cell.month, cell.day)}
-								class="rounded p-0.5 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-accent"
+								class="rounded p-0.5 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-accent focus-visible:opacity-100"
 								aria-label="Add entry on {key}"
 							>
 								<Icon name="plus" size={11} />
