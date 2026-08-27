@@ -14,7 +14,7 @@ The fix is a generic observer on the server's own `Y.Doc` (`src/lib/server/audit
 
 ## 2. How the observer attributes without new tagging
 
-y-protocols/sync applies an incoming client update via `Y.applyUpdate(doc, update, ws)` (`yjs-ws-server.ts`), so the resulting transaction's `origin` is that connection's own `ws` object. Every service-layer write, by contrast, calls `doc.transact(fn)` with no origin, which defaults to `null` (yjs's own `transact(doc, f, origin = null)`). That distinction already existed, unmodified, on every write path in this codebase — `attachDocAuditObserver` (called once from `getYDoc()`, after the initial snapshot load) just reads it:
+y-protocols/sync applies an incoming client update via `Y.applyUpdate(doc, update, ws)` (`yjs-ws-server.ts`), so the resulting transaction's `origin` is that connection's own `ws` object. Every service-layer write, by contrast, calls `doc.transact(fn)` with no origin, which defaults to `null` (yjs's own `transact(doc, f, origin = null)`). That distinction already existed, unmodified, on every write path in this codebase — `attachDocAuditObserver` (called once per resolved `Y.Doc`, from `workspace-store.ts`'s `createContext()`, after the initial snapshot load) just reads it:
 
 - `transaction.origin == null` → a service-layer write. Already audited by its own `logAudit` call — the observer does nothing, so nothing is double-counted.
 - `transaction.origin` is anything else → a real y-websocket client wrote directly to the doc. The observer resolves what changed and logs it, attributed to `CURRENT_USER` (Phase 0/1 is single-tenant — every live UI connection is the one workspace owner; see `service-layer.md` §3's note that UI writes are currently unscoped).

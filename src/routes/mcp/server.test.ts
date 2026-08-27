@@ -6,7 +6,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { GET, POST, DELETE } from './+server';
 import { createDocument } from '$lib/data/records';
 import { createToken } from '$lib/mcp/tokens';
-import { getYDoc } from '$lib/server/ydoc';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 
 // Mirrors tests/e2e/harness.ts's node-request/web-request bridge, but points
 // at this route's own exported handlers rather than reimplementing MCP
@@ -76,7 +76,7 @@ describe('routes/mcp: HTTP transport wiring and bearer-token extraction', () => 
 	});
 
 	it('serves an authenticated tool call end-to-end over the real MCP HTTP transport', async () => {
-		const doc = getYDoc();
+		const { doc } = resolveWorkspaceContext();
 		const docMeta = createDocument(doc, { title: 'Routed Doc' });
 		const { token } = createToken({
 			clientLabel: 'Route Test Client',

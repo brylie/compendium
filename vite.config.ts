@@ -18,13 +18,13 @@ function yjsWebSocketPlugin(): Plugin {
 			// context from the one it uses for the app's SSR code at request time
 			// (+page.server.ts, the /mcp route, the service layer). A plain
 			// top-level `import` of attach-ws.ts here — and everything it pulls in,
-			// down to ydoc.ts's module-level Y.Doc singleton — would resolve
-			// through that *other* context, creating a second, disconnected Y.Doc
-			// that only the WebSocket layer ever sees: every live edit silently
-			// stops showing up for connected clients while MCP/HTTP writes report
-			// success. server.ssrLoadModule loads it through the same SSR module
-			// graph the rest of the app uses instead, so there's exactly one
-			// getYDoc() singleton for this process.
+			// down to workspace-store.ts's module-level context registry — would
+			// resolve through that *other* context, creating a second, disconnected
+			// Y.Doc that only the WebSocket layer ever sees: every live edit
+			// silently stops showing up for connected clients while MCP/HTTP writes
+			// report success. server.ssrLoadModule loads it through the same SSR
+			// module graph the rest of the app uses instead, so there's exactly one
+			// resolveWorkspaceContext() registry for this process.
 			const mod = await server.ssrLoadModule('/src/lib/server/attach-ws.ts');
 			(mod.attachYjsWebSocket as typeof attachYjsWebSocket)(server.httpServer);
 		},

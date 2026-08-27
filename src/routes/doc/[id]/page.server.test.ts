@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { load } from './+page.server';
 import { createDocument } from '$lib/data/records';
-import { getYDoc } from '$lib/server/ydoc';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 
 describe('routes/doc/[id]/+page.server', () => {
 	it('returns the document title for an existing document', () => {
-		const doc = getYDoc();
+		const { doc } = resolveWorkspaceContext();
 		const docMeta = createDocument(doc, { title: 'My Doc' });
 
 		const result = load({ params: { id: docMeta.id } } as Parameters<typeof load>[0]);

@@ -1,4 +1,4 @@
-import { getYDoc } from '$lib/server/ydoc';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import {
 	createDocument as crdtCreateDocument,
 	createRecord as crdtCreateRecord,
@@ -30,7 +30,7 @@ export interface CreateDocumentInput {
 }
 
 export function createDocument(caller: CallerIdentity, input: CreateDocumentInput): DocumentMeta {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	// Decision: In single-tenant Phase 0/1, any authenticated caller is permitted
@@ -67,7 +67,7 @@ export function moveDocument(
 	documentId: string,
 	options: { parentDocumentId?: string; afterDocumentId?: string }
 ): void {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'move_document');
@@ -85,7 +85,7 @@ export function moveDocument(
 }
 
 export function deleteDocument(caller: CallerIdentity, documentId: string): void {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'delete_document');
@@ -98,7 +98,7 @@ export function updateDocumentTitle(
 	documentId: string,
 	title: string
 ): void {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'update_document_title');
@@ -139,7 +139,7 @@ export function getDocument(
 		markdown: string;
 	}>;
 } | null {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'get_document');
@@ -204,7 +204,7 @@ export function getDocument(
 }
 
 export function listDocuments(caller: CallerIdentity): DocumentMeta[] {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const docs = crdtListDocuments(doc);
 	if (isAccessToken(caller)) {
 		return docs.filter((d) => tokenAllowsParent(caller, d.id));

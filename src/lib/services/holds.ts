@@ -1,5 +1,4 @@
-import { getYDoc } from '$lib/server/ydoc';
-import { getAwareness } from '$lib/server/awareness';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { clientIdForToken, releaseAgentHold, requestAgentHold } from '$lib/server/holds';
 import { getRecord } from '$lib/data/records';
 import { logAudit } from '$lib/server/audit';
@@ -15,8 +14,7 @@ export function holdRecords(
 	caller: CallerIdentity,
 	recordIds: string[]
 ): { granted: string[]; denied: string[] } {
-	const doc = getYDoc();
-	const awareness = getAwareness();
+	const { doc, awareness } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	let result: { granted: string[]; denied: string[] };
@@ -47,7 +45,7 @@ export function holdRecords(
 }
 
 export function releaseRecords(caller: CallerIdentity, recordIds: string[]): void {
-	const awareness = getAwareness();
+	const { awareness } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	if (isAccessToken(caller)) {

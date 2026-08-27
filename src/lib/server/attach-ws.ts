@@ -13,13 +13,20 @@ export function attachYjsWebSocket(
 	path = '/ws'
 ): WebSocketServer {
 	const wss = new WebSocketServer({ noServer: true });
-	wss.on('connection', setupWSConnection);
+	// No selector passed through here — see the room-name comment below for why.
+	wss.on('connection', (ws) => setupWSConnection(ws));
 
 	server.on('upgrade', (request, socket, head) => {
 		const { pathname } = new URL(request.url ?? '/', 'http://localhost');
 		// The y-websocket client always appends a room name segment
-		// (serverUrl + '/' + roomname); Phase 0 serves one shared workspace
-		// doc regardless of room, so match by prefix rather than exact path.
+		// (serverUrl + '/' + roomname), matched here by prefix only to tell
+		// "is this our endpoint" from "is this Vite HMR's" apart. That segment is
+		// deliberately *not* forwarded into setupWSConnection as a workspace
+		// selector: Phase 0 has no auth to validate a client-supplied room name
+		// against, so every connection binds to the explicit trusted-local
+		// default context regardless of what room it asked for (issue #30) — a
+		// client-controlled value is a selector, never authority, until #13 adds
+		// the auth layer that could make one trustworthy.
 		if (pathname !== path && !pathname.startsWith(path + '/')) {
 			// On a server shared with another 'upgrade' listener (notably
 			// Vite's own HMR websocket, registered on this same httpServer in

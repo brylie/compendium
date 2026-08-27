@@ -1,5 +1,4 @@
-import { getYDoc } from '$lib/server/ydoc';
-import { getAwareness } from '$lib/server/awareness';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { clientIdForToken, isHeldByClient, releaseAgentHold } from '$lib/server/holds';
 import {
 	createRecord as crdtCreateRecord,
@@ -44,7 +43,7 @@ export class InvalidLinkTargetError extends Error {
 }
 
 function validatePageLinkTarget(caller: CallerIdentity, targetId: string): void {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const target = crdtGetDocument(doc, targetId);
 	if (!target) throw new InvalidLinkTargetError(targetId);
 	if (isAccessToken(caller) && !tokenAllowsParent(caller, targetId)) {
@@ -62,7 +61,7 @@ export function createRecord(
 		referencedRecordId?: string;
 	}
 ): WorkspaceRecord {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, input.parentId, 'create_record');
@@ -106,7 +105,7 @@ export function writeRecord(
 		throw new Error('write_record requires markdown, properties, or referencedRecordId');
 	}
 
-	const doc = getYDoc();
+	const { doc, awareness } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 	const record = requireAccessibleRecord(caller, recordId, 'write_record');
 
@@ -126,7 +125,6 @@ export function writeRecord(
 
 	if (input.markdown !== undefined) {
 		if (isAccessToken(caller)) {
-			const awareness = getAwareness();
 			const clientId = clientIdForToken(caller.tokenHash);
 			if (!isHeldByClient(awareness, clientId, recordId)) {
 				throw new HoldRequiredError(
@@ -190,7 +188,7 @@ export function writeRecord(
 }
 
 export function deleteRecord(caller: CallerIdentity, recordId: string): void {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleRecord(caller, recordId, 'delete_record');

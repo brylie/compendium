@@ -138,8 +138,9 @@ export function resetAuditObserverForTests(): void {
 
 /**
  * Attaches the generic "audit whatever the UI just did" observer to the
- * server's Y.Doc. Call once per Y.Doc instance (getYDoc() does this after
- * loading its initial snapshot, so the snapshot's own applyUpdate — which
+ * server's Y.Doc. Call once per Y.Doc instance (workspace-store.ts's
+ * createContext() does this after loading its initial snapshot, so the
+ * snapshot's own applyUpdate — which
  * runs before this is attached — never triggers a spurious audit trail on
  * process start).
  */

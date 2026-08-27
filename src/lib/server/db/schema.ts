@@ -3,6 +3,12 @@ import type { ActorId } from '$lib/data/types';
 
 export const snapshots = sqliteTable('snapshots', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
+	// Phase 0 has exactly one workspace/shard, so both columns default to the
+	// same constant (src/lib/server/workspace-store.ts's DEFAULT_WORKSPACE_ID /
+	// DEFAULT_SHARD_ID) for every row today — but the column exists now so
+	// #13's real sharding work is a query-scoping change, not a migration.
+	workspaceId: text('workspace_id').notNull().default('default'),
+	shardId: text('shard_id').notNull().default('default'),
 	state: blob('state', { mode: 'buffer' }).notNull(),
 	createdAt: integer('created_at').notNull()
 });

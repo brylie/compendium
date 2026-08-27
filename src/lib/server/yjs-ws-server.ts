@@ -3,8 +3,11 @@ import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import * as syncProtocol from 'y-protocols/sync';
 import * as awarenessProtocol from 'y-protocols/awareness';
-import { getYDoc } from './ydoc.js';
-import { getAwareness } from './awareness.js';
+import {
+	registerConnection,
+	resolveWorkspaceContext,
+	type WorkspaceSelector
+} from './workspace-store.js';
 
 // y-websocket's npm package ships the browser client only as of v3 — the
 // server side (formerly bin/utils.js) is reimplemented here against the same
@@ -15,9 +18,16 @@ const MESSAGE_SYNC = 0;
 const MESSAGE_AWARENESS = 1;
 const PING_INTERVAL_MS = 30_000;
 
-export function setupWSConnection(ws: WebSocket): void {
-	const doc = getYDoc();
-	const awareness = getAwareness();
+/**
+ * `selector` carries whatever workspace/shard hint attach-ws.ts parsed out of
+ * the connection's room path — non-authoritative in Phase 0 (see
+ * workspace-store.ts), but threaded through here rather than dropped so the
+ * boundary that resolves context is this call, not an implicit global.
+ */
+export function setupWSConnection(ws: WebSocket, selector?: WorkspaceSelector): void {
+	const context = resolveWorkspaceContext(selector);
+	const { doc, awareness } = context;
+	const unregisterConnection = registerConnection(context, ws);
 	ws.binaryType = 'arraybuffer';
 
 	const ownedClientIds = new Set<number>();
@@ -76,6 +86,7 @@ export function setupWSConnection(ws: WebSocket): void {
 		}
 		doc.off('update', docUpdateHandler);
 		awareness.off('update', awarenessUpdateHandler);
+		unregisterConnection();
 		clearInterval(pingInterval);
 		try {
 			ws.close();

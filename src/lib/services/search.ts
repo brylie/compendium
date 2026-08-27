@@ -1,4 +1,4 @@
-import { getYDoc } from '$lib/server/ydoc';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { listCollections, listDocuments, listRecordsForParent } from '$lib/data/records';
 import { logAudit } from '$lib/server/audit';
 import { tokenAllowsParent } from '$lib/mcp/tokens';
@@ -17,7 +17,7 @@ export function searchWorkspace(
 	caller: CallerIdentity,
 	query: string
 ): Array<{ recordId: string; snippet: string }> {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 	const needle = query.toLowerCase();
 	const results: Array<{ recordId: string; snippet: string }> = [];

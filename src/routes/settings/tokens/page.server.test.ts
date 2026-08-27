@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { load, actions } from './+page.server';
 import { createDocument } from '$lib/data/records';
-import { getYDoc } from '$lib/server/ydoc';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { listTokens } from '$lib/mcp/tokens';
 
 function formEvent(
@@ -17,7 +17,7 @@ function formEvent(
 
 describe('routes/settings/tokens/+page.server', () => {
 	it('load() lists tokens, documents, and collections', () => {
-		const doc = getYDoc();
+		const { doc } = resolveWorkspaceContext();
 		createDocument(doc, { title: 'Doc for tokens page' });
 
 		const result = load(undefined as unknown as Parameters<typeof load>[0]) as unknown as {
@@ -35,7 +35,7 @@ describe('routes/settings/tokens/+page.server', () => {
 	});
 
 	it('create action mints a scoped token and logs the grant', async () => {
-		const doc = getYDoc();
+		const { doc } = resolveWorkspaceContext();
 		const docMeta = createDocument(doc, { title: 'Scoped Doc' });
 
 		const result = (await actions.create(

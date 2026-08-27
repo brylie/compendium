@@ -1,4 +1,4 @@
-import { getYDoc } from '$lib/server/ydoc';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import {
 	createCollection as crdtCreateCollection,
 	deleteCollection as crdtDeleteCollection,
@@ -27,7 +27,7 @@ export function createCollection(
 	caller: CallerIdentity,
 	input: CreateCollectionInput
 ): CollectionMeta {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	const collection = crdtCreateCollection(doc, {
@@ -48,7 +48,7 @@ export function createCollection(
 }
 
 export function listCollections(caller: CallerIdentity): CollectionMeta[] {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const collections = crdtListCollections(doc);
 	if (isAccessToken(caller)) {
 		return collections.filter((c) => tokenAllowsParent(caller, c.id));
@@ -63,7 +63,7 @@ export function queryCollection(
 	collection: CollectionMeta | undefined;
 	records: WorkspaceRecord[];
 } {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, collectionId, 'query_collection');
@@ -75,7 +75,7 @@ export function queryCollection(
 }
 
 export function deleteCollection(caller: CallerIdentity, collectionId: string): void {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, collectionId, 'delete_collection');
@@ -88,7 +88,7 @@ export function updateCollectionTitle(
 	collectionId: string,
 	title: string
 ): void {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, collectionId, 'update_collection_title');
