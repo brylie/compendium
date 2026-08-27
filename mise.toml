@@ -1,6 +1,7 @@
 [tools]
 gh = "latest"
 prek = "latest"
+python = "3.14"
 
 [env]
 _.file = ".env"

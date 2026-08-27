@@ -36,8 +36,15 @@ right before running the command.
 | `scripts/set_field.py <issue> <field> <value> [--apply]` | Change a single-select field (Priority/Size/Status)             | Only with `--apply` |
 | `scripts/audit_backlog.py`                               | Sweep every open board item for mechanical gaps (see below)     | No                  |
 
-Run them with `python3 <path> ...` from anywhere (they resolve their own
-imports). All output is JSON on stdout.
+Run them with `mise exec -- python3 <path> ...` from anywhere inside the
+repo (they resolve their own imports). `mise exec` finds this repo's
+`mise.toml` by walking up from the current directory and runs the command
+under the pinned Python (3.14 as of writing), regardless of what plain
+`python3` on `$PATH` happens to resolve to — the OS-provided one varies by
+machine and can be years older. If `mise exec -- python3 --version` doesn't
+print the pinned version, run `mise install` first. Plain `python3
+<path>` also works whenever it happens to be new enough, but don't rely on
+that — use the `mise exec --` form.
 
 Field/option ids are never hardcoded anywhere in this skill or its scripts —
 `set_field.py` and `audit_backlog.py` both fetch the live schema on every
@@ -87,8 +94,8 @@ board's `Priority` field (P0/P1/P2), which is why `gh issue view --json
 labels` will never show it. Set it with:
 
 ```bash
-python3 scripts/set_field.py <issue> Priority <P0|P1|P2>          # dry run
-python3 scripts/set_field.py <issue> Priority <P0|P1|P2> --apply  # applies it
+mise exec -- python3 scripts/set_field.py <issue> Priority <P0|P1|P2>          # dry run
+mise exec -- python3 scripts/set_field.py <issue> Priority <P0|P1|P2> --apply  # applies it
 ```
 
 **Any priority change — including on a brand-new issue — gets a rationale
@@ -208,7 +215,7 @@ This is the actual "run this regularly" entry point — the other sections
 are what you do once a gap is found, this is how you find them:
 
 ```bash
-python3 scripts/audit_backlog.py
+mise exec -- python3 scripts/audit_backlog.py
 ```
 
 This flags every open board item missing Priority, missing a `Done when:`

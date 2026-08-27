@@ -34,3 +34,7 @@ coverage/
 *.db-wal
 *.db-shm
 *.db-journal
+
+# Python (backlog-refinement skill scripts)
+__pycache__/
+*.pyc
