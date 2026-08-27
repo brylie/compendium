@@ -82,7 +82,7 @@ def audit_item(item: dict) -> dict | None:
     # Line-based, not a body-wide substring match: "the work is done when
     # approved" would otherwise count as satisfying the acceptance-criteria
     # convention without actually providing one.
-    if not any(line.strip().lower().startswith("done when") for line in body.splitlines()):
+    if not any(line.strip().lower().startswith("done when:") for line in body.splitlines()):
         flags.append("no 'Done when:' acceptance criteria")
     if len(body.strip()) < MIN_BODY_LENGTH:
         flags.append(f"body under {MIN_BODY_LENGTH} chars — likely underspecified")

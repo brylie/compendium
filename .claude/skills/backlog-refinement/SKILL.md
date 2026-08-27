@@ -62,9 +62,7 @@ apply the wrong value.
 
 ## 1. Authoring a new issue
 
-Every issue — bug, feature, enhancement, refactor, tech-debt, doc gap — gets
-the same shape, matching the convention already in use across #13/#30/#31/
-#72/#74:
+Every issue — bug, feature, enhancement, refactor, tech-debt, doc gap — gets the same shape, matching the convention already in use across issues #13/#30/#31/#72/#74:
 
 ```markdown
 <Problem statement: what's wrong or missing, and why it matters. For a bug,
@@ -135,17 +133,20 @@ is tracked.
 
 ## 5. Relationships
 
-GitHub CLI (2.94.0+ — this repo's `mise.toml` pins `gh = "latest"`, so this
-is always available once `mise install`/`mise upgrade` has run) has native,
-queryable "blocks" / "blocked by" relationships, plus sub-issues for strict
-parent/child decomposition. **Check for these before assuming a relationship
-only exists in prose:**
+GitHub CLI 2.94.0+ has native, queryable "blocks" / "blocked by"
+relationships, plus sub-issues for strict parent/child decomposition — but
+verify before relying on this: this repo's `mise.toml` pins `gh = "latest"`,
+yet the plain `gh` a shell resolves first can easily be a different,
+older install (e.g. Homebrew's) that predates the feature entirely. Always
+invoke `gh` through `mise exec --` for the commands below, and confirm the
+resolved version actually supports them:
 
 ```bash
-gh issue view <issue> --json blockedBy,blocking     # what natively blocks / is blocked by this issue
+mise exec -- gh --version                                   # confirm 2.94.0+ before relying on the flags below
+mise exec -- gh issue view <issue> --json blockedBy,blocking # what natively blocks / is blocked by this issue
 ```
 
-This repo already has native links that predate this skill — #13 is
+This repo already has native links that predate this skill — issue #13 is
 natively `blockedBy` #30 and `blocking` #19 and #6, none of which was
 obvious from reading issue bodies alone. Don't rely on grepping issue text
 for "blocked by" and assume that's the complete picture.
@@ -154,22 +155,22 @@ To record a new blocks/blocked-by relationship, use the native link (after
 confirming with the user per the write-confirmation rule above):
 
 ```bash
-gh issue edit <issue> --add-blocked-by <other-issue>
-gh issue edit <issue> --add-blocking <other-issue>
+mise exec -- gh issue edit <issue> --add-blocked-by <other-issue>
+mise exec -- gh issue edit <issue> --add-blocking <other-issue>
 ```
 
 For strict parent/sub-issue decomposition (splitting one oversized issue
-into several trackable pieces): `gh issue edit <parent> --add-sub-issue
-<child-number-or-url>`.
+into several trackable pieces): `mise exec -- gh issue edit <parent>
+--add-sub-issue <child-number-or-url>`.
 
 Native links are structural, not explanatory — they show _that_ two issues
 are related but not _why_. Pair every native `--add-blocked-by`/
 `--add-blocking` link with a rationale comment, the same shape used for
-#13 ↔ #31 today (recorded in prose only, since it predates this skill's use
-of the native fields). For relationship types GitHub has no native field
-for at all — duplicate-of, prerequisite-for-in-spirit, anything looser than
-a strict block — the comment remains the _only_ record, not just the
-explanatory half of one:
+issue #13 ↔ #31 today (recorded in prose only, since it predates this
+skill's use of the native fields). For relationship types GitHub has no
+native field for at all — duplicate-of, prerequisite-for-in-spirit,
+anything looser than a strict block — the comment remains the _only_
+record, not just the explanatory half of one:
 
 > Blocked by #31 (CRDT capacity benchmark and resource observability,
 > promoted P2 → P0 to match): this issue's own body says to "use #31 to
