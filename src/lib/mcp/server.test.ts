@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpServer } from './server';
 import { createToken } from './tokens';
-import { getYDoc } from '$lib/server/ydoc';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { createCollection, createDocument, createRecord } from '$lib/data/records';
 
 interface ToolHolder {
@@ -47,7 +47,7 @@ function getTextContent(result: CallToolResult): string {
 
 describe('mcp server: document hierarchy and access grant persistence', () => {
 	it('persists access grants for agent-created documents across fresh tool calls', async () => {
-		const doc = getYDoc();
+		const { doc } = resolveWorkspaceContext();
 		const rootDoc = createDocument(doc, { title: 'Engineering Handbook' });
 
 		// Create a token scoped only to the root document
@@ -100,7 +100,7 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 	});
 
 	it('supports move_document to reorganize hierarchy with permission checks', async () => {
-		const doc = getYDoc();
+		const { doc } = resolveWorkspaceContext();
 		const folderA = createDocument(doc, { title: 'Folder A' });
 		const folderB = createDocument(doc, { title: 'Folder B' });
 		const childDoc = createDocument(doc, { title: 'Spec', parentDocumentId: folderA.id });
@@ -139,7 +139,7 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 	});
 
 	it('blocks moving a document into an inaccessible parent', async () => {
-		const doc = getYDoc();
+		const { doc } = resolveWorkspaceContext();
 		const allowedDoc = createDocument(doc, { title: 'Allowed' });
 		const secretDoc = createDocument(doc, { title: 'Secret' });
 
@@ -168,7 +168,7 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 	});
 
 	it('creates and transcodes page_link blocks as [[Document Title]] references', async () => {
-		const doc = getYDoc();
+		const { doc } = resolveWorkspaceContext();
 		const docA = createDocument(doc, { title: 'Target Document' });
 		const docB = createDocument(doc, { title: 'Source Document' });
 
@@ -218,7 +218,7 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 	});
 
 	it('create_record sets a page_link target via referencedRecordId, and write_record retargets it, over the MCP transport (issue #46)', async () => {
-		const doc = getYDoc();
+		const { doc } = resolveWorkspaceContext();
 		const targetA = createDocument(doc, { title: 'Doc A' });
 		const targetB = createDocument(doc, { title: 'Doc B' });
 		const source = createDocument(doc, { title: 'Source Doc' });
@@ -265,7 +265,7 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 	});
 
 	it('rejects a page_link target outside the token scope without leaking whether it exists', async () => {
-		const doc = getYDoc();
+		const { doc } = resolveWorkspaceContext();
 		const secret = createDocument(doc, { title: 'Secret Doc' });
 		const source = createDocument(doc, { title: 'Source Doc' });
 
@@ -305,7 +305,7 @@ describe('mcp server: authentication', () => {
 
 describe('mcp server: full tool surface', () => {
 	it('list_documents, delete_document, list_collections, and query_collection round-trip', async () => {
-		const doc = getYDoc();
+		const { doc } = resolveWorkspaceContext();
 		const docA = createDocument(doc, { title: 'Doc A' });
 		const collection = createCollection(doc, {
 			title: 'Tasks',
@@ -373,7 +373,7 @@ describe('mcp server: full tool surface', () => {
 	});
 
 	it('search_workspace, hold_records, release_records, write_record, and delete_record round-trip', async () => {
-		const doc = getYDoc();
+		const { doc } = resolveWorkspaceContext();
 		const docA = createDocument(doc, { title: 'Searchable Doc' });
 
 		const { token } = createToken({
@@ -426,7 +426,7 @@ describe('mcp server: full tool surface', () => {
 	});
 
 	it('surfaces a HoldRequiredError as a non-throwing tool error', async () => {
-		const doc = getYDoc();
+		const { doc } = resolveWorkspaceContext();
 		const docA = createDocument(doc, { title: 'Unheld Doc' });
 		const { token } = createToken({
 			clientLabel: 'No Hold Bot',
@@ -454,7 +454,7 @@ describe('mcp server: full tool surface', () => {
 	});
 
 	it('surfaces an unexpected error generically', async () => {
-		const doc = getYDoc();
+		const { doc } = resolveWorkspaceContext();
 		const docA = createDocument(doc, { title: 'Doc' });
 		const { token } = createToken({
 			clientLabel: 'Bad Write Bot',

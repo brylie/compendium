@@ -1,13 +1,20 @@
 {
-	"version": "7",
-	"dialect": "sqlite",
-	"entries": [
-		{
-			"idx": 0,
-			"version": "6",
-			"when": 1787441533691,
-			"tag": "0000_wise_trish_tilby",
-			"breakpoints": true
-		}
-	]
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1787441533691,
+      "tag": "0000_wise_trish_tilby",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787770170816,
+      "tag": "0001_chilly_tyger_tiger",
+      "breakpoints": true
+    }
+  ]
 }

@@ -1,5 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { getYDoc } from '$lib/server/ydoc';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { listCollections, listDocuments } from '$lib/data/records';
 import { createToken, listTokens, revokeToken } from '$lib/mcp/tokens';
 import { logAudit } from '$lib/server/audit';
@@ -8,7 +8,7 @@ import type { Actions, PageServerLoad } from './$types';
 const CURRENT_USER = { kind: 'human', userId: 'local' } as const;
 
 export const load: PageServerLoad = () => {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	return {
 		tokens: listTokens(),
 		documents: listDocuments(doc),

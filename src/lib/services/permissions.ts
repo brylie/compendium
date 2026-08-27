@@ -1,5 +1,5 @@
 import type { ActorId } from '$lib/data/types';
-import { getYDoc } from '$lib/server/ydoc';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { getRecord } from '$lib/data/records';
 import { tokenAllowsParent, type AccessToken } from '$lib/mcp/tokens';
 import { logAudit } from '$lib/server/audit';
@@ -57,7 +57,7 @@ export function requireAccessibleRecord(
 	recordId: string,
 	action?: string
 ): NonNullable<ReturnType<typeof getRecord>> {
-	const doc = getYDoc();
+	const { doc } = resolveWorkspaceContext();
 	const record = getRecord(doc, recordId);
 	if (!record) {
 		logDenial(caller, action, recordId);

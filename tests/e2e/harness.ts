@@ -12,8 +12,7 @@ import { createMcpServer } from '$lib/mcp/server';
 import { attachYjsWebSocket } from '$lib/server/attach-ws';
 import { createToken, type AccessToken } from '$lib/mcp/tokens';
 import { closeDb } from '$lib/server/store';
-import { resetYDocForTests } from '$lib/server/ydoc';
-import { resetAwarenessForTests } from '$lib/server/awareness';
+import { resetWorkspaceStoreForTests } from '$lib/server/workspace-store';
 
 // adapter-node's built handler (build/handler.js) uses ORIGIN to construct
 // each request's trusted `url.origin` for its CSRF check — not the raw
@@ -94,8 +93,7 @@ export async function createTestHarness(): Promise<TestHarness> {
 
 	// Reset state
 	closeDb();
-	resetYDocForTests();
-	resetAwarenessForTests();
+	resetWorkspaceStoreForTests();
 
 	let port = 0;
 	const mcpClients: Client[] = [];
@@ -265,8 +263,7 @@ export async function createTestHarness(): Promise<TestHarness> {
 		});
 
 		closeDb();
-		resetYDocForTests();
-		resetAwarenessForTests();
+		resetWorkspaceStoreForTests();
 
 		try {
 			rmSync(tempDir, { recursive: true, force: true });

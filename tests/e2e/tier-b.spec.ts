@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { createTestHarness, type TestHarness } from './harness';
 import { createDocument, createRecord } from '$lib/services';
-import { flush } from '$lib/server/ydoc';
+import { flush } from '$lib/server/workspace-store';
 import type { ActorId } from '$lib/data/types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };

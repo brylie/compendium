@@ -8,6 +8,7 @@ import { queryAuditLog } from './audit';
 import {
 	attachDocAuditObserver,
 	flushPendingAuditEvents,
+	pendingTimerDocCountForTests,
 	resetAuditObserverForTests
 } from './audit-observer';
 import type { ActorId } from '$lib/data/types';
@@ -182,6 +183,94 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 			// letting the full window elapse must not log a second update_record.
 			vi.advanceTimersByTime(3_000);
 			expect(recentActions(record.id).filter((a) => a === 'update_record')).toHaveLength(1);
+		});
+
+		it("debounces a same-id record independently per Y.Doc, so one workspace does not clobber another's pending update", () => {
+			// Two independently-resolved workspace contexts (workspace-store.ts)
+			// can each contain a record sharing the same id — record ids are only
+			// unique within their own doc. A debounce keyed on `${kind}:${id}`
+			// alone, shared across every attached doc, would let doc B's edit
+			// clear/overwrite doc A's still-pending timer for the "same" key.
+			const docB = new Y.Doc();
+			attachDocAuditObserver(docB);
+
+			try {
+				const sharedId = 'shared-record-id';
+				const parentA = makeDoc(doc);
+				const parentB = makeDoc(docB);
+				crdtCreateRecord(doc, { id: sharedId, parentId: parentA, blockType: 'paragraph' }, human);
+				crdtCreateRecord(docB, { id: sharedId, parentId: parentB, blockType: 'paragraph' }, human);
+
+				const yrecordA = doc.getMap('records').get(sharedId) as Y.Map<unknown>;
+				const yrecordB = docB.getMap('records').get(sharedId) as Y.Map<unknown>;
+
+				doc.transact(() => (yrecordA.get('content') as Y.Text).insert(0, 'from A'), 'ws-a');
+				vi.advanceTimersByTime(1_000);
+				// Doc B's edit for the same record id arrives inside doc A's
+				// debounce window. Without per-doc scoping this would reset/steal
+				// the timer keyed by "record:shared-record-id".
+				docB.transact(() => (yrecordB.get('content') as Y.Text).insert(0, 'from B'), 'ws-b');
+
+				vi.advanceTimersByTime(3_000);
+				// Both docs' pending updates must have fired on their own schedule —
+				// neither cleared the other's timer.
+				expect(recentActions(sharedId).filter((a) => a === 'update_record').length).toBe(2);
+			} finally {
+				docB.destroy();
+			}
+		});
+
+		it('flushes a pending update for a record id containing a colon without truncating it', () => {
+			// A `${kind}:${id}` key split back apart on ':' would misparse an id
+			// that itself contains a colon (recordId has no format restriction —
+			// see the MCP server's `recordId: z.string()`), truncating it and
+			// causing flushPendingAuditEvents to look up the wrong/nonexistent key.
+			const colonId = 'my:id';
+			const record = crdtCreateRecord(
+				doc,
+				{ id: colonId, parentId: makeDoc(doc), blockType: 'paragraph' },
+				human
+			);
+			const yrecord = doc.getMap('records').get(record.id) as Y.Map<unknown>;
+			const content = yrecord.get('content') as Y.Text;
+
+			doc.transact(() => content.insert(0, 'x'), 'fake-ws-connection');
+			expect(recentActions(colonId).filter((a) => a === 'update_record')).toHaveLength(0);
+
+			flushPendingAuditEvents();
+			expect(recentActions(colonId).filter((a) => a === 'update_record')).toHaveLength(1);
+		});
+
+		it("prunes a doc's entry once its last pending timer fires, instead of retaining an empty inner map forever", () => {
+			const record = crdtCreateRecord(
+				doc,
+				{ parentId: makeDoc(doc), blockType: 'paragraph' },
+				human
+			);
+			const yrecord = doc.getMap('records').get(record.id) as Y.Map<unknown>;
+			const content = yrecord.get('content') as Y.Text;
+
+			doc.transact(() => content.insert(0, 'x'), 'fake-ws-connection');
+			expect(pendingTimerDocCountForTests()).toBe(1);
+
+			vi.advanceTimersByTime(3_000);
+			expect(pendingTimerDocCountForTests()).toBe(0);
+		});
+
+		it("prunes a doc's entry on an explicit flush too, not just on natural timer expiry", () => {
+			const record = crdtCreateRecord(
+				doc,
+				{ parentId: makeDoc(doc), blockType: 'paragraph' },
+				human
+			);
+			const yrecord = doc.getMap('records').get(record.id) as Y.Map<unknown>;
+			const content = yrecord.get('content') as Y.Text;
+
+			doc.transact(() => content.insert(0, 'x'), 'fake-ws-connection');
+			expect(pendingTimerDocCountForTests()).toBe(1);
+
+			flushPendingAuditEvents();
+			expect(pendingTimerDocCountForTests()).toBe(0);
 		});
 
 		it('logs update_document when a document’s recordIds order changes without touching its own record', () => {

@@ -3,11 +3,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { closeDb } from '$lib/server/store';
-import { resetYDocForTests } from '$lib/server/ydoc';
-import { resetAwarenessForTests } from '$lib/server/awareness';
+import { resetWorkspaceStoreForTests } from '$lib/server/workspace-store';
 
-// Every test in this project touches the real getDb()/getYDoc() singletons
-// somewhere in the call chain (directly or via a service function). Without
+// Every test in this project touches the real getDb()/resolveWorkspaceContext()
+// singletons somewhere in the call chain (directly or via a service function). Without
 // this, DATABASE_URL defaults to .data/compendium.db — the real dev
 // workspace database — and test runs silently write real audit log entries
 // and Yjs snapshots into it. This applies to every test file automatically
@@ -22,8 +21,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	closeDb();
-	resetYDocForTests();
-	resetAwarenessForTests();
+	resetWorkspaceStoreForTests();
 	delete process.env.DATABASE_URL;
 	rmSync(dir, { recursive: true, force: true });
 });

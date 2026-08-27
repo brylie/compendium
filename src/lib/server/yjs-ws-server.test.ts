@@ -4,8 +4,7 @@ import * as encoding from 'lib0/encoding';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import type { WebSocket } from 'ws';
 import { setupWSConnection } from './yjs-ws-server';
-import { getAwareness, resetAwarenessForTests } from './awareness';
-import { getYDoc, resetYDocForTests } from './ydoc';
+import { resolveWorkspaceContext, resetWorkspaceStoreForTests } from './workspace-store';
 import { resetHoldsForTests } from './holds';
 
 // Minimal stand-in for the `ws` library's WebSocket, just enough surface for
@@ -28,7 +27,7 @@ class MockWebSocket extends EventEmitter {
 }
 
 function publishAwarenessState(
-	awareness: ReturnType<typeof getAwareness>,
+	awareness: ReturnType<typeof resolveWorkspaceContext>['awareness'],
 	clientId: number,
 	origin: unknown,
 	state: unknown
@@ -47,18 +46,16 @@ function publishAwarenessState(
 
 describe('yjs-ws-server: disconnect cleanup', () => {
 	beforeEach(() => {
-		resetYDocForTests();
-		resetAwarenessForTests();
+		resetWorkspaceStoreForTests();
 		resetHoldsForTests();
 	});
 
 	afterEach(() => {
-		resetAwarenessForTests();
-		resetYDocForTests();
+		resetWorkspaceStoreForTests();
 	});
 
 	it('a closing connection removes only the awareness clients it introduced, leaving other connections intact', () => {
-		const awareness = getAwareness();
+		const { awareness } = resolveWorkspaceContext();
 		const wsA = new MockWebSocket();
 		const wsB = new MockWebSocket();
 
@@ -87,7 +84,7 @@ describe('yjs-ws-server: disconnect cleanup', () => {
 		ws.sendImpl = sendSpy;
 
 		setupWSConnection(ws as unknown as WebSocket);
-		getYDoc().getMap('workspace').set('key', 'value'); // triggers doc's 'update' event
+		resolveWorkspaceContext().doc.getMap('workspace').set('key', 'value'); // triggers doc's 'update' event
 
 		expect(sendSpy).not.toHaveBeenCalled();
 	});
@@ -99,7 +96,9 @@ describe('yjs-ws-server: disconnect cleanup', () => {
 		};
 
 		setupWSConnection(ws as unknown as WebSocket);
-		expect(() => getYDoc().getMap('workspace').set('key2', 'value2')).not.toThrow();
+		expect(() =>
+			resolveWorkspaceContext().doc.getMap('workspace').set('key2', 'value2')
+		).not.toThrow();
 	});
 
 	it('closes the connection on a malformed incoming message', () => {

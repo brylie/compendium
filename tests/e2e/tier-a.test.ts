@@ -1,12 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
 import { createDocument, createRecord, getRecord, getRecordYText } from '$lib/data/records';
-import { getAwareness } from '$lib/server/awareness';
 import { queryAuditLog } from '$lib/server/audit';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { plainText, yTextToRichText } from '$lib/data/richtext';
 import { serviceModules, serviceSurfaces } from '$lib/services/manifest';
 import { flushPendingAuditEvents } from '$lib/server/audit-observer';
-import { getYDoc } from '$lib/server/ydoc';
 import { deleteRecord as crdtDeleteRecord } from '$lib/data/records';
 import type { ActorId } from '$lib/data/types';
 
@@ -201,7 +200,7 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 
 		// Wait for awareness state to propagate
 		await harness.waitForCondition(() => {
-			const states = Array.from(getAwareness().getStates().values()) as Array<{
+			const states = Array.from(resolveWorkspaceContext().awareness.getStates().values()) as Array<{
 				heldRecordIds?: string[];
 			}>;
 			return states.some((s) => s.heldRecordIds?.includes(block1.id));
@@ -252,7 +251,7 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		});
 
 		await harness.waitForCondition(() => {
-			const states = Array.from(getAwareness().getStates().values()) as Array<{
+			const states = Array.from(resolveWorkspaceContext().awareness.getStates().values()) as Array<{
 				heldRecordIds?: string[];
 			}>;
 			return states.some((s) => s.heldRecordIds?.includes(block.id));
@@ -657,7 +656,7 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		// updates instantly) to actually receive the sync before flushing —
 		// otherwise there's nothing pending yet to flush.
 		await harness.waitForCondition(() => {
-			const serverText = getRecordYText(getYDoc(), block.id);
+			const serverText = getRecordYText(resolveWorkspaceContext().doc, block.id);
 			return serverText !== undefined && plainText(yTextToRichText(serverText)).length > 0;
 		});
 		flushPendingAuditEvents();

@@ -2,8 +2,7 @@ import { EventEmitter } from 'node:events';
 import { createServer } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { attachYjsWebSocket } from './attach-ws';
-import { resetYDocForTests } from './ydoc';
-import { resetAwarenessForTests } from './awareness';
+import { resetWorkspaceStoreForTests } from './workspace-store';
 import { resetHoldsForTests } from './holds';
 
 // Minimal stand-in for `ws`'s WebSocket, matching the one already used in
@@ -26,14 +25,12 @@ class MockWebSocket extends EventEmitter {
 
 describe('attachYjsWebSocket: upgrade routing', () => {
 	beforeEach(() => {
-		resetYDocForTests();
-		resetAwarenessForTests();
+		resetWorkspaceStoreForTests();
 		resetHoldsForTests();
 	});
 
 	afterEach(() => {
-		resetAwarenessForTests();
-		resetYDocForTests();
+		resetWorkspaceStoreForTests();
 	});
 
 	// Regression test for the production entry point (server.ts), where
