@@ -96,8 +96,10 @@ identifiably already done. Two failure modes, both worth flagging:
 
 - **Orphaned requirement** — in the PRD, no tracking issue exists yet. This
   is invisible to planning until it's filed. Hand off to `backlog-refinement`
-  to file it (with the requirement's own `_Acceptance:_` clauses as a strong
-  starting point for the issue's own "Done when:" line).
+  with the requirement's own text, its PRD tier (P0/P1/P2), and its
+  `_Acceptance:_` clauses — that's the raw material for the issue's own
+  "Done when:" line. Classification, priority, and sizing from there are
+  `backlog-refinement`'s call, not something to pre-decide here.
 - **Orphaned scope** — an issue or shipped feature that isn't traceable to
   any PRD requirement. This is quiet product-surface expansion — the thing
   CLAUDE.md's implementation workflow already warns against. Flag it and ask
