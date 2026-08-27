@@ -36,17 +36,17 @@ asking first.
 `docs/prd.md`'s sections, in order, and what each is for — read the section
 itself before acting on it; this is a map, not a substitute:
 
-| Section                      | What it's for                                                                                                    |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Problem Statement            | The thesis this whole project is betting on                                                                      |
-| Goals / Non-Goals            | What's in scope and — just as load-bearing — what's deliberately excluded and why                                |
-| Target Users                 | Personas; note Phase 0 collapses several personas onto one person                                                |
-| User Stories                 | Per-persona scenarios; the concrete cases Requirements exist to satisfy                                          |
-| Core Architectural Principle | The unified record/Document/Collection/View model — the thing a new spec must not violate                        |
-| Requirements                 | Must-Have (P0) / Nice-to-Have (P1) / Future Considerations (P2), each with `_Acceptance:_` clauses               |
-| Success Metrics              | Leading/lagging indicators — explicitly Phase 1+ only; Phase 0's bar is qualitative                              |
-| Open Questions               | Currently empty ("ready to move into engineering scoping") — don't treat this as invalid just because it's short |
-| Timeline Considerations      | The Phase 0/1/2/3 definitions and what triggers moving between them                                              |
+| Section                      | What it's for                                                                                                                |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Problem Statement            | The thesis this whole project is betting on                                                                                  |
+| Goals / Non-Goals            | What's in scope and — just as load-bearing — what's deliberately excluded and why                                            |
+| Target Users                 | Personas; note Phase 0 collapses several personas onto one person                                                            |
+| User Stories                 | Per-persona scenarios; the concrete cases Requirements exist to satisfy                                                      |
+| Core Architectural Principle | The unified record/Document/Collection/View model — the thing a new spec must not violate                                    |
+| Requirements                 | Must-Have (P0) / Nice-to-Have (P1) / Future Considerations (P2) — only P0 items carry explicit `_Acceptance:_` clauses today |
+| Success Metrics              | Leading/lagging indicators — explicitly Phase 1+ only; Phase 0's bar is qualitative                                          |
+| Open Questions               | Currently empty ("ready to move into engineering scoping") — don't treat this as invalid just because it's short             |
+| Timeline Considerations      | The Phase 0/1/2/3 definitions and what triggers moving between them                                                          |
 
 ## 1. PRD stewardship
 
@@ -58,8 +58,8 @@ needing git blame. When you edit Goals/Non-Goals, User Stories, or a
 Requirement's tier, add a short inline note in the same style if the change
 isn't self-explanatory from context.
 
-Common edits this responsibility covers: retiring a User Story real usage
-invalidated, adding one a new persona/workflow revealed, moving a
+Common edits this responsibility covers: retiring a User Story invalidated
+by real usage, adding one revealed by a new persona/workflow, moving a
 Requirement between P0/P1/P2 tiers, or correcting Goals/Non-Goals language
 that no longer matches the product's actual direction. Apply the
 write-confirmation rule above to all of these.
@@ -165,11 +165,17 @@ Phase 0's only real validation signal is the founder's own daily use (see
 Success Metrics). When friction comes up in normal use, triage it three
 ways:
 
-- **Missing P0 requirement** — the PRD doesn't ask for this at all, and it
-  should. That's a §1 PRD edit (add the requirement, with acceptance
-  criteria), then hand off to `backlog-refinement` to file it.
+- **Missing P0 requirement** — the PRD doesn't ask for this at all, and it's
+  urgent enough to block or meaningfully hamper daily use right now. That's
+  a §1 PRD edit (add the requirement, with acceptance criteria), then hand
+  off to `backlog-refinement` to file it.
+- **Missing P1/P2 requirement** — the PRD doesn't cover this at all, but it's
+  not urgent enough to be P0 — a genuinely new requirement, not an existing
+  one that needs pulling forward. That's still a §1 PRD edit (add it at the
+  right tier, with acceptance criteria if the tier's convention has them —
+  see the structure map above), then hand off to `backlog-refinement`.
 - **P1/P2 item that should be pulled forward** — the PRD already covers this,
-  just at a later phase. That's a §6 call.
+  just at a later phase. That's a §6 call, not a new PRD entry.
 - **Already-scoped, just needs tracking** — the PRD covers it, an issue
   already exists or should exist with normal priority. That's purely
   `backlog-refinement`'s job — don't duplicate its triage logic here, hand
@@ -194,8 +200,10 @@ that needs it. This responsibility is earlier than that: before a spec gets
 written (or when reviewing one already drafted), check it against the PRD's
 Core Architectural Principle — does the proposed behavior treat Documents
 and Collections uniformly, do Views stay non-owning projections rather than
-copying data, does rich text stay in the run-array model rather than a
-Markdown string internally? Catching an architecture-violating spec before
+copying data, does rich text stay in the `Y.Text`-with-native-`.format()`-
+ranges model (per CLAUDE.md) rather than a Markdown string or a stored run
+array internally — `RichText.runs` is derived on read, never stored?
+Catching an architecture-violating spec before
 it's written is cheaper than catching it in code review, and is exactly the
 kind of check that requires having the Core Architectural Principle in mind,
 not just the local feature request.
