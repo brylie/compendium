@@ -37,15 +37,18 @@ draft the exact text, show it, wait for agreement, then run the command.
 
 ## Bundled scripts
 
-| Script                                                   | Purpose                                                         | Writes?             |
-| -------------------------------------------------------- | --------------------------------------------------------------- | ------------------- |
-| `scripts/project_fields.py`                              | Dump the board's field/option ids (Priority, Size, Status, ...) | No                  |
-| `scripts/get_item.py <issue>`                            | Resolve one issue's project item id + current field values      | No                  |
-| `scripts/set_field.py <issue> <field> <value> [--apply]` | Change a single-select field (Priority/Size/Status)             | Only with `--apply` |
-| `scripts/audit_backlog.py`                               | Sweep every open board item for mechanical gaps (see below)     | No                  |
+| Script                                           | Purpose                                                         | Writes?             |
+| ------------------------------------------------ | --------------------------------------------------------------- | ------------------- |
+| `project_fields.py`                              | Dump the board's field/option ids (Priority, Size, Status, ...) | No                  |
+| `get_item.py <issue>`                            | Resolve one issue's project item id + current field values      | No                  |
+| `set_field.py <issue> <field> <value> [--apply]` | Change a single-select field (Priority/Size/Status)             | Only with `--apply` |
+| `audit_backlog.py`                               | Sweep every open board item for mechanical gaps (see below)     | No                  |
 
-Run them with `mise exec -- python3 <path> ...` from anywhere inside the
-repo (they resolve their own imports). `mise exec` finds this repo's
+All live under `.claude/skills/backlog-refinement/scripts/`. Run them with
+`mise exec -- python3 .claude/skills/backlog-refinement/scripts/<name> ...`
+— the **full path from the repo root**, not just `scripts/<name>`, since
+that relative form only resolves correctly if your shell happens to already
+be inside this skill's own directory. `mise exec` finds this repo's
 `mise.toml` by walking up from the current directory and runs the command
 under the pinned Python (3.14 as of writing), regardless of what plain
 `python3` on `$PATH` happens to resolve to — the OS-provided one varies by
@@ -100,8 +103,8 @@ board's `Priority` field (P0/P1/P2), which is why `gh issue view --json
 labels` will never show it. Set it with:
 
 ```bash
-mise exec -- python3 scripts/set_field.py <issue> Priority <P0|P1|P2>          # dry run
-mise exec -- python3 scripts/set_field.py <issue> Priority <P0|P1|P2> --apply  # applies it
+mise exec -- python3 .claude/skills/backlog-refinement/scripts/set_field.py <issue> Priority <P0|P1|P2>          # dry run
+mise exec -- python3 .claude/skills/backlog-refinement/scripts/set_field.py <issue> Priority <P0|P1|P2> --apply  # applies it
 ```
 
 **Any priority change — including on a brand-new issue — gets a rationale
@@ -247,7 +250,7 @@ This is the actual "run this regularly" entry point — the other sections
 are what you do once a gap is found, this is how you find them:
 
 ```bash
-mise exec -- python3 scripts/audit_backlog.py
+mise exec -- python3 .claude/skills/backlog-refinement/scripts/audit_backlog.py
 ```
 
 This flags every open board item missing Priority, missing a `Done when:`
