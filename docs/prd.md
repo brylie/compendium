@@ -154,7 +154,8 @@ Chat/channels are explicitly not part of this model (see Non-Goals) — that gap
 **Block editor interaction (formatting + slash-command insertion)**
 
 - Humans style text through a rich-text editor UI — a selection toolbar and/or keyboard shortcuts — never by typing raw markup. Whatever characters appear in the editor are always literal content, never formatting syntax; the underlying rich-text run structure (see Core Architectural Principle) updates directly.
-- A slash-command menu (typing `/`) inserts or transforms blocks — heading, list, table, code, embed — following the convention established by Notion, Coda, and WordPress's Gutenberg block inserter.
+- A slash-command menu (typing `/`) inserts or transforms blocks — heading, list, to-do checklist, toggle/collapsible, quote, callout, divider, table, table of contents, code, embed — following the convention established by Notion, Coda, and WordPress's Gutenberg block inserter.
+- **Synced blocks** mirror one block's content across multiple locations in the workspace — editing the source or any synced instance updates all others (see `data-model.md`).
 - Despite the block model underneath, editing must _feel_ like a familiar word processor for the everyday keys and toolbar actions a person already has muscle memory for — Enter, Backspace, and "apply this formatting to what I'm looking at" — rather than exposing the block boundaries as something the person has to work around. Concretely:
   - Enter splits the current block's text at the caret, moving whatever comes after it into a new block, the same way Enter divides a line in Word or Google Docs — it does not silently discard the text after the caret.
   - Backspace with the caret at the very start of a block's text joins that block onto the end of the previous one, the same way Backspace joins two lines in a word processor — not only when the current block happens to be empty.
@@ -233,7 +234,7 @@ _Reordered 2026-08-26 around dogfooding priority: agent/MCP parity with the UI, 
 
 - **File and image attachment blocks** — upload/embed a file or image as a block, addressed and permissioned like any other record.
 - **Drag-and-drop block reordering.**
-- **Callout blocks** (note/tip/caution/danger style variants).
+- **Callout style variants** (note/tip/caution/danger color-coded presentation) — the base callout block, plus toggle/collapsible and table-of-contents blocks, already ship in Phase 0 as direct daily-editing needs; this item is specifically the remaining color-coded styling (#42).
 - **Child-page listing block** — a Confluence-style block that lists a Document's child pages inline, supporting a browsable page hierarchy.
 - **Markdown/Obsidian import**, with a migration report of anything that couldn't map cleanly — the on-ramp for bringing an existing vault in, including its `[[wiki-links]]`.
 - **Backlinks** — for any Document, show what else links to it via `page_link`/`[[wiki-link]]` (see `internal-links.md`), completing the read half of the linking model the MCP write side already has in P0.
