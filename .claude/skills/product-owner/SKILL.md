@@ -21,15 +21,25 @@ than duplicating that logic here.
 
 ## The one rule that overrides everything else here
 
-**Show the user the exact diff to `docs/prd.md` (or a `docs/specifications/*.md`
-file), and wait for their go-ahead, before writing it.** This mirrors
-`backlog-refinement`'s write-confirmation rule for the same reason: "I'm
+**Show the user the exact diff to `docs/prd.md`, and wait for their
+go-ahead, before writing it — every time, regardless of size.** "I'm
 confident this is the right call" is not the same thing as the user having
 agreed to it, and a product-direction edit — unlike a board field — has no
 mechanical dry-run wrapper to enforce this for you. Draft the exact edit,
 show it, wait for agreement, then write it. It's git-tracked and reversible
 either way, but that's a safety net for mistakes, not a substitute for
 asking first.
+
+This same gate covers `docs/specifications/*.md` too, but only for what
+this skill actually owns there: a §9 architecture-conformance judgment call
+on a proposed spec, or a standalone spec correction that isn't tied to
+implementing an already-scoped issue. It does **not** cover a spec update
+written as a routine part of implementing an issue whose scope the user
+already approved — CLAUDE.md's own implementation workflow already handles
+that case (write the spec as part of the same change; the PR itself, which
+the user reviews before merge, is the confirmation gate for that kind of
+edit). Don't require a second stop-and-confirm on top of a review the user
+is already going to do.
 
 ## PRD structure map
 
@@ -200,10 +210,12 @@ that needs it. This responsibility is earlier than that: before a spec gets
 written (or when reviewing one already drafted), check it against the PRD's
 Core Architectural Principle — does the proposed behavior treat Documents
 and Collections uniformly, do Views stay non-owning projections rather than
-copying data, does rich text stay in the `Y.Text`-with-native-`.format()`-
-ranges model (per CLAUDE.md) rather than a Markdown string or a stored run
-array internally — `RichText.runs` is derived on read, never stored?
-Catching an architecture-violating spec before
+copying data, does each block-record store its rich text in its own
+`Y.Text` with native `.format()` ranges (per CLAUDE.md) rather than a
+single document-wide `Y.Text`, a Markdown string, or a stored run array —
+`RichText.runs` is derived on read, never stored, and block-level CRDT/hold
+granularity depends on the per-record split? Catching an
+architecture-violating spec before
 it's written is cheaper than catching it in code review, and is exactly the
 kind of check that requires having the Core Architectural Principle in mind,
 not just the local feature request.
