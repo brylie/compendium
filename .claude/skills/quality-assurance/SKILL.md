@@ -43,8 +43,8 @@ standalone `docs/prd.md` correction.
 
 ## 1. The test model
 
-Four places a test can live, from `vite.config.ts`'s three Vitest projects
-plus the two E2E tiers in `e2e-testing.md`:
+Three Vitest projects plus two E2E tiers, from `vite.config.ts`'s project
+split and the two tiers in `e2e-testing.md`:
 
 | Layer                                   | Runner                | What it's for                                                                                                                                   |
 | --------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -54,7 +54,7 @@ plus the two E2E tiers in `e2e-testing.md`:
 | **Tier A** (`tests/e2e/tier-a.test.ts`) | Vitest, real server   | Protocol-boundary correctness: two independent real clients (an MCP SDK `Client`, a real `y-websocket` client) against one real running server. |
 | **Tier B** (`tests/e2e/tier-b.spec.ts`) | Playwright            | Genuinely DOM-only behavior a Tier A test structurally cannot see (rendered pixels, live DOM updates) — kept deliberately small.                |
 
-The four Vitest projects catch business-rule and CRDT bugs fast, in-process.
+The three Vitest projects catch business-rule and CRDT bugs fast, in-process.
 They **cannot** catch a bug where state is dropped exactly at the transport
 boundary — a permission grant correct in memory for one call, gone on the
 next — because nothing in that layer ever opens a second, independent
@@ -244,9 +244,10 @@ grooming cadence:
    "genuinely needs a rendered DOM" bar — has it grown scope creep toward
    things Tier A could cover instead?
 5. Pick two or three recently merged PRs touching permission/grant/hold/
-   attribution code (`git log --oneline -- src/lib/services src/lib/mcp
-src/lib/server/holds.ts`) and confirm each landed with a Tier A test, per
-   the standing rule in §1 — not just a unit test.
+   attribution code
+   (`git log --oneline -- src/lib/services src/lib/mcp src/lib/server/holds.ts`)
+   and confirm each landed with a Tier A test, per the standing rule in §1 —
+   not just a unit test.
 6. Walk the §3 probe matrix against one _already-shipped_ feature, not just
    new work — regressions hide in old code nobody's revisited since it
    shipped.
