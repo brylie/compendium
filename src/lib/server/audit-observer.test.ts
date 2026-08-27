@@ -184,6 +184,41 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 			expect(recentActions(record.id).filter((a) => a === 'update_record')).toHaveLength(1);
 		});
 
+		it("debounces a same-id record independently per Y.Doc, so one workspace does not clobber another's pending update", () => {
+			// Two independently-resolved workspace contexts (workspace-store.ts)
+			// can each contain a record sharing the same id — record ids are only
+			// unique within their own doc. A debounce keyed on `${kind}:${id}`
+			// alone, shared across every attached doc, would let doc B's edit
+			// clear/overwrite doc A's still-pending timer for the "same" key.
+			const docB = new Y.Doc();
+			attachDocAuditObserver(docB);
+
+			try {
+				const sharedId = 'shared-record-id';
+				const parentA = makeDoc(doc);
+				const parentB = makeDoc(docB);
+				crdtCreateRecord(doc, { id: sharedId, parentId: parentA, blockType: 'paragraph' }, human);
+				crdtCreateRecord(docB, { id: sharedId, parentId: parentB, blockType: 'paragraph' }, human);
+
+				const yrecordA = doc.getMap('records').get(sharedId) as Y.Map<unknown>;
+				const yrecordB = docB.getMap('records').get(sharedId) as Y.Map<unknown>;
+
+				doc.transact(() => (yrecordA.get('content') as Y.Text).insert(0, 'from A'), 'ws-a');
+				vi.advanceTimersByTime(1_000);
+				// Doc B's edit for the same record id arrives inside doc A's
+				// debounce window. Without per-doc scoping this would reset/steal
+				// the timer keyed by "record:shared-record-id".
+				docB.transact(() => (yrecordB.get('content') as Y.Text).insert(0, 'from B'), 'ws-b');
+
+				vi.advanceTimersByTime(3_000);
+				// Both docs' pending updates must have fired on their own schedule —
+				// neither cleared the other's timer.
+				expect(recentActions(sharedId).filter((a) => a === 'update_record').length).toBe(2);
+			} finally {
+				docB.destroy();
+			}
+		});
+
 		it('logs update_document when a document’s recordIds order changes without touching its own record', () => {
 			const documentId = makeDoc(doc);
 			const a = crdtCreateRecord(doc, { parentId: documentId, blockType: 'paragraph' }, human);

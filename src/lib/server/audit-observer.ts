@@ -91,18 +91,34 @@ function resolveOwningEntry(
 	return undefined;
 }
 
-const pendingUpdateTimers = new Map<string, ReturnType<typeof setTimeout>>();
+// Keyed by Y.Doc instance, not just `${kind}:${id}`: workspace-store.ts can
+// resolve more than one Y.Doc in the same process (one per workspace/shard
+// context), and two different workspaces' documents can perfectly well both
+// contain a record with the same id. A single flat `${kind}:${id}` → timer
+// map would let a debounced update on one workspace's doc clobber another's
+// in-flight timer for the "same" key, silently dropping an audit event.
+const pendingUpdateTimers = new Map<Y.Doc, Map<string, ReturnType<typeof setTimeout>>>();
 
-function scheduleUpdateAudit(kind: EntryKind, id: string): void {
+function timersFor(doc: Y.Doc): Map<string, ReturnType<typeof setTimeout>> {
+	let timers = pendingUpdateTimers.get(doc);
+	if (!timers) {
+		timers = new Map();
+		pendingUpdateTimers.set(doc, timers);
+	}
+	return timers;
+}
+
+function scheduleUpdateAudit(doc: Y.Doc, kind: EntryKind, id: string): void {
+	const timers = timersFor(doc);
 	const key = `${kind}:${id}`;
-	const existing = pendingUpdateTimers.get(key);
+	const existing = timers.get(key);
 	if (existing) clearTimeout(existing);
 	const timer = setTimeout(() => {
-		pendingUpdateTimers.delete(key);
+		timers.delete(key);
 		logAudit({ actor: CURRENT_USER, action: ACTIONS[kind].update, targetRecordId: id });
 	}, UPDATE_DEBOUNCE_MS);
 	timer.unref?.();
-	pendingUpdateTimers.set(key, timer);
+	timers.set(key, timer);
 }
 
 /**
@@ -113,26 +129,32 @@ function scheduleUpdateAudit(kind: EntryKind, id: string): void {
  * surfacing later as an `update_*` row that appears *after* the `delete_*`
  * row for the same, now-gone target.
  */
-function flushPendingFor(kind: EntryKind, id: string): void {
+function flushPendingFor(doc: Y.Doc, kind: EntryKind, id: string): void {
+	const timers = pendingUpdateTimers.get(doc);
+	if (!timers) return;
 	const key = `${kind}:${id}`;
-	const timer = pendingUpdateTimers.get(key);
+	const timer = timers.get(key);
 	if (!timer) return;
 	clearTimeout(timer);
-	pendingUpdateTimers.delete(key);
+	timers.delete(key);
 	logAudit({ actor: CURRENT_USER, action: ACTIONS[kind].update, targetRecordId: id });
 }
 
-/** Test/shutdown hook: write any debounced update events immediately instead of waiting out the window. */
+/** Test/shutdown hook: write any debounced update events immediately instead of waiting out the window, across every doc with a pending timer. */
 export function flushPendingAuditEvents(): void {
-	for (const key of [...pendingUpdateTimers.keys()]) {
-		const [kind, id] = key.split(':') as [EntryKind, string];
-		flushPendingFor(kind, id);
+	for (const [doc, timers] of pendingUpdateTimers) {
+		for (const key of [...timers.keys()]) {
+			const [kind, id] = key.split(':') as [EntryKind, string];
+			flushPendingFor(doc, kind, id);
+		}
 	}
 }
 
 /** Test-only: drop any pending debounce timers without flushing them. */
 export function resetAuditObserverForTests(): void {
-	for (const timer of pendingUpdateTimers.values()) clearTimeout(timer);
+	for (const timers of pendingUpdateTimers.values()) {
+		for (const timer of timers.values()) clearTimeout(timer);
+	}
 	pendingUpdateTimers.clear();
 }
 
@@ -183,13 +205,13 @@ export function attachDocAuditObserver(doc: Y.Doc): void {
 
 		for (const { kind, id, action } of finalized.values()) {
 			if (action === ACTIONS[kind].update) {
-				scheduleUpdateAudit(kind, id);
+				scheduleUpdateAudit(doc, kind, id);
 			} else {
 				// A create/delete resolves any edit still sitting in the debounce
 				// window for this same entry first, so it's written in the order it
 				// actually happened rather than surfacing later, after the entry is
 				// already gone.
-				flushPendingFor(kind, id);
+				flushPendingFor(doc, kind, id);
 				logAudit({ actor: CURRENT_USER, action, targetRecordId: id });
 			}
 		}

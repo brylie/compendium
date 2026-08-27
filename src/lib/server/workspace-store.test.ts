@@ -82,6 +82,20 @@ describe('workspace-store: isolation between independently-resolved contexts', (
 		expect(a.doc).not.toBe(b.doc);
 	});
 
+	it('does not collide two different {workspaceId, shardId} pairs that share a delimiter-joined string', () => {
+		// 'space::main' + 'primary' and 'space' + 'main::primary' would produce
+		// the identical `${a}::${b}` string under a naive delimited join.
+		const a = resolveWorkspaceContext({ workspaceId: 'space::main', shardId: 'primary' });
+		const b = resolveWorkspaceContext({ workspaceId: 'space', shardId: 'main::primary' });
+
+		a.doc.getMap('workspace').set('title', 'A');
+		b.doc.getMap('workspace').set('title', 'B');
+
+		expect(a.doc).not.toBe(b.doc);
+		expect(a.doc.getMap('workspace').get('title')).toBe('A');
+		expect(b.doc.getMap('workspace').get('title')).toBe('B');
+	});
+
 	it('gives two distinct keys their own, disconnected Awareness instance', () => {
 		const a = resolveWorkspaceContext({ workspaceId: 'space-a', shardId: 'main' });
 		const b = resolveWorkspaceContext({ workspaceId: 'space-b', shardId: 'main' });

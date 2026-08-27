@@ -6,7 +6,7 @@ import { browser } from '$app/environment';
 // Browser counterpart to src/lib/server/workspace-store.ts's resolved
 // context. Both connect to the same shared workspace room over /ws, so the
 // same src/lib/data/* record functions work unmodified against either doc —
-// per docs/technical-design.md §8, UI and MCP share one data-access layer.
+// per docs/specifications/architecture.md §2, UI and MCP share one data-access layer.
 
 let doc: Y.Doc | null = null;
 let provider: WebsocketProvider | null = null;

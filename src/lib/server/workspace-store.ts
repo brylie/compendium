@@ -67,8 +67,13 @@ function registry(): Map<string, InternalContext> {
 	return globalThis.__workspaceContexts;
 }
 
+// JSON-encoded rather than a delimited template string: a plain `${a}::${b}`
+// join lets a caller-chosen workspaceId/shardId pair collide with a
+// different pair (e.g. workspaceId "space::main" + shardId "primary" would
+// produce the same string as workspaceId "space" + shardId "main::primary"),
+// silently handing one caller another's doc/awareness/connections.
 function keyFor(workspaceId: string, shardId: string): string {
-	return `${workspaceId}::${shardId}`;
+	return JSON.stringify([workspaceId, shardId]);
 }
 
 function createContext(workspaceId: string, shardId: string): InternalContext {
