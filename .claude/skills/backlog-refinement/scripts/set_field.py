@@ -8,8 +8,8 @@ GitHub API write calls at all. Pass --apply once you (or the user, via you)
 have actually agreed to the change.
 
 Usage:
-  python3 set_field.py 31 Priority P0                # dry run — prints the plan
-  python3 set_field.py 31 Priority P0 --apply         # applies it
+  mise exec -- python3 set_field.py 31 Priority P0                # dry run — prints the plan
+  mise exec -- python3 set_field.py 31 Priority P0 --apply         # applies it
 
 This only sets a single-select field's value. It does not post the
 rationale comment that should accompany most priority/size changes — see

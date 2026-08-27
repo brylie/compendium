@@ -17,15 +17,23 @@ says otherwise. The bundled scripts default to these and accept `--owner` /
 
 ## The one rule that overrides everything else here
 
-**Every script in `scripts/` defaults to a dry run.** `set_field.py` prints
-the planned change and makes no write calls unless you pass `--apply`. Treat
-that the same way the rest of this session treats GitHub writes generally:
-show the user (or state clearly in your own reasoning) what's about to
-change, then apply it — don't chain straight from "diagnosed a gap" to
-`--apply` without that beat in between. Comments and new issues are string
-content, not script output — draft the text, then post it with `gh` once
-you're confident it's right; there's no dry-run wrapper for those, so get it
-right before running the command.
+**Show the user the exact planned write, and wait for their go-ahead,
+before any `gh`/GraphQL command that changes GitHub state** — a field
+change, a comment, a new issue, an edit, a closure, a relationship link.
+"I'm confident this is right" is not the same thing as the user having
+agreed to it; don't let internal confidence substitute for asking. This is
+the default, not a suggestion to weigh against convenience — the one
+exception is when the user (or a standing instruction like CLAUDE.md's
+CodeRabbit-response workflow, or an active CI-monitor session) has already
+given durable authorization for this specific class of write, the same way
+the rest of this repo's write-safety model already works.
+
+`set_field.py` enforces this mechanically for field changes: it defaults to
+a dry run and prints the planned change (issue, field, old value, new
+value) without making any write call, only executing once you pass
+`--apply`. Comments, new issues, edits, and closures have no such wrapper —
+they're plain `gh` commands, so _you_ are the confirmation gate for those:
+draft the exact text, show it, wait for agreement, then run the command.
 
 ## Bundled scripts
 
@@ -127,12 +135,41 @@ is tracked.
 
 ## 5. Relationships
 
-GitHub has no durable, queryable field for "blocks" / "blocked by" /
-"duplicate of" / "prerequisite for" between issues (the `Parent issue` /
-`Sub-issues progress` project fields only model strict parent-child
-hierarchy, via GitHub's native sub-issues feature). For anything else, the
-relationship has to live as **plain text in the issue body or a comment** —
-it's the only durable record. Pattern used for #13 ↔ #31 today:
+GitHub CLI (2.94.0+ — this repo's `mise.toml` pins `gh = "latest"`, so this
+is always available once `mise install`/`mise upgrade` has run) has native,
+queryable "blocks" / "blocked by" relationships, plus sub-issues for strict
+parent/child decomposition. **Check for these before assuming a relationship
+only exists in prose:**
+
+```bash
+gh issue view <issue> --json blockedBy,blocking     # what natively blocks / is blocked by this issue
+```
+
+This repo already has native links that predate this skill — #13 is
+natively `blockedBy` #30 and `blocking` #19 and #6, none of which was
+obvious from reading issue bodies alone. Don't rely on grepping issue text
+for "blocked by" and assume that's the complete picture.
+
+To record a new blocks/blocked-by relationship, use the native link (after
+confirming with the user per the write-confirmation rule above):
+
+```bash
+gh issue edit <issue> --add-blocked-by <other-issue>
+gh issue edit <issue> --add-blocking <other-issue>
+```
+
+For strict parent/sub-issue decomposition (splitting one oversized issue
+into several trackable pieces): `gh issue edit <parent> --add-sub-issue
+<child-number-or-url>`.
+
+Native links are structural, not explanatory — they show _that_ two issues
+are related but not _why_. Pair every native `--add-blocked-by`/
+`--add-blocking` link with a rationale comment, the same shape used for
+#13 ↔ #31 today (recorded in prose only, since it predates this skill's use
+of the native fields). For relationship types GitHub has no native field
+for at all — duplicate-of, prerequisite-for-in-spirit, anything looser than
+a strict block — the comment remains the _only_ record, not just the
+explanatory half of one:
 
 > Blocked by #31 (CRDT capacity benchmark and resource observability,
 > promoted P2 → P0 to match): this issue's own body says to "use #31 to
@@ -140,17 +177,11 @@ it's the only durable record. Pattern used for #13 ↔ #31 today:
 > foundation) → #31 (P0, must land first) → #13 (P0, this issue) → #6 (P1,
 > depends on #13).
 
-Post the relationship comment on **both** sides of the relationship (as was
-done for #13 and #31) — a reader landing on either issue should see it
-without having to already know to check the other one.
-
-For strict parent/sub-issue decomposition (splitting one oversized issue
-into several trackable pieces), use GitHub's native sub-issues instead of a
-prose relationship: `gh issue edit <parent> --add-sub-issue-url <child-url>`
-if using a version of `gh` that supports it, or the `addSubIssue` GraphQL
-mutation on `linkSubIssue` otherwise. Prose relationships and native
-sub-issues aren't mutually exclusive — a child issue can still get a comment
-explaining _why_ it was split out.
+Post the rationale comment on **both** sides of the relationship — a reader
+landing on either issue should see it without having to already know to
+check the other one. This matters even more when the relationship is
+recorded natively too, since `gh issue view --json blockedBy` only tells a
+reader _that_ a link exists, not why it was made.
 
 ## 6. Status hygiene
 

@@ -38,3 +38,20 @@ def run_graphql(query: str, **variables) -> dict:
         sys.stderr.write(proc.stderr)
         sys.exit(1)
     return json.loads(proc.stdout)
+
+
+def require_complete_page(page_info: dict, what: str) -> None:
+    """Fails loudly if a GraphQL connection had more pages than the query
+    fetched, instead of letting a script silently read a truncated first
+    page as if it were the whole result — which would report a field or
+    project membership that exists (just past the fetch limit) as missing.
+    Every connection this skill reads is small in practice (issue count,
+    project field count), so a plain `first: N` with this guard is enough;
+    it's not worth the extra complexity of real cursor pagination unless
+    one of these connections actually grows past N.
+    """
+    if page_info.get("hasNextPage"):
+        sys.exit(
+            f"{what} has more results than this script fetched in one page — "
+            "increase the query's `first:` limit rather than trust a truncated result."
+        )

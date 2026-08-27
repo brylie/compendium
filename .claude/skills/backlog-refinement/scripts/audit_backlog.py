@@ -8,14 +8,14 @@ grooming pass — it catches "field is empty" and "section is missing", not
 "is this well-scoped" or "does this still fit the PRD". Read the flagged
 issues yourself (or have Claude do it) for the judgment half; see SKILL.md.
 
-Usage: python3 audit_backlog.py [--owner brylie] [--project-number 6]
+Usage: mise exec -- python3 audit_backlog.py [--owner brylie] [--project-number 6]
 """
 from __future__ import annotations
 
 import argparse
 import json
 
-from _common import DEFAULT_OWNER, DEFAULT_PROJECT_NUMBER, run_graphql
+from _common import DEFAULT_OWNER, DEFAULT_PROJECT_NUMBER, require_complete_page, run_graphql
 
 LIST_QUERY = """
 query($owner: String!, $number: Int!, $after: String) {
@@ -27,7 +27,8 @@ query($owner: String!, $number: Int!, $after: String) {
           content {
             ... on Issue { number title body state url }
           }
-          fieldValues(first: 20) {
+          fieldValues(first: 50) {
+            pageInfo { hasNextPage }
             nodes {
               ... on ProjectV2ItemFieldSingleSelectValue {
                 name
@@ -66,6 +67,7 @@ def audit_item(item: dict) -> dict | None:
     if not content or content.get("state") != "OPEN":
         return None
 
+    require_complete_page(item["fieldValues"]["pageInfo"], f"field values for issue #{content.get('number')}")
     fields = {}
     for fv in item["fieldValues"]["nodes"]:
         if fv and "field" in fv:
@@ -77,7 +79,10 @@ def audit_item(item: dict) -> dict | None:
         flags.append("missing Priority")
     if not fields.get("Size"):
         flags.append("missing Size")
-    if "done when" not in body.lower():
+    # Line-based, not a body-wide substring match: "the work is done when
+    # approved" would otherwise count as satisfying the acceptance-criteria
+    # convention without actually providing one.
+    if not any(line.strip().lower().startswith("done when") for line in body.splitlines()):
         flags.append("no 'Done when:' acceptance criteria")
     if len(body.strip()) < MIN_BODY_LENGTH:
         flags.append(f"body under {MIN_BODY_LENGTH} chars — likely underspecified")

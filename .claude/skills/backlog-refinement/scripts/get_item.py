@@ -2,7 +2,7 @@
 """Read-only: resolves one issue's project-board item id and its current
 field values (Status, Priority, Size, ...).
 
-Usage: python3 get_item.py 31 [--owner brylie] [--repo compendium] [--project-number 6]
+Usage: mise exec -- python3 get_item.py 31 [--owner brylie] [--repo compendium] [--project-number 6]
 
 Queries the *issue's own* projectItems rather than paging through every item
 on the board and filtering by number — cheaper, and correct even once the
@@ -14,8 +14,13 @@ import argparse
 import json
 import sys
 
-from _common import DEFAULT_OWNER, DEFAULT_PROJECT_NUMBER, DEFAULT_REPO, run_graphql
+from _common import DEFAULT_OWNER, DEFAULT_PROJECT_NUMBER, DEFAULT_REPO, require_complete_page, run_graphql
 
+# first: limits below are sized well above what a real issue/item hits today
+# (an issue on this repo belongs to one project; that project has ~18
+# fields) — require_complete_page() fails loudly rather than silently
+# truncating if that ever stops being true, instead of reporting a real
+# project membership or field value as missing.
 QUERY = """
 query($owner: String!, $repo: String!, $issue: Int!) {
   repository(owner: $owner, name: $repo) {
@@ -23,11 +28,13 @@ query($owner: String!, $repo: String!, $issue: Int!) {
       title
       state
       url
-      projectItems(first: 10) {
+      projectItems(first: 20) {
+        pageInfo { hasNextPage }
         nodes {
           id
           project { number title }
-          fieldValues(first: 20) {
+          fieldValues(first: 50) {
+            pageInfo { hasNextPage }
             nodes {
               ... on ProjectV2ItemFieldSingleSelectValue {
                 name
@@ -52,6 +59,7 @@ query($owner: String!, $repo: String!, $issue: Int!) {
 
 
 def field_map(item: dict) -> dict:
+    require_complete_page(item["fieldValues"]["pageInfo"], f"issue field values for project item {item['id']}")
     fields = {}
     for fv in item["fieldValues"]["nodes"]:
         if not fv or "field" not in fv:
@@ -68,6 +76,7 @@ def get_item(issue: int, owner: str = DEFAULT_OWNER, repo: str = DEFAULT_REPO,
     if gh_issue is None:
         raise SystemExit(f"Issue #{issue} not found in {owner}/{repo}.")
 
+    require_complete_page(gh_issue["projectItems"]["pageInfo"], f"project memberships for issue #{issue}")
     item = next(
         (n for n in gh_issue["projectItems"]["nodes"] if n["project"]["number"] == project_number),
         None,

@@ -7,7 +7,7 @@ schema can change (a new Priority tier, a renamed Size option), and a stale
 hardcoded id would fail mutations silently or apply the wrong value. Every
 script that writes to the board calls get_schema() fresh instead.
 
-Usage: python3 project_fields.py [--owner brylie] [--project-number 6]
+Usage: mise exec -- python3 project_fields.py [--owner brylie] [--project-number 6]
 
 Assumes a *user*-owned project (`user(login: ...)`), not an organization
 project — this board lives under github.com/users/brylie/projects/6. If this
@@ -19,15 +19,19 @@ from __future__ import annotations
 import argparse
 import json
 
-from _common import DEFAULT_OWNER, DEFAULT_PROJECT_NUMBER, run_graphql
+from _common import DEFAULT_OWNER, DEFAULT_PROJECT_NUMBER, require_complete_page, run_graphql
 
+# first: 50 is well above this project's actual field count (~18 as of
+# writing) — require_complete_page() below fails loudly rather than
+# silently dropping fields past the limit if that ever stops being true.
 QUERY = """
 query($owner: String!, $number: Int!) {
   user(login: $owner) {
     projectV2(number: $number) {
       id
       title
-      fields(first: 30) {
+      fields(first: 50) {
+        pageInfo { hasNextPage }
         nodes {
           ... on ProjectV2FieldCommon { id name }
           ... on ProjectV2SingleSelectField { id name options { id name } }
@@ -41,9 +45,13 @@ query($owner: String!, $number: Int!) {
 
 def get_schema(owner: str = DEFAULT_OWNER, number: int = DEFAULT_PROJECT_NUMBER) -> dict:
     data = run_graphql(QUERY, owner=owner, number=number)
-    project = data["data"]["user"]["projectV2"]
+    user = data["data"]["user"]
+    if user is None:
+        raise SystemExit(f"No GitHub user {owner!r} found.")
+    project = user["projectV2"]
     if project is None:
         raise SystemExit(f"No project #{number} found for user {owner!r}.")
+    require_complete_page(project["fields"]["pageInfo"], f"fields on project #{number}")
     return project
 
 
