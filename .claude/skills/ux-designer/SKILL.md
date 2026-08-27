@@ -171,8 +171,9 @@ The "run this regularly" entry point, mirroring `backlog-refinement`'s
 grooming pass and `product-owner`'s product review — when asked to review
 the UI, check accessibility status, or periodically on your own:
 
-1. Run `scripts/audit_design_tokens.py` for the mechanical drift check
-   (§1).
+1. Run
+   `mise exec -- python3 .claude/skills/ux-designer/scripts/audit_design_tokens.py`
+   for the mechanical drift check (§1).
 2. Check issue #18's checklist state and spot-check one or two shipped
    surfaces against it by hand (§2) — don't assume "no new complaints"
    means accessible.
