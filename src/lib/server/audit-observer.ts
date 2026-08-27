@@ -108,13 +108,28 @@ function timersFor(doc: Y.Doc): Map<string, ReturnType<typeof setTimeout>> {
 	return timers;
 }
 
+// JSON-encoded rather than a `${kind}:${id}` template string: entry ids are
+// caller-supplied with no format restriction (e.g. the MCP server's
+// recordId: z.string() — see createRecord's `input.id`), so an id containing
+// ':' would otherwise make flushPendingAuditEvents' key.split(':') below
+// silently truncate it back to the wrong id.
+function timerKey(kind: EntryKind, id: string): string {
+	return JSON.stringify([kind, id]);
+}
+
+/** Removes doc's entry from the outer map once its last timer is gone, so a released Y.Doc isn't kept alive by a stale empty inner Map. */
+function pruneIfEmpty(doc: Y.Doc, timers: Map<string, ReturnType<typeof setTimeout>>): void {
+	if (timers.size === 0) pendingUpdateTimers.delete(doc);
+}
+
 function scheduleUpdateAudit(doc: Y.Doc, kind: EntryKind, id: string): void {
 	const timers = timersFor(doc);
-	const key = `${kind}:${id}`;
+	const key = timerKey(kind, id);
 	const existing = timers.get(key);
 	if (existing) clearTimeout(existing);
 	const timer = setTimeout(() => {
 		timers.delete(key);
+		pruneIfEmpty(doc, timers);
 		logAudit({ actor: CURRENT_USER, action: ACTIONS[kind].update, targetRecordId: id });
 	}, UPDATE_DEBOUNCE_MS);
 	timer.unref?.();
@@ -132,11 +147,12 @@ function scheduleUpdateAudit(doc: Y.Doc, kind: EntryKind, id: string): void {
 function flushPendingFor(doc: Y.Doc, kind: EntryKind, id: string): void {
 	const timers = pendingUpdateTimers.get(doc);
 	if (!timers) return;
-	const key = `${kind}:${id}`;
+	const key = timerKey(kind, id);
 	const timer = timers.get(key);
 	if (!timer) return;
 	clearTimeout(timer);
 	timers.delete(key);
+	pruneIfEmpty(doc, timers);
 	logAudit({ actor: CURRENT_USER, action: ACTIONS[kind].update, targetRecordId: id });
 }
 
@@ -144,10 +160,15 @@ function flushPendingFor(doc: Y.Doc, kind: EntryKind, id: string): void {
 export function flushPendingAuditEvents(): void {
 	for (const [doc, timers] of pendingUpdateTimers) {
 		for (const key of [...timers.keys()]) {
-			const [kind, id] = key.split(':') as [EntryKind, string];
+			const [kind, id] = JSON.parse(key) as [EntryKind, string];
 			flushPendingFor(doc, kind, id);
 		}
 	}
+}
+
+/** Test-only: number of Y.Docs currently holding at least one pending timer — proves a doc with no pending timers left is pruned, not retained. */
+export function pendingTimerDocCountForTests(): number {
+	return pendingUpdateTimers.size;
 }
 
 /** Test-only: drop any pending debounce timers without flushing them. */

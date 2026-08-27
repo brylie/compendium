@@ -8,6 +8,7 @@ import { queryAuditLog } from './audit';
 import {
 	attachDocAuditObserver,
 	flushPendingAuditEvents,
+	pendingTimerDocCountForTests,
 	resetAuditObserverForTests
 } from './audit-observer';
 import type { ActorId } from '$lib/data/types';
@@ -217,6 +218,59 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 			} finally {
 				docB.destroy();
 			}
+		});
+
+		it('flushes a pending update for a record id containing a colon without truncating it', () => {
+			// A `${kind}:${id}` key split back apart on ':' would misparse an id
+			// that itself contains a colon (recordId has no format restriction —
+			// see the MCP server's `recordId: z.string()`), truncating it and
+			// causing flushPendingAuditEvents to look up the wrong/nonexistent key.
+			const colonId = 'my:id';
+			const record = crdtCreateRecord(
+				doc,
+				{ id: colonId, parentId: makeDoc(doc), blockType: 'paragraph' },
+				human
+			);
+			const yrecord = doc.getMap('records').get(record.id) as Y.Map<unknown>;
+			const content = yrecord.get('content') as Y.Text;
+
+			doc.transact(() => content.insert(0, 'x'), 'fake-ws-connection');
+			expect(recentActions(colonId).filter((a) => a === 'update_record')).toHaveLength(0);
+
+			flushPendingAuditEvents();
+			expect(recentActions(colonId).filter((a) => a === 'update_record')).toHaveLength(1);
+		});
+
+		it("prunes a doc's entry once its last pending timer fires, instead of retaining an empty inner map forever", () => {
+			const record = crdtCreateRecord(
+				doc,
+				{ parentId: makeDoc(doc), blockType: 'paragraph' },
+				human
+			);
+			const yrecord = doc.getMap('records').get(record.id) as Y.Map<unknown>;
+			const content = yrecord.get('content') as Y.Text;
+
+			doc.transact(() => content.insert(0, 'x'), 'fake-ws-connection');
+			expect(pendingTimerDocCountForTests()).toBe(1);
+
+			vi.advanceTimersByTime(3_000);
+			expect(pendingTimerDocCountForTests()).toBe(0);
+		});
+
+		it("prunes a doc's entry on an explicit flush too, not just on natural timer expiry", () => {
+			const record = crdtCreateRecord(
+				doc,
+				{ parentId: makeDoc(doc), blockType: 'paragraph' },
+				human
+			);
+			const yrecord = doc.getMap('records').get(record.id) as Y.Map<unknown>;
+			const content = yrecord.get('content') as Y.Text;
+
+			doc.transact(() => content.insert(0, 'x'), 'fake-ws-connection');
+			expect(pendingTimerDocCountForTests()).toBe(1);
+
+			flushPendingAuditEvents();
+			expect(pendingTimerDocCountForTests()).toBe(0);
 		});
 
 		it('logs update_document when a document’s recordIds order changes without touching its own record', () => {

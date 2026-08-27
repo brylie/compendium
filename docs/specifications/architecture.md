@@ -20,7 +20,7 @@ One long-running local Node process, no separate backend/frontend deployment:
 │                               │                    │        │
 │                               ▼                    ▼        │
 │                        ┌─────────────────────────────┐     │
-│                        │   In-memory Y.Doc (workspace) │     │
+│                        │   In-memory Y.Doc (per shard) │     │
 │                        └──────────────┬───────────────┘     │
 │                                       │                      │
 │                                       ▼                      │

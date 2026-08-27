@@ -88,7 +88,7 @@ When addressing a CodeRabbit finding on a PR (whether triggered by an automated 
 **One Node process, one resolved `Y.Doc` per workspace/shard context, three surfaces onto it** — not a client/server split with a real API. The UI's WebSocket sync, the MCP server's tool handlers, and SQLite persistence all read/write the _same_ in-memory `Y.Doc`; this is deliberate (see `architecture.md` §1) because the core acceptance bet is that MCP writes and UI edits are indistinguishable and appear live to each other with zero polling.
 
 ```text
-SvelteKit UI  ◄──/ws (y-websocket)──►  Y.Doc (in-memory, whole workspace)  ◄──/mcp (HTTP)──►  MCP client
+SvelteKit UI  ◄──/ws (y-websocket)──►  Y.Doc (in-memory, per workspace/shard context)  ◄──/mcp (HTTP)──►  MCP client
                                               │
                                               ▼
                                    SQLite (Drizzle): snapshots, audit_log,
