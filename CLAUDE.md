@@ -58,18 +58,11 @@ When picking up tracked work (a GitHub issue, or a `/goal`-style instruction nam
 4. **Open a PR that links every issue it closes** — see "linking PRs to issues" below.
 5. **Triage discovered work into the backlog as you go** — see "issue triage" below. Don't let scope creep into the current PR; spin off a separate issue instead.
 
-## Workflow: issue triage (creating and maintaining backlog issues)
+## Workflow: issue triage, prioritization, and PR-linkage
 
-Opening a new issue (whether spotted mid-implementation or requested directly) is part of normal development, not a separate chore — do it proactively for bugs, missing features, worthwhile refactors, or tech debt noticed along the way, without waiting to be asked.
+Opening a new issue (whether spotted mid-implementation or requested directly) is part of normal development, not a separate chore — do it proactively for bugs, missing features, worthwhile refactors, or tech debt noticed along the way, without waiting to be asked. Every backlog issue needs a priority (this repo tracks it on the project board's `Priority` field, not a label), relationships to other issues should be recorded durably (issue body/comment — GitHub has no other durable place for that graph), and a PR that implements a tracked issue should link it with a closing keyword (e.g. `Closes #8`), not just mention it in prose.
 
-- **Every backlog issue needs a priority.** Use labels (or the convention already in use in this repo's issue tracker — check existing issues before inventing a new scheme) so the backlog stays sortable by what matters most; an issue with no priority signal is effectively invisible in planning.
-- **Record relationships explicitly.** If a new issue blocks, is blocked by, duplicates, or is a prerequisite for another (e.g. "#30 is prerequisite foundation for #13"), say so in the issue body or a comment — GitHub's issue text is the only durable record of that dependency graph, so don't leave it implicit in a PR description or commit message where it'll be lost.
-- **Re-triage when new information changes priority.** If implementing one issue reveals another should be reprioritized (e.g. a dependency became urgent, or a blocker was resolved), update that issue's priority/relationship with a comment explaining why — see the `#30` P2→P0 promotion comment for the expected shape (state the old and new priority, and the concrete reason).
-- Keep new issues scoped to one coherent piece of work — don't bundle unrelated findings into a single catch-all issue, since that defeats prioritization.
-
-## Workflow: linking PRs to issues
-
-When a PR implements a tracked GitHub issue, link it in the PR description with a closing keyword (e.g. `Closes #8`) rather than just mentioning the issue number in prose — this is what makes GitHub auto-close the issue on merge and show the linkage in both the issue and PR UI. Do this for every PR that implements or fixes a filed issue, not only when asked.
+The full procedure — issue shape/acceptance-criteria conventions, the priority-change rationale-comment template, the relationship-comment pattern, the PR-linkage audit for catching a merged PR that quietly didn't close what it should have, sizing, PRD/spec alignment checks, duplicate sweeps, and the periodic grooming-pass script — lives in the `backlog-refinement` skill (`.claude/skills/backlog-refinement/SKILL.md`). Use it for anything beyond a single quick `gh issue create`.
 
 ## Workflow: responding to CodeRabbit review comments
 
