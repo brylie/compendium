@@ -149,12 +149,9 @@ function indexRecord(doc: Y.Doc, index: BacklinkIndex, sourceRecordId: string): 
 
 /** Refresh only the backlinks whose displayed source metadata changed. */
 function indexDocumentSources(doc: Y.Doc, index: BacklinkIndex, sourceDocumentId: string): void {
-	const sourceRecordIds = [...index.bySourceRecordId]
-		.filter(([, backlinks]) =>
-			backlinks.some((backlink) => backlink.sourceDocumentId === sourceDocumentId)
-		)
-		.map(([sourceRecordId]) => sourceRecordId);
-	for (const sourceRecordId of sourceRecordIds) {
+	for (const sourceRecordId of listRecordsForParent(doc, sourceDocumentId).map(
+		(record) => record.id
+	)) {
 		indexRecord(doc, index, sourceRecordId);
 	}
 }

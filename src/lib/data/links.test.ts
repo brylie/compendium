@@ -241,6 +241,38 @@ describe('listIncomingLinks', () => {
 		expect(listIncomingLinks(doc, target.id)).toEqual([]);
 	});
 
+	it('indexes a linked record that arrives before its parent Document during synchronization', () => {
+		const doc = new Y.Doc();
+		const target = createDocument(doc, { id: 'target', title: 'Target' });
+		const sourceRecord = new Y.Map<unknown>();
+		sourceRecord.set('id', 'early-record');
+		sourceRecord.set('parentId', 'late-source');
+		sourceRecord.set('order', 'a0');
+		sourceRecord.set('blockType', 'page_link');
+		sourceRecord.set('referencedRecordId', target.id);
+		sourceRecord.set('createdBy', CURRENT_USER);
+		sourceRecord.set('createdAt', 0);
+
+		// The reverse index is already live when a remote update delivers a
+		// record before its owning Document metadata.
+		expect(listIncomingLinks(doc, target.id)).toEqual([]);
+		doc.getMap<Y.Map<unknown>>('records').set('early-record', sourceRecord);
+		expect(listIncomingLinks(doc, target.id)).toEqual([]);
+
+		const recordIds = new Y.Array<string>();
+		recordIds.push(['early-record']);
+		const sourceDocument = new Y.Map<unknown>();
+		sourceDocument.set('id', 'late-source');
+		sourceDocument.set('title', 'Late source');
+		sourceDocument.set('order', 'a0');
+		sourceDocument.set('recordIds', recordIds);
+		doc.getMap<Y.Map<unknown>>('documents').set('late-source', sourceDocument);
+
+		expect(listIncomingLinks(doc, target.id)).toMatchObject([
+			{ sourceDocumentId: 'late-source', sourceRecordId: 'early-record' }
+		]);
+	});
+
 	it('does not confuse links when Documents share a title', () => {
 		const doc = new Y.Doc();
 		const first = createDocument(doc, { id: 'first', title: 'Notes' });
