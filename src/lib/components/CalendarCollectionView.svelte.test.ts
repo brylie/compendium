@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import { createCollection, createRecord, getRecord } from '$lib/data/records';
+import { createCollection, createRecord, getCollection, getRecord } from '$lib/data/records';
 import type { ViewConfig } from '$lib/data/views';
 import CalendarCollectionViewHarness from './CalendarCollectionViewHarness.svelte';
 
@@ -32,16 +32,19 @@ describe('CalendarCollectionView', () => {
 		expect(screen.getByText(/doesn't have one yet/)).toBeInTheDocument();
 	});
 
-	it('adds a date property via the prompt and switches into the calendar grid', async () => {
+	it('adds a date property from the inline empty-state form and switches into the calendar grid', async () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Cal', schema: [] });
-		vi.spyOn(window, 'prompt').mockReturnValue('Due date');
 		const user = userEvent.setup();
 		renderCalendar('col-1');
 
+		expect(screen.getByRole('textbox', { name: 'Date property name' })).toHaveValue('Date');
 		await user.click(screen.getByRole('button', { name: 'Add a date property' }));
 
-		expect(screen.getByRole('option', { name: 'Due date' })).toBeInTheDocument();
+		expect(screen.getByRole('option', { name: 'Date' })).toBeInTheDocument();
 		expect(screen.getByText('March 2026')).toBeInTheDocument();
+		expect(getCollection(ydoc, 'col-1')?.schema).toEqual([
+			expect.objectContaining({ label: 'Date', type: 'date' })
+		]);
 	});
 
 	it('places a record on its matching day cell', () => {
