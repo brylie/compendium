@@ -7,7 +7,8 @@ import {
 	createDocument,
 	createRecord,
 	getDocument,
-	getRecordYText
+	getRecordYText,
+	updateRecordContent
 } from '$lib/data/records';
 import type { ActorId } from '$lib/data/types';
 import Page from './+page.svelte';
@@ -261,6 +262,38 @@ describe('doc/[id] +page', () => {
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
 		expect(screen.getByRole('link', { name: /Other Doc/ })).toHaveAttribute('href', '/doc/other');
+	});
+
+	it('shows backlinks from page_link and inline wiki-link sources with navigable context', () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'Target' });
+		createDocument(ydoc, { id: 'source', title: 'Source document' });
+		createRecord(
+			ydoc,
+			{ parentId: 'source', blockType: 'page_link', referencedRecordId: 'doc-1' },
+			HUMAN
+		);
+		const inlineBlock = createRecord(ydoc, { parentId: 'source', blockType: 'paragraph' }, HUMAN);
+		updateRecordContent(
+			ydoc,
+			inlineBlock.id,
+			{ runs: [{ text: 'Related notes', marks: { link: 'record:doc-1' } }] },
+			HUMAN
+		);
+
+		render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'Target' }
+		});
+
+		expect(screen.getByRole('heading', { name: 'Backlinks' })).toBeInTheDocument();
+		expect(screen.getByText('2')).toBeInTheDocument();
+		expect(screen.getAllByRole('link', { name: 'Source document' })).toHaveLength(2);
+		expect(screen.getAllByRole('link', { name: 'Source document' })[0]).toHaveAttribute(
+			'href',
+			'/doc/source'
+		);
+		expect(screen.getByText('Related notes')).toBeInTheDocument();
 	});
 
 	it('shows an explicit "deleted" state for a page_link whose target no longer exists, distinct from an unlinked block', () => {

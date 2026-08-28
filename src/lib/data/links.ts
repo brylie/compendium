@@ -1,5 +1,12 @@
 import type * as Y from 'yjs';
-import { getCollection, getDocument, listRecordsForParent } from './records';
+import {
+	getCollection,
+	getDocument,
+	getRecord,
+	listDocuments,
+	listRecordsForParent
+} from './records';
+import { plainText } from './richtext';
 
 // The one canonical internal-link representation, shared by `page_link`
 // blocks (target on the block record's `referencedRecordId`) and inline
@@ -38,6 +45,19 @@ export interface OutgoingLink {
 	target: InternalLinkTarget | undefined;
 }
 
+/**
+ * A reference to a Document discovered by scanning the shared, ID-backed
+ * outgoing-link representation. `context` is the current text of the exact
+ * referring block, so it changes with edits instead of becoming stale beside
+ * the backlink.
+ */
+export interface Backlink {
+	sourceDocumentId: string;
+	sourceDocumentTitle: string;
+	sourceRecordId: string;
+	context: string;
+}
+
 export function isLinkBroken(link: OutgoingLink): boolean {
 	return link.target === undefined;
 }
@@ -72,4 +92,34 @@ export function listOutgoingLinks(doc: Y.Doc, documentId: string): OutgoingLink[
 		}
 	}
 	return links;
+}
+
+/**
+ * Every Document that points at `targetId`, via either a page_link block or
+ * an inline `record:` wiki-link. This deliberately derives from
+ * `listOutgoingLinks` rather than maintaining a second, title-based index:
+ * renames, moves, duplicate titles, and deletion of a source all remain
+ * correct as the Y.Doc changes.
+ */
+export function listIncomingLinks(doc: Y.Doc, targetId: string): Backlink[] {
+	const backlinks: Backlink[] = [];
+
+	for (const source of listDocuments(doc)) {
+		for (const link of listOutgoingLinks(doc, source.id)) {
+			if (link.targetId !== targetId) continue;
+			const sourceRecord = getRecord(doc, link.sourceRecordId);
+			if (!sourceRecord) continue;
+
+			backlinks.push({
+				sourceDocumentId: source.id,
+				sourceDocumentTitle: source.title,
+				sourceRecordId: sourceRecord.id,
+				context:
+					(sourceRecord.content ? plainText(sourceRecord.content).trim() : '') ||
+					(sourceRecord.blockType === 'page_link' ? 'Page link' : 'Untitled block')
+			});
+		}
+	}
+
+	return backlinks;
 }
