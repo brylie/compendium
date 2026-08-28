@@ -149,15 +149,25 @@ function indexRecord(doc: Y.Doc, index: BacklinkIndex, sourceRecordId: string): 
 
 /** Refresh only the backlinks whose displayed source metadata changed. */
 function indexDocumentSources(doc: Y.Doc, index: BacklinkIndex, sourceDocumentId: string): void {
-	for (const [sourceRecordId, backlinks] of index.bySourceRecordId) {
-		if (backlinks.some((backlink) => backlink.sourceDocumentId === sourceDocumentId)) {
-			indexRecord(doc, index, sourceRecordId);
-		}
+	const sourceRecordIds = [...index.bySourceRecordId]
+		.filter(([, backlinks]) =>
+			backlinks.some((backlink) => backlink.sourceDocumentId === sourceDocumentId)
+		)
+		.map(([sourceRecordId]) => sourceRecordId);
+	for (const sourceRecordId of sourceRecordIds) {
+		indexRecord(doc, index, sourceRecordId);
 	}
 }
 
 /** Collect direct record or Document IDs affected by a deep Yjs observer event batch. */
-function eventIds(events: Y.YEvent<any>[], root: Y.AbstractType<any>): Set<string> {
+function eventIds(
+	events: Array<{
+		path: Array<string | number>;
+		target: unknown;
+		changes: { keys: Map<string, unknown> };
+	}>,
+	root: unknown
+): Set<string> {
 	const ids = new Set<string>();
 	for (const event of events) {
 		const firstPathSegment = event.path[0];
@@ -210,7 +220,10 @@ function getBacklinkIndex(doc: Y.Doc): BacklinkIndex {
  * deletion therefore remain correct without rescanning the workspace.
  */
 export function listIncomingLinks(doc: Y.Doc, targetId: string): Backlink[] {
-	return (getBacklinkIndex(doc).byTargetId.get(targetId) ?? []).map(
-		({ targetId: _targetId, ...backlink }) => backlink
-	);
+	return (getBacklinkIndex(doc).byTargetId.get(targetId) ?? []).map((backlink) => ({
+		sourceDocumentId: backlink.sourceDocumentId,
+		sourceDocumentTitle: backlink.sourceDocumentTitle,
+		sourceRecordId: backlink.sourceRecordId,
+		context: backlink.context
+	}));
 }
