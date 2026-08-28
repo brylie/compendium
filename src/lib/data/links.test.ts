@@ -214,6 +214,33 @@ describe('listIncomingLinks', () => {
 		expect(listIncomingLinks(doc, target.id)).toEqual([]);
 	});
 
+	it('updates the reverse index when a linked record is edited', () => {
+		const doc = new Y.Doc();
+		const target = createDocument(doc, { id: 'target', title: 'Target' });
+		const source = createDocument(doc, { id: 'source', title: 'Source' });
+		const record = createRecord(doc, { parentId: source.id, blockType: 'paragraph' }, CURRENT_USER);
+
+		// Build the index before the record gains a link, as the mounted UI does.
+		expect(listIncomingLinks(doc, target.id)).toEqual([]);
+		updateRecordContent(
+			doc,
+			record.id,
+			{ runs: [{ text: 'A live backlink', marks: { link: `${RECORD_LINK_SCHEME}${target.id}` } }] },
+			CURRENT_USER
+		);
+		expect(listIncomingLinks(doc, target.id)).toMatchObject([
+			{ sourceRecordId: record.id, context: 'A live backlink' }
+		]);
+
+		updateRecordContent(
+			doc,
+			record.id,
+			{ runs: [{ text: 'No link now', marks: {} }] },
+			CURRENT_USER
+		);
+		expect(listIncomingLinks(doc, target.id)).toEqual([]);
+	});
+
 	it('does not confuse links when Documents share a title', () => {
 		const doc = new Y.Doc();
 		const first = createDocument(doc, { id: 'first', title: 'Notes' });

@@ -156,6 +156,9 @@
 	onMount(() => {
 		const doc = getClientDoc();
 		ydoc = doc;
+		// Register the backlink index before this page's Yjs observers. That
+		// keeps the index current before refresh() reads it after a remote edit.
+		backlinks = listIncomingLinks(doc, data.documentId);
 
 		const recordsMap = doc.getMap('records');
 		const documentsMap = doc.getMap('documents');
