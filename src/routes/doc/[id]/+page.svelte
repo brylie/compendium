@@ -16,6 +16,7 @@
 		setRecordReferencedId,
 		updateDocumentTitle
 	} from '$lib/data/records';
+	import { listIncomingLinks } from '$lib/data/links';
 	import {
 		appendRichTextToYText,
 		applyRichTextToYText,
@@ -47,6 +48,7 @@
 	// remote title edits — untrack() here just tells Svelte that's deliberate.
 	let title = $state(untrack(() => data.title));
 	let blocks: WorkspaceRecord[] = $state([]);
+	let backlinks: ReturnType<typeof listIncomingLinks> = $state([]);
 	let slashMenuBlockId: string | null = $state(null);
 	let slashQuery = $state('');
 	let heldByOthers: Map<string, ActorId> = $state(new Map());
@@ -69,6 +71,7 @@
 		if (!ydoc) return;
 		const nextBlocks = listRecordsForParent(ydoc, data.documentId);
 		blocks = nextBlocks;
+		backlinks = listIncomingLinks(ydoc, data.documentId);
 		const docMeta = getDocument(ydoc, data.documentId);
 		title = docMeta?.title ?? data.title;
 		if (docMeta?.parentDocumentId) {
@@ -153,6 +156,9 @@
 	onMount(() => {
 		const doc = getClientDoc();
 		ydoc = doc;
+		// Register the backlink index before this page's Yjs observers. That
+		// keeps the index current before refresh() reads it after a remote edit.
+		backlinks = listIncomingLinks(doc, data.documentId);
 
 		const recordsMap = doc.getMap('records');
 		const documentsMap = doc.getMap('documents');
@@ -511,6 +517,36 @@
 		onkeydown={handleTitleKeydown}
 		placeholder="Untitled document"
 	/>
+
+	<section
+		class="mt-5 rounded-lg border border-border bg-surface/50 p-3"
+		aria-labelledby="backlinks-heading"
+	>
+		<div class="flex items-center gap-2 text-xs font-semibold tracking-wider text-muted uppercase">
+			<Icon name="link" size={15} class="text-accent" />
+			<h2 id="backlinks-heading">Backlinks</h2>
+			<span class="normal-case">{backlinks.length}</span>
+		</div>
+		{#if backlinks.length > 0}
+			<ul class="mt-2 space-y-2">
+				{#each backlinks as backlink, index (`${backlink.sourceRecordId}-${index}`)}
+					<li class="min-w-0 text-sm">
+						<a
+							href={resolve('/doc/[id]', { id: backlink.sourceDocumentId })}
+							class="font-medium text-fg underline underline-offset-2 transition-colors hover:text-accent"
+						>
+							{backlink.sourceDocumentTitle || 'Untitled Document'}
+						</a>
+						<p class="mt-0.5 truncate text-xs text-muted" title={backlink.context}>
+							{backlink.context}
+						</p>
+					</li>
+				{/each}
+			</ul>
+		{:else}
+			<p class="mt-2 text-xs text-muted italic">No pages link here yet.</p>
+		{/if}
+	</section>
 
 	<!-- Blocks Canvas (Click anywhere below title to start writing) -->
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
