@@ -140,13 +140,12 @@ ORIGIN=http://localhost:3000 npm start
 1. Create a Document or Collection in Compendium.
 2. Open **Tokens** at `/settings/tokens` and create a token scoped to the
    content the agent should access.
-3. Configure an MCP-capable client with that token as a Bearer token. Use
-   `http://localhost:5173/mcp` with `npm run dev`, or
-   `http://localhost:3000/mcp` with the default `npm start` configuration (use
-   the matching port if you set `PORT`). Hosted clients such as ChatGPT cannot
-   reach `localhost`; trusted testing requires a secure tunnel that provides a
-   publicly reachable HTTPS URL ending in `/mcp`. Because this is still a
-   local-trust MVP, do not treat a tunnel as a production deployment.
+3. Configure a locally running desktop MCP client, such as Claude Desktop,
+   with that token as a Bearer token. Use `http://localhost:5173/mcp` with
+   `npm run dev`, or `http://localhost:3000/mcp` with the default `npm start`
+   configuration (use the matching port if you set `PORT`). Cloud-hosted chat
+   clients cannot reach `localhost`; connecting them or exposing Compendium
+   through a public tunnel is outside this local-first prototype's scope.
 4. Keep the browser open and ask the agent to list Documents, read one, hold a
    block, and update it. The result appears live in the editor.
 
