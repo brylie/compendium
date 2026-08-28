@@ -1,146 +1,221 @@
-# Compendium
+<p align="center">
+  <img src="static/favicon.svg" width="88" height="88" alt="Compendium logo" />
+</p>
 
-A shared knowledge workspace where people and AI agents read and write the
-same pages and tables — live, in the same place, with nothing to export,
-import, or paste between them.
+<h1 align="center">Compendium</h1>
 
-## Why
+<p align="center">
+  <strong>Where people and AI agents build knowledge together.</strong>
+</p>
 
-Most knowledge tools were built for humans and had agents bolted on
-afterward: a chat sidebar, or a one-shot "generate this page" button. They
-can't reliably read the rest of a workspace, hold a durable identity, or
-write back into a document the way a human collaborator would. In practice
-this means pasting agent output between chat windows and documents by hand —
-which breaks the audit trail, duplicates work, and lets the document drift
-out of sync with what the agent actually knows or did.
+<p align="center">
+  An open-source, real-time knowledge workspace where humans and MCP-compatible
+  agents read and write the same documents, tables, boards, and calendars.
+  Nothing to copy, paste, export, or reconcile.
+</p>
 
-It's not that in-place agent editing is impossible — Gemini edits Google
-Docs in place now, Copilot edits Word in place — it's that it's walled to
-each vendor's own ecosystem. An assistant reaching into a file format
-outside its home turf creates a new file instead of updating the one that's
-open. **MCP-based editing sidesteps that by construction**: the workspace,
-not any one vendor's document format, is the shared surface, so any
-MCP-compatible agent — Claude, ChatGPT, Gemini, a custom bot — gets the same
-in-place read/write access as a human editing in the native UI.
+<p align="center">
+  <a href="https://github.com/brylie/compendium/actions/workflows/ci.yml"><img src="https://github.com/brylie/compendium/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/brylie/compendium" alt="Apache 2.0 license" /></a>
+  <a href="docs/specifications/mcp-tools.md"><img src="https://img.shields.io/badge/MCP-native-5A67D8" alt="MCP native" /></a>
+  <a href="https://svelte.dev"><img src="https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white" alt="Svelte 5" /></a>
+</p>
 
-The other half of the bet: documentation, structured data, kanban, and
-calendars are usually separate tools, each with their own data model, so
-neither humans nor agents can treat "what the team knows" as one queryable
-thing. Compendium models all of it as one thing — see below.
+> **Project status:** Compendium is an actively developed personal MVP. The
+> human–agent collaboration loop works today; multi-tenant authentication and
+> production hardening are still on the roadmap.
 
-Full product rationale, including the persona/market thesis and what's
-explicitly _not_ being built, lives in
-[`docs/prd.md`](docs/prd.md).
+## The idea
 
-## What it is
+Most knowledge tools give an AI a chat box beside your work. The agent can
+suggest a page, summarize a page, or generate a replacement—but the handoff
+back into the real source of truth is still yours to manage.
 
-Everything — a paragraph, a heading, a table row, a kanban card — is the
-same underlying kind of thing, addressed the same way by the UI, the
-permission model, the audit log, and the MCP tools an agent uses. That's
-what lets an agent treat a Document and a Table as one connected workspace
-instead of two disconnected apps.
+Compendium starts from a different premise: **an agent should collaborate in
+the workspace, not comment from the sidelines.**
 
-- A **Document** is a page: an ordered sequence of blocks, the
-  prose-editing surface.
-- A **Collection** is a structured dataset: a set of records sharing a
-  schema (text, number, date, select, checkbox, relation).
-- A **View** renders a Collection (Table today; Kanban and Calendar are
-  planned as new renderers over the same data, not a migration).
-- Text within a block can be independently formatted (bold, italic, code,
-  links, `@mentions`), and two people — or a person and an agent — can edit
-  the same paragraph at the same time without clobbering each other.
+A person editing in the browser and an agent connected over the Model Context
+Protocol operate on the same live records. Both can read structure, make
+changes, follow links, update tables, and see each other's work arrive in real
+time. Agent access is scoped, edits are attributed, and active work is
+coordinated at the block level.
 
-Because a Document block and a Collection row are the same kind of thing
-under the hood, an agent can update several at once as a single step — e.g.
-an event's description in a Document, its task row in a Table, and a draft
-announcement in a separate Document, updated together instead of by three
-hand-propagated edits.
-
-## How it works
-
-One server holds the whole workspace and keeps every connected client in
-sync in real time. The web UI and any connected MCP agent are looking at
-the same live workspace, not separate copies — there's no import/export
-step and no polling delay, so a change from either side shows up everywhere
-else immediately.
-
-Before an agent overwrites existing content, it visibly claims the blocks
-it's about to change — they show a shimmer and the agent's name — so a
-human working nearby doesn't get overwritten mid-edit, and so two agents
-don't collide. A human's own cursor works the same way: being in a block is
-itself an implicit claim on it.
-
-Everything is saved centrally with a full history of who changed what.
-
-Full architecture, the sync engine, and the MCP tool surface live in
-[`docs/specifications/`](docs/specifications/).
-
-## Running it
-
-```sh
-npm install
-npm run dev          # http://localhost:5173, with /ws and /mcp on the same port
+```mermaid
+flowchart LR
+    Human["Human collaborator"] <-->|"live editing"| UI["SvelteKit UI"]
+    UI <-->|"Yjs WebSocket sync"| Workspace["Shared Y.Doc"]
+    Workspace <-->|"read · hold · write"| MCP["MCP server"]
+    MCP <-->|"bring your own client"| Agent["AI agent"]
+    Workspace --> Persistence["SQLite snapshots"]
+    Workspace --> Trust["Audit log + scoped access"]
 ```
 
-For a production-style run (one process, built for production):
+One workspace. One data model. Two kinds of collaborators.
+
+## What makes Compendium different
+
+### Agents work on the real thing
+
+Claude, ChatGPT, Gemini, or a custom MCP client can work directly with the
+same Documents and Collections visible in the UI. There is no agent-only copy
+and no import/export seam where context or attribution gets lost.
+
+### Documents and structured work share one model
+
+A paragraph, heading, task row, and board card are all addressable workspace
+records. Documents provide narrative; Collections provide structure; Table,
+Board, and Calendar are views over the same Collection data. Agents do not
+need a different protocol for every surface.
+
+### Collaboration is explicit
+
+Before replacing existing content, an agent holds the blocks it intends to
+change. People can see that work in progress, conflicting blocks are rejected
+individually, and abandoned holds expire automatically. Humans remain in
+control without reducing agents to read-only assistants.
+
+### Trust is part of the architecture
+
+Access tokens are scoped to specific Documents and Collections. Writes,
+deletes, and denied attempts are attributed in an audit log. The collaboration
+contract is tested across real MCP, HTTP, WebSocket, and browser boundaries—not
+only as isolated functions.
+
+## Available today
+
+| Capability                      | What works now                                                                                                  |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| **Document editor**             | Rich text, block types, slash commands, a persistent toolbar, nested pages, and local undo/redo                 |
+| **Structured data**             | Collections with schemas and editable Table, Board, and Calendar views, including inline views inside Documents |
+| **Connected knowledge**         | Stable page links, `[[wiki links]]`, explicit broken-link states, and live backlinks                            |
+| **Agent access**                | An MCP server for listing, reading, creating, moving, searching, and editing workspace content                  |
+| **Live coordination**           | Yjs synchronization, human presence, per-block agent holds, and conflict-safe writes                            |
+| **Permissions and attribution** | Document/Collection-scoped tokens, actor attribution, and a queryable audit log                                 |
+| **Persistence**                 | SQLite-backed CRDT snapshots, access tokens, and audit history                                                  |
+
+The [product requirements](docs/prd.md) explain the larger thesis. The
+[canonical specifications](docs/specifications/) describe exactly what is
+implemented and where the boundaries still are.
+
+## See the collaboration loop
+
+1. A person creates a planning Document and a task Collection in the browser.
+2. An MCP agent reads both as structured workspace records—not as a flattened
+   export.
+3. The agent holds the blocks it plans to update; the UI shows that activity.
+4. The agent updates the plan and task rows. Open clients receive the changes
+   immediately.
+5. The audit log records who changed what, while the human's own concurrent
+   edits remain protected.
+
+That loop is the product: durable knowledge shaped jointly by people and
+agents, in the place where the work already lives.
+
+## Quick start
+
+Compendium's CI runs on Node.js 24.
+
+```sh
+git clone https://github.com/brylie/compendium.git
+cd compendium
+npm install
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173). The development server
+hosts the web UI, Yjs WebSocket endpoint, and MCP endpoint together.
+
+For a production-style local build:
 
 ```sh
 npm run build
 ORIGIN=http://localhost:3000 npm start
 ```
 
-Set `ORIGIN` to whatever host/port you're actually serving on — it's used
-to validate incoming requests and only matters if you're scripting requests
-yourself.
+> Compendium is currently a single-tenant, local-trust MVP. Do not expose it
+> to an untrusted network as though it already had multi-user authentication.
 
-## Connecting an MCP client
+## Connect an AI client
 
-1. Create a document or collection from the workspace home page.
-2. Go to **Tokens** (`/settings/tokens`), create a token scoped to the
-   documents/collections you want to grant access to.
-3. Point your MCP client (Claude Desktop, Claude Code, ChatGPT, etc.) at
-   `http://localhost:5173/mcp` (the `npm run dev` port above) with that token
-   as a bearer token, per your client's own remote-MCP-server configuration.
-   Substitute your actual host/port if running the production build instead.
+1. Create a Document or Collection in Compendium.
+2. Open **Tokens** at `/settings/tokens` and create a token scoped to the
+   content the agent should access.
+3. Configure any remote-MCP-capable client to use `http://localhost:5173/mcp`
+   with that token as a Bearer token.
+4. Keep the browser open and ask the agent to list Documents, read one, hold a
+   block, and update it. The result appears live in the editor.
 
-Edits made this way appear live in any open browser tab, and vice versa —
-MCP and the UI are editing the same workspace (see
-[`docs/specifications/architecture.md` §1](docs/specifications/architecture.md)).
+The MCP surface currently includes:
 
-## Testing
-
-```sh
-npm run test           # vitest — data layer, holds, and markdown transcoding
-npm run test:e2e       # tier-a (vitest, protocol-level) + tier-b (playwright, DOM-level)
-npm run check           # svelte-check
-npm run lint             # prettier + eslint
+```text
+list_documents    get_document      create_document
+move_document     delete_document   list_collections
+query_collection  search_workspace  hold_records
+release_records   create_record     write_record
+delete_record
 ```
 
-The E2E suites exist specifically to prove MCP writes and UI edits stay in
-sync across the real transport boundary in both directions — human creates,
-agent edits and vice versa — not just that each side works in isolation. See
-[`docs/specifications/e2e-testing.md`](docs/specifications/e2e-testing.md).
+See the [MCP tool contract](docs/specifications/mcp-tools.md) for inputs,
+outputs, permissions, and link behavior.
+
+## Architecture
+
+Compendium deliberately runs the UI sync endpoint, MCP server, and persistence
+layer in one Node process. They resolve the same in-memory Yjs workspace, so an
+MCP write and a browser edit converge without polling or a second application
+data model.
+
+- **SvelteKit + Svelte 5** provide the application and editor UI.
+- **Yjs + y-websocket** provide CRDT state and real-time synchronization.
+- **MCP** gives compatible agents structured read/write access.
+- **SQLite + Drizzle** store snapshots, scoped tokens, and the audit log.
+- **Vitest + Playwright** verify business logic and real protocol convergence.
+
+Read the [architecture specification](docs/specifications/architecture.md) for
+the process model and the [data-model specification](docs/specifications/data-model.md)
+for the shared record primitive.
+
+## Development
+
+```sh
+npm run test          # unit and component tests
+npm run test:e2e      # real MCP↔Yjs and browser-level flows
+npm run check         # Svelte and TypeScript checks
+npm run lint          # formatting and lint rules
+npm run build         # production build
+```
+
+The E2E suites intentionally cross real transport boundaries. A feature is not
+considered integrated merely because its UI and service functions pass in
+isolation.
 
 ## Roadmap
 
-The [Compendium GitHub Project](https://github.com/users/brylie/projects/6) is the
-canonical roadmap. Open work is tracked as [GitHub Issues](https://github.com/brylie/compendium/issues)
-and organized there, not in local planning docs.
+The [Compendium project board](https://github.com/users/brylie/projects/6) is
+the canonical roadmap. Near-term work focuses on daily-driver editor depth,
+workspace search, multi-space organization, stronger agent parity, and
+scalable persistence. Longer-term possibilities include a relationship graph,
+workflow automation, and multi-agent handoffs.
 
-## Further reading
+Browse the [open issues](https://github.com/brylie/compendium/issues) to see
+what is ready, in progress, and deliberately deferred.
 
-Product rationale and the canonical specification for each implemented
-subsystem have their own doc under [`docs/`](docs/) and are kept current
-there rather than mirrored here:
+## Documentation
 
-- [`prd.md`](docs/prd.md) — problem
-  statement, goals/non-goals, requirements, and the build-vs-adopt decisions
-  behind the editor.
-- [`specifications/`](docs/specifications/) — one doc per subsystem
-  (architecture, data model, collaboration/holds, MCP tools, markdown
-  transcoding, persistence, service layer, testing strategy, design system),
-  indexed in that folder's own [`README.md`](docs/specifications/README.md).
+- [Product requirements](docs/prd.md)—the problem, product bet, boundaries,
+  and phased roadmap
+- [Specifications index](docs/specifications/README.md)—canonical behavior by
+  subsystem
+- [Architecture](docs/specifications/architecture.md)—process, routes, and
+  synchronization model
+- [MCP tools](docs/specifications/mcp-tools.md)—the agent-facing contract
+- [Collaboration](docs/specifications/collaboration.md)—presence and block
+  holds
+- [Internal links](docs/specifications/internal-links.md)—stable links,
+  broken targets, and backlinks
+- [Testing strategy](docs/specifications/e2e-testing.md)—why protocol-level
+  convergence is tested
 
 ## License
 
-Apache 2.0 — see [`LICENSE`](LICENSE).
+Compendium is licensed under the [Apache License 2.0](LICENSE).
