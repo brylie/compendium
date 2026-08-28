@@ -38,6 +38,7 @@
 	let rows: WorkspaceRecord[] = $state([]);
 	let manualOrder: Record<string, string[]> = $state({});
 	let draggedRecordId: string | null = $state(null);
+	let newGroupingPropertyLabel = $state('Status');
 
 	// The grouping property is config.groupBy, persisted on the embedding
 	// block — see EmbeddedViewConfig in $lib/data/types. Manual per-card
@@ -106,8 +107,7 @@
 
 	function addGroupingProperty(): void {
 		if (!ydoc) return;
-		const rawLabel = window.prompt('New select property name (e.g. "Status"):');
-		const label = rawLabel?.trim();
+		const label = newGroupingPropertyLabel.trim();
 		if (!label) return;
 		const property: PropertyDefinition = { key: nanoid(8), label, type: 'select', options: [] };
 		updateCollectionSchema(ydoc, collectionId, [...schema, property]);
@@ -217,14 +217,31 @@
 			Board view groups records by a <strong>select</strong> property, and this collection doesn't have
 			one yet.
 		</p>
-		<button
-			type="button"
-			onclick={addGroupingProperty}
-			class="mt-3 inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg transition-opacity hover:opacity-90"
+		<form
+			class="mt-3 flex flex-wrap justify-center gap-2"
+			onsubmit={(event) => {
+				event.preventDefault();
+				addGroupingProperty();
+			}}
 		>
-			<Icon name="plus" size={14} />
-			<span>Add a select property</span>
-		</button>
+			<label class="sr-only" for="board-new-group-property-{collectionId}"
+				>Select property name</label
+			>
+			<input
+				id="board-new-group-property-{collectionId}"
+				type="text"
+				bind:value={newGroupingPropertyLabel}
+				class="min-w-40 rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg focus:border-accent focus:outline-none"
+			/>
+			<button
+				type="submit"
+				disabled={!newGroupingPropertyLabel.trim()}
+				class="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg transition-opacity hover:opacity-90 disabled:opacity-40"
+			>
+				<Icon name="plus" size={14} />
+				<span>Add a select property</span>
+			</button>
+		</form>
 	</div>
 {:else}
 	<div class="mb-4 flex items-center gap-2">

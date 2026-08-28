@@ -39,6 +39,7 @@
 	let rows: WorkspaceRecord[] = $state([]);
 	let viewYear = $state(today.getFullYear());
 	let viewMonth = $state(today.getMonth()); // 0-11
+	let newDatePropertyLabel = $state('Date');
 
 	// The date property driving placement is config.groupBy, persisted on
 	// the embedding block — see EmbeddedViewConfig in $lib/data/types.
@@ -166,8 +167,7 @@
 
 	function addDateProperty(): void {
 		if (!ydoc) return;
-		const rawLabel = window.prompt('New date property name (e.g. "Due date"):');
-		const label = rawLabel?.trim();
+		const label = newDatePropertyLabel.trim();
 		if (!label) return;
 		const property: PropertyDefinition = { key: nanoid(8), label, type: 'date' };
 		updateCollectionSchema(ydoc, collectionId, [...schema, property]);
@@ -232,14 +232,31 @@
 			Calendar view places records by a <strong>date</strong> property, and this collection doesn't have
 			one yet.
 		</p>
-		<button
-			type="button"
-			onclick={addDateProperty}
-			class="mt-3 inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg transition-opacity hover:opacity-90"
+		<form
+			class="mt-3 flex flex-wrap justify-center gap-2"
+			onsubmit={(event) => {
+				event.preventDefault();
+				addDateProperty();
+			}}
 		>
-			<Icon name="plus" size={14} />
-			<span>Add a date property</span>
-		</button>
+			<label class="sr-only" for="calendar-new-date-property-{collectionId}"
+				>Date property name</label
+			>
+			<input
+				id="calendar-new-date-property-{collectionId}"
+				type="text"
+				bind:value={newDatePropertyLabel}
+				class="min-w-40 rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg focus:border-accent focus:outline-none"
+			/>
+			<button
+				type="submit"
+				disabled={!newDatePropertyLabel.trim()}
+				class="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg transition-opacity hover:opacity-90 disabled:opacity-40"
+			>
+				<Icon name="plus" size={14} />
+				<span>Add a date property</span>
+			</button>
+		</form>
 	</div>
 {:else}
 	<div class="mb-4 flex flex-wrap items-center gap-3">

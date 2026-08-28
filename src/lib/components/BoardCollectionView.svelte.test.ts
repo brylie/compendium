@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import { createCollection, createRecord, getRecord } from '$lib/data/records';
+import { createCollection, createRecord, getCollection, getRecord } from '$lib/data/records';
 import type { ViewConfig } from '$lib/data/views';
 import BoardCollectionViewHarness from './BoardCollectionViewHarness.svelte';
 
@@ -33,15 +33,18 @@ describe('BoardCollectionView', () => {
 		expect(screen.getByText(/doesn't have one yet/)).toBeInTheDocument();
 	});
 
-	it('adds a select property via the prompt', async () => {
+	it('adds a select property from the inline empty-state form', async () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Board', schema: [] });
-		vi.spyOn(window, 'prompt').mockReturnValue('Status');
 		const user = userEvent.setup();
 		renderBoard('col-1');
 
+		expect(screen.getByRole('textbox', { name: 'Select property name' })).toHaveValue('Status');
 		await user.click(screen.getByRole('button', { name: 'Add a select property' }));
 
 		expect(screen.getByText('No Status')).toBeInTheDocument();
+		expect(getCollection(ydoc, 'col-1')?.schema).toEqual([
+			expect.objectContaining({ label: 'Status', type: 'select' })
+		]);
 	});
 
 	it('renders one column per select option, plus a catch-all, even when empty', () => {
