@@ -67,6 +67,7 @@
 	let linkRecordId = $state('');
 	let linkSelection: { start: number; end: number } | null = $state(null);
 	let linkUrlInput: HTMLInputElement | undefined = $state();
+	let linkDialog: HTMLDivElement | undefined = $state();
 
 	const documentMetadataById = $derived(
 		ydoc
@@ -164,8 +165,37 @@
 			linkMode === 'record' ? `${RECORD_LINK_SCHEME}${value}` : value
 		);
 		activeMarks = editor.getFormatState();
+		closeLinkComposer();
+	}
+
+	function closeLinkComposer(): void {
+		const blockId = linkDialogBlockId;
 		linkDialogBlockId = null;
 		linkSelection = null;
+		if (blockId) void tick().then(() => blockRefs[blockId]?.focusEditor(false));
+	}
+
+	function handleLinkDialogKeydown(event: KeyboardEvent): void {
+		if (event.key === 'Escape') {
+			closeLinkComposer();
+			return;
+		}
+		if (event.key !== 'Tab' || !linkDialog) return;
+		const focusable = Array.from(
+			linkDialog.querySelectorAll<HTMLElement>(
+				'button:not([disabled]), input:not([disabled]), select:not([disabled]), [href]'
+			)
+		);
+		const first = focusable[0];
+		const last = focusable.at(-1);
+		if (!first || !last) return;
+		if (event.shiftKey && document.activeElement === first) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && document.activeElement === last) {
+			event.preventDefault();
+			first.focus();
+		}
 	}
 
 	function documentLocation(documentId: string): string {
@@ -994,17 +1024,13 @@
 		role="presentation"
 	>
 		<div
+			bind:this={linkDialog}
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="link-composer-title"
 			tabindex="-1"
 			class="w-full max-w-md rounded-lg border border-border bg-bg p-5 shadow-xl"
-			onkeydown={(event) => {
-				if (event.key === 'Escape') {
-					linkDialogBlockId = null;
-					linkSelection = null;
-				}
-			}}
+			onkeydown={handleLinkDialogKeydown}
 		>
 			<h2 id="link-composer-title" class="text-lg font-semibold text-fg">Add link</h2>
 			<div class="mt-4 flex gap-2" role="group" aria-label="Link type">
@@ -1063,10 +1089,7 @@
 			<div class="mt-5 flex justify-end gap-2">
 				<button
 					type="button"
-					onclick={() => {
-						linkDialogBlockId = null;
-						linkSelection = null;
-					}}
+					onclick={closeLinkComposer}
 					class="rounded px-3 py-2 text-sm text-muted hover:text-fg">Cancel</button
 				>
 				<button

@@ -185,28 +185,32 @@
 
 	async function confirmDeletion(): Promise<void> {
 		const deletion = pendingDeletion;
-		pendingDeletion = null;
 		if (!deletion) return;
-		if (deletion.kind === 'document') {
-			const id = deletion.id;
-			if (ydoc) {
-				deleteDocument(ydoc, id);
-				refresh();
+		try {
+			if (deletion.kind === 'document') {
+				const id = deletion.id;
+				if (ydoc) {
+					deleteDocument(ydoc, id);
+					refresh();
+				}
+				await invalidateAll();
+				if (currentDocId === id) {
+					await goto(resolve('/'));
+				}
+			} else {
+				const id = deletion.id;
+				if (ydoc) {
+					deleteCollection(ydoc, id);
+					refresh();
+				}
+				await invalidateAll();
+				if (currentTableId === id) {
+					await goto(resolve('/'));
+				}
 			}
-			await invalidateAll();
-			if (currentDocId === id) {
-				await goto(resolve('/'));
-			}
-		} else {
-			const id = deletion.id;
-			if (ydoc) {
-				deleteCollection(ydoc, id);
-				refresh();
-			}
-			await invalidateAll();
-			if (currentTableId === id) {
-				await goto(resolve('/'));
-			}
+			pendingDeletion = null;
+		} catch {
+			errorMessage = `Could not delete the ${deletion.kind}. Please try again.`;
 		}
 	}
 </script>

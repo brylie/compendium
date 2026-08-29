@@ -24,17 +24,44 @@
 	} = $props();
 
 	let input: HTMLInputElement | undefined = $state();
+	let dialog: HTMLDivElement | undefined = $state();
 	let value = $state('');
 
 	$effect(() => {
 		if (!open) return;
+		const previousFocus =
+			document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		value = initialValue;
 		void tick().then(() => input?.focus());
+		return () => previousFocus?.focus();
 	});
 
 	function submit(event: SubmitEvent): void {
 		event.preventDefault();
 		onSubmit(value);
+	}
+
+	function handleKeydown(event: KeyboardEvent): void {
+		if (event.key === 'Escape') {
+			onCancel();
+			return;
+		}
+		if (event.key !== 'Tab' || !dialog) return;
+		const focusable = Array.from(
+			dialog.querySelectorAll<HTMLElement>(
+				'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href]'
+			)
+		);
+		const first = focusable[0];
+		const last = focusable.at(-1);
+		if (!first || !last) return;
+		if (event.shiftKey && document.activeElement === first) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && document.activeElement === last) {
+			event.preventDefault();
+			first.focus();
+		}
 	}
 </script>
 
@@ -44,14 +71,13 @@
 		role="presentation"
 	>
 		<div
+			bind:this={dialog}
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="prompt-dialog-title"
 			tabindex="-1"
 			class="w-full max-w-md rounded-lg border border-border bg-bg p-5 shadow-xl"
-			onkeydown={(event) => {
-				if (event.key === 'Escape') onCancel();
-			}}
+			onkeydown={handleKeydown}
 		>
 			<form onsubmit={submit}>
 				<h2 id="prompt-dialog-title" class="text-lg font-semibold text-fg">{title}</h2>

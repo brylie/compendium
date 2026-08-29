@@ -18,9 +18,33 @@
 	} = $props();
 
 	let cancelButton: HTMLButtonElement | undefined = $state();
+	let dialog: HTMLDivElement | undefined = $state();
 	$effect(() => {
-		if (open) void tick().then(() => cancelButton?.focus());
+		if (!open) return;
+		const previousFocus =
+			document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		void tick().then(() => cancelButton?.focus());
+		return () => previousFocus?.focus();
 	});
+
+	function handleKeydown(event: KeyboardEvent): void {
+		if (event.key === 'Escape') {
+			onCancel();
+			return;
+		}
+		if (event.key !== 'Tab' || !dialog) return;
+		const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled])'));
+		const first = focusable[0];
+		const last = focusable.at(-1);
+		if (!first || !last) return;
+		if (event.shiftKey && document.activeElement === first) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && document.activeElement === last) {
+			event.preventDefault();
+			first.focus();
+		}
+	}
 </script>
 
 {#if open}
@@ -29,14 +53,13 @@
 		role="presentation"
 	>
 		<div
+			bind:this={dialog}
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="confirm-dialog-title"
 			tabindex="-1"
 			class="w-full max-w-md rounded-lg border border-border bg-bg p-5 shadow-xl"
-			onkeydown={(event) => {
-				if (event.key === 'Escape') onCancel();
-			}}
+			onkeydown={handleKeydown}
 		>
 			<h2 id="confirm-dialog-title" class="text-lg font-semibold text-fg">{title}</h2>
 			<p class="mt-2 text-sm text-muted">{message}</p>
