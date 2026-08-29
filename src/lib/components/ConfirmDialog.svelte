@@ -17,9 +17,9 @@
 		onCancel: () => void;
 	} = $props();
 
-	let confirmButton: HTMLButtonElement | undefined = $state();
+	let cancelButton: HTMLButtonElement | undefined = $state();
 	$effect(() => {
-		if (open) void tick().then(() => confirmButton?.focus());
+		if (open) void tick().then(() => cancelButton?.focus());
 	});
 </script>
 
@@ -42,12 +42,12 @@
 			<p class="mt-2 text-sm text-muted">{message}</p>
 			<div class="mt-5 flex justify-end gap-2">
 				<button
+					bind:this={cancelButton}
 					type="button"
 					onclick={onCancel}
 					class="rounded px-3 py-2 text-sm text-muted hover:text-fg">Cancel</button
 				>
 				<button
-					bind:this={confirmButton}
 					type="button"
 					onclick={onConfirm}
 					class="rounded bg-red-600 px-3 py-2 text-sm font-medium text-white">{confirmLabel}</button

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import {
@@ -19,6 +19,16 @@ import Page from './+page.svelte';
 // non-editing-convention UI flows (slash menu, synced/page-link targets).
 
 const HUMAN: ActorId = { kind: 'human', userId: 'local' };
+
+function selectEditorText(element: HTMLElement, start: number, end: number): void {
+	const textNode = document.createTreeWalker(element, NodeFilter.SHOW_TEXT).nextNode() as Text;
+	const range = document.createRange();
+	range.setStart(textNode, start);
+	range.setEnd(textNode, end);
+	const selection = window.getSelection()!;
+	selection.removeAllRanges();
+	selection.addRange(range);
+}
 
 let ydoc: Y.Doc;
 vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
@@ -247,6 +257,30 @@ describe('doc/[id] +page', () => {
 		});
 		expect(screen.getByText('Link to page:')).toBeInTheDocument();
 		expect(screen.getByRole('option', { name: 'Other Doc' })).toBeInTheDocument();
+	});
+
+	it('applies a URL link to the selection preserved by the in-page composer', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		getRecordYText(ydoc, record.id)!.insert(0, 'Visit example');
+		const user = userEvent.setup();
+		render(Page, {
+			params: { id: 'doc-1' },
+			form: null,
+			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		});
+
+		const editor = screen.getByRole('textbox', { name: /Type '\/' for commands/ });
+		selectEditorText(editor, 0, 5);
+		await fireEvent(document, new Event('selectionchange'));
+		await user.click(screen.getByRole('button', { name: /^Link$/ }));
+		await user.type(screen.getByLabelText('Web address'), 'https://example.com');
+		await user.click(screen.getByRole('button', { name: 'Add link' }));
+
+		expect(getRecordYText(ydoc, record.id)!.toDelta()).toEqual([
+			{ insert: 'Visit', attributes: { link: 'https://example.com' } },
+			{ insert: ' example' }
+		]);
 	});
 
 	it('renders a linked page_link block as a navigable link to the target document', () => {

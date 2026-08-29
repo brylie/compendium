@@ -193,6 +193,10 @@
 		}
 	}
 
+	export function getSelectionRange(): { start: number; end: number } | null {
+		return el ? getSelectionOffsets(el) : null;
+	}
+
 	export function getFormatState(): Partial<Record<keyof TextMarks, boolean>> {
 		if (!el) return {};
 		const offsets = getSelectionOffsets(el);
@@ -232,7 +236,16 @@
 	export function applyFormat(mark: keyof TextMarks, value?: unknown): void {
 		if (!el) return;
 		const offsets = getSelectionOffsets(el);
-		if (!offsets || offsets.start === offsets.end) return;
+		if (!offsets) return;
+		applyFormatAtRange(mark, offsets, value);
+	}
+
+	export function applyFormatAtRange(
+		mark: keyof TextMarks,
+		offsets: { start: number; end: number },
+		value?: unknown
+	): void {
+		if (offsets.start === offsets.end) return;
 		const nextValue = value === undefined ? (getFormatState()[mark] ? null : true) : value;
 		const doc = ytext.doc;
 		const apply = () =>

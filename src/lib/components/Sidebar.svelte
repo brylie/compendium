@@ -111,6 +111,7 @@
 	}
 
 	function openNewDocument(parentId?: string): void {
+		errorMessage = null;
 		pendingParentId = parentId;
 		createDialog = 'document';
 	}
@@ -143,6 +144,7 @@
 	}
 
 	function openNewCollection(): void {
+		errorMessage = null;
 		createDialog = 'collection';
 	}
 

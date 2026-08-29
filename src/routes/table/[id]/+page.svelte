@@ -34,6 +34,7 @@
 	let newPropertyLabel = $state('');
 	let newPropertyType: PropertyType = $state('text');
 	let optionDialogPropertyKey: string | null = $state(null);
+	let optionDialogError = $state('');
 
 	const PROPERTY_TYPES: PropertyType[] = [
 		'text',
@@ -95,19 +96,26 @@
 		);
 	}
 
-	function addSelectOption(propertyKey: string, rawLabel: string): void {
-		if (!ydoc) return;
+	function addSelectOption(propertyKey: string, rawLabel: string): boolean {
+		if (!ydoc) return false;
 		const label = rawLabel.trim();
-		if (!label) return;
+		if (!label) return false;
 		const nextSchema = schema.map((p) =>
 			p.key === propertyKey
 				? { ...p, options: [...(p.options ?? []), { id: nanoid(6), label }] }
 				: p
 		);
-		updateCollectionSchema(ydoc, data.collectionId, nextSchema);
+		try {
+			updateCollectionSchema(ydoc, data.collectionId, nextSchema);
+			return true;
+		} catch {
+			optionDialogError = 'Could not add the option. Please try again.';
+			return false;
+		}
 	}
 
 	function openSelectOptionDialog(propertyKey: string): void {
+		optionDialogError = '';
 		optionDialogPropertyKey = propertyKey;
 	}
 
@@ -269,10 +277,12 @@
 	title="New option"
 	label="Option name"
 	placeholder="Option name"
+	errorMessage={optionDialogError}
 	submitLabel="Add option"
 	onSubmit={(value) => {
-		if (optionDialogPropertyKey) addSelectOption(optionDialogPropertyKey, value);
-		optionDialogPropertyKey = null;
+		if (optionDialogPropertyKey && addSelectOption(optionDialogPropertyKey, value)) {
+			optionDialogPropertyKey = null;
+		}
 	}}
 	onCancel={() => (optionDialogPropertyKey = null)}
 />

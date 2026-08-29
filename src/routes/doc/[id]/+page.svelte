@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { resolve } from '$app/paths';
 	import { getClientDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
@@ -64,10 +65,24 @@
 	let linkMode: 'url' | 'record' = $state('url');
 	let linkUrl = $state('');
 	let linkRecordId = $state('');
+	let linkSelection: { start: number; end: number } | null = $state(null);
+	let linkUrlInput: HTMLInputElement | undefined = $state();
+
+	const documentMetadataById = $derived(
+		ydoc
+			? new Map(listDocuments(ydoc).map((document) => [document.id, document]))
+			: new Map<string, ReturnType<typeof listDocuments>[number]>()
+	);
 
 	interface BlockEditorHandle {
 		render: () => void;
 		applyFormat: (mark: keyof TextMarks, value?: unknown) => void;
+		applyFormatAtRange: (
+			mark: keyof TextMarks,
+			range: { start: number; end: number },
+			value?: unknown
+		) => void;
+		getSelectionRange: () => { start: number; end: number } | null;
 		getFormatState: () => Partial<Record<keyof TextMarks, boolean>>;
 		focusEditor: (position?: boolean | number) => void;
 	}
@@ -130,7 +145,10 @@
 	}
 
 	function openLinkComposer(blockId: string): void {
+		const selection = blockRefs[blockId]?.getSelectionRange();
+		if (!selection || selection.start === selection.end) return;
 		linkDialogBlockId = blockId;
+		linkSelection = selection;
 		linkMode = 'url';
 		linkUrl = '';
 		linkRecordId = '';
@@ -139,20 +157,28 @@
 	function applyLink(): void {
 		const editor = linkDialogBlockId ? blockRefs[linkDialogBlockId] : undefined;
 		const value = linkMode === 'record' ? linkRecordId : linkUrl.trim();
-		if (!editor || !value) return;
-		editor.applyFormat('link', linkMode === 'record' ? `${RECORD_LINK_SCHEME}${value}` : value);
+		if (!editor || !value || !linkSelection) return;
+		editor.applyFormatAtRange(
+			'link',
+			linkSelection,
+			linkMode === 'record' ? `${RECORD_LINK_SCHEME}${value}` : value
+		);
 		activeMarks = editor.getFormatState();
 		linkDialogBlockId = null;
+		linkSelection = null;
 	}
 
 	function documentLocation(documentId: string): string {
 		if (!ydoc) return '';
-		const documents = new Map(listDocuments(ydoc).map((document) => [document.id, document]));
 		const parts: string[] = [];
-		let current = documents.get(documentId);
-		while (current) {
+		const visited = new SvelteSet<string>();
+		let current = documentMetadataById.get(documentId);
+		while (current && !visited.has(current.id)) {
+			visited.add(current.id);
 			parts.unshift(current.title || 'Untitled');
-			current = current.parentDocumentId ? documents.get(current.parentDocumentId) : undefined;
+			current = current.parentDocumentId
+				? documentMetadataById.get(current.parentDocumentId)
+				: undefined;
 		}
 		return parts.join(' / ');
 	}
@@ -249,6 +275,11 @@
 	$effect(() => {
 		if (!ydoc) return;
 		refresh();
+	});
+
+	$effect(() => {
+		if (!linkDialogBlockId || linkMode !== 'url') return;
+		void tick().then(() => linkUrlInput?.focus());
 	});
 
 	function handleTitleInput(event: Event): void {
@@ -969,7 +1000,10 @@
 			tabindex="-1"
 			class="w-full max-w-md rounded-lg border border-border bg-bg p-5 shadow-xl"
 			onkeydown={(event) => {
-				if (event.key === 'Escape') linkDialogBlockId = null;
+				if (event.key === 'Escape') {
+					linkDialogBlockId = null;
+					linkSelection = null;
+				}
 			}}
 		>
 			<h2 id="link-composer-title" class="text-lg font-semibold text-fg">Add link</h2>
@@ -995,6 +1029,7 @@
 				<label class="mt-4 block text-sm font-medium text-fg">
 					Web address
 					<input
+						bind:this={linkUrlInput}
 						bind:value={linkUrl}
 						placeholder="https://example.com"
 						class="mt-1.5 w-full rounded border border-border bg-surface px-3 py-2 text-sm text-fg outline-none focus:border-accent"
@@ -1028,7 +1063,10 @@
 			<div class="mt-5 flex justify-end gap-2">
 				<button
 					type="button"
-					onclick={() => (linkDialogBlockId = null)}
+					onclick={() => {
+						linkDialogBlockId = null;
+						linkSelection = null;
+					}}
 					class="rounded px-3 py-2 text-sm text-muted hover:text-fg">Cancel</button
 				>
 				<button

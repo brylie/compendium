@@ -7,6 +7,7 @@
 		label,
 		placeholder = '',
 		initialValue = '',
+		errorMessage = '',
 		submitLabel = 'Save',
 		onSubmit,
 		onCancel
@@ -16,6 +17,7 @@
 		label: string;
 		placeholder?: string;
 		initialValue?: string;
+		errorMessage?: string;
 		submitLabel?: string;
 		onSubmit: (value: string) => void;
 		onCancel: () => void;
@@ -62,6 +64,9 @@
 						{placeholder}
 					/>
 				</label>
+				{#if errorMessage}
+					<p class="mt-2 text-sm text-red-700" role="alert">{errorMessage}</p>
+				{/if}
 				<div class="mt-5 flex justify-end gap-2">
 					<button
 						type="button"
