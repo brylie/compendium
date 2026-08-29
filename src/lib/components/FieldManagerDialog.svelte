@@ -134,6 +134,9 @@
 	<div
 		class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
 		role="presentation"
+		onclick={(event) => {
+			if (event.target === event.currentTarget) onClose();
+		}}
 	>
 		<div
 			bind:this={dialog}
@@ -141,7 +144,7 @@
 			aria-modal="true"
 			aria-labelledby="field-manager-title"
 			tabindex="-1"
-			class="w-full max-w-lg rounded-lg border border-border bg-bg p-5 shadow-xl"
+			class="w-full max-w-xl rounded-lg border border-border bg-bg p-5 shadow-xl"
 			onkeydown={handleKeydown}
 		>
 			<div class="flex items-center justify-between">
@@ -157,9 +160,9 @@
 				</button>
 			</div>
 
-			<ul class="mt-4 max-h-96 space-y-1 overflow-y-auto" role="list">
+			<ul class="mt-4 max-h-96 divide-y divide-border overflow-y-auto" role="list">
 				{#each schema as property, index (property.key)}
-					<li class="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5">
+					<li class="flex items-center gap-2 px-1 py-2 hover:bg-surface/50">
 						<div class="flex flex-col">
 							<button
 								type="button"

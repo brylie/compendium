@@ -252,6 +252,68 @@ describe('FieldMenu', () => {
 		expect(screen.queryByRole('menu')).not.toBeInTheDocument();
 	});
 
+	// Regression coverage for two real bugs found in manual testing: the panel
+	// used to be `position: absolute` inside the field's own header cell,
+	// which (a) got clipped by Table's `overflow-x-auto` wrapper whenever the
+	// table was too short for the panel to fit, and (b) whatever fixed z-index
+	// it had only mattered relative to that ancestor's local stacking context,
+	// not e.g. a "Manage fields" modal opened around it later.
+	describe('the floating panel escapes ancestor clipping and stacking (regression)', () => {
+		it('is portalled to document.body rather than staying nested under its trigger', async () => {
+			const collection = createCollection(ydoc, {
+				title: 'T',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await user.click(screen.getByRole('button', { name: 'Field options for Name' }));
+
+			expect(screen.getByRole('menu').parentElement).toBe(document.body);
+		});
+
+		it('removes the portalled panel from the document once closed', async () => {
+			const collection = createCollection(ydoc, {
+				title: 'T',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await user.click(screen.getByRole('button', { name: 'Field options for Name' }));
+			expect(document.body.querySelector('[role="menu"]')).not.toBeNull();
+
+			await user.keyboard('{Escape}');
+
+			expect(document.body.querySelector('[role="menu"]')).toBeNull();
+		});
+
+		it("carries a z-index that stacks above a modal overlay (e.g. FieldManagerDialog's z-40 backdrop)", async () => {
+			const collection = createCollection(ydoc, {
+				title: 'T',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await user.click(screen.getByRole('button', { name: 'Field options for Name' }));
+
+			expect(screen.getByRole('menu')).toHaveClass('z-50');
+		});
+	});
+
 	// These simulate another client (human or agent) deleting the Collection
 	// concurrently, between the menu opening and the action being confirmed —
 	// a real race in this multi-writer CRDT app, not a contrived scenario.

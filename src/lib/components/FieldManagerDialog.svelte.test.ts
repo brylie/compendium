@@ -143,4 +143,46 @@ describe('FieldManagerDialog', () => {
 			expect(screen.getByText('Could not add the field. Please try again.')).toBeInTheDocument();
 		});
 	});
+
+	it('closes when clicking the backdrop outside the dialog', async () => {
+		const collection = createCollection(ydoc, { title: 'T', schema: [] });
+		const onClose = vi.fn();
+		const user = userEvent.setup();
+		render(FieldManagerDialog, { open: true, collectionId: collection.id, onClose });
+
+		await user.click(screen.getByRole('presentation'));
+
+		expect(onClose).toHaveBeenCalledOnce();
+	});
+
+	it('does not close when clicking inside the dialog itself', async () => {
+		const collection = createCollection(ydoc, { title: 'T', schema: [] });
+		const onClose = vi.fn();
+		const user = userEvent.setup();
+		render(FieldManagerDialog, { open: true, collectionId: collection.id, onClose });
+
+		await user.click(screen.getByRole('dialog'));
+
+		expect(onClose).not.toHaveBeenCalled();
+	});
+
+	// Regression: a nested FieldMenu's floating panel used to render behind
+	// this dialog's own backdrop once the panel was portalled to
+	// document.body — both became siblings there, so whichever had the
+	// higher z-index won regardless of DOM nesting, and the panel's z-20
+	// lost to the backdrop's z-40.
+	it("a nested field menu's panel stacks above this dialog's own backdrop and escapes its scrollable list", async () => {
+		const collection = createCollection(ydoc, {
+			title: 'T',
+			schema: [{ key: 'a', label: 'Alpha', type: 'text' }]
+		});
+		const user = userEvent.setup();
+		render(FieldManagerDialog, { open: true, collectionId: collection.id, onClose: vi.fn() });
+
+		await user.click(screen.getByRole('button', { name: 'Field options for Alpha' }));
+
+		const panel = screen.getByRole('menu');
+		expect(panel).toHaveClass('z-50');
+		expect(panel.parentElement).toBe(document.body);
+	});
 });

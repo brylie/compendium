@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { nanoid } from 'nanoid';
 	import { getClientDoc } from '$lib/client/yjs-client';
 	import {
@@ -36,6 +37,8 @@
 		'relation'
 	];
 
+	const PANEL_WIDTH = 224; // px — matches the panel's w-56
+
 	let open = $state(false);
 	let mode = $state<'menu' | 'edit'>('menu');
 	let editLabel = $state('');
@@ -43,11 +46,66 @@
 	let confirmDeleteOpen = $state(false);
 	let deleteAffectedCount = $state(0);
 	let errorMessage = $state('');
+	let panelStyle = $state('');
 
 	let container: HTMLDivElement | undefined = $state();
 	let trigger: HTMLButtonElement | undefined = $state();
+	let panel: HTMLDivElement | undefined = $state();
 	let firstMenuItem: HTMLButtonElement | undefined = $state();
 	let labelInput: HTMLInputElement | undefined = $state();
+
+	// The panel is portalled to <body> (see `portal` below) rather than
+	// positioned `absolute` inside `container` — Table's header lives inside
+	// an `overflow-x-auto` wrapper, which (per the CSS overflow spec) forces
+	// overflow-y to clip too, cutting the dropdown off whenever the table has
+	// too few rows for the panel to fit above that clip boundary. `fixed`
+	// positioning computed from the trigger's own viewport rect sidesteps
+	// that ancestor clipping entirely.
+	function portal(node: HTMLElement): { destroy(): void } {
+		document.body.appendChild(node);
+		return {
+			destroy() {
+				node.remove();
+			}
+		};
+	}
+
+	function updatePanelPosition(): void {
+		if (!trigger) return;
+		const rect = trigger.getBoundingClientRect();
+		const left = Math.min(
+			Math.max(8, rect.right - PANEL_WIDTH),
+			window.innerWidth - PANEL_WIDTH - 8
+		);
+		panelStyle = `position: fixed; top: ${rect.bottom + 4}px; left: ${left}px;`;
+	}
+
+	// Runs after the panel actually renders (so its real height is known) to
+	// flip it above the trigger when it would otherwise overflow the bottom
+	// of the viewport — the synchronous updatePanelPosition() above only has
+	// the trigger's rect to go on, not the panel's own (mode-dependent) height.
+	async function refinePanelPosition(): Promise<void> {
+		await tick();
+		if (!trigger || !panel) return;
+		const rect = trigger.getBoundingClientRect();
+		const panelHeight = panel.getBoundingClientRect().height;
+		const left = Math.min(
+			Math.max(8, rect.right - PANEL_WIDTH),
+			window.innerWidth - PANEL_WIDTH - 8
+		);
+		const overflowsBelow = rect.bottom + 4 + panelHeight > window.innerHeight - 8;
+		const top = overflowsBelow ? Math.max(8, rect.top - panelHeight - 4) : rect.bottom + 4;
+		panelStyle = `position: fixed; top: ${top}px; left: ${left}px;`;
+	}
+
+	// Dropdowns don't track scroll/resize continuously here — closing on
+	// either (a common pattern; a native <select> does the same on scroll)
+	// is simpler than keeping a stale `fixed` position glued to a trigger
+	// that's moved, and avoids a scroll/resize listener recomputing layout
+	// on every frame for a menu that's normally open for a couple of clicks.
+	function handleWindowScrollOrResize(): void {
+		if (open) closeMenu();
+	}
 
 	const typeChangePreview = $derived(
 		mode === 'edit' && editType !== property.type
@@ -56,6 +114,7 @@
 	);
 
 	function openMenu(): void {
+		updatePanelPosition();
 		open = true;
 		mode = 'menu';
 		errorMessage = '';
@@ -140,7 +199,11 @@
 		// unlike container.contains(event.target), it stays correct even when a
 		// menu action (e.g. "Edit field") synchronously re-renders and detaches
 		// the very button that was clicked before this listener runs on window.
-		if (!event.composedPath().includes(container)) closeMenu();
+		// The panel is checked separately since portal() moves it outside
+		// `container` in the DOM (see `portal` above) — without this, clicking
+		// inside the portalled panel itself would look like an outside click.
+		const path = event.composedPath();
+		if (!path.includes(container) && !(panel && path.includes(panel))) closeMenu();
 	}
 
 	function handleKeydown(event: KeyboardEvent): void {
@@ -149,8 +212,8 @@
 			closeMenu();
 			return;
 		}
-		if (mode !== 'menu' || !container) return;
-		const items = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+		if (mode !== 'menu' || !panel) return;
+		const items = Array.from(panel.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
 		if (items.length === 0) return;
 		const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
 		if (event.key === 'ArrowDown') {
@@ -164,12 +227,20 @@
 
 	$effect(() => {
 		if (!open) return;
+		void refinePanelPosition();
+		// Reading `mode` here (not just above) makes this effect re-run —
+		// and re-flip the panel for its new height — when Edit field toggles
+		// the panel between the menu list and the (taller) edit form.
 		if (mode === 'menu') firstMenuItem?.focus();
 		else labelInput?.focus();
 	});
 </script>
 
-<svelte:window onclick={handleWindowClick} />
+<svelte:window
+	onclick={handleWindowClick}
+	onscroll={handleWindowScrollOrResize}
+	onresize={handleWindowScrollOrResize}
+/>
 
 <div class="relative inline-block" bind:this={container}>
 	<button
@@ -188,13 +259,16 @@
 
 	{#if open}
 		<div
+			bind:this={panel}
+			use:portal
 			role={mode === 'menu' ? 'menu' : 'group'}
 			aria-label={mode === 'menu'
 				? `${property.label} field options`
 				: `Edit ${property.label} field`}
 			tabindex="-1"
 			onkeydown={handleKeydown}
-			class="absolute top-full right-0 z-20 mt-1 w-56 rounded-lg border border-border bg-bg p-1 text-left shadow-lg ring-1 ring-black/5"
+			style={panelStyle}
+			class="z-50 w-56 rounded-lg border border-border bg-bg p-1 text-left shadow-lg ring-1 ring-black/5"
 		>
 			{#if mode === 'menu'}
 				<button
