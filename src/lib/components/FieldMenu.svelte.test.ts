@@ -312,6 +312,25 @@ describe('FieldMenu', () => {
 
 			expect(screen.getByRole('menu')).toHaveClass('z-50');
 		});
+
+		it('caps its own height to the viewport and scrolls internally, so a short viewport cannot clip its lower controls', async () => {
+			const collection = createCollection(ydoc, {
+				title: 'T',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await user.click(screen.getByRole('button', { name: 'Field options for Name' }));
+
+			const panel = screen.getByRole('menu');
+			expect(panel).toHaveClass('max-h-[calc(100vh-16px)]');
+			expect(panel).toHaveClass('overflow-y-auto');
+		});
 	});
 
 	// These simulate another client (human or agent) deleting the Collection

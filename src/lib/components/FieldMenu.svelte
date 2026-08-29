@@ -268,7 +268,7 @@
 			tabindex="-1"
 			onkeydown={handleKeydown}
 			style={panelStyle}
-			class="z-50 w-56 rounded-lg border border-border bg-bg p-1 text-left shadow-lg ring-1 ring-black/5"
+			class="z-50 max-h-[calc(100vh-16px)] w-56 overflow-y-auto rounded-lg border border-border bg-bg p-1 text-left shadow-lg ring-1 ring-black/5"
 		>
 			{#if mode === 'menu'}
 				<button
