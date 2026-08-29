@@ -131,11 +131,12 @@ describe('Sidebar', () => {
 				json: async () => ({ id: 'new-doc-id' })
 			})
 		);
-		vi.spyOn(window, 'prompt').mockReturnValue('New Doc Title');
 		const user = userEvent.setup();
 		render(Sidebar, {});
 
 		await user.click(screen.getByRole('button', { name: 'New document' }));
+		await user.type(screen.getByLabelText('Document title'), 'New Doc Title');
+		await user.click(screen.getByRole('button', { name: 'Create' }));
 
 		expect(fetch).toHaveBeenCalledWith(
 			'/api/documents',
@@ -144,60 +145,62 @@ describe('Sidebar', () => {
 		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/doc/new-doc-id'));
 	});
 
-	it('does not create a document when the title prompt is cancelled', async () => {
+	it('does not create a document when creation is cancelled', async () => {
 		vi.stubGlobal('fetch', vi.fn());
-		vi.spyOn(window, 'prompt').mockReturnValue(null);
 		const user = userEvent.setup();
 		render(Sidebar, {});
 
 		await user.click(screen.getByRole('button', { name: 'New document' }));
+		await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
 		expect(fetch).not.toHaveBeenCalled();
 	});
 
-	it('alerts when document creation fails', async () => {
+	it('shows an in-page error when document creation fails', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
-		vi.spyOn(window, 'prompt').mockReturnValue('Title');
-		const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
 		const user = userEvent.setup();
 		render(Sidebar, {});
 
 		await user.click(screen.getByRole('button', { name: 'New document' }));
+		await user.type(screen.getByLabelText('Document title'), 'Title');
+		await user.click(screen.getByRole('button', { name: 'Create' }));
 
-		await vi.waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Failed to create document'));
+		await vi.waitFor(() =>
+			expect(screen.getByRole('alert')).toHaveTextContent('Failed to create document.')
+		);
 	});
 
 	it('deletes a document after confirmation and navigates home if it was the active one', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'To Delete' });
 		setPath('/doc/doc-1');
-		vi.spyOn(window, 'confirm').mockReturnValue(true);
 		const user = userEvent.setup();
 		render(Sidebar, {});
 
 		await user.click(screen.getByRole('button', { name: 'Delete document' }));
+		await user.click(screen.getByRole('button', { name: 'Delete' }));
 
 		expect(screen.queryByText('To Delete')).not.toBeInTheDocument();
 		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
 	});
 
-	it('keeps the document when deletion is not confirmed', async () => {
+	it('keeps the document when deletion is cancelled', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'Keep Me' });
-		vi.spyOn(window, 'confirm').mockReturnValue(false);
 		const user = userEvent.setup();
 		render(Sidebar, {});
 
 		await user.click(screen.getByRole('button', { name: 'Delete document' }));
+		await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
 		expect(screen.getByText('Keep Me')).toBeInTheDocument();
 	});
 
 	it('deletes a collection after confirmation', async () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Drop Table', schema: [] });
-		vi.spyOn(window, 'confirm').mockReturnValue(true);
 		const user = userEvent.setup();
 		render(Sidebar, {});
 
 		await user.click(screen.getByRole('button', { name: 'Delete collection' }));
+		await user.click(screen.getByRole('button', { name: 'Delete' }));
 
 		expect(screen.queryByText('Drop Table')).not.toBeInTheDocument();
 	});

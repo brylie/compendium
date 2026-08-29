@@ -206,7 +206,7 @@ describe('doc/[id] +page', () => {
 		expect(within(tocBlock).getByText('Section One')).toBeInTheDocument();
 	});
 
-	it('shows a set-target prompt for a synced block with no target yet', () => {
+	it('shows an in-page control for a synced block with no target yet', () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'synced_block' }, HUMAN);
 		render(Page, {
@@ -217,12 +217,11 @@ describe('doc/[id] +page', () => {
 		expect(screen.getByText('Set target ID')).toBeInTheDocument();
 	});
 
-	it('links a synced block to another record via a prompt', async () => {
+	it('links a synced block to another record through the in-page dialog', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const target = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 		getRecordYText(ydoc, target.id)!.insert(0, 'Original content');
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'synced_block' }, HUMAN);
-		vi.spyOn(window, 'prompt').mockReturnValue(target.id);
 		const user = userEvent.setup();
 		render(Page, {
 			params: { id: 'doc-1' },
@@ -231,6 +230,8 @@ describe('doc/[id] +page', () => {
 		});
 
 		await user.click(screen.getByText('Set target ID'));
+		await user.type(screen.getByLabelText('Block record ID'), target.id);
+		await user.click(screen.getByRole('button', { name: 'Set target' }));
 
 		expect(screen.getAllByText('Original content').length).toBeGreaterThan(0);
 	});
@@ -513,10 +514,9 @@ describe('doc/[id] +page', () => {
 		expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(1);
 	});
 
-	it('does not set a synced-block target when the prompt is cancelled', async () => {
+	it('does not set a synced-block target when the dialog is cancelled', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'synced_block' }, HUMAN);
-		vi.spyOn(window, 'prompt').mockReturnValue(null);
 		const user = userEvent.setup();
 		render(Page, {
 			params: { id: 'doc-1' },
@@ -525,6 +525,7 @@ describe('doc/[id] +page', () => {
 		});
 
 		await user.click(screen.getByText('Set target ID'));
+		await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
 		const yrecord = ydoc.getMap('records').get(record.id) as Y.Map<unknown>;
 		expect(yrecord.get('referencedRecordId')).toBeUndefined();
@@ -633,7 +634,6 @@ describe('doc/[id] +page', () => {
 			{ parentId: 'doc-1', blockType: 'page_link', referencedRecordId: 'target-a' },
 			HUMAN
 		);
-		vi.spyOn(window, 'prompt').mockReturnValue('target-b');
 		const user = userEvent.setup();
 		render(Page, {
 			params: { id: 'doc-1' },
@@ -641,7 +641,10 @@ describe('doc/[id] +page', () => {
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
 
-		await user.click(screen.getByText('Change'));
+		await user.selectOptions(
+			screen.getByRole('combobox', { name: 'Change target document' }),
+			'target-b'
+		);
 
 		const yrecord = ydoc.getMap('records').get(record.id) as Y.Map<unknown>;
 		expect(yrecord.get('referencedRecordId')).toBe('target-b');

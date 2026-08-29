@@ -247,11 +247,12 @@ describe('BoardCollectionView', () => {
 			{ parentId: 'col-1', properties: { status: { type: 'select', value: 'todo' } } },
 			actor
 		);
-		vi.spyOn(window, 'prompt').mockReturnValue('High');
 		const user = userEvent.setup();
 		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
 		await user.click(screen.getByTitle('Add option'));
+		await user.type(screen.getByLabelText('Option name'), 'High');
+		await user.click(screen.getByRole('button', { name: 'Add' }));
 
 		const collection = ydoc.getMap('collections').get('col-1') as Y.Map<unknown>;
 		const schema = collection.get('schema') as { key: string; options?: { label: string }[] }[];

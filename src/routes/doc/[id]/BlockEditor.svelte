@@ -15,7 +15,8 @@
 		onEnter,
 		onBackspaceAtStart,
 		onFocusBlock,
-		onSlashKey
+		onSlashKey,
+		onLinkShortcut = () => {}
 	}: {
 		ytext: Y.Text;
 		recordId?: string;
@@ -26,6 +27,7 @@
 		onBackspaceAtStart: () => void;
 		onFocusBlock: () => void;
 		onSlashKey: () => void;
+		onLinkShortcut?: () => void;
 	} = $props();
 
 	let el: HTMLDivElement | undefined = $state();
@@ -187,8 +189,7 @@
 		}
 		if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
 			event.preventDefault();
-			const url = window.prompt('Link URL:');
-			if (url) applyFormat('link', url);
+			onLinkShortcut();
 		}
 	}
 

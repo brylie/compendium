@@ -21,6 +21,7 @@
 	} from '$lib/data/types';
 	import Icon from '$lib/components/Icon.svelte';
 	import PropertyValueCell from '$lib/components/PropertyValueCell.svelte';
+	import PromptDialog from '$lib/components/PromptDialog.svelte';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -32,6 +33,7 @@
 	let rows: WorkspaceRecord[] = $state([]);
 	let newPropertyLabel = $state('');
 	let newPropertyType: PropertyType = $state('text');
+	let optionDialogPropertyKey: string | null = $state(null);
 
 	const PROPERTY_TYPES: PropertyType[] = [
 		'text',
@@ -93,9 +95,9 @@
 		);
 	}
 
-	function addSelectOption(propertyKey: string): void {
+	function addSelectOption(propertyKey: string, rawLabel: string): void {
 		if (!ydoc) return;
-		const label = window.prompt('New option label:');
+		const label = rawLabel.trim();
 		if (!label) return;
 		const nextSchema = schema.map((p) =>
 			p.key === propertyKey
@@ -103,6 +105,10 @@
 				: p
 		);
 		updateCollectionSchema(ydoc, data.collectionId, nextSchema);
+	}
+
+	function openSelectOptionDialog(propertyKey: string): void {
+		optionDialogPropertyKey = propertyKey;
 	}
 
 	function addRow(): void {
@@ -190,7 +196,7 @@
 									{property}
 									value={cellValue(row, property)}
 									oninput={(value) => setCell(row, property, value)}
-									onAddOption={() => addSelectOption(property.key)}
+									onAddOption={() => openSelectOptionDialog(property.key)}
 								/>
 							</td>
 						{/each}
@@ -257,3 +263,16 @@
 		</div>
 	</section>
 </div>
+
+<PromptDialog
+	open={optionDialogPropertyKey !== null}
+	title="New option"
+	label="Option name"
+	placeholder="Option name"
+	submitLabel="Add option"
+	onSubmit={(value) => {
+		if (optionDialogPropertyKey) addSelectOption(optionDialogPropertyKey, value);
+		optionDialogPropertyKey = null;
+	}}
+	onCancel={() => (optionDialogPropertyKey = null)}
+/>

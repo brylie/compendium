@@ -160,14 +160,13 @@ describe('table/[id] +page', () => {
 		expect(getCollection(ydoc, 'col-1')?.schema).toEqual([]);
 	});
 
-	it('adds a select option via a prompt and offers it as a select value', async () => {
+	it('adds a select option through the in-page dialog and offers it as a select value', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'T',
 			schema: [{ key: 'status', label: 'Status', type: 'select', options: [] }]
 		});
 		createRecord(ydoc, { parentId: 'col-1', properties: {} }, { kind: 'human', userId: 'local' });
-		vi.spyOn(window, 'prompt').mockReturnValue('Done');
 		const user = userEvent.setup();
 		render(Page, {
 			params: { id: 'col-1' },
@@ -176,6 +175,10 @@ describe('table/[id] +page', () => {
 		});
 
 		await user.click(screen.getByTitle('Add option'));
+		await user.type(screen.getByLabelText('Option name'), 'Done');
+		await user.click(
+			within(screen.getByRole('dialog')).getByRole('button', { name: 'Add option' })
+		);
 
 		const select = within(screen.getByRole('table')).getByRole('combobox');
 		expect(within(select).getByText('Done')).toBeInTheDocument();
