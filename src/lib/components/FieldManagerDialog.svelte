@@ -33,6 +33,8 @@
 
 	let dialog: HTMLDivElement | undefined = $state();
 	let closeButton: HTMLButtonElement | undefined = $state();
+	let upButtons: Record<string, HTMLButtonElement | undefined> = {};
+	let downButtons: Record<string, HTMLButtonElement | undefined> = {};
 
 	function refresh(): void {
 		schema = getCollection(getClientDoc(), collectionId)?.schema ?? [];
@@ -66,8 +68,18 @@
 		if (target < 0 || target >= schema.length) return;
 		const next = [...schema];
 		[next[index], next[target]] = [next[target], next[index]];
+		const key = schema[index].key;
 		try {
 			updateCollectionSchema(getClientDoc(), collectionId, next);
+			// The moved field's own up/down button becomes `disabled` (and loses
+			// focus to document.body) when the move lands it at either edge of
+			// the list — move focus to the counterpart button on the same field
+			// so a keyboard user doesn't lose their place in the list.
+			if (target === 0) {
+				void tick().then(() => downButtons[key]?.focus());
+			} else if (target === next.length - 1) {
+				void tick().then(() => upButtons[key]?.focus());
+			}
 		} catch {
 			errorMessage = 'Could not reorder fields. Please try again.';
 		}
@@ -151,6 +163,7 @@
 						<div class="flex flex-col">
 							<button
 								type="button"
+								bind:this={upButtons[property.key]}
 								onclick={() => moveField(index, -1)}
 								disabled={index === 0}
 								class="text-muted hover:text-fg disabled:opacity-30"
@@ -160,6 +173,7 @@
 							</button>
 							<button
 								type="button"
+								bind:this={downButtons[property.key]}
 								onclick={() => moveField(index, 1)}
 								disabled={index === schema.length - 1}
 								class="text-muted hover:text-fg disabled:opacity-30"

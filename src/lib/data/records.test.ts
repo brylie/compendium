@@ -541,6 +541,37 @@ describe('collection field lifecycle: rename, retype, duplicate, delete', () => 
 		});
 	});
 
+	it('deleteCollectionProperty leaves an embed that references a different collection untouched', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupCollection(doc);
+		const other = createCollection(doc, {
+			title: 'Other',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+		const document = createDocument(doc, { title: 'Doc' });
+		const viewConfig = {
+			viewType: 'table' as const,
+			filters: [{ propertyKey: 'name', op: 'is' as const, value: 'x' }],
+			visibleProperties: ['name'],
+			groupBy: 'name',
+			sort: { mode: 'property' as const, propertyKey: 'name', direction: 'asc' as const }
+		};
+		const block = createRecord(
+			doc,
+			{
+				parentId: document.id,
+				blockType: 'collection_view',
+				referencedRecordId: other.id,
+				viewConfig
+			},
+			human
+		);
+
+		deleteCollectionProperty(doc, collection.id, 'name');
+
+		expect(getRecord(doc, block.id)?.viewConfig).toEqual(viewConfig);
+	});
+
 	it('deleteCollectionProperty throws NotFoundError for an unknown collection', () => {
 		const doc = new Y.Doc();
 		expect(() => deleteCollectionProperty(doc, 'missing', 'name')).toThrow(NotFoundError);

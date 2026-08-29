@@ -124,11 +124,14 @@
 	function confirmDelete(): void {
 		try {
 			deleteCollectionProperty(getClientDoc(), collectionId, property.key);
-			confirmDeleteOpen = false;
 			errorMessage = '';
 		} catch {
+			// Close the confirmation too, not just clear it — ConfirmDialog is a
+			// full-screen `fixed inset-0` overlay, so leaving it open would hide
+			// the error paragraph behind it and the user would see no feedback.
 			errorMessage = 'Could not delete the field. Please try again.';
 		}
+		confirmDeleteOpen = false;
 	}
 
 	function handleWindowClick(event: MouseEvent): void {
@@ -185,8 +188,10 @@
 
 	{#if open}
 		<div
-			role="menu"
-			aria-label="{property.label} field options"
+			role={mode === 'menu' ? 'menu' : 'group'}
+			aria-label={mode === 'menu'
+				? `${property.label} field options`
+				: `Edit ${property.label} field`}
 			tabindex="-1"
 			onkeydown={handleKeydown}
 			class="absolute top-full right-0 z-20 mt-1 w-56 rounded-lg border border-border bg-bg p-1 text-left shadow-lg ring-1 ring-black/5"

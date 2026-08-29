@@ -231,6 +231,10 @@
 	}
 </script>
 
+{#if schema.length > 0}
+	<ViewToolbar {collectionId} {schema} bind:config={() => config, onConfigChange} />
+{/if}
+
 {#if dateProperties.length === 0}
 	<div class="rounded-lg border border-dashed border-border bg-surface/50 p-8 text-center">
 		<p class="text-sm text-muted">
@@ -305,8 +309,6 @@
 			</button>
 		</div>
 	</div>
-
-	<ViewToolbar {collectionId} {schema} bind:config={() => config, onConfigChange} />
 
 	<div class="overflow-hidden rounded-lg border border-border">
 		<div
