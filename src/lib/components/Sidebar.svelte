@@ -186,6 +186,7 @@
 	async function confirmDeletion(): Promise<void> {
 		const deletion = pendingDeletion;
 		if (!deletion) return;
+		errorMessage = null;
 		try {
 			if (deletion.kind === 'document') {
 				const id = deletion.id;
