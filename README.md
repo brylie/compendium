@@ -206,6 +206,7 @@ what is ready, in progress, and deliberately deferred.
 
 ## Documentation
 
+- [Changelog](CHANGELOG.md)—release history and notable changes
 - [Product requirements](docs/prd.md)—the problem, product bet, boundaries,
   and phased roadmap
 - [Specifications index](docs/specifications/README.md)—canonical behavior by
