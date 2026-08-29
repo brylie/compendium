@@ -13,15 +13,12 @@
 		updateRecordProperties
 	} from '$lib/data/records';
 	import { getCollectionView } from '$lib/data/views';
-	import type {
-		PropertyDefinition,
-		PropertyType,
-		PropertyValue,
-		WorkspaceRecord
-	} from '$lib/data/types';
+	import type { PropertyDefinition, PropertyValue, WorkspaceRecord } from '$lib/data/types';
 	import Icon from '$lib/components/Icon.svelte';
 	import PropertyValueCell from '$lib/components/PropertyValueCell.svelte';
 	import PromptDialog from '$lib/components/PromptDialog.svelte';
+	import FieldMenu from '$lib/components/FieldMenu.svelte';
+	import FieldManagerDialog from '$lib/components/FieldManagerDialog.svelte';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -31,19 +28,9 @@
 	let title = $derived(currentCollection?.title ?? data.title);
 	let schema: PropertyDefinition[] = $state([]);
 	let rows: WorkspaceRecord[] = $state([]);
-	let newPropertyLabel = $state('');
-	let newPropertyType: PropertyType = $state('text');
 	let optionDialogPropertyKey: string | null = $state(null);
 	let optionDialogError = $state('');
-
-	const PROPERTY_TYPES: PropertyType[] = [
-		'text',
-		'number',
-		'date',
-		'select',
-		'checkbox',
-		'relation'
-	];
+	let fieldManagerOpen = $state(false);
 
 	function refresh(): void {
 		if (!ydoc) return;
@@ -73,27 +60,6 @@
 		if (!ydoc) return;
 		title = (event.target as HTMLInputElement).value;
 		updateCollectionTitle(ydoc, data.collectionId, title);
-	}
-
-	function addProperty(): void {
-		if (!ydoc || !newPropertyLabel.trim()) return;
-		const property: PropertyDefinition = {
-			key: nanoid(8),
-			label: newPropertyLabel.trim(),
-			type: newPropertyType,
-			options: newPropertyType === 'select' ? [] : undefined
-		};
-		updateCollectionSchema(ydoc, data.collectionId, [...schema, property]);
-		newPropertyLabel = '';
-	}
-
-	function removeProperty(key: string): void {
-		if (!ydoc) return;
-		updateCollectionSchema(
-			ydoc,
-			data.collectionId,
-			schema.filter((p) => p.key !== key)
-		);
 	}
 
 	function addSelectOption(propertyKey: string, rawLabel: string): boolean {
@@ -179,15 +145,7 @@
 									>
 										{property.type}
 									</span>
-									<button
-										type="button"
-										onclick={() => removeProperty(property.key)}
-										class="rounded p-0.5 text-muted hover:text-red-500"
-										title="Remove column"
-										aria-label="Remove column"
-									>
-										×
-									</button>
+									<FieldMenu collectionId={data.collectionId} {schema} {property} />
 								</div>
 							</div>
 						</th>
@@ -240,37 +198,22 @@
 			<Icon name="plus" size={13} />
 			<span>Add row</span>
 		</button>
+		<button
+			type="button"
+			onclick={() => (fieldManagerOpen = true)}
+			class="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:border-accent hover:text-accent"
+		>
+			<Icon name="pencil" size={13} />
+			<span>Manage fields</span>
+		</button>
 	</div>
-
-	<!-- Schema Editor -->
-	<section class="mt-10 rounded-lg border border-border bg-surface/50 p-5">
-		<h2 class="font-display text-base font-semibold text-fg">Add Property Column</h2>
-		<div class="mt-3 flex flex-wrap gap-2">
-			<input
-				type="text"
-				placeholder="Property name…"
-				bind:value={newPropertyLabel}
-				class="min-w-48 rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg placeholder:text-muted focus:border-accent focus:outline-none"
-			/>
-			<select
-				bind:value={newPropertyType}
-				class="rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg focus:border-accent focus:outline-none"
-			>
-				{#each PROPERTY_TYPES as t (t)}
-					<option value={t}>{t}</option>
-				{/each}
-			</select>
-			<button
-				type="button"
-				onclick={addProperty}
-				class="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg transition-opacity hover:opacity-90"
-			>
-				<Icon name="plus" size={14} />
-				<span>Add property</span>
-			</button>
-		</div>
-	</section>
 </div>
+
+<FieldManagerDialog
+	open={fieldManagerOpen}
+	collectionId={data.collectionId}
+	onClose={() => (fieldManagerOpen = false)}
+/>
 
 <PromptDialog
 	open={optionDialogPropertyKey !== null}

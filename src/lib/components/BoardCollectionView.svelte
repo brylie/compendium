@@ -217,6 +217,10 @@
 	}
 </script>
 
+{#if schema.length > 0}
+	<ViewToolbar {collectionId} {schema} bind:config={() => config, onConfigChange} />
+{/if}
+
 {#if selectProperties.length === 0}
 	<div class="rounded-lg border border-dashed border-border bg-surface/50 p-8 text-center">
 		<p class="text-sm text-muted">
@@ -264,8 +268,6 @@
 			{/each}
 		</select>
 	</div>
-
-	<ViewToolbar {schema} bind:config={() => config, onConfigChange} />
 
 	<div class="flex gap-4 overflow-x-auto pb-4">
 		{#each columns as column (column.optionId ?? UNASSIGNED_KEY)}

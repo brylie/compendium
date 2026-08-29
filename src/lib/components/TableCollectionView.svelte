@@ -17,6 +17,7 @@
 	import PropertyValueCell from './PropertyValueCell.svelte';
 	import ViewToolbar from './ViewToolbar.svelte';
 	import PromptDialog from './PromptDialog.svelte';
+	import FieldMenu from './FieldMenu.svelte';
 
 	let {
 		collectionId,
@@ -94,6 +95,15 @@
 	function openSelectOptionDialog(propertyKey: string): void {
 		optionDialogPropertyKey = propertyKey;
 	}
+
+	// A column is only ever rendered here when it's visible (columns already
+	// filters via visibleProperties), so this only ever needs to hide —
+	// re-showing a hidden field goes through ViewToolbar's own "Fields" panel,
+	// which is the one place that can see and toggle a currently-hidden field.
+	function hideInThisView(propertyKey: string): void {
+		const current = config.visibleProperties ?? schema.map((p) => p.key);
+		onConfigChange({ ...config, visibleProperties: current.filter((k) => k !== propertyKey) });
+	}
 </script>
 
 {#if schema.length === 0}
@@ -106,7 +116,7 @@
 		>.
 	</p>
 {:else}
-	<ViewToolbar {schema} bind:config={() => config, onConfigChange} />
+	<ViewToolbar {collectionId} {schema} bind:config={() => config, onConfigChange} />
 
 	<div class="overflow-x-auto rounded-lg border border-border bg-bg shadow-xs">
 		<table class="w-full border-collapse text-left text-sm">
@@ -115,7 +125,18 @@
 					class="border-b border-border bg-surface text-xs font-semibold tracking-wider text-muted"
 				>
 					{#each columns as property (property.key)}
-						<th class="border-r border-border/60 px-3.5 py-2.5">{property.label}</th>
+						<th class="border-r border-border/60 px-3.5 py-2.5">
+							<div class="flex items-center justify-between gap-2">
+								<span class="font-medium text-fg">{property.label}</span>
+								<FieldMenu
+									{collectionId}
+									{schema}
+									{property}
+									visible={true}
+									onToggleVisible={() => hideInThisView(property.key)}
+								/>
+							</div>
+						</th>
 					{/each}
 					<th class="w-12 px-3 py-2.5"></th>
 				</tr>

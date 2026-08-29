@@ -56,7 +56,7 @@ describe('table/[id] +page', () => {
 		expect(screen.getByDisplayValue('Alice')).toBeInTheDocument();
 	});
 
-	it('adds a new property column via the schema editor form', async () => {
+	it('adds a new field via the Manage fields dialog', async () => {
 		createCollection(ydoc, { id: 'col-1', title: 'T', schema: [] });
 		const user = userEvent.setup();
 		render(Page, {
@@ -65,10 +65,11 @@ describe('table/[id] +page', () => {
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
 		});
 
-		await user.type(screen.getByPlaceholderText('Property name…'), 'Status');
-		await user.click(screen.getByRole('button', { name: 'Add property' }));
+		await user.click(screen.getByRole('button', { name: 'Manage fields' }));
+		await user.type(screen.getByPlaceholderText('Field name…'), 'Status');
+		await user.click(screen.getByRole('button', { name: 'Add field' }));
 
-		expect(screen.getByText('Status')).toBeInTheDocument();
+		expect(within(screen.getByRole('table')).getByText('Status')).toBeInTheDocument();
 		expect(getCollection(ydoc, 'col-1')?.schema).toEqual([
 			expect.objectContaining({ label: 'Status', type: 'text' })
 		]);
@@ -141,7 +142,7 @@ describe('table/[id] +page', () => {
 		expect(screen.queryByDisplayValue('Bob')).not.toBeInTheDocument();
 	});
 
-	it('removes a property column via its header button', async () => {
+	it('removes a field via its header menu, after confirming', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'T',
@@ -154,7 +155,11 @@ describe('table/[id] +page', () => {
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
 		});
 
-		await user.click(screen.getByRole('button', { name: 'Remove column' }));
+		await user.click(screen.getByRole('button', { name: 'Field options for Name' }));
+		await user.click(screen.getByRole('menuitem', { name: 'Delete field' }));
+		await user.click(
+			within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete field' })
+		);
 
 		expect(screen.queryByText('Name')).not.toBeInTheDocument();
 		expect(getCollection(ydoc, 'col-1')?.schema).toEqual([]);
@@ -184,7 +189,7 @@ describe('table/[id] +page', () => {
 		expect(within(select).getByText('Done')).toBeInTheDocument();
 	});
 
-	it('does nothing when the new property label is blank', async () => {
+	it('disables "Add field" when the new field name is blank', async () => {
 		createCollection(ydoc, { id: 'col-1', title: 'T', schema: [] });
 		const user = userEvent.setup();
 		render(Page, {
@@ -193,8 +198,9 @@ describe('table/[id] +page', () => {
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
 		});
 
-		await user.click(screen.getByRole('button', { name: 'Add property' }));
+		await user.click(screen.getByRole('button', { name: 'Manage fields' }));
 
+		expect(screen.getByRole('button', { name: 'Add field' })).toBeDisabled();
 		expect(getCollection(ydoc, 'col-1')?.schema).toEqual([]);
 	});
 

@@ -27,8 +27,14 @@
 		return () => previousFocus?.focus();
 	});
 
+	// stopPropagation on every branch here (not just preventDefault) matters
+	// when a ConfirmDialog is opened from inside another modal (e.g. a field
+	// editor's delete confirmation, nested inside the field manager dialog) —
+	// without it, Escape/Tab would bubble to the outer dialog's own handler
+	// and close/tab-trap both layers at once instead of just this one.
 	function handleKeydown(event: KeyboardEvent): void {
 		if (event.key === 'Escape') {
+			event.stopPropagation();
 			onCancel();
 			return;
 		}
@@ -39,9 +45,11 @@
 		if (!first || !last) return;
 		if (event.shiftKey && document.activeElement === first) {
 			event.preventDefault();
+			event.stopPropagation();
 			last.focus();
 		} else if (!event.shiftKey && document.activeElement === last) {
 			event.preventDefault();
+			event.stopPropagation();
 			first.focus();
 		}
 	}
