@@ -15,7 +15,8 @@
 		onEnter,
 		onBackspaceAtStart,
 		onFocusBlock,
-		onSlashKey
+		onSlashKey,
+		onLinkShortcut = () => {}
 	}: {
 		ytext: Y.Text;
 		recordId?: string;
@@ -26,6 +27,7 @@
 		onBackspaceAtStart: () => void;
 		onFocusBlock: () => void;
 		onSlashKey: () => void;
+		onLinkShortcut?: () => void;
 	} = $props();
 
 	let el: HTMLDivElement | undefined = $state();
@@ -187,9 +189,12 @@
 		}
 		if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
 			event.preventDefault();
-			const url = window.prompt('Link URL:');
-			if (url) applyFormat('link', url);
+			onLinkShortcut();
 		}
+	}
+
+	export function getSelectionRange(): { start: number; end: number } | null {
+		return el ? getSelectionOffsets(el) : null;
 	}
 
 	export function getFormatState(): Partial<Record<keyof TextMarks, boolean>> {
@@ -231,7 +236,16 @@
 	export function applyFormat(mark: keyof TextMarks, value?: unknown): void {
 		if (!el) return;
 		const offsets = getSelectionOffsets(el);
-		if (!offsets || offsets.start === offsets.end) return;
+		if (!offsets) return;
+		applyFormatAtRange(mark, offsets, value);
+	}
+
+	export function applyFormatAtRange(
+		mark: keyof TextMarks,
+		offsets: { start: number; end: number },
+		value?: unknown
+	): void {
+		if (offsets.start === offsets.end) return;
 		const nextValue = value === undefined ? (getFormatState()[mark] ? null : true) : value;
 		const doc = ytext.doc;
 		const apply = () =>

@@ -101,18 +101,21 @@ describe('TableCollectionView', () => {
 		expect(getRecord(ydoc, record.id)).toBeUndefined();
 	});
 
-	it('adds a select option via a prompt and offers it as a value', async () => {
+	it('adds a select option through the in-page dialog and offers it as a value', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'T',
 			schema: [{ key: 'status', label: 'Status', type: 'select', options: [] }]
 		});
 		createRecord(ydoc, { parentId: 'col-1', properties: {} }, actor);
-		vi.spyOn(window, 'prompt').mockReturnValue('Done');
 		const user = userEvent.setup();
 		renderTable('col-1');
 
 		await user.click(screen.getByTitle('Add option'));
+		await user.type(screen.getByLabelText('Option name'), 'Done');
+		await user.click(
+			within(screen.getByRole('dialog')).getByRole('button', { name: 'Add option' })
+		);
 
 		const select = within(screen.getByRole('table')).getByRole('combobox');
 		expect(within(select).getByText('Done')).toBeInTheDocument();

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick, untrack } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { resolve } from '$app/paths';
 	import { getClientDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
@@ -8,6 +9,7 @@
 		deleteRecord,
 		getDocument,
 		getRecordYText,
+		listCollections,
 		listDocuments,
 		listRecordsForParent,
 		setBlockType,
@@ -16,7 +18,7 @@
 		setRecordReferencedId,
 		updateDocumentTitle
 	} from '$lib/data/records';
-	import { listIncomingLinks } from '$lib/data/links';
+	import { listIncomingLinks, RECORD_LINK_SCHEME } from '$lib/data/links';
 	import {
 		appendRichTextToYText,
 		applyRichTextToYText,
@@ -37,6 +39,7 @@
 	import Toolbar from './Toolbar.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import CollectionViewBlock from '$lib/components/CollectionViewBlock.svelte';
+	import PromptDialog from '$lib/components/PromptDialog.svelte';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -57,10 +60,30 @@
 	let activeMarks: Partial<Record<keyof TextMarks, boolean>> = $state({});
 	let canUndo = $state(false);
 	let canRedo = $state(false);
+	let syncedBlockDialogId: string | null = $state(null);
+	let linkDialogBlockId: string | null = $state(null);
+	let linkMode: 'url' | 'record' = $state('url');
+	let linkUrl = $state('');
+	let linkRecordId = $state('');
+	let linkSelection: { start: number; end: number } | null = $state(null);
+	let linkUrlInput: HTMLInputElement | undefined = $state();
+	let linkDialog: HTMLDivElement | undefined = $state();
+
+	const documentMetadataById = $derived(
+		ydoc
+			? new Map(listDocuments(ydoc).map((document) => [document.id, document]))
+			: new Map<string, ReturnType<typeof listDocuments>[number]>()
+	);
 
 	interface BlockEditorHandle {
 		render: () => void;
 		applyFormat: (mark: keyof TextMarks, value?: unknown) => void;
+		applyFormatAtRange: (
+			mark: keyof TextMarks,
+			range: { start: number; end: number },
+			value?: unknown
+		) => void;
+		getSelectionRange: () => { start: number; end: number } | null;
 		getFormatState: () => Partial<Record<keyof TextMarks, boolean>>;
 		focusEditor: (position?: boolean | number) => void;
 	}
@@ -115,13 +138,79 @@
 		const editor = activeBlockId ? blockRefs[activeBlockId] : undefined;
 		if (!editor) return;
 		if (mark === 'link') {
-			const url = window.prompt('Link URL:');
-			if (!url) return;
-			editor.applyFormat(mark, url);
+			openLinkComposer(activeBlockId!);
 		} else {
 			editor.applyFormat(mark);
 		}
 		activeMarks = editor.getFormatState();
+	}
+
+	function openLinkComposer(blockId: string): void {
+		const selection = blockRefs[blockId]?.getSelectionRange();
+		if (!selection || selection.start === selection.end) return;
+		linkDialogBlockId = blockId;
+		linkSelection = selection;
+		linkMode = 'url';
+		linkUrl = '';
+		linkRecordId = '';
+	}
+
+	function applyLink(): void {
+		const editor = linkDialogBlockId ? blockRefs[linkDialogBlockId] : undefined;
+		const value = linkMode === 'record' ? linkRecordId : linkUrl.trim();
+		if (!editor || !value || !linkSelection) return;
+		editor.applyFormatAtRange(
+			'link',
+			linkSelection,
+			linkMode === 'record' ? `${RECORD_LINK_SCHEME}${value}` : value
+		);
+		activeMarks = editor.getFormatState();
+		closeLinkComposer();
+	}
+
+	function closeLinkComposer(): void {
+		const blockId = linkDialogBlockId;
+		linkDialogBlockId = null;
+		linkSelection = null;
+		if (blockId) void tick().then(() => blockRefs[blockId]?.focusEditor(false));
+	}
+
+	function handleLinkDialogKeydown(event: KeyboardEvent): void {
+		if (event.key === 'Escape') {
+			closeLinkComposer();
+			return;
+		}
+		if (event.key !== 'Tab' || !linkDialog) return;
+		const focusable = Array.from(
+			linkDialog.querySelectorAll<HTMLElement>(
+				'button:not([disabled]), input:not([disabled]), select:not([disabled]), [href]'
+			)
+		);
+		const first = focusable[0];
+		const last = focusable.at(-1);
+		if (!first || !last) return;
+		if (event.shiftKey && document.activeElement === first) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && document.activeElement === last) {
+			event.preventDefault();
+			first.focus();
+		}
+	}
+
+	function documentLocation(documentId: string): string {
+		if (!ydoc) return '';
+		const parts: string[] = [];
+		const visited = new SvelteSet<string>();
+		let current = documentMetadataById.get(documentId);
+		while (current && !visited.has(current.id)) {
+			visited.add(current.id);
+			parts.unshift(current.title || 'Untitled');
+			current = current.parentDocumentId
+				? documentMetadataById.get(current.parentDocumentId)
+				: undefined;
+		}
+		return parts.join(' / ');
 	}
 
 	// Word-processor convention: clicking a text-formatting control (a
@@ -216,6 +305,11 @@
 	$effect(() => {
 		if (!ydoc) return;
 		refresh();
+	});
+
+	$effect(() => {
+		if (!linkDialogBlockId || linkMode !== 'url') return;
+		void tick().then(() => linkUrlInput?.focus());
 	});
 
 	function handleTitleInput(event: Event): void {
@@ -411,19 +505,7 @@
 	}
 
 	function handleLinkSyncedBlock(blockId: string): void {
-		if (!ydoc) return;
-		const targetId = window.prompt('Enter target Block Record ID to sync with:');
-		if (targetId) {
-			setRecordReferencedId(ydoc, blockId, targetId.trim(), CURRENT_USER);
-		}
-	}
-
-	function handleLinkPage(blockId: string): void {
-		if (!ydoc) return;
-		const docId = window.prompt('Enter target Document ID:');
-		if (docId) {
-			setRecordReferencedId(ydoc, blockId, docId.trim(), CURRENT_USER);
-		}
+		syncedBlockDialogId = blockId;
 	}
 
 	// Computed heading list for Table of Contents blocks
@@ -657,6 +739,7 @@
 										onBackspaceAtStart={() => handleBackspace(block, index)}
 										onFocusBlock={() => handleFocusBlock(block.id)}
 										onSlashKey={() => openSlashMenu(block.id)}
+										onLinkShortcut={() => openLinkComposer(block.id)}
 									/>
 								{/if}
 							</div>
@@ -674,6 +757,7 @@
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
 									onSlashKey={() => openSlashMenu(block.id)}
+									onLinkShortcut={() => openLinkComposer(block.id)}
 								/>
 							{/if}
 						</div>
@@ -691,6 +775,7 @@
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
 									onSlashKey={() => openSlashMenu(block.id)}
+									onLinkShortcut={() => openLinkComposer(block.id)}
 								/>
 							{/if}
 						</div>
@@ -747,6 +832,7 @@
 									onFocusBlock={() =>
 										handleFocusBlock(block.id, block.referencedRecordId || block.id)}
 									onSlashKey={() => openSlashMenu(block.id)}
+									onLinkShortcut={() => openLinkComposer(block.id)}
 								/>
 							{:else}
 								<p class="text-xs text-muted italic">
@@ -772,14 +858,24 @@
 											>{linkedDoc.title || 'Untitled Document'}</span
 										>
 									</a>
-									<button
-										type="button"
-										onclick={() => handleLinkPage(block.id)}
-										class="rounded px-2 py-0.5 text-xs text-muted hover:text-accent"
-										title="Change target document"
+									<select
+										class="rounded border border-border bg-bg px-2 py-1 text-xs text-fg focus:border-accent"
+										aria-label="Change target document"
+										value={linkedDoc.id}
+										onchange={(event) =>
+											setRecordReferencedId(
+												ydoc!,
+												block.id,
+												(event.target as HTMLSelectElement).value,
+												CURRENT_USER
+											)}
 									>
-										Change
-									</button>
+										{#each listDocuments(ydoc!) as document (document.id)}
+											{#if document.id !== data.documentId}
+												<option value={document.id}>{documentLocation(document.id)}</option>
+											{/if}
+										{/each}
+									</select>
 								</div>
 							{:else if isBroken}
 								<div class="flex items-center justify-between" role="alert">
@@ -787,14 +883,21 @@
 										<Icon name="link" size={16} class="flex-shrink-0 opacity-50" />
 										Linked page was deleted
 									</span>
-									<button
-										type="button"
-										onclick={() => handleLinkPage(block.id)}
-										class="rounded px-2 py-0.5 text-xs text-muted hover:text-accent"
-										title="Change target document"
+									<select
+										class="rounded border border-border bg-bg px-2 py-1 text-xs text-fg focus:border-accent"
+										aria-label="Choose replacement document"
+										onchange={(event) => {
+											const value = (event.target as HTMLSelectElement).value;
+											if (value) setRecordReferencedId(ydoc!, block.id, value, CURRENT_USER);
+										}}
 									>
-										Change
-									</button>
+										<option value="">Choose a document…</option>
+										{#each listDocuments(ydoc!) as document (document.id)}
+											{#if document.id !== data.documentId}
+												<option value={document.id}>{documentLocation(document.id)}</option>
+											{/if}
+										{/each}
+									</select>
 								</div>
 							{:else}
 								<div class="flex items-center gap-2 text-xs text-muted">
@@ -811,7 +914,7 @@
 											<option value="">Select document…</option>
 											{#each listDocuments(ydoc) as d (d.id)}
 												{#if d.id !== data.documentId}
-													<option value={d.id}>{d.title || 'Untitled'}</option>
+													<option value={d.id}>{documentLocation(d.id)}</option>
 												{/if}
 											{/each}
 										</select>
@@ -849,6 +952,7 @@
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
 									onSlashKey={() => openSlashMenu(block.id)}
+									onLinkShortcut={() => openLinkComposer(block.id)}
 								/>
 							</div>
 						{/if}
@@ -898,6 +1002,107 @@
 		<kbd class="rounded bg-surface px-1 py-0.5 font-mono">K</kbd> link. Type "/" for slash commands.
 	</footer>
 </div>
+
+<PromptDialog
+	open={syncedBlockDialogId !== null}
+	title="Set synced block target"
+	label="Block record ID"
+	placeholder="Paste a block record ID"
+	submitLabel="Set target"
+	onSubmit={(value) => {
+		if (ydoc && syncedBlockDialogId && value.trim()) {
+			setRecordReferencedId(ydoc, syncedBlockDialogId, value.trim(), CURRENT_USER);
+		}
+		syncedBlockDialogId = null;
+	}}
+	onCancel={() => (syncedBlockDialogId = null)}
+/>
+
+{#if linkDialogBlockId !== null}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+		role="presentation"
+	>
+		<div
+			bind:this={linkDialog}
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="link-composer-title"
+			tabindex="-1"
+			class="w-full max-w-md rounded-lg border border-border bg-bg p-5 shadow-xl"
+			onkeydown={handleLinkDialogKeydown}
+		>
+			<h2 id="link-composer-title" class="text-lg font-semibold text-fg">Add link</h2>
+			<div class="mt-4 flex gap-2" role="group" aria-label="Link type">
+				<button
+					type="button"
+					onclick={() => (linkMode = 'url')}
+					class="rounded px-3 py-1.5 text-sm"
+					class:bg-accent={linkMode === 'url'}
+					class:text-accent-fg={linkMode === 'url'}
+					class:bg-surface={linkMode !== 'url'}>Web address</button
+				>
+				<button
+					type="button"
+					onclick={() => (linkMode = 'record')}
+					class="rounded px-3 py-1.5 text-sm"
+					class:bg-accent={linkMode === 'record'}
+					class:text-accent-fg={linkMode === 'record'}
+					class:bg-surface={linkMode !== 'record'}>Workspace item</button
+				>
+			</div>
+			{#if linkMode === 'url'}
+				<label class="mt-4 block text-sm font-medium text-fg">
+					Web address
+					<input
+						bind:this={linkUrlInput}
+						bind:value={linkUrl}
+						placeholder="https://example.com"
+						class="mt-1.5 w-full rounded border border-border bg-surface px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+					/>
+				</label>
+			{:else}
+				<label class="mt-4 block text-sm font-medium text-fg">
+					Link to
+					<select
+						bind:value={linkRecordId}
+						class="mt-1.5 w-full rounded border border-border bg-surface px-3 py-2 text-sm text-fg outline-none focus:border-accent"
+					>
+						<option value="">Choose a page or collection…</option>
+						{#if ydoc}
+							<optgroup label="Pages">
+								{#each listDocuments(ydoc) as document (document.id)}
+									{#if document.id !== data.documentId}
+										<option value={document.id}>{documentLocation(document.id)}</option>
+									{/if}
+								{/each}
+							</optgroup>
+							<optgroup label="Collections">
+								{#each listCollections(ydoc) as collection (collection.id)}
+									<option value={collection.id}>{collection.title || 'Untitled collection'}</option>
+								{/each}
+							</optgroup>
+						{/if}
+					</select>
+				</label>
+			{/if}
+			<div class="mt-5 flex justify-end gap-2">
+				<button
+					type="button"
+					onclick={closeLinkComposer}
+					class="rounded px-3 py-2 text-sm text-muted hover:text-fg">Cancel</button
+				>
+				<button
+					type="button"
+					disabled={linkMode === 'url' ? !linkUrl.trim() : !linkRecordId}
+					onclick={applyLink}
+					class="rounded bg-accent px-3 py-2 text-sm font-medium text-accent-fg disabled:opacity-40"
+					>Add link</button
+				>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.shimmer-bar {

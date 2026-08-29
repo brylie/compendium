@@ -281,28 +281,22 @@ describe('BlockEditor', () => {
 		expect(delta[0].attributes?.bold).toBeUndefined();
 	});
 
-	it('prompts for a URL and applies a link mark on Cmd/Ctrl+K', async () => {
+	it('delegates Cmd/Ctrl+K to the in-page link composer', async () => {
 		const ytext = doc.getText('a');
 		ytext.insert(0, 'hello world');
-		const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('https://example.com');
-		const { container } = render(BlockEditor, { ytext, ...handlers() });
+		const onLinkShortcut = vi.fn();
+		const { container } = render(BlockEditor, { ytext, ...handlers(), onLinkShortcut });
 		const el = container.querySelector('[contenteditable]') as HTMLElement;
 
 		selectRange(el, 0, 5);
 		await fireEvent.keyDown(el, { key: 'k', metaKey: true });
 
-		const delta = ytext.toDelta() as { insert: string; attributes?: { link?: string } }[];
-		expect(delta[0]).toMatchObject({
-			insert: 'hello',
-			attributes: { link: 'https://example.com' }
-		});
-		promptSpy.mockRestore();
+		expect(onLinkShortcut).toHaveBeenCalledOnce();
 	});
 
-	it('does not apply a link mark when the URL prompt is cancelled', async () => {
+	it('does not apply a link mark directly when Cmd/Ctrl+K opens the composer', async () => {
 		const ytext = doc.getText('a');
 		ytext.insert(0, 'hello world');
-		const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(null);
 		const { container } = render(BlockEditor, { ytext, ...handlers() });
 		const el = container.querySelector('[contenteditable]') as HTMLElement;
 
@@ -311,7 +305,6 @@ describe('BlockEditor', () => {
 
 		const delta = ytext.toDelta() as { insert: string; attributes?: unknown }[];
 		expect(delta[0].attributes).toBeUndefined();
-		promptSpy.mockRestore();
 	});
 
 	it('does not split the block on Enter mid IME composition', async () => {

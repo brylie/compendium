@@ -20,6 +20,7 @@
 	import Icon from './Icon.svelte';
 	import PropertyValueCell from './PropertyValueCell.svelte';
 	import ViewToolbar from './ViewToolbar.svelte';
+	import PromptDialog from './PromptDialog.svelte';
 
 	let {
 		collectionId,
@@ -39,6 +40,7 @@
 	let manualOrder: Record<string, string[]> = $state({});
 	let draggedRecordId: string | null = $state(null);
 	let newGroupingPropertyLabel = $state('Status');
+	let optionDialogPropertyKey: string | null = $state(null);
 
 	// The grouping property is config.groupBy, persisted on the embedding
 	// block — see EmbeddedViewConfig in $lib/data/types. Manual per-card
@@ -114,7 +116,7 @@
 		onConfigChange({ ...config, groupBy: property.key });
 	}
 
-	function addSelectOption(propertyKey: string, rawLabel: string | null): void {
+	function addSelectOption(propertyKey: string, rawLabel: string): void {
 		if (!ydoc) return;
 		const label = rawLabel?.trim();
 		if (!label) return;
@@ -128,7 +130,11 @@
 
 	function addColumnOption(): void {
 		if (!groupProperty) return;
-		addSelectOption(groupProperty.key, window.prompt('New column name:'));
+		optionDialogPropertyKey = groupProperty.key;
+	}
+
+	function openSelectOptionDialog(propertyKey: string): void {
+		optionDialogPropertyKey = propertyKey;
 	}
 
 	function addCard(column: BoardColumn): void {
@@ -342,8 +348,7 @@
 										{property}
 										value={row.properties?.[property.key]}
 										oninput={(value) => setCell(row, property, value)}
-										onAddOption={() =>
-											addSelectOption(property.key, window.prompt('New option label:'))}
+										onAddOption={() => openSelectOptionDialog(property.key)}
 										compact
 									/>
 								</div>
@@ -365,3 +370,16 @@
 		</button>
 	</div>
 {/if}
+
+<PromptDialog
+	open={optionDialogPropertyKey !== null}
+	title={optionDialogPropertyKey === groupProperty?.key ? 'New column' : 'New option'}
+	label={optionDialogPropertyKey === groupProperty?.key ? 'Column name' : 'Option name'}
+	placeholder={optionDialogPropertyKey === groupProperty?.key ? 'Column name' : 'Option name'}
+	submitLabel="Add"
+	onSubmit={(value) => {
+		if (optionDialogPropertyKey) addSelectOption(optionDialogPropertyKey, value);
+		optionDialogPropertyKey = null;
+	}}
+	onCancel={() => (optionDialogPropertyKey = null)}
+/>

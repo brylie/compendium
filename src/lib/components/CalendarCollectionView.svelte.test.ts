@@ -167,6 +167,37 @@ describe('CalendarCollectionView', () => {
 		});
 	});
 
+	it('adds a select option through the in-page dialog', async () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Cal',
+			schema: [
+				{ key: 'due', label: 'Due', type: 'date' },
+				{ key: 'status', label: 'Status', type: 'select', options: [] }
+			]
+		});
+		createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: { due: { type: 'date', value: '2026-03-20' } }
+			},
+			actor
+		);
+		const user = userEvent.setup();
+		renderCalendar('col-1', { groupBy: 'due' });
+
+		await user.click(screen.getByTitle('Add option'));
+		await user.type(screen.getByLabelText('Option name'), 'Ready');
+		await user.click(
+			within(screen.getByRole('dialog')).getByRole('button', { name: 'Add option' })
+		);
+
+		expect(getCollection(ydoc, 'col-1')?.schema[1].options).toEqual([
+			expect.objectContaining({ label: 'Ready' })
+		]);
+	});
+
 	it('deletes an entry via its trash button', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',

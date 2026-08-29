@@ -15,6 +15,8 @@
 	import { isDark, toggleTheme } from '$lib/client/theme';
 	import type { CollectionMeta, DocumentMeta, DocumentTreeNode } from '$lib/data/types';
 	import Icon from './Icon.svelte';
+	import PromptDialog from './PromptDialog.svelte';
+	import ConfirmDialog from './ConfirmDialog.svelte';
 
 	let {
 		initialDocuments = [],
@@ -36,6 +38,10 @@
 	let expandedDocIds: SvelteSet<string> = new SvelteSet();
 
 	let ydoc: ReturnType<typeof getClientDoc> | undefined = $state();
+	let createDialog: 'document' | 'collection' | null = $state(null);
+	let pendingParentId: string | undefined = $state();
+	let pendingDeletion: { kind: 'document' | 'collection'; id: string } | null = $state(null);
+	let errorMessage: string | null = $state(null);
 
 	let documentTree = $derived(buildDocumentTree(documents));
 	let currentPath = $derived(page.url.pathname);
@@ -104,10 +110,16 @@
 		else expandedDocIds.add(id);
 	}
 
-	async function handleNewDocument(parentId?: string): Promise<void> {
-		const rawTitle = window.prompt('Document title:');
-		if (rawTitle === null) return;
+	function openNewDocument(parentId?: string): void {
+		errorMessage = null;
+		pendingParentId = parentId;
+		createDialog = 'document';
+	}
+
+	async function createDocument(rawTitle: string): Promise<void> {
 		const title = rawTitle.trim() || 'Untitled';
+		const parentId = pendingParentId;
+		createDialog = null;
 
 		try {
 			const res = await fetch('/api/documents', {
@@ -124,17 +136,21 @@
 				await invalidateAll();
 				await goto(resolve('/doc/[id]', { id: newDoc.id }));
 			} else {
-				alert('Failed to create document');
+				errorMessage = 'Failed to create document.';
 			}
 		} catch {
-			alert('Failed to create document (network error)');
+			errorMessage = 'Failed to create document. Check your connection and try again.';
 		}
 	}
 
-	async function handleNewCollection(): Promise<void> {
-		const rawTitle = window.prompt('Collection title:');
-		if (rawTitle === null) return;
+	function openNewCollection(): void {
+		errorMessage = null;
+		createDialog = 'collection';
+	}
+
+	async function createCollection(rawTitle: string): Promise<void> {
 		const title = rawTitle.trim() || 'Untitled Collection';
+		createDialog = null;
 
 		try {
 			const res = await fetch('/api/collections', {
@@ -148,38 +164,54 @@
 				await invalidateAll();
 				await goto(resolve('/table/[id]', { id: newCol.id }));
 			} else {
-				alert('Failed to create collection');
+				errorMessage = 'Failed to create collection.';
 			}
 		} catch {
-			alert('Failed to create collection (network error)');
+			errorMessage = 'Failed to create collection. Check your connection and try again.';
 		}
 	}
 
-	async function handleDeleteDocument(id: string, e: MouseEvent): Promise<void> {
+	function handleDeleteDocument(id: string, e: MouseEvent): void {
 		e.stopPropagation();
 		e.preventDefault();
-		if (!confirm('Are you sure you want to delete this document?')) return;
-		if (ydoc) {
-			deleteDocument(ydoc, id);
-			refresh();
-		}
-		await invalidateAll();
-		if (currentDocId === id) {
-			await goto(resolve('/'));
-		}
+		pendingDeletion = { kind: 'document', id };
 	}
 
-	async function handleDeleteCollection(id: string, e: MouseEvent): Promise<void> {
+	function handleDeleteCollection(id: string, e: MouseEvent): void {
 		e.stopPropagation();
 		e.preventDefault();
-		if (!confirm('Are you sure you want to delete this collection?')) return;
-		if (ydoc) {
-			deleteCollection(ydoc, id);
-			refresh();
-		}
-		await invalidateAll();
-		if (currentTableId === id) {
-			await goto(resolve('/'));
+		pendingDeletion = { kind: 'collection', id };
+	}
+
+	async function confirmDeletion(): Promise<void> {
+		const deletion = pendingDeletion;
+		if (!deletion) return;
+		errorMessage = null;
+		try {
+			if (deletion.kind === 'document') {
+				const id = deletion.id;
+				if (ydoc) {
+					deleteDocument(ydoc, id);
+					refresh();
+				}
+				await invalidateAll();
+				if (currentDocId === id) {
+					await goto(resolve('/'));
+				}
+			} else {
+				const id = deletion.id;
+				if (ydoc) {
+					deleteCollection(ydoc, id);
+					refresh();
+				}
+				await invalidateAll();
+				if (currentTableId === id) {
+					await goto(resolve('/'));
+				}
+			}
+			pendingDeletion = null;
+		} catch {
+			errorMessage = `Could not delete the ${deletion.kind}. Please try again.`;
 		}
 	}
 </script>
@@ -236,7 +268,7 @@
 					<span>Documents</span>
 					<button
 						type="button"
-						onclick={() => handleNewDocument(currentDocId ?? undefined)}
+						onclick={() => openNewDocument(currentDocId ?? undefined)}
 						class="rounded p-0.5 opacity-70 transition-all hover:bg-surface hover:text-accent hover:opacity-100"
 						title={currentDocId ? 'New sub-page' : 'New document'}
 						aria-label="New document"
@@ -288,7 +320,7 @@
 										onclick={(e) => {
 											e.stopPropagation();
 											e.preventDefault();
-											handleNewDocument(node.id);
+											openNewDocument(node.id);
 										}}
 										class="p-0.5 text-muted hover:text-accent"
 										title="Add sub-page"
@@ -332,7 +364,7 @@
 					<span>Collections</span>
 					<button
 						type="button"
-						onclick={handleNewCollection}
+						onclick={openNewCollection}
 						class="rounded p-0.5 opacity-70 transition-all hover:bg-surface hover:text-accent hover:opacity-100"
 						title="New collection"
 						aria-label="New collection"
@@ -463,4 +495,41 @@
 			</div>
 		{/if}
 	</div>
+
+	{#if errorMessage}
+		<div
+			class="mx-2 mb-2 rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-700"
+			role="alert"
+		>
+			{errorMessage}
+			<button type="button" class="ml-2 underline" onclick={() => (errorMessage = null)}
+				>Dismiss</button
+			>
+		</div>
+	{/if}
 </aside>
+
+<PromptDialog
+	open={createDialog !== null}
+	title={createDialog === 'collection' ? 'New collection' : 'New document'}
+	label={createDialog === 'collection' ? 'Collection title' : 'Document title'}
+	placeholder={createDialog === 'collection' ? 'Untitled Collection' : 'Untitled'}
+	submitLabel="Create"
+	onSubmit={(value) => {
+		if (createDialog === 'collection') void createCollection(value);
+		else void createDocument(value);
+	}}
+	onCancel={() => {
+		createDialog = null;
+		pendingParentId = undefined;
+	}}
+/>
+
+<ConfirmDialog
+	open={pendingDeletion !== null}
+	title={pendingDeletion?.kind === 'collection' ? 'Delete collection?' : 'Delete document?'}
+	message="This cannot be undone."
+	confirmLabel="Delete"
+	onConfirm={() => void confirmDeletion()}
+	onCancel={() => (pendingDeletion = null)}
+/>
