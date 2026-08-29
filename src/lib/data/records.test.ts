@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import {
 	buildDocumentTree,
+	coercePropertyValue,
+	countRecordsWithProperty,
 	createCollection,
 	createDocument,
 	createRecord,
 	deleteCollection,
+	deleteCollectionProperty,
 	deleteDocument,
 	deleteRecord,
+	duplicateCollectionProperty,
 	getCollection,
 	getDocument,
 	getRecord,
@@ -16,12 +20,14 @@ import {
 	listDocuments,
 	listRecordsForParent,
 	NotFoundError,
+	previewCollectionPropertyTypeChange,
 	setBlockType,
 	setRecordChecked,
 	setRecordCollapsed,
 	setRecordReferencedId,
 	setRecordViewConfig,
 	touchRecordEditor,
+	updateCollectionProperty,
 	updateCollectionSchema,
 	updateCollectionTitle,
 	updateDocumentParent,
@@ -320,6 +326,224 @@ describe('collections: title, schema, and delete edge cases', () => {
 	it('getCollection returns undefined for a nonexistent id', () => {
 		const doc = new Y.Doc();
 		expect(getCollection(doc, 'missing')).toBeUndefined();
+	});
+});
+
+describe('coercePropertyValue', () => {
+	it('returns the value unchanged when the type already matches', () => {
+		const value = { type: 'text' as const, value: 'hi' };
+		expect(coercePropertyValue(value, 'text')).toBe(value);
+	});
+
+	it('converts number/date/checkbox to text losslessly', () => {
+		expect(coercePropertyValue({ type: 'number', value: 7 }, 'text')).toEqual({
+			type: 'text',
+			value: '7'
+		});
+		expect(coercePropertyValue({ type: 'date', value: '2026-01-01' }, 'text')).toEqual({
+			type: 'text',
+			value: '2026-01-01'
+		});
+		expect(coercePropertyValue({ type: 'checkbox', value: true }, 'text')).toEqual({
+			type: 'text',
+			value: 'true'
+		});
+	});
+
+	it('parses a numeric-looking text value into number, and rejects a non-numeric one', () => {
+		expect(coercePropertyValue({ type: 'text', value: '42' }, 'number')).toEqual({
+			type: 'number',
+			value: 42
+		});
+		expect(coercePropertyValue({ type: 'text', value: 'abc' }, 'number')).toBeUndefined();
+		expect(coercePropertyValue({ type: 'text', value: '' }, 'number')).toBeUndefined();
+	});
+
+	it('parses "true"/"false" text into checkbox, and rejects anything else', () => {
+		expect(coercePropertyValue({ type: 'text', value: 'true' }, 'checkbox')).toEqual({
+			type: 'checkbox',
+			value: true
+		});
+		expect(coercePropertyValue({ type: 'text', value: 'false' }, 'checkbox')).toEqual({
+			type: 'checkbox',
+			value: false
+		});
+		expect(coercePropertyValue({ type: 'text', value: 'maybe' }, 'checkbox')).toBeUndefined();
+	});
+
+	it('has no safe conversion into date/select/relation', () => {
+		expect(coercePropertyValue({ type: 'text', value: '2026-01-01' }, 'date')).toBeUndefined();
+		expect(coercePropertyValue({ type: 'text', value: 'x' }, 'select')).toBeUndefined();
+		expect(coercePropertyValue({ type: 'text', value: 'x' }, 'relation')).toBeUndefined();
+	});
+});
+
+describe('collection field lifecycle: rename, retype, duplicate, delete', () => {
+	function setupCollection(doc: Y.Doc) {
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+		const withValue = createRecord(
+			doc,
+			{ parentId: collection.id, properties: { name: { type: 'text', value: 'Alice' } } },
+			human
+		);
+		const withoutValue = createRecord(doc, { parentId: collection.id, properties: {} }, human);
+		return { collection, withValue, withoutValue };
+	}
+
+	it('updateCollectionProperty renames a field without touching its type or values', () => {
+		const doc = new Y.Doc();
+		const { collection, withValue } = setupCollection(doc);
+
+		updateCollectionProperty(doc, collection.id, 'name', { label: 'Full name' });
+
+		expect(getCollection(doc, collection.id)?.schema).toEqual([
+			{ key: 'name', label: 'Full name', type: 'text', options: undefined }
+		]);
+		expect(getRecord(doc, withValue.id)?.properties?.name).toEqual({
+			type: 'text',
+			value: 'Alice'
+		});
+	});
+
+	it('updateCollectionProperty retypes a field and migrates coercible values, clearing the rest', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [{ key: 'qty', label: 'Qty', type: 'text' }]
+		});
+		const numeric = createRecord(
+			doc,
+			{ parentId: collection.id, properties: { qty: { type: 'text', value: '5' } } },
+			human
+		);
+		const nonNumeric = createRecord(
+			doc,
+			{ parentId: collection.id, properties: { qty: { type: 'text', value: 'lots' } } },
+			human
+		);
+
+		updateCollectionProperty(doc, collection.id, 'qty', { type: 'number' });
+
+		expect(getCollection(doc, collection.id)?.schema[0].type).toBe('number');
+		expect(getRecord(doc, numeric.id)?.properties?.qty).toEqual({ type: 'number', value: 5 });
+		expect(getRecord(doc, nonNumeric.id)?.properties?.qty).toBeUndefined();
+	});
+
+	it('updateCollectionProperty throws NotFoundError for an unknown collection or field', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupCollection(doc);
+		expect(() => updateCollectionProperty(doc, 'missing', 'name', { label: 'x' })).toThrow(
+			NotFoundError
+		);
+		expect(() => updateCollectionProperty(doc, collection.id, 'missing', { label: 'x' })).toThrow(
+			NotFoundError
+		);
+	});
+
+	it('previewCollectionPropertyTypeChange reports how many filled records would lose their value', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [{ key: 'qty', label: 'Qty', type: 'text' }]
+		});
+		createRecord(
+			doc,
+			{ parentId: collection.id, properties: { qty: { type: 'text', value: '5' } } },
+			human
+		);
+		createRecord(
+			doc,
+			{ parentId: collection.id, properties: { qty: { type: 'text', value: 'lots' } } },
+			human
+		);
+		createRecord(doc, { parentId: collection.id, properties: {} }, human);
+
+		expect(previewCollectionPropertyTypeChange(doc, collection.id, 'qty', 'number')).toEqual({
+			affected: 1,
+			total: 2
+		});
+	});
+
+	it('duplicateCollectionProperty clones the field definition and copies existing values', () => {
+		const doc = new Y.Doc();
+		const { collection, withValue, withoutValue } = setupCollection(doc);
+
+		const copy = duplicateCollectionProperty(doc, collection.id, 'name');
+
+		expect(copy.label).toBe('Name copy');
+		expect(copy.key).not.toBe('name');
+		const schema = getCollection(doc, collection.id)?.schema ?? [];
+		expect(schema.map((p) => p.key)).toEqual(['name', copy.key]);
+		expect(getRecord(doc, withValue.id)?.properties?.[copy.key]).toEqual({
+			type: 'text',
+			value: 'Alice'
+		});
+		expect(getRecord(doc, withoutValue.id)?.properties?.[copy.key]).toBeUndefined();
+	});
+
+	it('duplicateCollectionProperty throws NotFoundError for an unknown collection or field', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupCollection(doc);
+		expect(() => duplicateCollectionProperty(doc, 'missing', 'name')).toThrow(NotFoundError);
+		expect(() => duplicateCollectionProperty(doc, collection.id, 'missing')).toThrow(NotFoundError);
+	});
+
+	it('countRecordsWithProperty counts only records holding a value for that key', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupCollection(doc);
+		expect(countRecordsWithProperty(doc, collection.id, 'name')).toBe(1);
+		expect(countRecordsWithProperty(doc, collection.id, 'missing-key')).toBe(0);
+	});
+
+	it('deleteCollectionProperty removes the field from schema and strips its value off every record', () => {
+		const doc = new Y.Doc();
+		const { collection, withValue, withoutValue } = setupCollection(doc);
+
+		deleteCollectionProperty(doc, collection.id, 'name');
+
+		expect(getCollection(doc, collection.id)?.schema).toEqual([]);
+		expect(getRecord(doc, withValue.id)?.properties?.name).toBeUndefined();
+		expect(getRecord(doc, withoutValue.id)?.properties?.name).toBeUndefined();
+	});
+
+	it('deleteCollectionProperty repairs an embedded collection_view block that referenced the deleted field', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupCollection(doc);
+		const document = createDocument(doc, { title: 'Doc' });
+		const block = createRecord(
+			doc,
+			{
+				parentId: document.id,
+				blockType: 'collection_view',
+				referencedRecordId: collection.id,
+				viewConfig: {
+					viewType: 'table',
+					filters: [{ propertyKey: 'name', op: 'is', value: 'x' }],
+					visibleProperties: ['name'],
+					groupBy: 'name',
+					sort: { mode: 'property', propertyKey: 'name', direction: 'asc' }
+				}
+			},
+			human
+		);
+
+		deleteCollectionProperty(doc, collection.id, 'name');
+
+		expect(getRecord(doc, block.id)?.viewConfig).toEqual({
+			viewType: 'table',
+			filters: [],
+			visibleProperties: [],
+			groupBy: undefined,
+			sort: { mode: 'manual' }
+		});
+	});
+
+	it('deleteCollectionProperty throws NotFoundError for an unknown collection', () => {
+		const doc = new Y.Doc();
+		expect(() => deleteCollectionProperty(doc, 'missing', 'name')).toThrow(NotFoundError);
 	});
 });
 

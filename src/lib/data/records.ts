@@ -10,6 +10,7 @@ import type {
 	EmbeddedViewConfig,
 	ParentKind,
 	PropertyDefinition,
+	PropertyType,
 	PropertyValue,
 	RichText,
 	WorkspaceRecord
@@ -270,6 +271,207 @@ export function updateCollectionSchema(doc: Y.Doc, id: string, schema: PropertyD
 	const ymeta = collectionsMap(doc).get(id) as Y.Map<unknown> | undefined;
 	if (!ymeta) throw new NotFoundError(`Collection ${id} not found`);
 	ymeta.set('schema', schema);
+}
+
+/**
+ * Best-effort value conversion for a field type change — used both to preview
+ * how many values would be lost (before the user confirms) and to actually
+ * migrate values when the change is applied. Returns undefined when there's
+ * no lossless-enough conversion, which the caller treats as "clear the
+ * value" rather than leaving a value whose `type` no longer matches the
+ * field's schema type.
+ */
+export function coercePropertyValue(
+	value: PropertyValue,
+	toType: PropertyType
+): PropertyValue | undefined {
+	if (value.type === toType) return value;
+	switch (toType) {
+		case 'text':
+			if (value.type === 'number') return { type: 'text', value: String(value.value) };
+			if (value.type === 'date') return { type: 'text', value: value.value };
+			if (value.type === 'checkbox') return { type: 'text', value: value.value ? 'true' : 'false' };
+			return undefined;
+		case 'number': {
+			if (value.type !== 'text' || value.value.trim() === '') return undefined;
+			const n = Number(value.value);
+			return Number.isFinite(n) ? { type: 'number', value: n } : undefined;
+		}
+		case 'checkbox': {
+			if (value.type !== 'text') return undefined;
+			const v = value.value.trim().toLowerCase();
+			if (v === 'true') return { type: 'checkbox', value: true };
+			if (v === 'false') return { type: 'checkbox', value: false };
+			return undefined;
+		}
+		default:
+			return undefined; // date, select, relation: no safe generic coercion
+	}
+}
+
+/** How many of a Collection's records would lose their value if `propertyKey` were changed to `toType` — surfaced in the field editor's confirmation before the change is applied. */
+export function previewCollectionPropertyTypeChange(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string,
+	toType: PropertyType
+): { affected: number; total: number } {
+	let affected = 0;
+	let total = 0;
+	for (const record of listRecordsForParent(doc, collectionId)) {
+		const value = record.properties?.[propertyKey];
+		if (value === undefined) continue;
+		total++;
+		if (coercePropertyValue(value, toType) === undefined) affected++;
+	}
+	return { affected, total };
+}
+
+/** Renames and/or retypes one field in a Collection's schema, migrating (or clearing, per `coercePropertyValue`) every record's existing value when `patch.type` changes. */
+export function updateCollectionProperty(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string,
+	patch: { label?: string; type?: PropertyType }
+): void {
+	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
+	doc.transact(() => {
+		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+		const index = schema.findIndex((p) => p.key === propertyKey);
+		if (index === -1) throw new NotFoundError(`Property ${propertyKey} not found`);
+		const current = schema[index];
+		const nextType = patch.type ?? current.type;
+		const next: PropertyDefinition = {
+			...current,
+			label: patch.label !== undefined ? patch.label : current.label,
+			type: nextType,
+			options:
+				nextType === 'select' ? (current.type === 'select' ? current.options : []) : undefined
+		};
+		const nextSchema = [...schema];
+		nextSchema[index] = next;
+		ymeta.set('schema', nextSchema);
+
+		if (patch.type && patch.type !== current.type) {
+			for (const record of listRecordsForParent(doc, collectionId)) {
+				const value = record.properties?.[propertyKey];
+				if (value === undefined) continue;
+				const yrecord = recordsMap(doc).get(record.id) as Y.Map<unknown> | undefined;
+				const coerced = coercePropertyValue(value, patch.type);
+				if (coerced) yrecord?.set(PROP_PREFIX + propertyKey, coerced);
+				else yrecord?.delete(PROP_PREFIX + propertyKey);
+			}
+		}
+	});
+}
+
+/** Clones a field definition (fresh key, "<label> copy") immediately after the source field, copying every record's existing value under the new key. */
+export function duplicateCollectionProperty(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string
+): PropertyDefinition {
+	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
+	return doc.transact(() => {
+		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+		const index = schema.findIndex((p) => p.key === propertyKey);
+		if (index === -1) throw new NotFoundError(`Property ${propertyKey} not found`);
+		const source = schema[index];
+		const copy: PropertyDefinition = {
+			...source,
+			key: nanoid(8),
+			label: `${source.label} copy`,
+			options: source.options?.map((o) => ({ ...o }))
+		};
+		const nextSchema = [...schema.slice(0, index + 1), copy, ...schema.slice(index + 1)];
+		ymeta.set('schema', nextSchema);
+
+		for (const record of listRecordsForParent(doc, collectionId)) {
+			const value = record.properties?.[propertyKey];
+			if (value === undefined) continue;
+			const yrecord = recordsMap(doc).get(record.id) as Y.Map<unknown> | undefined;
+			yrecord?.set(PROP_PREFIX + copy.key, value);
+		}
+
+		return copy;
+	});
+}
+
+/** How many of a Collection's records currently hold a value for `propertyKey` — the "affected records" count shown before a destructive field deletion. */
+export function countRecordsWithProperty(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string
+): number {
+	return listRecordsForParent(doc, collectionId).filter(
+		(r) => r.properties?.[propertyKey] !== undefined
+	).length;
+}
+
+// Strips a deleted field out of any collection_view block's persisted
+// viewConfig that still references it (filters/visibleProperties/groupBy/
+// sort), across every Document — a stale propertyKey there would otherwise
+// silently break that embed's filtering/grouping/sort the next time it
+// renders. Manual per-column Board order isn't touched: it's session-local
+// state, never persisted to viewConfig in the first place (collection-views.md §6).
+function repairEmbeddedViewsAfterPropertyRemoval(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string
+): void {
+	recordsMap(doc).forEach((yrecord) => {
+		if (yrecord.get('blockType') !== 'collection_view') return;
+		if (yrecord.get('referencedRecordId') !== collectionId) return;
+		const config = yrecord.get('viewConfig') as EmbeddedViewConfig | undefined;
+		if (!config) return;
+
+		const next: EmbeddedViewConfig = { ...config };
+		let changed = false;
+		if (next.filters?.some((f) => f.propertyKey === propertyKey)) {
+			next.filters = next.filters.filter((f) => f.propertyKey !== propertyKey);
+			changed = true;
+		}
+		if (next.visibleProperties?.includes(propertyKey)) {
+			next.visibleProperties = next.visibleProperties.filter((k) => k !== propertyKey);
+			changed = true;
+		}
+		if (next.groupBy === propertyKey) {
+			next.groupBy = undefined;
+			changed = true;
+		}
+		if (next.sort?.propertyKey === propertyKey) {
+			next.sort = { mode: 'manual' };
+			changed = true;
+		}
+		if (changed) yrecord.set('viewConfig', next);
+	});
+}
+
+/** Removes a field from a Collection's schema, strips its value off every record, and repairs any embedded view's config that referenced it — the "explicitly destructive" delete path §93 of the field manager asks for. */
+export function deleteCollectionProperty(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string
+): void {
+	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
+	doc.transact(() => {
+		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+		ymeta.set(
+			'schema',
+			schema.filter((p) => p.key !== propertyKey)
+		);
+
+		for (const record of listRecordsForParent(doc, collectionId)) {
+			if (record.properties?.[propertyKey] === undefined) continue;
+			const yrecord = recordsMap(doc).get(record.id) as Y.Map<unknown> | undefined;
+			yrecord?.delete(PROP_PREFIX + propertyKey);
+		}
+
+		repairEmbeddedViewsAfterPropertyRemoval(doc, collectionId, propertyKey);
+	});
 }
 
 export function deleteCollection(doc: Y.Doc, id: string): void {

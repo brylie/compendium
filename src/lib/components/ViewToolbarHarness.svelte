@@ -13,10 +13,12 @@
 	import type { ViewConfig } from '$lib/data/views';
 
 	let {
+		collectionId = 'col-1',
 		schema,
 		initialConfig = {},
 		onConfigChange
 	}: {
+		collectionId?: string;
 		schema: PropertyDefinition[];
 		initialConfig?: ViewConfig;
 		onConfigChange?: (config: ViewConfig) => void;
@@ -29,4 +31,4 @@
 	});
 </script>
 
-<ViewToolbar {schema} bind:config />
+<ViewToolbar {collectionId} {schema} bind:config />

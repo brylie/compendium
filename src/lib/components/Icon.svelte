@@ -39,7 +39,13 @@
 			| 'board'
 			| 'calendar'
 			| 'filter'
-			| 'sort';
+			| 'sort'
+			| 'pencil'
+			| 'duplicate'
+			| 'eye-off'
+			| 'arrow-up'
+			| 'arrow-down'
+			| 'close';
 		size?: number;
 		class?: string;
 	} = $props();
@@ -153,5 +159,21 @@
 		<path d="M3 4h14l-5.5 6.5V16l-3-1.5v-4Z" />
 	{:else if name === 'sort'}
 		<path d="M6 4v12M6 4 3.5 6.5M6 4l2.5 2.5M14 16V4M14 16l2.5-2.5M14 16l-2.5-2.5" />
+	{:else if name === 'pencil'}
+		<path d="m4 16 .7-3.2L12.5 5a1.5 1.5 0 0 1 2.1 0l.4.4a1.5 1.5 0 0 1 0 2.1L7.2 15.3 4 16Z" />
+		<path d="m11 6.5 2.5 2.5" />
+	{:else if name === 'duplicate'}
+		<rect x="7" y="7" width="9.5" height="9.5" rx="1.5" />
+		<path d="M13.5 7V5A1.5 1.5 0 0 0 12 3.5H5A1.5 1.5 0 0 0 3.5 5v7A1.5 1.5 0 0 0 5 13.5h2" />
+	{:else if name === 'eye-off'}
+		<path
+			d="M3 3l14 14M8.3 8.4a2.5 2.5 0 0 0 3.4 3.4M6.1 6.2C4.3 7.3 3 9 2.5 10c1.2 2.5 4 5.5 7.5 5.5 1.3 0 2.5-.4 3.6-1M12 4.7A8.6 8.6 0 0 1 17.5 10c-.4.8-1 1.7-1.7 2.5"
+		/>
+	{:else if name === 'arrow-up'}
+		<path d="M10 16V4M5 8.5 10 4l5 4.5" />
+	{:else if name === 'arrow-down'}
+		<path d="M10 4v12M5 11.5 10 16l5-4.5" />
+	{:else if name === 'close'}
+		<path d="m5 5 10 10M15 5 5 15" />
 	{/if}
 </svg>

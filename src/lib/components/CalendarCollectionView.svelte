@@ -306,7 +306,7 @@
 		</div>
 	</div>
 
-	<ViewToolbar {schema} bind:config={() => config, onConfigChange} />
+	<ViewToolbar {collectionId} {schema} bind:config={() => config, onConfigChange} />
 
 	<div class="overflow-hidden rounded-lg border border-border">
 		<div

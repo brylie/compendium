@@ -8,11 +8,14 @@
 		SortDirection
 	} from '$lib/data/views';
 	import Icon from './Icon.svelte';
+	import FieldManagerDialog from './FieldManagerDialog.svelte';
 
 	let {
+		collectionId,
 		schema,
 		config = $bindable()
 	}: {
+		collectionId: string;
 		schema: PropertyDefinition[];
 		config: ViewConfig;
 	} = $props();
@@ -88,6 +91,7 @@
 
 	let visiblePanelOpen = $state(false);
 	let filterPanelOpen = $state(false);
+	let fieldManagerOpen = $state(false);
 </script>
 
 <div class="mb-4 flex flex-wrap items-center gap-2 text-xs">
@@ -240,4 +244,20 @@
 			</div>
 		{/if}
 	</div>
+
+	<!-- Manage fields -->
+	<button
+		type="button"
+		onclick={() => (fieldManagerOpen = true)}
+		class="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-muted transition-colors hover:border-accent hover:text-accent"
+	>
+		<Icon name="pencil" size={13} />
+		<span>Manage fields</span>
+	</button>
 </div>
+
+<FieldManagerDialog
+	open={fieldManagerOpen}
+	{collectionId}
+	onClose={() => (fieldManagerOpen = false)}
+/>

@@ -265,7 +265,7 @@
 		</select>
 	</div>
 
-	<ViewToolbar {schema} bind:config={() => config, onConfigChange} />
+	<ViewToolbar {collectionId} {schema} bind:config={() => config, onConfigChange} />
 
 	<div class="flex gap-4 overflow-x-auto pb-4">
 		{#each columns as column (column.optionId ?? UNASSIGNED_KEY)}
