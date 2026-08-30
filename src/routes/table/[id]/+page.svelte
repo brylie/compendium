@@ -67,6 +67,16 @@
 		};
 	});
 
+	// SvelteKit reuses this component instance across client-side navigations
+	// between two /table/[id] routes (onMount doesn't re-run) — refresh()
+	// must re-run whenever data.collectionId changes, not just on
+	// mount/Yjs updates, or the page keeps showing the previously-open
+	// collection.
+	$effect(() => {
+		if (!ydoc) return;
+		refresh();
+	});
+
 	function handleTitleInput(event: Event): void {
 		if (!ydoc) return;
 		title = (event.target as HTMLInputElement).value;

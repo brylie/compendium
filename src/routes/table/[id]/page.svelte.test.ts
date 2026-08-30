@@ -51,6 +51,51 @@ describe('table/[id] +page', () => {
 		).toBeInTheDocument();
 	});
 
+	it('re-derives title, schema, and rows when navigating client-side to a different collection id', async () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'First',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+		createRecord(
+			ydoc,
+			{ parentId: 'col-1', properties: { name: { type: 'text', value: 'From collection one' } } },
+			{ kind: 'human', userId: 'local' }
+		);
+
+		createCollection(ydoc, {
+			id: 'col-2',
+			title: 'Second',
+			schema: [{ key: 'label', label: 'Label', type: 'text' }]
+		});
+		createRecord(
+			ydoc,
+			{
+				parentId: 'col-2',
+				properties: { label: { type: 'text', value: 'From collection two' } }
+			},
+			{ kind: 'human', userId: 'local' }
+		);
+
+		const { rerender } = render(Page, {
+			params: { id: 'col-1' },
+			form: null,
+			data: { documents: [], collections: [], collectionId: 'col-1', title: 'First' }
+		});
+		expect(screen.getByPlaceholderText('Untitled Collection')).toHaveValue('First');
+		expect(screen.getByDisplayValue('From collection one')).toBeInTheDocument();
+
+		await rerender({
+			params: { id: 'col-2' },
+			form: null,
+			data: { documents: [], collections: [], collectionId: 'col-2', title: 'Second' }
+		});
+
+		expect(screen.getByPlaceholderText('Untitled Collection')).toHaveValue('Second');
+		expect(screen.queryByDisplayValue('From collection one')).not.toBeInTheDocument();
+		expect(screen.getByDisplayValue('From collection two')).toBeInTheDocument();
+	});
+
 	it('shows an empty-state row when the collection has no rows', () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Empty', schema: [] });
 		render(Page, {
