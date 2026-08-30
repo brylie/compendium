@@ -1,6 +1,7 @@
 # Workspace catalog and CRDT sharding
 
-**Status:** Proposed — requires the capacity baseline from #31 before approval.
+**Status:** Proposed — #31's capacity baseline is complete; design approval is
+pending review of the contracts in this document.
 
 **Depends on:** [`prd.md`](../prd.md), [`architecture.md`](./architecture.md),
 [`persistence.md`](./persistence.md), [`collaboration.md`](./collaboration.md),
@@ -20,8 +21,8 @@ not as the universal transport for every reactive interface element.
 - A **Document shard** is one Y.Doc containing one Document's ordered blocks
   and rich text.
 - A **Collection shard** is one Y.Doc containing one Collection's schema and
-  rows. It is the initial unit; #31 determines whether a later row partition is
-  needed and under which measured conditions.
+  rows. It is the initial unit; a later row partition requires a measured
+  threshold and a separate design decision.
 - The browser uses a small server-sent-events feed for catalog changes. SSE
   delivers invalidations; it never becomes a second source of truth or a
   replacement for collaborative content sync.
@@ -29,23 +30,38 @@ not as the universal transport for every reactive interface element.
   Document or Collection shard.
 
 This is intentionally a proposed decision, not an implementation commitment.
-#31 must establish the Phase-0 baseline and identify whether a one-Y.Doc-per
-Document/Collection design meets the expected operating envelope. The approval
-record for #112 must state which assumptions survived that measurement.
+The completed [#31 capacity baseline](../benchmarks/crdt-capacity-baseline-2026-08-30.md)
+supports a small daily Phase-0 workspace and establishes a global-state
+escalation boundary. Its document-size projection supports this shard direction,
+but does not substitute for real shard-aware transport measurements. The
+approval record for #112 must state which assumptions survived that measurement
+and which must be proved by #113.
 
 ## 2. Terms and boundaries
 
-| Term                | Meaning                                                                                                                     | Authority                                            |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Deployment instance | One locally configured Compendium process and database target. It separates dogfooding, development, and test environments. | Server configuration; see #111.                      |
-| Workspace           | The top-level durable knowledge environment within a deployment instance.                                                   | Server-authorized request context.                   |
-| Space               | An organizational and permission boundary within one Workspace. A person switches Spaces to work on different projects.     | Workspace catalog.                                   |
-| Catalog             | The SQLite metadata projection needed to route, list, search, and authorize content without opening every content shard.    | Catalog service and committed database transactions. |
-| Content shard       | The Y.Doc for one Document or Collection.                                                                                   | Authorized Yjs and service-layer mutations.          |
+| Term                | Meaning                                                                                                                                                   | Authority                                            |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Deployment instance | Server-owned instance identity, persistence target, and event scope. One or more coordinated processes with all three values belong to the same instance. | Server configuration; see #111.                      |
+| Workspace           | The top-level durable knowledge environment within a deployment instance.                                                                                 | Server-authorized request context.                   |
+| Space               | An organizational and permission boundary within one Workspace. A person switches Spaces to work on different projects.                                   | Workspace catalog.                                   |
+| Catalog             | The SQLite metadata projection needed to route, list, search, and authorize content without opening every content shard.                                  | Catalog service and committed database transactions. |
+| Content shard       | The Y.Doc for one Document or Collection.                                                                                                                 | Authorized Yjs and service-layer mutations.          |
 
 A deployment instance is not a Workspace, and a Space is not a tenant. This
 keeps local operational isolation (#111), single-user multi-space organization
 (#6), and eventual multi-user authentication (#3) independently evolvable.
+
+Phase 0 and the first #113 implementation run one application process per
+Deployment instance. Starting independent processes against the same instance
+identity and SQLite target is unsupported until the coordination contract below
+is implemented; separate personal, development, and test instances must use
+distinct server-owned identities and persistence targets. A future scale-out
+deployment still represents one Deployment instance only when every process
+shares the same identity, catalog/outbox database, authorization policy, and
+event backplane. It must use durable shard ownership leases, transactional
+outbox claims, and a deployment-scoped event backplane; independent mutable
+in-memory replicas are invalid. #111 owns the startup diagnostics and isolation
+tests, while #113 must not silently introduce a second writer.
 
 ## 3. Ownership model
 
@@ -58,12 +74,20 @@ and authorize a Workspace without subscribing to its content shards:
 - Document and Collection identities, titles, owning Space, hierarchy/order,
   and shard locator.
 - Space-level access grants and the derived scopes assigned to access tokens.
+- A workspace-wide record locator with a unique `(workspace_id, record_id)`
+  key, owning-shard locator, and record kind.
 - Catalog revision and committed event records.
 
 Document titles and hierarchy are catalog fields. They are not duplicated into a
 Document Y.Doc and derived later, because the sidebar needs them before opening
 the Document. Record IDs remain stable global identities; a title is never an
-identity or authorization key.
+identity or authorization key. Creating a record reserves its supplied or
+generated ID in the workspace-wide locator transaction before inserting it into
+the target shard. A duplicate `(workspace_id, record_id)` is rejected; a retry
+with the same operation ID returns its original result rather than creating a
+second record. The hold coordinator resolves this locator before using its
+`(workspaceId, recordId)` key, so a hold cannot conflate records in different
+shards.
 
 The existing `snapshots`, `access_tokens`, and `audit_log` storage must become
 explicitly scoped by Workspace and, where applicable, Space and shard. A
@@ -107,6 +131,23 @@ authorize caller and target scope
   → publish the committed event to active SSE subscribers
 ```
 
+Operations that also move, create, or delete content use a durable operation
+row rather than publishing directly from the initial catalog transaction:
+
+```text
+pending_content → content_durable → publishable → published
+```
+
+The catalog transaction records the operation ID, affected shards, intended
+catalog revision, and a non-publishable outbox row. The shard transition writes
+the operation ID into its durable snapshot/recovery marker; only then does one
+transaction mark the operation and its outbox row `publishable`. An outbox
+consumer may claim and emit only `publishable` rows. Restart recovery resumes a
+pending operation idempotently by inspecting those durable markers, never by
+assuming a catalog row proves the content transition completed. This applies to
+move and delete events as well as creation, so a client cannot be invalidated
+toward absent or stale content.
+
 SSE is driven by the committed catalog write, never by the periodic persistence
 of a Y.Doc snapshot. A snapshot callback would be delayed, might batch unrelated
 content changes, and cannot safely identify which navigation metadata changed.
@@ -114,16 +155,22 @@ content changes, and cannot safely identify which navigation metadata changed.
 The SSE endpoint emits compact invalidations, for example:
 
 ```text
-id: 184
+id: opaque-authorized-stream-cursor
 event: catalog-changed
-data: {"workspaceId":"…","revision":184,"documents":["…"],"spaces":["…"]}
+data: {"documents":["…"],"spaces":["…"]}
 ```
 
 The client treats this event as a hint to fetch authoritative catalog state. It
 does not mutate its catalog cache solely from event payload. On reconnect, the
-client supplies `Last-Event-ID` (or a known revision); if retained events no
-longer cover that revision, the server sends a resync signal and the client
-reloads the authorized catalog snapshot.
+client supplies an opaque `Last-Event-ID` cursor. The cursor is scoped to the
+Deployment instance, Workspace, and an authorization-scope fingerprint; it
+maps server-side to the highest catalog revision delivered to that authorized
+stream, but never exposes a raw workspace revision or event ID. If the scope
+has changed, the cursor fails validation, retained source events no longer
+cover its hidden revision, or filtering makes replay coverage ambiguous, the
+server sends `catalog-resync` and the client reloads the authorized catalog
+snapshot. Inaccessible Space changes therefore create neither an observable
+cursor gap nor an existence signal.
 
 An SSE subscriber is authorized for a Workspace and a set of Spaces before it
 is registered. Filtering happens before an event is emitted, not after it
@@ -131,9 +178,9 @@ reaches the browser. A permission revocation closes or resynchronizes affected
 subscriptions immediately.
 
 For the initial single-process deployment, an in-process publisher may drain
-committed outbox rows immediately. Multiple application processes require a
-shared outbox consumer/event backplane and shard ownership; independent mutable
-in-memory replicas are invalid.
+only `publishable` outbox rows immediately. Multiple application processes
+require the deployment coordination rules in §2; independent mutable in-memory
+replicas are invalid.
 
 ## 5. Trusted routing
 
@@ -161,11 +208,11 @@ update-log versus periodic-snapshot decision revisited from #31's recovery and
 write-churn measurements.
 
 There is no false atomicity claim between a catalog transaction and an arbitrary
-later Yjs snapshot. Operations that change both catalog and content must define
-their recovery protocol explicitly: record an operation ID, make retries
-idempotent, and recover on restart from the catalog operation/outbox state plus
-the relevant shard snapshot. Deleting or moving a Document must not publish its
-catalog event until its required durable transition is complete.
+later Yjs snapshot. Operations that change both catalog and content use the
+durable operation state in §4: record an operation ID, make retries idempotent,
+persist a shard completion marker, and recover on restart from the operation,
+outbox, and relevant shard snapshot. Deleting or moving a Document must not
+publish its catalog event until its required durable transition is complete.
 
 Each shard supports lazy loading and flushing. It may unload only when it has no
 authorized live connections, no active holds requiring it, and no unflushed
@@ -174,8 +221,31 @@ serve the sidebar without opening content shards.
 
 ## 7. Migration
 
-The Phase-0 workspace migrates into one Workspace with one default Space. The
-migration preserves:
+The Phase-0 workspace migrates into one Workspace with one default Space. A
+versioned migration first loads the legacy snapshot into an isolated Y.Doc and
+records a manifest keyed by `(legacy_snapshot_id, migration_version)`. It then
+deterministically creates:
+
+- one catalog row and Document shard for each legacy Document, with its ordered
+  block records and Y.Text content;
+- one catalog row and Collection shard for each legacy Collection, with its
+  schema and rows; and
+- workspace-wide record-locator entries for every migrated block and row.
+
+The migration copies IDs exactly: `parentId`, record order, relation targets,
+page-link targets, and collection-view references retain their original IDs and
+are resolved only after the corresponding target locator exists. Each target
+shard is snapshotted with the migration operation ID and content checksum before
+the manifest records it durable. The catalog exposes the new workspace only
+after every planned target has a durable marker and the locator manifest is
+complete. Re-running a migration reuses verified targets from that manifest and
+creates no duplicate rows, records, or snapshots.
+
+The original mixed Y.Doc snapshot and its audit/recovery metadata remain a
+read-only legacy recovery unit until all target checksums, IDs, references,
+token grants, and restart recovery checks pass and an explicit retention policy
+permits removal. A failed migration leaves that unit intact and does not expose
+a partial catalog. The migration preserves:
 
 - Document, Collection, record, and relation IDs.
 - Document hierarchy and order.
@@ -183,13 +253,13 @@ migration preserves:
 - Token grants, actor attribution, audit history, and snapshot recovery data.
 
 Migration is versioned, idempotent, observable, and tested against a copied
-representative database. A failed migration leaves the original recovery unit
-intact and never partially exposes a catalog that points to unavailable shards.
+representative database.
 
 ## 8. Measurements that decide approval
 
-#31 must record, for a representative seeded workspace and realistic concurrent
-browser/MCP workload:
+The completed #31 baseline records the Phase-0 global-workspace envelope. #113
+must rerun the same representative seeded workspace and realistic concurrent
+browser/MCP workload with real shards, recording:
 
 - Per-Document and per-Collection encoded state size.
 - Catalog size, catalog refresh payload, and SSE reconnect/resync behavior.
@@ -212,9 +282,19 @@ require further partitioning or compaction.
 - A Space-scoped SSE subscriber never receives an event that reveals an
   inaccessible title, hierarchy, or existence signal.
 - A missed SSE event causes a revision-aware catalog resync, not a stale UI.
+- An opaque SSE cursor cannot reveal an inaccessible Space change; a changed or
+  ambiguous authorized scope causes a catalog resync.
 - UI and MCP operations enforce the same catalog, Space, and shard scope.
 - A cross-document agent hold works only for records the caller can access and
   does not expose active editing state outside the relevant shard.
-- Existing data migrates losslessly into the default Space and survives restart.
-- Two local deployment instances remain isolated even when they run the same
-  Compendium version concurrently.
+- A duplicate caller-supplied record ID in two shards of one Workspace is
+  rejected, while independent Workspaces remain isolated.
+- Crash/restart recovery never emits a move/delete catalog event before its
+  target shard transition is durable, and retries remain idempotent.
+- Existing data migrates losslessly into the default Space and survives restart:
+  fixtures cover mixed Documents/Collections, IDs, embedded views, links,
+  recovery metadata, and a re-run after partial completion.
+- #111 proves two local deployment instances remain isolated even when they run
+  the same Compendium version concurrently; a later scale-out implementation
+  proves lease, outbox-claim, and event-backplane coordination within one
+  Deployment instance.
