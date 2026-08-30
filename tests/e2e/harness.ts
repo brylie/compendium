@@ -2,7 +2,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import WebSocket from 'ws';
+import WebSocket, { type RawData } from 'ws';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -43,10 +43,11 @@ export interface TestHarness {
 		allowedCollectionIds: string[];
 	}) => { token: string; record: AccessToken };
 	getMcpClient: (token: string) => Promise<Client>;
-	getYjsClient: () => {
+	getYjsClient: (options?: { disableBc?: boolean }) => {
 		doc: Y.Doc;
 		provider: WebsocketProvider;
 		awareness: WebsocketProvider['awareness'];
+		traffic: WebSocketTraffic;
 		disconnect: () => void;
 	};
 	waitForCondition: (
@@ -54,6 +55,27 @@ export interface TestHarness {
 		options?: { timeoutMs?: number; intervalMs?: number }
 	) => Promise<void>;
 	cleanup: () => Promise<void>;
+}
+
+/**
+ * Bytes received from the real Yjs WebSocket server by one test client.
+ *
+ * This deliberately measures the client-visible transport boundary: it covers
+ * initial state transfer and server fan-out without relying on internals of
+ * y-websocket's connection handler. It is useful to E2E tests and capacity
+ * benchmarks, while production telemetry remains a separate concern.
+ */
+export interface WebSocketTraffic {
+	receivedBytes: number;
+	receivedMessages: number;
+	reset: () => void;
+}
+
+function rawDataByteLength(data: RawData): number {
+	if (typeof data === 'string') return Buffer.byteLength(data);
+	if (Buffer.isBuffer(data)) return data.byteLength;
+	if (data instanceof ArrayBuffer) return data.byteLength;
+	return data.reduce((total, chunk) => total + chunk.byteLength, 0);
 }
 
 async function nodeRequestToWebRequest(
@@ -195,21 +217,41 @@ export async function createTestHarness(): Promise<TestHarness> {
 		return client;
 	}
 
-	function getYjsClient(): {
+	function getYjsClient(options: { disableBc?: boolean } = {}): {
 		doc: Y.Doc;
 		provider: WebsocketProvider;
 		awareness: WebsocketProvider['awareness'];
+		traffic: WebSocketTraffic;
 		disconnect: () => void;
 	} {
 		const doc = new Y.Doc();
+		const traffic: WebSocketTraffic = {
+			receivedBytes: 0,
+			receivedMessages: 0,
+			reset: () => {
+				traffic.receivedBytes = 0;
+				traffic.receivedMessages = 0;
+			}
+		};
+		class InstrumentedWebSocket extends WebSocket {
+			constructor(address: string | URL, protocols?: string | string[]) {
+				super(address, protocols);
+				this.on('message', (data: RawData) => {
+					traffic.receivedBytes += rawDataByteLength(data);
+					traffic.receivedMessages += 1;
+				});
+			}
+		}
 		const provider = new WebsocketProvider(wsUrl, 'workspace', doc, {
-			WebSocketPolyfill: WebSocket as unknown as typeof globalThis.WebSocket
+			WebSocketPolyfill: InstrumentedWebSocket as unknown as typeof globalThis.WebSocket,
+			disableBc: options.disableBc
 		});
 		yjsProviders.push(provider);
 		return {
 			doc,
 			provider,
 			awareness: provider.awareness,
+			traffic,
 			disconnect: () => {
 				provider.destroy();
 				doc.destroy();

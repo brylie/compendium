@@ -19,6 +19,7 @@ Compendium is a shared, real-time knowledge workspace: one SvelteKit app where a
 - [`persistence.md`](docs/specifications/persistence.md) — SQLite via Drizzle (snapshots, audit, tokens, read model)
 - [`service-layer.md`](docs/specifications/service-layer.md) / [`service-layer-manifest.md`](docs/specifications/service-layer-manifest.md) — where permission+audit logic must live
 - [`e2e-testing.md`](docs/specifications/e2e-testing.md) — why/how the Tier A + Tier B suites exist
+- [`crdt-capacity-baseline-2026-08-30.md`](docs/benchmarks/crdt-capacity-baseline-2026-08-30.md) — current measured global-workspace envelope and sharding decision gates
 - [`design-system.md`](docs/specifications/design-system.md) — UI tokens/conventions
 
 ## Commands
@@ -35,6 +36,9 @@ npx vitest run --project server                  # one vitest project only (serv
 npm run test:e2e:tier-a       # vitest, protocol-level MCP+Yjs parity tests (tests/e2e/tier-a.test.ts)
 npm run test:e2e:tier-b       # playwright, DOM-level (requires `npm run build` first — serves via build/handler.js)
 npm run test:e2e              # both tiers
+
+npm run benchmark:workspace        # bounded CRDT capacity profile; isolated temp DB + localhost server
+npm run benchmark:workspace:large  # manual CRDT capacity profile; run before/after shard or persistence changes
 
 npm run test:coverage         # coverage; thresholds are 80% stmts/branches/functions/lines (vite.config.ts)
 npm run check                 # svelte-kit sync && svelte-check (typecheck)
@@ -108,3 +112,22 @@ Unit tests calling `records.ts`/`services/*.ts` directly, and manual/Playwright-
 - **Tier B** (`tests/e2e/tier-b.spec.ts`, Playwright): real browser, but the triggering action still comes from a real MCP client call in the test's Node context. Reserved for behavior that specifically needs a rendered DOM (held-block shimmer, live sidebar tree updates) — keep this tier small.
 - Shared harness: `tests/e2e/harness.ts` (the only place that should know how to boot a full server instance for tests).
 - Vitest is split into three projects (`vite.config.ts`): `server` (node env, most of `src/**` + `tests/**`), `client` (jsdom, `src/lib/client/**`), `component` (jsdom + `browser` resolve condition, `src/**/*.svelte.test.ts` — needed because Vitest's default SSR condition resolves `svelte` to a build without `mount()`).
+
+## Capacity benchmark: required QA for CRDT and sharding work
+
+Read [`docs/specifications/e2e-testing.md`](docs/specifications/e2e-testing.md) §6 and the current
+[`docs/benchmarks/crdt-capacity-baseline-2026-08-30.md`](docs/benchmarks/crdt-capacity-baseline-2026-08-30.md)
+before changing the Yjs schema, WebSocket routing or fan-out, workspace/shard resolution, snapshot persistence,
+or the document/collection ownership model.
+
+- Run `npm run benchmark:workspace` for every PR that changes one of those boundaries or any other Yjs sync
+  behavior. It is deliberately separate from `npm run test` and coverage so normal checks stay bounded.
+- Run `npm run benchmark:workspace:large` manually before and after shard-aware routing, catalog/SSE integration,
+  compaction, snapshot-format, persistence, or sync-protocol redesign. Compare like-for-like runs; performance
+  values are trend evidence, not universal SLOs. [`e2e-testing.md`](docs/specifications/e2e-testing.md) §6 is
+  canonical if this short list needs interpretation.
+- Keep benchmark clients on WebSocket transport (`disableBc: true`) when reporting sync bytes. Do not re-enable
+  BroadcastChannel sharing to make a profile look smaller.
+- If a guardrail fails or the result crosses a documented sharding trigger, stop treating it as a test-only
+  regression: record the result in a dated benchmark note and link the implementation issue/PR. Update the
+  baseline only after explaining the fixture or architecture change that makes the comparison valid.

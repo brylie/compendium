@@ -184,6 +184,8 @@ for the shared record primitive.
 ```sh
 npm run test          # unit and component tests
 npm run test:e2e      # real MCP↔Yjs and browser-level flows
+npm run benchmark:workspace        # bounded CRDT capacity profile
+npm run benchmark:workspace:large  # manual sharding/persistence profile
 npm run check         # Svelte and TypeScript checks
 npm run lint          # formatting and lint rules
 npm run build         # production build
@@ -192,6 +194,14 @@ npm run build         # production build
 The E2E suites intentionally cross real transport boundaries. A feature is not
 considered integrated merely because its UI and service functions pass in
 isolation.
+
+The capacity benchmark is intentionally separate from routine tests so it can
+measure a real temporary SQLite + WebSocket + MCP workspace without making
+ordinary checks environment-sensitive. Run the bounded profile for CRDT,
+sync, snapshot, or routing changes; run both profiles before and after
+shard-aware routing, catalog/SSE integration, compaction, snapshot-format,
+persistence, or sync-protocol redesign. See the [testing strategy](docs/specifications/e2e-testing.md#6-capacity-benchmark--crdt-and-sharding-regression-gate)
+for the canonical selection rules and the [current baseline](docs/benchmarks/crdt-capacity-baseline-2026-08-30.md).
 
 ## Roadmap
 

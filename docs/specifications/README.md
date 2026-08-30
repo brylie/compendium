@@ -13,7 +13,7 @@ Canonical specification for each implemented subsystem, translating [`prd.md`](.
 - [`persistence.md`](./persistence.md) — SQLite via Drizzle: snapshots, audit log, access tokens, and the query read model.
 - [`audit-coverage.md`](./audit-coverage.md) — how direct UI mutations (which bypass the service layer entirely) and denied MCP attempts get an audit trail, and what's deliberately excluded.
 - [`service-layer.md`](./service-layer.md) / [`service-layer-manifest.md`](./service-layer-manifest.md) — how permission/audit logic is centralized once and shared by MCP and UI.
-- [`e2e-testing.md`](./e2e-testing.md) — the MCP/UI parity testing strategy.
+- [`e2e-testing.md`](./e2e-testing.md) — MCP/UI parity and CRDT capacity benchmark strategy.
 - [`design-system.md`](./design-system.md) — UI tokens and conventions.
 
 ## Out of scope for the current architecture

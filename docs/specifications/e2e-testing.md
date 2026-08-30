@@ -87,3 +87,65 @@ This harness is the only thing that should know how to boot a full server instan
 ## 5. Relationship to existing and future unit tests
 
 This spec doesn't replace `records.ts`'s existing unit tests, or the equivalent tests the service layer (`service-layer.md`) will need — those stay valuable for fast, fine-grained coverage of CRDT and business-rule logic. Tier A is specifically for the narrower, higher-value class of bug that only exists at the transport boundary between two independent real clients — write a Tier A test whenever a change touches anything permission-, grant-, hold-, or attribution-related, since those are exactly the categories where "worked in the unit test, broke for a real second agent call" has already happened once.
+
+## 6. Capacity benchmark — CRDT and sharding regression gate
+
+Tier A proves that a small number of real clients converge correctly. It does
+not establish that the shared state stays within a workable resource envelope
+as documents, Collections, concurrent clients, and MCP activity grow. The
+capacity benchmark fills that gap while preserving the same real server, Yjs
+WebSocket, MCP HTTP, and temporary SQLite boundaries.
+
+### Profiles and commands
+
+```sh
+npm run benchmark:workspace        # `daily`: bounded profile, suitable for CI
+npm run benchmark:workspace:large  # `large`: manual pre/post-change comparison
+```
+
+The benchmark lives in `tests/benchmark/workspace-capacity.test.ts` and runs
+in its own Vitest project. It is intentionally excluded from `npm run test`
+and coverage: performance work must stay discoverable and repeatable without
+making ordinary correctness checks slow or environment-sensitive. Every run
+creates a temporary SQLite database and random local port; it must never point
+at a developer's running workspace database.
+
+`daily` uses a small knowledgebase fixture and carries conservative CI
+guardrails. `large` is deliberately not a CI gate: use it before and after a
+change where state topology or transport cost could change, then publish the
+two results with the environment and fixture in a dated note under
+`docs/benchmarks/`.
+
+### When an engineer or agent must run it
+
+Run the bounded profile for a PR that changes any of the following:
+
+- the Yjs record schema, encoded representation, or document/Collection
+  ownership model;
+- `attach-ws.ts`, WebSocket connection lifecycle, routing, or update fan-out;
+- `workspace-store.ts`, shard selection, context lifecycle, or snapshot load/
+  flush behavior;
+- MCP write paths that change edit churn, cross-client update application, or
+  persistence behavior.
+
+Run both profiles for shard-aware routing, catalog/SSE integration, compaction,
+snapshot-format, or persistence redesign. For the workspace-catalog work,
+this is a required before-and-after acceptance check, not an optional
+optimization exercise.
+
+### How to interpret and maintain results
+
+The suite records encoded state/snapshot size, client-visible initial-sync and
+fan-out bytes, convergence and MCP-write timing, restart time, and Node host
+resource signals. Initial-sync measurements must have `disableBc: true` for
+every benchmark provider, including the seed client: otherwise same-process
+BroadcastChannel sharing bypasses WebSocket traffic and makes the transport
+envelope appear smaller than it is.
+
+Use the current [CRDT capacity baseline](../benchmarks/crdt-capacity-baseline-2026-08-30.md)
+as the decision record. Compare like-for-like results rather than treating
+machine-specific timings as universal SLOs. A daily-profile guardrail failure,
+a global snapshot of 2 MiB or more, or event-loop p99 of 100 ms or more is a
+sharding/compaction escalation: document it and link the related issue or PR.
+When an intentional fixture or architecture change makes a new baseline valid,
+write a new dated note; do not silently overwrite an old decision record.
