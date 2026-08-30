@@ -20,7 +20,11 @@ import {
 	reserveCollectionLocator,
 	recordCatalogCollectionCreated,
 	recordCatalogCollectionTitleChanged,
-	recordCatalogCollectionDeleted
+	recordCatalogCollectionDeleted,
+	reserveRecordLocator,
+	releaseRecordLocator,
+	resolveShardForParent,
+	resolveShardForRecord
 } from './catalog';
 
 const WS = 'default';
@@ -329,5 +333,58 @@ describe('catalog: two workspaces reusing the same record id stay isolated', () 
 		expect(
 			listCatalogCollections('workspace-d').find((c) => c.id === 'shared-collection-id')?.title
 		).toBe('Workspace D Table');
+	});
+});
+
+describe('catalog: record/row locator and shard resolution (#120)', () => {
+	it('resolveShardForParent finds a Document or Collection by its own id', () => {
+		const { defaultSpaceId } = bootstrap();
+		reserveDocumentLocator(WS, defaultSpaceId, 'a-document', SHARD);
+		reserveCollectionLocator(WS, defaultSpaceId, 'a-collection', 'other-shard');
+
+		expect(resolveShardForParent(WS, 'a-document')).toEqual({ shardId: SHARD, kind: 'document' });
+		expect(resolveShardForParent(WS, 'a-collection')).toEqual({
+			shardId: 'other-shard',
+			kind: 'collection'
+		});
+	});
+
+	it('resolveShardForParent returns undefined for an untracked id', () => {
+		bootstrap();
+		expect(resolveShardForParent(WS, 'never-created')).toBeUndefined();
+	});
+
+	it('reserves and resolves a record/row locator independently of Document/Collection locators', () => {
+		const { defaultSpaceId } = bootstrap();
+		reserveRecordLocator(WS, defaultSpaceId, 'row-1', 'collection-shard-x');
+
+		expect(resolveShardForRecord(WS, 'row-1')).toEqual({ shardId: 'collection-shard-x' });
+		// A record-kind locator entry must never satisfy a parent lookup — a
+		// row is never itself a valid parentId.
+		expect(resolveShardForParent(WS, 'row-1')).toBeUndefined();
+	});
+
+	it('releaseRecordLocator removes the entry, and the id becomes reservable again', () => {
+		const { defaultSpaceId } = bootstrap();
+		reserveRecordLocator(WS, defaultSpaceId, 'row-2', SHARD);
+		expect(resolveShardForRecord(WS, 'row-2')).toEqual({ shardId: SHARD });
+
+		releaseRecordLocator(WS, 'row-2');
+
+		expect(resolveShardForRecord(WS, 'row-2')).toBeUndefined();
+		expect(() => reserveRecordLocator(WS, defaultSpaceId, 'row-2', SHARD)).not.toThrow();
+	});
+
+	it('releaseRecordLocator on a never-reserved id is a safe no-op', () => {
+		bootstrap();
+		expect(() => releaseRecordLocator(WS, 'never-reserved')).not.toThrow();
+	});
+
+	it('rejects a duplicate record id reservation, consistent with Document/Collection locators', () => {
+		const { defaultSpaceId } = bootstrap();
+		reserveRecordLocator(WS, defaultSpaceId, 'row-3', SHARD);
+		expect(() => reserveRecordLocator(WS, defaultSpaceId, 'row-3', SHARD)).toThrow(
+			RecordIdConflictError
+		);
 	});
 });

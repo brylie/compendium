@@ -22,6 +22,7 @@ import {
 	actorForCaller,
 	isAccessToken,
 	requireAccessibleParent,
+	resolveParentWorkspaceContext,
 	type CallerIdentity
 } from './permissions';
 
@@ -89,7 +90,7 @@ export function queryCollection(
 	collection: CollectionMeta | undefined;
 	records: WorkspaceRecord[];
 } {
-	const { doc } = resolveWorkspaceContext();
+	const { doc } = resolveParentWorkspaceContext(collectionId);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, collectionId, 'query_collection');
@@ -101,7 +102,7 @@ export function queryCollection(
 }
 
 export function deleteCollection(caller: CallerIdentity, collectionId: string): void {
-	const { doc, workspaceId } = resolveWorkspaceContext();
+	const { doc, workspaceId } = resolveParentWorkspaceContext(collectionId);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, collectionId, 'delete_collection');
@@ -115,7 +116,7 @@ export function updateCollectionTitle(
 	collectionId: string,
 	title: string
 ): void {
-	const { doc, workspaceId } = resolveWorkspaceContext();
+	const { doc, workspaceId } = resolveParentWorkspaceContext(collectionId);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, collectionId, 'update_collection_title');
