@@ -98,18 +98,51 @@ export function applyFilters(
 	);
 }
 
+// A `select` value's rank is its position in the field's own `options`
+// array — the same order Board's `groupBySelectProperty` already renders
+// columns in (data-model.md's canonical Select order). An option id no
+// longer present there (deleted, or from a schema the caller doesn't have
+// loaded) has no rank — `undefined`, so it falls into the same "empty"
+// bucket `isEmptyComparable` already sorts last, matching
+// `groupBySelectProperty`'s own catch-all "No <property>" column treatment
+// of an unknown id. This is the one canonical Select-order contract every
+// renderer (Table/Board/Calendar sort, and Board's column order) shares.
+function selectOptionRank(
+	property: PropertyDefinition | undefined,
+	optionId: string
+): number | undefined {
+	const index = property?.options?.findIndex((o) => o.id === optionId) ?? -1;
+	return index === -1 ? undefined : index;
+}
+
+// Like comparableValue, except a `select` value sorts by its configured
+// option-array position rather than its opaque, generated option id — a
+// plain string comparison of ids bears no relationship to the workflow
+// order (e.g. "Backlog → In progress → Done") the field's options define.
+// Every other type keeps comparableValue's existing type-appropriate
+// comparison unchanged.
+function sortComparableValue(
+	value: PropertyValue | undefined,
+	property: PropertyDefinition | undefined
+): Comparable {
+	if (value?.type === 'select') return selectOptionRank(property, value.value);
+	return comparableValue(value);
+}
+
 export function applySort(
 	records: WorkspaceRecord[],
+	schema: PropertyDefinition[],
 	sort: ViewSort | undefined
 ): WorkspaceRecord[] {
 	if (!sort || sort.mode !== 'property' || !sort.propertyKey) return records;
 	const key = sort.propertyKey;
+	const property = schema.find((p) => p.key === key);
 	const dir = sort.direction === 'desc' ? -1 : 1;
 	// Empties always sort last, regardless of direction — an "asc" sort by a
 	// mostly-empty property shouldn't bury every populated row on the last page.
 	return [...records].sort((a, b) => {
-		const av = comparableValue(a.properties?.[key]);
-		const bv = comparableValue(b.properties?.[key]);
+		const av = sortComparableValue(a.properties?.[key], property);
+		const bv = sortComparableValue(b.properties?.[key], property);
 		if (isEmptyComparable(av) && isEmptyComparable(bv)) return 0;
 		if (isEmptyComparable(av)) return 1;
 		if (isEmptyComparable(bv)) return -1;
@@ -119,8 +152,12 @@ export function applySort(
 	});
 }
 
-export function projectRecords(records: WorkspaceRecord[], config: ViewConfig): WorkspaceRecord[] {
-	return applySort(applyFilters(records, config.filters), config.sort);
+export function projectRecords(
+	records: WorkspaceRecord[],
+	schema: PropertyDefinition[],
+	config: ViewConfig
+): WorkspaceRecord[] {
+	return applySort(applyFilters(records, config.filters), schema, config.sort);
 }
 
 export function visibleProperties(

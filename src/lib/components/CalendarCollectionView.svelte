@@ -51,7 +51,7 @@
 	const dateProperties = $derived(schema.filter((p) => p.type === 'date'));
 	const dateProperty = $derived(schema.find((p) => p.key === config.groupBy));
 	const titleProperty = $derived(resolvePrimaryField(schema, primaryFieldKey));
-	const projected = $derived(projectRecords(rows, config));
+	const projected = $derived(projectRecords(rows, schema, config));
 	const entryFields = $derived(
 		visibleProperties(schema, config).filter(
 			(p) => p.key !== config.groupBy && p.key !== titleProperty?.key
