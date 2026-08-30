@@ -19,8 +19,34 @@ export interface HoldAwarenessState {
 
 const AGENT_HOLD_TTL_MS = 100_000; // PRD target: 90-120s
 
-const agentClocks = new Map<number, number>();
-const agentTtlTimers = new Map<number, ReturnType<typeof setTimeout>>();
+// Keyed by Awareness *and* clientId, not clientId alone: the synthetic
+// clientId is deterministic per access token (see clientIdForToken below),
+// so the same token produces the same clientId regardless of which shard's
+// Awareness it's operating against. A cross-shard agent hold batch (a
+// stated acceptance criterion — see docs/specifications/collaboration.md)
+// can legitimately hold records on two different Awareness instances under
+// the same clientId; a flat Map<number, ...> would let the second
+// scheduleTtl() call silently cancel the first shard's timer.
+const agentClocks = new Map<Awareness, Map<number, number>>();
+const agentTtlTimers = new Map<Awareness, Map<number, ReturnType<typeof setTimeout>>>();
+
+function clocksFor(awareness: Awareness): Map<number, number> {
+	let clocks = agentClocks.get(awareness);
+	if (!clocks) {
+		clocks = new Map();
+		agentClocks.set(awareness, clocks);
+	}
+	return clocks;
+}
+
+function timersFor(awareness: Awareness): Map<number, ReturnType<typeof setTimeout>> {
+	let timers = agentTtlTimers.get(awareness);
+	if (!timers) {
+		timers = new Map();
+		agentTtlTimers.set(awareness, timers);
+	}
+	return timers;
+}
 // Per-Awareness-instance, not a single module-level flag: workspace-store.ts
 // can resolve more than one concurrent {workspaceId, shardId} context (each
 // with its own Awareness) — a single boolean guard would wire eviction only
@@ -92,7 +118,9 @@ export function initHoldEviction(awareness: Awareness): void {
 export function resetHoldEvictionForTests(): void {
 	wiredAwareness = new WeakSet<Awareness>();
 	agentClocks.clear();
-	agentTtlTimers.forEach((timer) => clearTimeout(timer));
+	for (const timers of agentTtlTimers.values()) {
+		for (const timer of timers.values()) clearTimeout(timer);
+	}
 	agentTtlTimers.clear();
 }
 
@@ -117,8 +145,9 @@ function writeRemoteState(
 	clientId: number,
 	state: HoldAwarenessState | null
 ): void {
-	const clock = (agentClocks.get(clientId) ?? 0) + 1;
-	agentClocks.set(clientId, clock);
+	const clocks = clocksFor(awareness);
+	const clock = (clocks.get(clientId) ?? 0) + 1;
+	clocks.set(clientId, clock);
 
 	const encoder = encoding.createEncoder();
 	encoding.writeVarUint(encoder, 1);
@@ -180,7 +209,7 @@ export function requestAgentHold(
 			scheduleTtl(awareness, clientId);
 		} else {
 			writeRemoteState(awareness, clientId, null);
-			clearTtl(clientId);
+			clearTtl(awareness, clientId);
 		}
 	}
 
@@ -197,14 +226,14 @@ export function releaseAgentHold(
 
 	if (!recordIds) {
 		writeRemoteState(awareness, clientId, null);
-		clearTtl(clientId);
+		clearTtl(awareness, clientId);
 		return;
 	}
 
 	const nextHeld = existing.heldRecordIds.filter((id) => !recordIds.includes(id));
 	if (nextHeld.length === 0) {
 		writeRemoteState(awareness, clientId, null);
-		clearTtl(clientId);
+		clearTtl(awareness, clientId);
 	} else {
 		writeRemoteState(awareness, clientId, { ...existing, heldRecordIds: nextHeld });
 		scheduleTtl(awareness, clientId);
@@ -216,25 +245,29 @@ export function isHeldByClient(awareness: Awareness, clientId: number, recordId:
 }
 
 function scheduleTtl(awareness: Awareness, clientId: number): void {
-	clearTtl(clientId);
+	clearTtl(awareness, clientId);
+	const timers = timersFor(awareness);
 	const timer = setTimeout(() => {
 		writeRemoteState(awareness, clientId, null);
-		agentTtlTimers.delete(clientId);
+		timersFor(awareness).delete(clientId);
 	}, AGENT_HOLD_TTL_MS);
 	timer.unref?.();
-	agentTtlTimers.set(clientId, timer);
+	timers.set(clientId, timer);
 }
 
-function clearTtl(clientId: number): void {
-	const timer = agentTtlTimers.get(clientId);
+function clearTtl(awareness: Awareness, clientId: number): void {
+	const timers = timersFor(awareness);
+	const timer = timers.get(clientId);
 	if (timer) clearTimeout(timer);
-	agentTtlTimers.delete(clientId);
+	timers.delete(clientId);
 }
 
 /** Test-only: drop module-level state between test runs. */
 export function resetHoldsForTests(): void {
 	agentClocks.clear();
-	for (const timer of agentTtlTimers.values()) clearTimeout(timer);
+	for (const timers of agentTtlTimers.values()) {
+		for (const timer of timers.values()) clearTimeout(timer);
+	}
 	agentTtlTimers.clear();
 	wiredAwareness = new WeakSet<Awareness>();
 }

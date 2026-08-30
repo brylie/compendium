@@ -248,3 +248,62 @@ describe('holds: eviction wiring across multiple concurrent Awareness instances 
 		expect(isHeldByClient(awarenessB, clientId, 'r2')).toBe(false);
 	});
 });
+
+describe('holds: TTL timers scoped per-Awareness, not by clientId alone (#120)', () => {
+	// The same access token always maps to the same synthetic clientId,
+	// regardless of which shard's Awareness it's holding records on — a
+	// cross-shard agent hold batch (a stated acceptance criterion) can
+	// legitimately hold under that same clientId on two different Awareness
+	// instances at once. A TTL timer map keyed only by clientId would let
+	// the second shard's scheduleTtl() silently cancel the first shard's
+	// timer, so the first hold would never auto-expire.
+	let docA: Y.Doc;
+	let docB: Y.Doc;
+	let awarenessA: Awareness;
+	let awarenessB: Awareness;
+
+	beforeEach(() => {
+		resetHoldsForTests();
+		docA = new Y.Doc();
+		docB = new Y.Doc();
+		awarenessA = new Awareness(docA);
+		awarenessB = new Awareness(docB);
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		awarenessA.destroy();
+		awarenessB.destroy();
+	});
+
+	it('a hold on one shard keeps its own TTL even after the same clientId schedules a hold on another shard', () => {
+		const clientId = clientIdForToken('token-a');
+
+		requestAgentHold(awarenessA, clientId, agent, ['r1'], () => true);
+		vi.advanceTimersByTime(60_000);
+		// Scheduling a second, later hold under the *same* clientId on a
+		// *different* Awareness must not reset or cancel shard A's timer.
+		requestAgentHold(awarenessB, clientId, agent, ['r2'], () => true);
+
+		vi.advanceTimersByTime(39_999); // 99,999ms since A's grant
+		expect(isHeldByClient(awarenessA, clientId, 'r1')).toBe(true);
+		vi.advanceTimersByTime(1); // 100,000ms since A's grant
+		expect(isHeldByClient(awarenessA, clientId, 'r1')).toBe(false);
+	});
+
+	it('both shards expire independently at their own 100s boundary', () => {
+		const clientId = clientIdForToken('token-a');
+
+		requestAgentHold(awarenessA, clientId, agent, ['r1'], () => true);
+		vi.advanceTimersByTime(50_000);
+		requestAgentHold(awarenessB, clientId, agent, ['r2'], () => true);
+
+		vi.advanceTimersByTime(50_000); // 100,000ms since A, 50,000ms since B
+		expect(isHeldByClient(awarenessA, clientId, 'r1')).toBe(false);
+		expect(isHeldByClient(awarenessB, clientId, 'r2')).toBe(true);
+
+		vi.advanceTimersByTime(50_000); // 100,000ms since B
+		expect(isHeldByClient(awarenessB, clientId, 'r2')).toBe(false);
+	});
+});
