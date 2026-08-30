@@ -3,6 +3,7 @@ import {
 	createCollection as crdtCreateCollection,
 	deleteCollection as crdtDeleteCollection,
 	getCollection as crdtGetCollection,
+	getDocument as crdtGetDocument,
 	listCollections as crdtListCollections,
 	listRecordsForParent as crdtListRecordsForParent,
 	updateCollectionTitle as crdtUpdateCollectionTitle
@@ -41,9 +42,10 @@ export function createCollection(
 	const id = input.id ?? nanoid();
 	// See documents.ts's createDocument for why this also checks the live
 	// Y.Doc, not just the catalog locator: a caller-supplied id could collide
-	// with a Collection created by a client writing directly to the Y.Doc,
+	// with content created by a client writing directly to the Y.Doc,
 	// bypassing the service layer (and therefore the locator) entirely.
-	if (crdtGetCollection(doc, id)) {
+	// Checked against both maps — see createDocument's comment for why.
+	if (crdtGetCollection(doc, id) || crdtGetDocument(doc, id)) {
 		throw new RecordIdConflictError(id);
 	}
 	reserveCollectionLocator(workspaceId, defaultSpaceId, id, shardId);

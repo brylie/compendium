@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { eq } from 'drizzle-orm';
 import { getDb } from './store';
-import { catalogDocuments, catalogOutbox, catalogRevisions, spaces } from './db/schema';
+import {
+	catalogDocuments,
+	catalogOutbox,
+	catalogRevisions,
+	recordLocator,
+	spaces
+} from './db/schema';
 import {
 	createDocument as crdtCreateDocument,
 	createCollection as crdtCreateCollection
@@ -329,5 +335,62 @@ describe('catalog: two workspaces reusing the same record id stay isolated', () 
 		expect(
 			listCatalogCollections('workspace-d').find((c) => c.id === 'shared-collection-id')?.title
 		).toBe('Workspace D Table');
+	});
+});
+
+describe('catalog: spaceId is workspace-scoped, not just globally unique', () => {
+	it('rejects a catalog_documents row whose workspaceId disagrees with its spaceId’s real workspace', () => {
+		const { defaultSpaceId } = bootstrap();
+		expect(() =>
+			getDb()
+				.insert(catalogDocuments)
+				.values({
+					id: 'mismatched-doc',
+					workspaceId: 'a-different-workspace', // defaultSpaceId belongs to WS ('default'), not this one
+					spaceId: defaultSpaceId,
+					shardId: SHARD,
+					title: 'Should Be Rejected',
+					order: 'a0',
+					createdAt: Date.now(),
+					updatedAt: Date.now()
+				})
+				.run()
+		).toThrow(/FOREIGN KEY constraint failed/);
+	});
+
+	it('rejects a record_locator row whose workspaceId disagrees with its spaceId’s real workspace', () => {
+		const { defaultSpaceId } = bootstrap();
+		expect(() =>
+			getDb()
+				.insert(recordLocator)
+				.values({
+					workspaceId: 'a-different-workspace',
+					recordId: 'mismatched-record',
+					kind: 'document',
+					spaceId: defaultSpaceId,
+					shardId: SHARD,
+					createdAt: Date.now()
+				})
+				.run()
+		).toThrow(/FOREIGN KEY constraint failed/);
+	});
+
+	it('accepts a row whose workspaceId correctly matches its spaceId’s real workspace', () => {
+		const { defaultSpaceId } = bootstrap();
+		expect(() =>
+			getDb()
+				.insert(catalogDocuments)
+				.values({
+					id: 'matched-doc',
+					workspaceId: WS,
+					spaceId: defaultSpaceId,
+					shardId: SHARD,
+					title: 'Correctly Matched',
+					order: 'a0',
+					createdAt: Date.now(),
+					updatedAt: Date.now()
+				})
+				.run()
+		).not.toThrow();
 	});
 });
