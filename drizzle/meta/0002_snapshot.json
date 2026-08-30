@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f2e87a44-6451-4ed1-baea-48026ac2b2e8",
+  "id": "1ee39636-c8f7-42e4-8d5b-68aa201b6088",
   "prevId": "ae36812a-00d1-455c-acae-ba1fde05dbb1",
   "tables": {
     "access_tokens": {
@@ -165,14 +165,16 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "catalog_collections_space_id_spaces_id_fk": {
-          "name": "catalog_collections_space_id_spaces_id_fk",
+        "catalog_collections_workspace_id_space_id_spaces_workspace_id_id_fk": {
+          "name": "catalog_collections_workspace_id_space_id_spaces_workspace_id_id_fk",
           "tableFrom": "catalog_collections",
           "tableTo": "spaces",
           "columnsFrom": [
+            "workspace_id",
             "space_id"
           ],
           "columnsTo": [
+            "workspace_id",
             "id"
           ],
           "onDelete": "no action",
@@ -262,14 +264,16 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "catalog_documents_space_id_spaces_id_fk": {
-          "name": "catalog_documents_space_id_spaces_id_fk",
+        "catalog_documents_workspace_id_space_id_spaces_workspace_id_id_fk": {
+          "name": "catalog_documents_workspace_id_space_id_spaces_workspace_id_id_fk",
           "tableFrom": "catalog_documents",
           "tableTo": "spaces",
           "columnsFrom": [
+            "workspace_id",
             "space_id"
           ],
           "columnsTo": [
+            "workspace_id",
             "id"
           ],
           "onDelete": "no action",
@@ -447,14 +451,16 @@
         }
       },
       "foreignKeys": {
-        "record_locator_space_id_spaces_id_fk": {
-          "name": "record_locator_space_id_spaces_id_fk",
+        "record_locator_workspace_id_space_id_spaces_workspace_id_id_fk": {
+          "name": "record_locator_workspace_id_space_id_spaces_workspace_id_id_fk",
           "tableFrom": "record_locator",
           "tableTo": "spaces",
           "columnsFrom": [
+            "workspace_id",
             "space_id"
           ],
           "columnsTo": [
+            "workspace_id",
             "id"
           ],
           "onDelete": "no action",
@@ -545,7 +551,16 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "spaces_workspace_id_unique": {
+          "name": "spaces_workspace_id_unique",
+          "columns": [
+            "workspace_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

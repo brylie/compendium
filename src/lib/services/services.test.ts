@@ -857,6 +857,38 @@ describe('service layer: catalog stays in sync with Y.Doc document/collection mu
 		).toThrow(RecordIdConflictError);
 		expect(crdtGetCollection(doc, direct.id)?.title).toBe('Written Directly To The Y.Doc');
 	});
+
+	it('rejects createDocument when the id already names a Collection (cross-type collision, direct Y.Doc write)', () => {
+		const { doc } = resolveWorkspaceContext();
+		const directCollection = crdtCreateCollection(doc, {
+			title: 'A Collection, Written Directly',
+			schema: []
+		});
+
+		expect(() =>
+			createDocument(human, { id: directCollection.id, title: 'Cross-Type Attempt' })
+		).toThrow(RecordIdConflictError);
+		// The Collection must remain intact and still reachable — not silently
+		// shadowed by a same-id Document entry (documentsMap/collectionsMap are
+		// separate Y.Maps, so a same-id Document wouldn't overwrite it, but
+		// parentKindOf checks the documents map first, making the Collection
+		// permanently unreachable via any parentId lookup once both exist).
+		expect(crdtGetCollection(doc, directCollection.id)?.title).toBe(
+			'A Collection, Written Directly'
+		);
+		expect(crdtGetDocument(doc, directCollection.id)).toBeUndefined();
+	});
+
+	it('rejects createCollection when the id already names a Document (cross-type collision, direct Y.Doc write)', () => {
+		const { doc } = resolveWorkspaceContext();
+		const directDocument = crdtCreateDocument(doc, { title: 'A Document, Written Directly' });
+
+		expect(() =>
+			createCollection(human, { id: directDocument.id, title: 'Cross-Type Attempt', schema: [] })
+		).toThrow(RecordIdConflictError);
+		expect(crdtGetDocument(doc, directDocument.id)?.title).toBe('A Document, Written Directly');
+		expect(crdtGetCollection(doc, directDocument.id)).toBeUndefined();
+	});
 });
 
 describe('service layer: resolves a genuinely separate Collection shard (#120)', () => {

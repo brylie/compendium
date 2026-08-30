@@ -1,4 +1,12 @@
-import { blob, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+	blob,
+	foreignKey,
+	integer,
+	primaryKey,
+	sqliteTable,
+	text,
+	uniqueIndex
+} from 'drizzle-orm/sqlite-core';
 import type { ActorId } from '$lib/data/types';
 
 export const snapshots = sqliteTable('snapshots', {
@@ -42,12 +50,19 @@ export const accessTokens = sqliteTable('access_tokens', {
 // today); the column exists now so Phase B's real per-Document/per-Collection
 // shard split is a query-scoping change, not another migration.
 
-export const spaces = sqliteTable('spaces', {
-	id: text('id').primaryKey(),
-	workspaceId: text('workspace_id').notNull().default('default'),
-	name: text('name').notNull(),
-	createdAt: integer('created_at').notNull()
-});
+export const spaces = sqliteTable(
+	'spaces',
+	{
+		id: text('id').primaryKey(),
+		workspaceId: text('workspace_id').notNull().default('default'),
+		name: text('name').notNull(),
+		createdAt: integer('created_at').notNull()
+	},
+	// (workspaceId, id) is already implied unique by id's own global PK, but
+	// SQLite still requires an explicit unique constraint on exactly this
+	// column tuple to be the target of a composite foreign key below.
+	(t) => [uniqueIndex('spaces_workspace_id_unique').on(t.workspaceId, t.id)]
+);
 
 // Primary key is (workspaceId, id), not bare id: record_locator scopes
 // uniqueness the same way (a recordId is only unique *within* a workspace),
@@ -59,9 +74,7 @@ export const catalogDocuments = sqliteTable(
 	{
 		id: text('id').notNull(), // == the Y.Doc DocumentMeta.id it mirrors
 		workspaceId: text('workspace_id').notNull().default('default'),
-		spaceId: text('space_id')
-			.notNull()
-			.references(() => spaces.id),
+		spaceId: text('space_id').notNull(),
 		shardId: text('shard_id').notNull().default('default'),
 		title: text('title').notNull(),
 		// Deliberately NOT a foreign key: a Document can be created by a client
@@ -77,7 +90,17 @@ export const catalogDocuments = sqliteTable(
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at').notNull()
 	},
-	(t) => [primaryKey({ columns: [t.workspaceId, t.id] })]
+	(t) => [
+		primaryKey({ columns: [t.workspaceId, t.id] }),
+		// Composite, not a plain spaceId -> spaces.id reference: a bare
+		// reference would let this row's workspaceId disagree with the
+		// referenced Space's own workspaceId (spaces.id alone is globally
+		// unique, so it can't catch that mismatch on its own).
+		foreignKey({
+			columns: [t.workspaceId, t.spaceId],
+			foreignColumns: [spaces.workspaceId, spaces.id]
+		})
+	]
 );
 
 export const catalogCollections = sqliteTable(
@@ -85,9 +108,7 @@ export const catalogCollections = sqliteTable(
 	{
 		id: text('id').notNull(), // == the Y.Doc CollectionMeta.id it mirrors
 		workspaceId: text('workspace_id').notNull().default('default'),
-		spaceId: text('space_id')
-			.notNull()
-			.references(() => spaces.id),
+		spaceId: text('space_id').notNull(),
 		shardId: text('shard_id').notNull().default('default'),
 		title: text('title').notNull(),
 		// No parent/order (Collections are flat) and no schema mirror — schema
@@ -95,7 +116,13 @@ export const catalogCollections = sqliteTable(
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at').notNull()
 	},
-	(t) => [primaryKey({ columns: [t.workspaceId, t.id] })]
+	(t) => [
+		primaryKey({ columns: [t.workspaceId, t.id] }),
+		foreignKey({
+			columns: [t.workspaceId, t.spaceId],
+			foreignColumns: [spaces.workspaceId, spaces.id]
+		})
+	]
 );
 
 // The workspace-wide (workspace_id, record_id) locator required by §3.1: the
@@ -110,13 +137,17 @@ export const recordLocator = sqliteTable(
 		workspaceId: text('workspace_id').notNull().default('default'),
 		recordId: text('record_id').notNull(),
 		kind: text('kind').notNull().$type<'document' | 'collection' | 'record'>(),
-		spaceId: text('space_id')
-			.notNull()
-			.references(() => spaces.id),
+		spaceId: text('space_id').notNull(),
 		shardId: text('shard_id').notNull().default('default'),
 		createdAt: integer('created_at').notNull()
 	},
-	(t) => [uniqueIndex('record_locator_workspace_record_unique').on(t.workspaceId, t.recordId)]
+	(t) => [
+		uniqueIndex('record_locator_workspace_record_unique').on(t.workspaceId, t.recordId),
+		foreignKey({
+			columns: [t.workspaceId, t.spaceId],
+			foreignColumns: [spaces.workspaceId, spaces.id]
+		})
+	]
 );
 
 export const catalogRevisions = sqliteTable('catalog_revisions', {

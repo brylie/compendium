@@ -7,7 +7,7 @@ CREATE TABLE `catalog_collections` (
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
 	PRIMARY KEY(`workspace_id`, `id`),
-	FOREIGN KEY (`space_id`) REFERENCES `spaces`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`workspace_id`,`space_id`) REFERENCES `spaces`(`workspace_id`,`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE TABLE `catalog_documents` (
@@ -21,7 +21,7 @@ CREATE TABLE `catalog_documents` (
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
 	PRIMARY KEY(`workspace_id`, `id`),
-	FOREIGN KEY (`space_id`) REFERENCES `spaces`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`workspace_id`,`space_id`) REFERENCES `spaces`(`workspace_id`,`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE TABLE `catalog_outbox` (
@@ -48,7 +48,7 @@ CREATE TABLE `record_locator` (
 	`space_id` text NOT NULL,
 	`shard_id` text DEFAULT 'default' NOT NULL,
 	`created_at` integer NOT NULL,
-	FOREIGN KEY (`space_id`) REFERENCES `spaces`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`workspace_id`,`space_id`) REFERENCES `spaces`(`workspace_id`,`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `record_locator_workspace_record_unique` ON `record_locator` (`workspace_id`,`record_id`);--> statement-breakpoint
@@ -58,3 +58,5 @@ CREATE TABLE `spaces` (
 	`name` text NOT NULL,
 	`created_at` integer NOT NULL
 );
+--> statement-breakpoint
+CREATE UNIQUE INDEX `spaces_workspace_id_unique` ON `spaces` (`workspace_id`,`id`);
