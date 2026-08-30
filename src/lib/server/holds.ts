@@ -21,7 +21,12 @@ const AGENT_HOLD_TTL_MS = 100_000; // PRD target: 90-120s
 
 const agentClocks = new Map<number, number>();
 const agentTtlTimers = new Map<number, ReturnType<typeof setTimeout>>();
-let evictionWired = false;
+// Per-Awareness-instance, not a single module-level flag: workspace-store.ts
+// can resolve more than one concurrent {workspaceId, shardId} context (each
+// with its own Awareness) — a single boolean guard would wire eviction only
+// for whichever context happened to resolve first in the process, leaving
+// every other shard's cross-client hold eviction silently dead.
+let wiredAwareness = new WeakSet<Awareness>();
 
 /** Stable synthetic clientID for a given access token, so a stateless HTTP
  *  agent's holds persist across separate hold/write/release calls. */
@@ -66,8 +71,8 @@ export function aggregateHolds(awareness: Awareness): Map<string, ActorId> {
  * human's cursor already occupies.
  */
 export function initHoldEviction(awareness: Awareness): void {
-	if (evictionWired) return;
-	evictionWired = true;
+	if (wiredAwareness.has(awareness)) return;
+	wiredAwareness.add(awareness);
 
 	awareness.on(
 		'change',
@@ -85,7 +90,7 @@ export function initHoldEviction(awareness: Awareness): void {
 }
 
 export function resetHoldEvictionForTests(): void {
-	evictionWired = false;
+	wiredAwareness = new WeakSet<Awareness>();
 	agentClocks.clear();
 	agentTtlTimers.forEach((timer) => clearTimeout(timer));
 	agentTtlTimers.clear();
@@ -231,5 +236,5 @@ export function resetHoldsForTests(): void {
 	agentClocks.clear();
 	for (const timer of agentTtlTimers.values()) clearTimeout(timer);
 	agentTtlTimers.clear();
-	evictionWired = false;
+	wiredAwareness = new WeakSet<Awareness>();
 }
