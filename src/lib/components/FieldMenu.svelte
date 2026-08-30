@@ -11,7 +11,6 @@
 		duplicateCollectionProperty,
 		moveSelectOption,
 		previewCollectionPropertyTypeChange,
-		resolvePrimaryField,
 		setPrimaryField,
 		updateCollectionProperty,
 		updateCollectionSchema,
@@ -60,12 +59,17 @@
 	let errorMessage = $state('');
 	let panelStyle = $state('');
 
-	// The primary field (issue #96) — the record's title/identity field,
-	// resolved the same way Board/Calendar resolve their card/entry title
-	// (see resolvePrimaryField), so this indicator always matches what's
-	// actually showing as the title elsewhere, including the auto-fallback
-	// case where no field has been explicitly chosen yet.
-	const isPrimary = $derived(resolvePrimaryField(schema, primaryFieldKey)?.key === property.key);
+	// The primary field (issue #96) — whether this field is the Collection's
+	// *explicit* primaryFieldKey, not whether it's merely the resolved
+	// fallback (resolvePrimaryField's first-text default). Comparing against
+	// the resolved value here would make the fallback field's own toggle a
+	// no-op forever: with primaryFieldKey unset, resolvePrimaryField already
+	// returns the fallback field, so isPrimary would read true and the menu
+	// would only ever offer "Unset" — clicking it writes null onto an
+	// already-null key, leaving no way to actually persist that field as the
+	// explicit choice. Comparing the raw key lets a user promote the current
+	// fallback field to an explicit primaryFieldKey.
+	const isPrimary = $derived(primaryFieldKey === property.key);
 
 	// Select option lifecycle (issue #94) — only shown when the field is
 	// already a select field (not while editType is mid-change toward one;

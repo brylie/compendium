@@ -293,7 +293,10 @@ function isEligiblePrimaryFieldType(type: PropertyType): boolean {
  * fallback exists so a pre-existing Collection (created before this field
  * existed, or one where the primary field was since deleted/retyped) keeps
  * showing the same title it always implicitly had, without a migration
- * step. Returns undefined only when no eligible field exists at all.
+ * step. The fallback only ever considers `text` fields, not every eligible
+ * type — so this returns undefined both when the schema has no eligible
+ * field at all, and when it has eligible fields (e.g. a lone `number` or
+ * `select` field) but none of type `text`.
  */
 export function resolvePrimaryField(
 	schema: PropertyDefinition[],

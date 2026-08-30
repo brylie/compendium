@@ -609,6 +609,11 @@ describe('primary field: resolve, set, and migration on delete/retype (issue #96
 		expect(resolvePrimaryField(schema, undefined)).toBeUndefined();
 	});
 
+	it('resolvePrimaryField returns undefined when an eligible field exists but none is type text — the fallback only considers text fields', () => {
+		const schema = [{ key: 'qty', label: 'Qty', type: 'number' as const }];
+		expect(resolvePrimaryField(schema, undefined)).toBeUndefined();
+	});
+
 	it('setPrimaryField chooses an explicit field, overriding the first-text fallback', () => {
 		const doc = new Y.Doc();
 		const collection = setupCollection(doc);
