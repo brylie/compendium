@@ -83,10 +83,8 @@
 
 	function addSelectOption(propertyKey: string, rawLabel: string): void {
 		if (!ydoc) return;
-		const label = rawLabel.trim();
-		if (!label) return;
 		try {
-			addSelectOptionToSchema(ydoc, collectionId, propertyKey, label);
+			addSelectOptionToSchema(ydoc, collectionId, propertyKey, rawLabel);
 			optionDialogPropertyKey = null;
 			optionDialogError = '';
 		} catch (err) {

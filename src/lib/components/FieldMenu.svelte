@@ -74,6 +74,7 @@
 	let panel: HTMLDivElement | undefined = $state();
 	let firstMenuItem: HTMLButtonElement | undefined = $state();
 	let labelInput: HTMLInputElement | undefined = $state();
+	let confirmDialogs: HTMLDivElement | undefined = $state();
 
 	// The panel is portalled to <body> (see `portal` below) rather than
 	// positioned `absolute` inside `container` — Table's header lives inside
@@ -226,18 +227,26 @@
 		}
 	}
 
-	function renameOption(optionId: string, rawLabel: string): void {
+	// Returns whether the rename took effect, so the caller (the input's own
+	// blur handler) can restore the input's displayed text to the still-
+	// current stored label on rejection — value={option.label} is one-way and
+	// won't touch the DOM on its own when option.label hasn't actually
+	// changed, so a rejected edit would otherwise leave the invalid text
+	// showing in the field indefinitely.
+	function renameOption(optionId: string, rawLabel: string): boolean {
 		const option = options.find((o) => o.id === optionId);
 		const label = rawLabel.trim();
-		if (!option || label === option.label) return;
+		if (!option || label === option.label) return true;
 		try {
 			updateSelectOption(getClientDoc(), collectionId, property.key, optionId, { label });
 			optionError = '';
+			return true;
 		} catch (err) {
 			optionError =
 				err instanceof ValidationError
 					? err.message
 					: 'Could not rename the option. Please try again.';
+			return false;
 		}
 	}
 
@@ -269,8 +278,12 @@
 		}
 	}
 
-	function handleOptionDragStart(optionId: string): void {
+	function handleOptionDragStart(event: DragEvent, optionId: string): void {
 		draggedOptionId = optionId;
+		// Firefox refuses to start a drag at all unless the dataTransfer store
+		// has data set during dragstart — Chrome is lenient about an empty
+		// store, Firefox isn't.
+		event.dataTransfer?.setData('text/plain', optionId);
 	}
 
 	function handleOptionDrop(targetOptionId: string): void {
@@ -322,8 +335,20 @@
 		// The panel is checked separately since portal() moves it outside
 		// `container` in the DOM (see `portal` above) — without this, clicking
 		// inside the portalled panel itself would look like an outside click.
+		// `confirmDialogs` is checked too: it wraps both ConfirmDialogs, which
+		// render as their own fixed-overlay siblings outside container/panel —
+		// without this, confirming/cancelling an option delete (deliberately
+		// left open so the field editor stays open across managing several
+		// options) would look like an outside click and force-close the panel,
+		// swallowing optionError along with it since it only renders while open.
 		const path = event.composedPath();
-		if (!path.includes(container) && !(panel && path.includes(panel))) closeMenu();
+		if (
+			!path.includes(container) &&
+			!(panel && path.includes(panel)) &&
+			!(confirmDialogs && path.includes(confirmDialogs))
+		) {
+			closeMenu();
+		}
 	}
 
 	function handleKeydown(event: KeyboardEvent): void {
@@ -496,8 +521,6 @@
 								<li
 									class="flex items-center gap-1 rounded px-0.5 py-0.5"
 									class:bg-surface={dragOverOptionId === option.id}
-									draggable="true"
-									ondragstart={() => handleOptionDragStart(option.id)}
 									ondragover={(e) => {
 										e.preventDefault();
 										dragOverOptionId = option.id;
@@ -509,11 +532,20 @@
 										e.preventDefault();
 										handleOptionDrop(option.id);
 									}}
-									ondragend={() => {
-										draggedOptionId = null;
-										dragOverOptionId = null;
-									}}
 								>
+									<span
+										draggable="true"
+										ondragstart={(e) => handleOptionDragStart(e, option.id)}
+										ondragend={() => {
+											draggedOptionId = null;
+											dragOverOptionId = null;
+										}}
+										class="cursor-grab text-muted"
+										aria-hidden="true"
+										title="Drag to reorder"
+									>
+										<Icon name="grip" size={12} />
+									</span>
 									<div class="flex flex-col">
 										<button
 											type="button"
@@ -562,7 +594,10 @@
 									<input
 										type="text"
 										value={option.label}
-										onblur={(e) => renameOption(option.id, (e.target as HTMLInputElement).value)}
+										onblur={(e) => {
+											const input = e.target as HTMLInputElement;
+											if (!renameOption(option.id, input.value)) input.value = option.label;
+										}}
 										onkeydown={(e) => {
 											if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
 										}}
@@ -614,22 +649,27 @@
 	{/if}
 </div>
 
-<ConfirmDialog
-	open={confirmDeleteOpen}
-	title="Delete field"
-	message={`Delete "${property.label}"? ${deleteAffectedCount} record(s) currently have a value for this field. This cannot be undone.`}
-	confirmLabel="Delete field"
-	onConfirm={confirmDelete}
-	onCancel={() => (confirmDeleteOpen = false)}
-/>
-<ConfirmDialog
-	open={deleteOptionId !== null}
-	title="Delete option"
-	message={`Delete "${deleteOptionLabel}"? ${deleteOptionAffectedCount} record(s) currently have this value — they will show as unassigned (Board's "No ${property.label}" column). This cannot be undone.`}
-	confirmLabel="Delete option"
-	onConfirm={confirmDeleteOption}
-	onCancel={() => (deleteOptionId = null)}
-/>
+<div bind:this={confirmDialogs}>
+	<ConfirmDialog
+		open={confirmDeleteOpen}
+		title="Delete field"
+		message={`Delete "${property.label}"? ${deleteAffectedCount} record(s) currently have a value for this field. This cannot be undone.`}
+		confirmLabel="Delete field"
+		onConfirm={confirmDelete}
+		onCancel={() => (confirmDeleteOpen = false)}
+	/>
+	<ConfirmDialog
+		open={deleteOptionId !== null}
+		title="Delete option"
+		message={`Delete "${deleteOptionLabel}"? ${deleteOptionAffectedCount} record(s) currently have this value — they will show as unassigned (Board's "No ${property.label}" column). This cannot be undone.`}
+		confirmLabel="Delete option"
+		onConfirm={confirmDeleteOption}
+		onCancel={() => (deleteOptionId = null)}
+	/>
+</div>
 {#if errorMessage && !open}
 	<p class="mt-1 text-xs text-red-600" role="alert">{errorMessage}</p>
+{/if}
+{#if optionError && !open}
+	<p class="mt-1 text-xs text-red-600" role="alert">{optionError}</p>
 {/if}

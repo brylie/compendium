@@ -120,4 +120,24 @@ describe('TableCollectionView', () => {
 		const select = within(screen.getByRole('table')).getByRole('combobox');
 		expect(within(select).getByText('Done')).toBeInTheDocument();
 	});
+
+	it('rejects a blank select option label with an inline error instead of silently doing nothing', async () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'T',
+			schema: [{ key: 'status', label: 'Status', type: 'select', options: [] }]
+		});
+		createRecord(ydoc, { parentId: 'col-1', properties: {} }, actor);
+		const user = userEvent.setup();
+		renderTable('col-1');
+
+		await user.click(screen.getByTitle('Add option'));
+		await user.click(
+			within(screen.getByRole('dialog')).getByRole('button', { name: 'Add option' })
+		);
+
+		expect(
+			within(screen.getByRole('dialog')).getByText('Option label cannot be blank')
+		).toBeInTheDocument();
+	});
 });
