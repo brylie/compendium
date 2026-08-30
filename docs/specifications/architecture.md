@@ -52,9 +52,10 @@ architecture boundary is therefore document- and Collection-level Yjs shards,
 with workspace navigation/catalog updates kept outside those content shards.
 That is a direction validated by the baseline, not a claim that shard-aware
 routing is shipped: Phase 0 still resolves every live connection to the one
-default shard. #112 defines the proposed catalog/shard design, and #113 must
-prove it with real per-shard transport measurements before this architecture
-can describe it as implemented.
+default shard. [`workspace-sharding.md`](./workspace-sharding.md) (#112)
+records the **approved** catalog/shard design, and #113 must prove it with
+real per-shard transport measurements before this architecture can describe
+it as implemented.
 
 **Why HTTP MCP transport, not stdio:** Claude Desktop, Claude Code, and ChatGPT all support pointing at a remote MCP server via URL + bearer token in their own config (per the docs linked in the PRD). That matches the "simple local access token" decision better than stdio, which would mean each client spawns and manages its own subprocess — more moving parts for no benefit when everything's already running as one long-lived local service.
 

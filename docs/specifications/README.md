@@ -3,7 +3,7 @@
 Canonical specification for each implemented subsystem, translating [`prd.md`](../prd.md) into concrete engineering decisions. Split by feature rather than kept as one document, so a change to one subsystem doesn't require editing (or risk going stale in) an unrelated one.
 
 - [`architecture.md`](./architecture.md) — process model (one Node process, `/ws` + `/mcp`) and SvelteKit app structure.
-- [`workspace-sharding.md`](./workspace-sharding.md) — proposed Workspace catalog, content-shard, and committed-catalog-write/SSE design for #112; pending #31 measurement before approval.
+- [`workspace-sharding.md`](./workspace-sharding.md) — approved Workspace catalog, content-shard, and committed-catalog-write/SSE design (#112); #113 must still prove it with real shard-aware transport measurements before it's treated as implemented.
 - [`data-model.md`](./data-model.md) — the Record/Document/Collection types and their Yjs mapping.
 - [`collaboration.md`](./collaboration.md) — presence and holds, built on Yjs Awareness.
 - [`mcp-tools.md`](./mcp-tools.md) — the MCP tool surface and permission scoping.
