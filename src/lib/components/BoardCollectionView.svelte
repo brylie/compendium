@@ -56,7 +56,7 @@
 	// (whose order wins when two people drag concurrently?) — deferred.
 	const selectProperties = $derived(schema.filter((p) => p.type === 'select'));
 	const groupProperty = $derived(schema.find((p) => p.key === config.groupBy));
-	const projected = $derived(projectRecords(rows, config));
+	const projected = $derived(projectRecords(rows, schema, config));
 	const columns = $derived<BoardColumn[]>(
 		groupProperty ? groupBySelectProperty(projected, groupProperty) : []
 	);

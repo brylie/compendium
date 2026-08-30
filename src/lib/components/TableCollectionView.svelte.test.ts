@@ -10,8 +10,11 @@ vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
 
 const actor = { kind: 'human' as const, userId: 'local' };
 
-function renderTable(collectionId: string) {
-	return render(TableCollectionViewHarness, { collectionId });
+function renderTable(
+	collectionId: string,
+	initialConfig: import('$lib/data/views').ViewConfig = {}
+) {
+	return render(TableCollectionViewHarness, { collectionId, initialConfig });
 }
 
 describe('TableCollectionView', () => {
@@ -174,5 +177,66 @@ describe('TableCollectionView', () => {
 		expect(
 			within(screen.getByRole('dialog')).getByText('Option label cannot be blank')
 		).toBeInTheDocument();
+	});
+
+	it('sorts rows by a Select field in configured option order, not by opaque option id (issue #95)', () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'T',
+			schema: [
+				{ key: 'name', label: 'Name', type: 'text' },
+				{
+					key: 'status',
+					label: 'Status',
+					// Ids deliberately ordered backwards from the configured
+					// workflow — a plain string compare would sort the wrong way.
+					type: 'select',
+					options: [
+						{ id: 'zzz-backlog', label: 'Backlog' },
+						{ id: 'mmm-in-progress', label: 'In progress' },
+						{ id: 'aaa-done', label: 'Done' }
+					]
+				}
+			]
+		});
+		createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: {
+					name: { type: 'text', value: 'Ship it' },
+					status: { type: 'select', value: 'aaa-done' }
+				}
+			},
+			actor
+		);
+		createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: {
+					name: { type: 'text', value: 'Draft it' },
+					status: { type: 'select', value: 'zzz-backlog' }
+				}
+			},
+			actor
+		);
+		createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: {
+					name: { type: 'text', value: 'Build it' },
+					status: { type: 'select', value: 'mmm-in-progress' }
+				}
+			},
+			actor
+		);
+
+		renderTable('col-1', { sort: { mode: 'property', propertyKey: 'status' } });
+
+		const rows = screen.getAllByRole('row').slice(1); // drop the header row
+		const names = rows.map((row) => (within(row).getByRole('textbox') as HTMLInputElement).value);
+		expect(names).toEqual(['Draft it', 'Build it', 'Ship it']);
 	});
 });

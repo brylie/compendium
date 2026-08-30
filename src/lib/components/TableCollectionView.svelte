@@ -38,7 +38,7 @@
 	let optionDialogError = $state('');
 
 	const columns = $derived(visibleProperties(schema, config));
-	const projected = $derived(projectRecords(rows, config));
+	const projected = $derived(projectRecords(rows, schema, config));
 	const effectivePrimaryKey = $derived(resolvePrimaryField(schema, primaryFieldKey)?.key);
 
 	function refresh(): void {

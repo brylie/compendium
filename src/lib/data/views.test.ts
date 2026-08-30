@@ -93,8 +93,8 @@ describe('applyFilters', () => {
 describe('applySort', () => {
 	it('leaves manual-mode records untouched', () => {
 		const records = [record('b', {}), record('a', {})];
-		expect(applySort(records, { mode: 'manual' })).toEqual(records);
-		expect(applySort(records, undefined)).toEqual(records);
+		expect(applySort(records, [], { mode: 'manual' })).toEqual(records);
+		expect(applySort(records, [], undefined)).toEqual(records);
 	});
 
 	it('sorts ascending by a text property, empties last', () => {
@@ -103,7 +103,7 @@ describe('applySort', () => {
 			record('b', {}),
 			record('c', { title: { type: 'text', value: 'Apple' } })
 		];
-		const result = applySort(records, { mode: 'property', propertyKey: 'title' });
+		const result = applySort(records, [], { mode: 'property', propertyKey: 'title' });
 		expect(result.map((r) => r.id)).toEqual(['c', 'a', 'b']);
 	});
 
@@ -112,7 +112,7 @@ describe('applySort', () => {
 			record('a', { title: { type: 'text', value: 'Banana' } }),
 			record('c', { title: { type: 'text', value: 'Apple' } })
 		];
-		const result = applySort(records, {
+		const result = applySort(records, [], {
 			mode: 'property',
 			propertyKey: 'title',
 			direction: 'desc'
@@ -126,7 +126,7 @@ describe('applySort', () => {
 			record('c', { title: { type: 'text', value: 'Apple' } })
 		];
 		const original = [...records];
-		applySort(records, { mode: 'property', propertyKey: 'title' });
+		applySort(records, [], { mode: 'property', propertyKey: 'title' });
 		expect(records).toEqual(original);
 	});
 
@@ -136,7 +136,7 @@ describe('applySort', () => {
 			record('b', { qty: { type: 'number', value: 3 } }),
 			record('c', { qty: { type: 'number', value: 2 } })
 		];
-		const result = applySort(records, { mode: 'property', propertyKey: 'qty' });
+		const result = applySort(records, [], { mode: 'property', propertyKey: 'qty' });
 		expect(result.map((r) => r.id)).toEqual(['a', 'c', 'b']);
 	});
 
@@ -145,7 +145,7 @@ describe('applySort', () => {
 			record('a', { qty: { type: 'number', value: 5 } }),
 			record('b', { qty: { type: 'number', value: 5 } })
 		];
-		const result = applySort(records, { mode: 'property', propertyKey: 'qty' });
+		const result = applySort(records, [], { mode: 'property', propertyKey: 'qty' });
 		expect(result.map((r) => r.id)).toEqual(['a', 'b']);
 	});
 
@@ -154,18 +154,122 @@ describe('applySort', () => {
 			record('a', { done: { type: 'checkbox', value: true } }),
 			record('b', { done: { type: 'checkbox', value: false } })
 		];
-		expect(applySort(records, { mode: 'property', propertyKey: 'done' }).map((r) => r.id)).toEqual([
-			'b',
-			'a'
-		]);
+		expect(
+			applySort(records, [], { mode: 'property', propertyKey: 'done' }).map((r) => r.id)
+		).toEqual(['b', 'a']);
 
 		const withRelations = [
 			record('a', { links: { type: 'relation', value: ['z'] } }),
 			record('b', { links: { type: 'relation', value: ['a'] } })
 		];
 		expect(
-			applySort(withRelations, { mode: 'property', propertyKey: 'links' }).map((r) => r.id)
+			applySort(withRelations, [], { mode: 'property', propertyKey: 'links' }).map((r) => r.id)
 		).toEqual(['b', 'a']);
+	});
+
+	describe('select fields rank by configured option order, not option id (issue #95)', () => {
+		const workflowProperty: PropertyDefinition = {
+			key: 'status',
+			label: 'Status',
+			type: 'select',
+			options: [
+				// Deliberately id-ordered backwards from the configured workflow —
+				// a plain string compare of these ids would sort in exactly the
+				// wrong direction, which is the bug this field's fixture is meant
+				// to catch.
+				{ id: 'zzz-backlog', label: 'Backlog' },
+				{ id: 'mmm-in-progress', label: 'In progress' },
+				{ id: 'aaa-done', label: 'Done' }
+			]
+		};
+
+		it('sorts ascending in configured option order, not by option id', () => {
+			const records = [
+				record('done-record', { status: { type: 'select', value: 'aaa-done' } }),
+				record('backlog-record', { status: { type: 'select', value: 'zzz-backlog' } }),
+				record('progress-record', { status: { type: 'select', value: 'mmm-in-progress' } })
+			];
+			const result = applySort(records, [workflowProperty], {
+				mode: 'property',
+				propertyKey: 'status'
+			});
+			expect(result.map((r) => r.id)).toEqual(['backlog-record', 'progress-record', 'done-record']);
+		});
+
+		it('sorts descending as the exact reverse of the configured option order', () => {
+			const records = [
+				record('backlog-record', { status: { type: 'select', value: 'zzz-backlog' } }),
+				record('done-record', { status: { type: 'select', value: 'aaa-done' } }),
+				record('progress-record', { status: { type: 'select', value: 'mmm-in-progress' } })
+			];
+			const result = applySort(records, [workflowProperty], {
+				mode: 'property',
+				propertyKey: 'status',
+				direction: 'desc'
+			});
+			expect(result.map((r) => r.id)).toEqual(['done-record', 'progress-record', 'backlog-record']);
+		});
+
+		it('sorts an unassigned (empty) value last, regardless of direction', () => {
+			const records = [
+				record('done-record', { status: { type: 'select', value: 'aaa-done' } }),
+				record('unassigned-record', {}),
+				record('backlog-record', { status: { type: 'select', value: 'zzz-backlog' } })
+			];
+			const asc = applySort(records, [workflowProperty], {
+				mode: 'property',
+				propertyKey: 'status'
+			});
+			expect(asc.map((r) => r.id)).toEqual(['backlog-record', 'done-record', 'unassigned-record']);
+
+			const desc = applySort(records, [workflowProperty], {
+				mode: 'property',
+				propertyKey: 'status',
+				direction: 'desc'
+			});
+			expect(desc.map((r) => r.id)).toEqual(['done-record', 'backlog-record', 'unassigned-record']);
+		});
+
+		it('sorts a legacy/unknown option id as if it were empty — same bucket groupBySelectProperty already puts it in', () => {
+			const records = [
+				record('done-record', { status: { type: 'select', value: 'aaa-done' } }),
+				record('stale-record', { status: { type: 'select', value: 'no-longer-an-option' } }),
+				record('backlog-record', { status: { type: 'select', value: 'zzz-backlog' } })
+			];
+			const result = applySort(records, [workflowProperty], {
+				mode: 'property',
+				propertyKey: 'status'
+			});
+			expect(result.map((r) => r.id)).toEqual(['backlog-record', 'done-record', 'stale-record']);
+		});
+
+		it('falls back to comparableValue when no schema entry is found for the sort key', () => {
+			const records = [
+				record('a', { status: { type: 'select', value: 'aaa-done' } }),
+				record('b', { status: { type: 'select', value: 'zzz-backlog' } })
+			];
+			// No schema passed for 'status' — sortComparableValue can't special-case
+			// a select value it has no PropertyDefinition for, so this exercises the
+			// same plain-string-compare path the pre-#95 code always used.
+			const result = applySort(records, [], { mode: 'property', propertyKey: 'status' });
+			expect(result.map((r) => r.id)).toEqual(['a', 'b']);
+		});
+
+		it("agrees with groupBySelectProperty's Board column order — one canonical Select-order contract", () => {
+			const records = [
+				record('done-record', { status: { type: 'select', value: 'aaa-done' } }),
+				record('backlog-record', { status: { type: 'select', value: 'zzz-backlog' } }),
+				record('progress-record', { status: { type: 'select', value: 'mmm-in-progress' } })
+			];
+			const sortedIds = applySort(records, [workflowProperty], {
+				mode: 'property',
+				propertyKey: 'status'
+			}).map((r) => r.id);
+			const boardColumnOrder = groupBySelectProperty(records, workflowProperty)
+				.flatMap((column) => column.records)
+				.map((r) => r.id);
+			expect(sortedIds).toEqual(boardColumnOrder);
+		});
 	});
 });
 
@@ -189,7 +293,9 @@ describe('projectRecords', () => {
 			filters: [{ propertyKey: 'status', op: 'is', value: 'todo' }],
 			sort: { mode: 'property', propertyKey: 'title' }
 		};
-		expect(projectRecords(records, config).map((r) => r.id)).toEqual(['c', 'a']);
+		expect(
+			projectRecords(records, [statusProperty, titleProperty], config).map((r) => r.id)
+		).toEqual(['c', 'a']);
 	});
 });
 
