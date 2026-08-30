@@ -10,7 +10,9 @@ server rather than measuring isolated Yjs objects only.
 
 The benchmark seeds deterministic documents, blocks, collections, and rows;
 then connects Yjs clients, performs a human-originated WebSocket mutation, and
-runs sequential MCP `hold_records` and `write_record` calls. It captures:
+runs sequential MCP `hold_records` and `write_record` calls. BroadcastChannel
+sharing is disabled for benchmark clients, so initial-sync bytes are observed
+only at the WebSocket boundary. It captures:
 
 - encoded global Yjs state and persisted snapshot sizes;
 - initial client-sync bytes and elapsed time;
@@ -38,15 +40,15 @@ They are a baseline and trend signal, not universal production SLOs.
 | Metric                              | Daily: 12 docs, 192 blocks, 3 collections / 120 rows, 3 clients, 12 MCP writes | Large: 120 docs, 2,880 blocks, 8 collections / 3,200 rows, 8 clients, 80 MCP writes |
 | ----------------------------------- | -----------------------------------------------------------------------------: | ----------------------------------------------------------------------------------: |
 | Encoded global state                |                                                                      142,694 B |                                                                         2,848,008 B |
-| Aggregate initial-sync bytes        |                                                                      142,776 B |                                                                         8,544,250 B |
-| All-clients initial-sync elapsed    |                                                                        93.5 ms |                                                                            973.2 ms |
-| Receiver fan-out bytes (one edit)   |                                                                          116 B |                                                                               406 B |
-| Fan-out convergence elapsed         |                                                                        27.2 ms |                                                                             25.9 ms |
-| MCP write p50 / p95                 |                                                                   5.5 / 8.4 ms |                                                                        4.9 / 9.0 ms |
-| Persisted snapshot                  |                                                                      143,424 B |                                                                         2,852,778 B |
-| Snapshot-backed restart             |                                                                         9.4 ms |                                                                            130.1 ms |
-| Process heap delta                  |                                                                        25.3 MB |                                                                            396.1 MB |
-| Event-loop p99                      |                                                                       43.94 ms |                                                                           270.01 ms |
+| Aggregate initial-sync bytes        |                                                                      570,858 B |                                                                        28,480,307 B |
+| All-clients initial-sync elapsed    |                                                                        87.9 ms |                                                                          1,421.8 ms |
+| Receiver fan-out bytes (one edit)   |                                                                          114 B |                                                                               406 B |
+| Fan-out convergence elapsed         |                                                                        26.9 ms |                                                                             26.2 ms |
+| MCP write p50 / p95                 |                                                                   6.0 / 8.6 ms |                                                                        5.5 / 9.2 ms |
+| Persisted snapshot                  |                                                                      143,421 B |                                                                         2,852,778 B |
+| Snapshot-backed restart             |                                                                         9.5 ms |                                                                             85.7 ms |
+| Process heap delta                  |                                                                        50.8 MB |                                                                            518.9 MB |
+| Event-loop p99                      |                                                                       43.55 ms |                                                                           417.07 ms |
 | One-document shard state projection |                                                                        6,795 B |                                                                            10,147 B |
 
 ## Interpretation and decision boundary
@@ -59,7 +61,7 @@ work proceeds.
 
 The large profile exposes the existing global-document cost: every new client
 receives the whole 2.85 MB workspace state, and the one-process benchmark
-showed a 396 MB heap increase with a 270 ms event-loop p99. A same-shape
+showed a 518.9 MB heap increase with a 417.07 ms event-loop p99. A same-shape
 single-document state is roughly 10 KB, which makes document-level Yjs shards
 the appropriate next boundary. The catalog/SSE design in #112 keeps titles and
 navigation outside that document state so unrelated document edits need not

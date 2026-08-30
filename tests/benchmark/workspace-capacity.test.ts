@@ -77,7 +77,9 @@ describe('CRDT workspace capacity baseline (issue #31)', () => {
 		const profile = PROFILES[profileName];
 		if (!profile) throw new Error(`Unknown benchmark profile: ${profileName}`);
 
-		const seedClient = harness.getYjsClient();
+		// BroadcastChannel is deliberately disabled: each client must receive its
+		// initial state through the WebSocket transport being measured.
+		const seedClient = harness.getYjsClient({ disableBc: true });
 		const schema: PropertyDefinition[] = [
 			{ key: 'title', label: 'Title', type: 'text' },
 			{
@@ -145,7 +147,9 @@ describe('CRDT workspace capacity baseline (issue #31)', () => {
 		const heapBefore = process.memoryUsage().heapUsed;
 		const cpuBefore = process.cpuUsage();
 
-		const peers = Array.from({ length: profile.clients }, () => harness.getYjsClient());
+		const peers = Array.from({ length: profile.clients }, () =>
+			harness.getYjsClient({ disableBc: true })
+		);
 		const initialSyncStart = performance.now();
 		await Promise.all(
 			peers.map((peer) =>
@@ -176,8 +180,11 @@ describe('CRDT workspace capacity baseline (issue #31)', () => {
 			)
 		);
 		// The peer state can converge before ws emits its frame accounting callback
-		// in the same Node turn. Let that callback drain before recording bytes.
-		await new Promise((resolve) => setTimeout(resolve, 25));
+		// in the same Node turn. Wait for that bounded transport observation.
+		await harness.waitForCondition(
+			() => peers.slice(1).every((peer) => peer.traffic.receivedBytes > 0),
+			{ timeoutMs: 2_000, intervalMs: 5 }
+		);
 		const fanoutLatencyMs = performance.now() - fanoutStart;
 		const fanoutBytes = peers
 			.slice(1)
