@@ -122,8 +122,10 @@ or the document/collection ownership model.
 
 - Run `npm run benchmark:workspace` for every PR that changes one of those boundaries. It is deliberately
   separate from `npm run test` and coverage so normal checks stay bounded.
-- Run `npm run benchmark:workspace:large` manually before and after any sharding, compaction, persistence,
-  or sync-protocol redesign. Compare like-for-like runs; performance values are trend evidence, not universal SLOs.
+- Run `npm run benchmark:workspace:large` manually before and after shard-aware routing, catalog/SSE integration,
+  compaction, snapshot-format, persistence, or sync-protocol redesign. Compare like-for-like runs; performance
+  values are trend evidence, not universal SLOs. [`e2e-testing.md`](docs/specifications/e2e-testing.md) §6 is
+  canonical if this short list needs interpretation.
 - Keep benchmark clients on WebSocket transport (`disableBc: true`) when reporting sync bytes. Do not re-enable
   BroadcastChannel sharing to make a profile look smaller.
 - If a guardrail fails or the result crosses a documented sharding trigger, stop treating it as a test-only

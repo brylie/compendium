@@ -198,9 +198,10 @@ isolation.
 The capacity benchmark is intentionally separate from routine tests so it can
 measure a real temporary SQLite + WebSocket + MCP workspace without making
 ordinary checks environment-sensitive. Run the bounded profile for CRDT,
-sync, snapshot, or routing changes; run both profiles before and after sharding
-or persistence redesign. See the [testing strategy](docs/specifications/e2e-testing.md#6-capacity-benchmark--crdt-and-sharding-regression-gate)
-and the [current baseline](docs/benchmarks/crdt-capacity-baseline-2026-08-30.md).
+sync, snapshot, or routing changes; run both profiles before and after
+shard-aware routing, catalog/SSE integration, compaction, snapshot-format,
+persistence, or sync-protocol redesign. See the [testing strategy](docs/specifications/e2e-testing.md#6-capacity-benchmark--crdt-and-sharding-regression-gate)
+for the canonical selection rules and the [current baseline](docs/benchmarks/crdt-capacity-baseline-2026-08-30.md).
 
 ## Roadmap
 
