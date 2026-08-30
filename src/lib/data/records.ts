@@ -250,7 +250,8 @@ function readCollectionMeta(id: string, ymeta: Y.Map<unknown>): CollectionMeta {
 		id,
 		title: ymeta.get('title') as string,
 		schema: (ymeta.get('schema') as PropertyDefinition[]) ?? [],
-		recordIds: recordIds ? recordIds.toArray() : []
+		recordIds: recordIds ? recordIds.toArray() : [],
+		primaryFieldKey: (ymeta.get('primaryFieldKey') as string | undefined) || undefined
 	};
 }
 
@@ -273,6 +274,61 @@ export function updateCollectionSchema(doc: Y.Doc, id: string, schema: PropertyD
 	const ymeta = collectionsMap(doc).get(id) as Y.Map<unknown> | undefined;
 	if (!ymeta) throw new NotFoundError(`Collection ${id} not found`);
 	ymeta.set('schema', schema);
+}
+
+// A `relation` value is a list of record IDs with no inherent display string
+// of its own (data-model.md's PropertyValue — resolving it to a title would
+// mean reaching into other records), so it's the one property type that
+// can't stand in for a record's own identity — every other type already
+// renders as a single displayable value via PropertyValueCell.
+function isEligiblePrimaryFieldType(type: PropertyType): boolean {
+	return type !== 'relation';
+}
+
+/**
+ * The field that represents a record's title/identity — Airtable's "primary
+ * field," GitLab's issue title. Resolves the Collection's explicit
+ * `primaryFieldKey` when it names an eligible field still in schema, or
+ * falls back to the first `text` field in schema order otherwise — the
+ * fallback exists so a pre-existing Collection (created before this field
+ * existed, or one where the primary field was since deleted/retyped) keeps
+ * showing the same title it always implicitly had, without a migration
+ * step. Returns undefined only when no eligible field exists at all.
+ */
+export function resolvePrimaryField(
+	schema: PropertyDefinition[],
+	primaryFieldKey: string | undefined
+): PropertyDefinition | undefined {
+	if (primaryFieldKey) {
+		const explicit = schema.find((p) => p.key === primaryFieldKey);
+		if (explicit && isEligiblePrimaryFieldType(explicit.type)) return explicit;
+	}
+	return schema.find((p) => p.type === 'text');
+}
+
+/**
+ * Sets (or, with `propertyKey: null`, clears) the Collection's explicit
+ * primary field. Clearing reverts to `resolvePrimaryField`'s automatic
+ * fallback rather than leaving the Collection with no title field at all.
+ */
+export function setPrimaryField(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string | null
+): void {
+	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
+	if (propertyKey === null) {
+		ymeta.delete('primaryFieldKey');
+		return;
+	}
+	const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+	const property = schema.find((p) => p.key === propertyKey);
+	if (!property) throw new NotFoundError(`Property ${propertyKey} not found`);
+	if (!isEligiblePrimaryFieldType(property.type)) {
+		throw new ValidationError(`A ${property.type} field can't be the primary field`);
+	}
+	ymeta.set('primaryFieldKey', propertyKey);
 }
 
 /**
@@ -363,6 +419,14 @@ export function updateCollectionProperty(
 				const coerced = coercePropertyValue(value, patch.type);
 				if (coerced) yrecord?.set(PROP_PREFIX + propertyKey, coerced);
 				else yrecord?.delete(PROP_PREFIX + propertyKey);
+			}
+			// A retype away from an eligible primary-field type would otherwise
+			// leave `primaryFieldKey` pointing at a field that can no longer
+			// represent a record's identity (e.g. text -> relation) — clear it so
+			// resolvePrimaryField's fallback takes over instead of silently
+			// keeping a now-invalid explicit choice.
+			if (ymeta.get('primaryFieldKey') === propertyKey && !isEligiblePrimaryFieldType(patch.type)) {
+				ymeta.delete('primaryFieldKey');
 			}
 		}
 	});
@@ -470,6 +534,10 @@ export function deleteCollectionProperty(
 			if (record.properties?.[propertyKey] === undefined) continue;
 			const yrecord = recordsMap(doc).get(record.id) as Y.Map<unknown> | undefined;
 			yrecord?.delete(PROP_PREFIX + propertyKey);
+		}
+
+		if (ymeta.get('primaryFieldKey') === propertyKey) {
+			ymeta.delete('primaryFieldKey');
 		}
 
 		repairEmbeddedViewsAfterPropertyRemoval(doc, collectionId, propertyKey);

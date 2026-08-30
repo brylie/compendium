@@ -7,12 +7,14 @@
 	import {
 		createRecord,
 		deleteRecord,
+		resolvePrimaryField,
 		updateCollectionSchema,
 		updateRecordProperties
 	} from '$lib/data/records';
 	import {
 		dateKeyForRecord,
 		getCollectionView,
+		primaryFieldDisplayValue,
 		projectRecords,
 		visibleProperties
 	} from '$lib/data/views';
@@ -38,6 +40,7 @@
 	let ydoc: ReturnType<typeof getClientDoc> | undefined = $state();
 	let schema: PropertyDefinition[] = $state([]);
 	let rows: WorkspaceRecord[] = $state([]);
+	let primaryFieldKey: string | undefined = $state();
 	let viewYear = $state(today.getFullYear());
 	let viewMonth = $state(today.getMonth()); // 0-11
 	let newDatePropertyLabel = $state('Date');
@@ -47,11 +50,11 @@
 	// the embedding block — see EmbeddedViewConfig in $lib/data/types.
 	const dateProperties = $derived(schema.filter((p) => p.type === 'date'));
 	const dateProperty = $derived(schema.find((p) => p.key === config.groupBy));
-	const titlePropertyKey = $derived(schema.find((p) => p.type === 'text')?.key);
+	const titleProperty = $derived(resolvePrimaryField(schema, primaryFieldKey));
 	const projected = $derived(projectRecords(rows, config));
 	const entryFields = $derived(
 		visibleProperties(schema, config).filter(
-			(p) => p.key !== config.groupBy && p.key !== titlePropertyKey
+			(p) => p.key !== config.groupBy && p.key !== titleProperty?.key
 		)
 	);
 
@@ -134,6 +137,7 @@
 		const view = getCollectionView(ydoc, collectionId);
 		schema = view.collection?.schema ?? [];
 		rows = view.records;
+		primaryFieldKey = view.collection?.primaryFieldKey;
 		if (autoGroupByAttempted) return;
 		autoGroupByAttempted = true;
 		const resolvedKey =
@@ -226,8 +230,8 @@
 	}
 
 	function entryTitle(row: WorkspaceRecord): string {
-		const value = titlePropertyKey ? row.properties?.[titlePropertyKey] : undefined;
-		return value?.type === 'text' && value.value ? value.value : 'Untitled';
+		const value = titleProperty ? row.properties?.[titleProperty.key] : undefined;
+		return primaryFieldDisplayValue(value, titleProperty) || 'Untitled';
 	}
 </script>
 

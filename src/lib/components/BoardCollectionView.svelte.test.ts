@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import { createCollection, createRecord, getCollection, getRecord } from '$lib/data/records';
+import {
+	createCollection,
+	createRecord,
+	getCollection,
+	getRecord,
+	setPrimaryField,
+	updateCollectionSchema
+} from '$lib/data/records';
 import type { ViewConfig } from '$lib/data/views';
 import BoardCollectionViewHarness from './BoardCollectionViewHarness.svelte';
 
@@ -226,6 +233,62 @@ describe('BoardCollectionView', () => {
 			type: 'select',
 			value: 'done'
 		});
+	});
+
+	it('uses the explicitly chosen primary field as the card title, not just the first text field (issue #96)', () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Board',
+			schema: [
+				{ key: 'title', label: 'Title', type: 'text' },
+				{ key: 'notes', label: 'Notes', type: 'text' },
+				{ key: 'status', label: 'Status', type: 'select', options: [] }
+			]
+		});
+		setPrimaryField(ydoc, 'col-1', 'notes');
+		createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: {
+					title: { type: 'text', value: 'First text field' },
+					notes: { type: 'text', value: 'Chosen primary field' }
+				}
+			},
+			actor
+		);
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
+
+		// The chosen primary field ('notes'), not the schema-first text field
+		// ('title'), is the one rendered as the card's featured title cell —
+		// 'title' still renders too, but only as an ordinary field row.
+		expect(screen.getByDisplayValue('Chosen primary field')).toBeInTheDocument();
+	});
+
+	it('keeps an explicitly chosen primary field after the schema is reordered', () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Board',
+			schema: [
+				{ key: 'title', label: 'Title', type: 'text' },
+				{ key: 'notes', label: 'Notes', type: 'text' },
+				{ key: 'status', label: 'Status', type: 'select', options: [] }
+			]
+		});
+		setPrimaryField(ydoc, 'col-1', 'notes');
+		createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: { notes: { type: 'text', value: 'Still primary' } }
+			},
+			actor
+		);
+		const schema = getCollection(ydoc, 'col-1')!.schema;
+		updateCollectionSchema(ydoc, 'col-1', [...schema].reverse());
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
+
+		expect(screen.getByDisplayValue('Still primary')).toBeInTheDocument();
 	});
 
 	it('adds a new option to a non-grouping select field from a card without touching the grouping property', async () => {

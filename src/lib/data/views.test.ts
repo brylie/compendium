@@ -4,6 +4,7 @@ import {
 	applySort,
 	dateKeyForRecord,
 	groupBySelectProperty,
+	primaryFieldDisplayValue,
 	projectRecords,
 	visibleProperties,
 	type ViewConfig
@@ -241,6 +242,32 @@ describe('groupBySelectProperty', () => {
 		const columns = groupBySelectProperty([record('a', {})], statusProperty);
 		const todoColumn = columns.find((c) => c.optionId === 'todo');
 		expect(todoColumn?.records).toEqual([]);
+	});
+});
+
+describe('primaryFieldDisplayValue', () => {
+	it('returns an empty string when there is no value or no property', () => {
+		expect(primaryFieldDisplayValue(undefined, titleProperty)).toBe('');
+		expect(primaryFieldDisplayValue({ type: 'text', value: 'x' }, undefined)).toBe('');
+	});
+
+	it('renders text and number values directly', () => {
+		expect(primaryFieldDisplayValue({ type: 'text', value: 'Alice' }, titleProperty)).toBe('Alice');
+		const qty: PropertyDefinition = { key: 'qty', label: 'Qty', type: 'number' };
+		expect(primaryFieldDisplayValue({ type: 'number', value: 5 }, qty)).toBe('5');
+	});
+
+	it('resolves a select value to its option label', () => {
+		expect(primaryFieldDisplayValue({ type: 'select', value: 'done' }, statusProperty)).toBe(
+			'Done'
+		);
+	});
+
+	it('returns an empty string for a relation value — it has no single display string', () => {
+		const relationProperty: PropertyDefinition = { key: 'links', label: 'Links', type: 'relation' };
+		expect(
+			primaryFieldDisplayValue({ type: 'relation', value: ['a', 'b'] }, relationProperty)
+		).toBe('');
 	});
 });
 

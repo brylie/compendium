@@ -46,7 +46,8 @@
 			| 'arrow-up'
 			| 'arrow-down'
 			| 'close'
-			| 'grip';
+			| 'grip'
+			| 'star';
 		size?: number;
 		class?: string;
 	} = $props();
@@ -183,5 +184,11 @@
 		<circle cx="13" cy="10" r="1.3" fill="currentColor" stroke="none" />
 		<circle cx="7" cy="15" r="1.3" fill="currentColor" stroke="none" />
 		<circle cx="13" cy="15" r="1.3" fill="currentColor" stroke="none" />
+	{:else if name === 'star'}
+		<path
+			d="m10 2.5 2.2 4.7 5.1.6-3.8 3.5.9 5.2-4.4-2.5-4.4 2.5.9-5.2-3.8-3.5 5.1-.6Z"
+			fill="currentColor"
+			stroke="none"
+		/>
 	{/if}
 </svg>

@@ -3,7 +3,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpServer } from './server';
 import { createToken } from './tokens';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
-import { createCollection, createDocument, createRecord } from '$lib/data/records';
+import { createCollection, createDocument, createRecord, setPrimaryField } from '$lib/data/records';
 
 interface ToolHolder {
 	_registeredTools: Record<
@@ -370,6 +370,46 @@ describe('mcp server: full tool surface', () => {
 			token
 		);
 		expect(getAfterDeleteResult.isError).toBe(true);
+	});
+
+	it('list_collections and query_collection expose the resolved primary field (issue #96)', async () => {
+		const { doc } = resolveWorkspaceContext();
+		const autoCollection = createCollection(doc, {
+			title: 'Auto',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+		const explicitCollection = createCollection(doc, {
+			title: 'Explicit',
+			schema: [
+				{ key: 'name', label: 'Name', type: 'text' },
+				{ key: 'notes', label: 'Notes', type: 'text' }
+			]
+		});
+		setPrimaryField(doc, explicitCollection.id, 'notes');
+
+		const { token } = createToken({
+			clientLabel: 'Primary Field Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: [autoCollection.id, explicitCollection.id]
+		});
+		const mcpServer = createMcpServer();
+
+		const listResult = await invokeTool(mcpServer, 'list_collections', {}, token);
+		const list = JSON.parse(getTextContent(listResult));
+		expect(list).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: autoCollection.id, primaryFieldKey: 'name' }),
+				expect.objectContaining({ id: explicitCollection.id, primaryFieldKey: 'notes' })
+			])
+		);
+
+		const queryResult = await invokeTool(
+			mcpServer,
+			'query_collection',
+			{ collectionId: explicitCollection.id },
+			token
+		);
+		expect(JSON.parse(getTextContent(queryResult)).primaryFieldKey).toBe('notes');
 	});
 
 	it('search_workspace, hold_records, release_records, write_record, and delete_record round-trip', async () => {

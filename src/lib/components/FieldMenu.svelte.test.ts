@@ -252,6 +252,80 @@ describe('FieldMenu', () => {
 		expect(screen.queryByRole('menu')).not.toBeInTheDocument();
 	});
 
+	describe('primary field (issue #96)', () => {
+		function renderTwoTextFields() {
+			return createCollection(ydoc, {
+				title: 'T',
+				schema: [
+					{ key: 'name', label: 'Name', type: 'text' },
+					{ key: 'notes', label: 'Notes', type: 'text' }
+				]
+			});
+		}
+
+		it('sets a field as primary from the menu', async () => {
+			const collection = renderTwoTextFields();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[1] // 'notes' — not the auto-fallback first text field
+			});
+
+			await user.click(screen.getByRole('button', { name: 'Field options for Notes' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Set as primary field' }));
+
+			expect(getCollection(ydoc, collection.id)?.primaryFieldKey).toBe('notes');
+		});
+
+		it('offers "Unset primary field" once a field is passed in as the current primary', async () => {
+			const collection = renderTwoTextFields();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[1],
+				primaryFieldKey: 'notes'
+			});
+
+			await user.click(screen.getByRole('button', { name: 'Field options for Notes' }));
+			expect(screen.getByRole('menuitem', { name: 'Unset primary field' })).toBeInTheDocument();
+		});
+
+		it('unsets an explicit primary field, reverting to the automatic fallback', async () => {
+			const collection = renderTwoTextFields();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[1],
+				primaryFieldKey: 'notes'
+			});
+
+			await user.click(screen.getByRole('button', { name: 'Field options for Notes' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Unset primary field' }));
+
+			expect(getCollection(ydoc, collection.id)?.primaryFieldKey).toBeUndefined();
+		});
+
+		it('disables the primary toggle for a relation field, which has no display value of its own', async () => {
+			const collection = createCollection(ydoc, {
+				title: 'T',
+				schema: [{ key: 'links', label: 'Links', type: 'relation' }]
+			});
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await user.click(screen.getByRole('button', { name: 'Field options for Links' }));
+
+			expect(screen.getByRole('menuitem', { name: 'Set as primary field' })).toBeDisabled();
+		});
+	});
+
 	describe('select field option lifecycle (issue #94)', () => {
 		function renderSelectField() {
 			const collection = createCollection(ydoc, {

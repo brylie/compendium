@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import { createCollection, createRecord, getRecord } from '$lib/data/records';
+import { createCollection, createRecord, getRecord, setPrimaryField } from '$lib/data/records';
 import TableCollectionViewHarness from './TableCollectionViewHarness.svelte';
 
 let ydoc: Y.Doc;
@@ -119,6 +119,41 @@ describe('TableCollectionView', () => {
 
 		const select = within(screen.getByRole('table')).getByRole('combobox');
 		expect(within(select).getByText('Done')).toBeInTheDocument();
+	});
+
+	it('marks the resolved primary field column with a visible indicator (issue #96)', () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'T',
+			schema: [
+				{ key: 'name', label: 'Name', type: 'text' },
+				{ key: 'notes', label: 'Notes', type: 'text' }
+			]
+		});
+		renderTable('col-1');
+
+		const nameHeader = screen.getByRole('columnheader', { name: /^Name/ });
+		const notesHeader = screen.getByRole('columnheader', { name: /^Notes/ });
+		expect(within(nameHeader).getByText('Primary field')).toBeInTheDocument();
+		expect(within(notesHeader).queryByText('Primary field')).not.toBeInTheDocument();
+	});
+
+	it('moves the primary-field indicator once an explicit primary field is chosen', () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'T',
+			schema: [
+				{ key: 'name', label: 'Name', type: 'text' },
+				{ key: 'notes', label: 'Notes', type: 'text' }
+			]
+		});
+		setPrimaryField(ydoc, 'col-1', 'notes');
+		renderTable('col-1');
+
+		const nameHeader = screen.getByRole('columnheader', { name: /^Name/ });
+		const notesHeader = screen.getByRole('columnheader', { name: /^Notes/ });
+		expect(within(nameHeader).queryByText('Primary field')).not.toBeInTheDocument();
+		expect(within(notesHeader).getByText('Primary field')).toBeInTheDocument();
 	});
 
 	it('rejects a blank select option label with an inline error instead of silently doing nothing', async () => {

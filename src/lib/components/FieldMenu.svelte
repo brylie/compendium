@@ -11,6 +11,8 @@
 		duplicateCollectionProperty,
 		moveSelectOption,
 		previewCollectionPropertyTypeChange,
+		resolvePrimaryField,
+		setPrimaryField,
 		updateCollectionProperty,
 		updateCollectionSchema,
 		updateSelectOption,
@@ -25,12 +27,14 @@
 		collectionId,
 		schema,
 		property,
+		primaryFieldKey = undefined,
 		visible = undefined,
 		onToggleVisible = undefined
 	}: {
 		collectionId: string;
 		schema: PropertyDefinition[];
 		property: PropertyDefinition;
+		primaryFieldKey?: string;
 		visible?: boolean;
 		onToggleVisible?: () => void;
 	} = $props();
@@ -55,6 +59,13 @@
 	let deleteAffectedCount = $state(0);
 	let errorMessage = $state('');
 	let panelStyle = $state('');
+
+	// The primary field (issue #96) — the record's title/identity field,
+	// resolved the same way Board/Calendar resolve their card/entry title
+	// (see resolvePrimaryField), so this indicator always matches what's
+	// actually showing as the title elsewhere, including the auto-fallback
+	// case where no field has been explicitly chosen yet.
+	const isPrimary = $derived(resolvePrimaryField(schema, primaryFieldKey)?.key === property.key);
 
 	// Select option lifecycle (issue #94) — only shown when the field is
 	// already a select field (not while editType is mid-change toward one;
@@ -190,6 +201,19 @@
 	function toggleVisible(): void {
 		onToggleVisible?.();
 		closeMenu();
+	}
+
+	function togglePrimary(): void {
+		try {
+			setPrimaryField(getClientDoc(), collectionId, isPrimary ? null : property.key);
+			errorMessage = '';
+			closeMenu();
+		} catch (err) {
+			errorMessage =
+				err instanceof ValidationError
+					? err.message
+					: 'Could not update the primary field. Please try again.';
+		}
 	}
 
 	function openDeleteConfirm(): void {
@@ -452,6 +476,19 @@
 				>
 					<Icon name="duplicate" size={14} />
 					<span>Duplicate</span>
+				</button>
+				<button
+					type="button"
+					role="menuitem"
+					onclick={togglePrimary}
+					disabled={!isPrimary && property.type === 'relation'}
+					class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-fg hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+					title={!isPrimary && property.type === 'relation'
+						? "A relation field can't be the primary field"
+						: undefined}
+				>
+					<Icon name="star" size={14} />
+					<span>{isPrimary ? 'Unset primary field' : 'Set as primary field'}</span>
 				</button>
 				{#if onToggleVisible}
 					<button

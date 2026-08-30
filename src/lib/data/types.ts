@@ -133,6 +133,7 @@ export interface CollectionMeta {
 	title: string;
 	schema: PropertyDefinition[];
 	recordIds: string[]; // membership; row order within a view is a view concern
+	primaryFieldKey?: string; // schema key of the record's title/identity field — see resolvePrimaryField in $lib/data/views
 }
 
 export type ParentKind = 'document' | 'collection';

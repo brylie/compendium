@@ -167,6 +167,34 @@ export function groupBySelectProperty(
 	return [...columns, unassigned];
 }
 
+// A plain-text rendering of a record's value for the resolved primary field
+// (see resolvePrimaryField in $lib/data/records) — used wherever a record
+// needs a single display string outside its own editable cell (Board/
+// Calendar's card-title aria-labels, the "Move to column" <select> label).
+// Not used for the primary field's own editable rendering, which stays a
+// full PropertyValueCell so every eligible type (not just text) stays
+// directly editable inline.
+export function primaryFieldDisplayValue(
+	value: PropertyValue | undefined,
+	property: PropertyDefinition | undefined
+): string {
+	if (!value || !property) return '';
+	switch (value.type) {
+		case 'text':
+			return value.value;
+		case 'number':
+			return String(value.value);
+		case 'date':
+			return value.value;
+		case 'checkbox':
+			return value.value ? 'Checked' : '';
+		case 'select':
+			return property.options?.find((o) => o.id === value.value)?.label ?? '';
+		case 'relation':
+			return '';
+	}
+}
+
 // YYYY-MM-DD portion of a record's date property value, or undefined if the
 // property isn't set — used by Calendar to bucket records by day without
 // caring about time-of-day precision.

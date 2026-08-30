@@ -8,6 +8,7 @@
 		createRecord,
 		deleteRecord,
 		getCollection,
+		resolvePrimaryField,
 		updateCollectionSchema,
 		updateCollectionTitle,
 		updateRecordProperties
@@ -28,15 +29,24 @@
 	let title = $derived(currentCollection?.title ?? data.title);
 	let schema: PropertyDefinition[] = $state([]);
 	let rows: WorkspaceRecord[] = $state([]);
+	let primaryFieldKey: string | undefined = $state();
 	let optionDialogPropertyKey: string | null = $state(null);
 	let optionDialogError = $state('');
 	let fieldManagerOpen = $state(false);
+	let effectivePrimaryKey = $derived(resolvePrimaryField(schema, primaryFieldKey)?.key);
 
+	// `currentCollection` (a $derived keyed off `ydoc`, which is only ever
+	// assigned once) doesn't re-run when a later Yjs mutation streams in —
+	// unlike `schema`/`rows` above, it has no reactive dependency that
+	// changes after mount. `primaryFieldKey` is tracked as its own $state,
+	// reassigned here on every observer-driven refresh(), so the primary-
+	// field indicator stays live the same way schema/rows already do.
 	function refresh(): void {
 		if (!ydoc) return;
 		const view = getCollectionView(ydoc, data.collectionId);
 		schema = view.collection?.schema ?? [];
 		rows = view.records;
+		primaryFieldKey = view.collection?.primaryFieldKey;
 	}
 
 	onMount(() => {
@@ -138,14 +148,25 @@
 					{#each schema as property (property.key)}
 						<th class="border-r border-border/60 px-3.5 py-2.5">
 							<div class="flex items-center justify-between gap-2">
-								<span class="font-medium text-fg">{property.label}</span>
+								<span class="flex items-center gap-1 font-medium text-fg">
+									{property.label}
+									{#if property.key === effectivePrimaryKey}
+										<Icon name="star" size={11} class="text-accent" />
+										<span class="sr-only">Primary field</span>
+									{/if}
+								</span>
 								<div class="flex items-center gap-1.5">
 									<span
 										class="py-0.2 rounded border border-border bg-bg px-1 font-mono text-[10px] text-muted"
 									>
 										{property.type}
 									</span>
-									<FieldMenu collectionId={data.collectionId} {schema} {property} />
+									<FieldMenu
+										collectionId={data.collectionId}
+										{schema}
+										{property}
+										{primaryFieldKey}
+									/>
 								</div>
 							</div>
 						</th>
