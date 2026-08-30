@@ -10,10 +10,18 @@ import {
 	updateDocumentTitle as crdtUpdateDocumentTitle
 } from '$lib/data/records';
 import { logAudit } from '$lib/server/audit';
+import {
+	recordCatalogDocumentCreated,
+	recordCatalogDocumentDeleted,
+	recordCatalogDocumentMoved,
+	recordCatalogDocumentTitleChanged,
+	reserveDocumentLocator
+} from '$lib/server/catalog';
 import { grantDocumentAccess, tokenAllowsParent } from '$lib/mcp/tokens';
 import { richTextToMarkdown } from '$lib/mcp/markdown-transcode';
 import { resolveInternalLinkTarget } from '$lib/data/links';
 import type { DocumentMeta, EmbeddedViewConfig } from '$lib/data/types';
+import { nanoid } from 'nanoid';
 import {
 	actorForCaller,
 	isAccessToken,
@@ -30,7 +38,7 @@ export interface CreateDocumentInput {
 }
 
 export function createDocument(caller: CallerIdentity, input: CreateDocumentInput): DocumentMeta {
-	const { doc } = resolveWorkspaceContext();
+	const { doc, workspaceId, shardId, defaultSpaceId } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	// Decision: In single-tenant Phase 0/1, any authenticated caller is permitted
@@ -39,11 +47,28 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 		requireAccessibleParent(caller, input.parentDocumentId, 'create_document');
 	}
 
+	// Reserve the id in the catalog's workspace-wide record locator *before*
+	// any Y.Doc content is written — throws RecordIdConflictError on a
+	// collision instead of the Y.Doc primitive's prior silent overwrite (see
+	// docs/specifications/workspace-sharding.md §3.1).
+	const id = input.id ?? nanoid();
+	reserveDocumentLocator(workspaceId, defaultSpaceId, id, shardId);
+
 	const document = crdtCreateDocument(doc, {
-		id: input.id,
+		id,
 		title: input.title,
 		parentDocumentId: input.parentDocumentId,
 		afterDocumentId: input.afterDocumentId
+	});
+
+	recordCatalogDocumentCreated({
+		workspaceId,
+		spaceId: defaultSpaceId,
+		id: document.id,
+		title: document.title,
+		parentDocumentId: document.parentDocumentId,
+		order: document.order,
+		shardId
 	});
 
 	if (input.createInitialBlock) {
@@ -67,7 +92,7 @@ export function moveDocument(
 	documentId: string,
 	options: { parentDocumentId?: string; afterDocumentId?: string }
 ): void {
-	const { doc } = resolveWorkspaceContext();
+	const { doc, workspaceId } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'move_document');
@@ -76,6 +101,10 @@ export function moveDocument(
 	}
 
 	crdtUpdateDocumentParent(doc, documentId, options.parentDocumentId, options.afterDocumentId);
+	const moved = crdtGetDocument(doc, documentId);
+	if (moved) {
+		recordCatalogDocumentMoved(workspaceId, documentId, moved.parentDocumentId, moved.order);
+	}
 	logAudit({
 		actor,
 		action: 'move_document',
@@ -85,11 +114,12 @@ export function moveDocument(
 }
 
 export function deleteDocument(caller: CallerIdentity, documentId: string): void {
-	const { doc } = resolveWorkspaceContext();
+	const { doc, workspaceId } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'delete_document');
 	crdtDeleteDocument(doc, documentId);
+	recordCatalogDocumentDeleted(workspaceId, documentId);
 	logAudit({ actor, action: 'delete_document', targetRecordId: documentId });
 }
 
@@ -98,11 +128,12 @@ export function updateDocumentTitle(
 	documentId: string,
 	title: string
 ): void {
-	const { doc } = resolveWorkspaceContext();
+	const { doc, workspaceId } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'update_document_title');
 	crdtUpdateDocumentTitle(doc, documentId, title);
+	recordCatalogDocumentTitleChanged(workspaceId, documentId, title);
 	logAudit({
 		actor,
 		action: 'update_document_title',

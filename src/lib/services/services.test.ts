@@ -26,6 +26,11 @@ import { createToken, verifyToken } from '$lib/mcp/tokens';
 import { queryAuditLog } from '$lib/server/audit';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { createRecord as crdtCreateRecord } from '$lib/data/records';
+import {
+	listCatalogCollections,
+	listCatalogDocuments,
+	RecordIdConflictError
+} from '$lib/server/catalog';
 import type { ActorId } from '$lib/data/types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
@@ -757,5 +762,62 @@ describe('service layer: denied access attempts are themselves audited (docs/spe
 		);
 		expect(entry).toBeDefined();
 		expect(entry?.diff).toBeUndefined();
+	});
+});
+
+describe('service layer: catalog stays in sync with Y.Doc document/collection mutations (#113 Phase A)', () => {
+	function catalogWorkspaceId(): string {
+		return resolveWorkspaceContext().workspaceId;
+	}
+
+	it('mirrors document create, rename, move, and delete into the catalog', () => {
+		const parent = createDocument(human, { title: 'Catalog Parent' });
+		const child = createDocument(human, { title: 'Catalog Child' });
+
+		let catalog = listCatalogDocuments(catalogWorkspaceId());
+		expect(catalog.find((d) => d.id === parent.id)?.title).toBe('Catalog Parent');
+		expect(catalog.find((d) => d.id === child.id)?.parentDocumentId).toBeUndefined();
+
+		updateDocumentTitle(human, child.id, 'Renamed Child');
+		catalog = listCatalogDocuments(catalogWorkspaceId());
+		expect(catalog.find((d) => d.id === child.id)?.title).toBe('Renamed Child');
+
+		moveDocument(human, child.id, { parentDocumentId: parent.id });
+		catalog = listCatalogDocuments(catalogWorkspaceId());
+		expect(catalog.find((d) => d.id === child.id)?.parentDocumentId).toBe(parent.id);
+
+		deleteDocument(human, parent.id);
+		catalog = listCatalogDocuments(catalogWorkspaceId());
+		expect(catalog.find((d) => d.id === parent.id)).toBeUndefined();
+		expect(catalog.find((d) => d.id === child.id)).toBeUndefined(); // recursive descendant delete
+	});
+
+	it('mirrors collection create, rename, and delete into the catalog', () => {
+		const col = createCollection(human, { title: 'Catalog Table', schema: [] });
+
+		let catalog = listCatalogCollections(catalogWorkspaceId());
+		expect(catalog.find((c) => c.id === col.id)?.title).toBe('Catalog Table');
+
+		updateCollectionTitle(human, col.id, 'Renamed Table');
+		catalog = listCatalogCollections(catalogWorkspaceId());
+		expect(catalog.find((c) => c.id === col.id)?.title).toBe('Renamed Table');
+
+		deleteCollection(human, col.id);
+		catalog = listCatalogCollections(catalogWorkspaceId());
+		expect(catalog.find((c) => c.id === col.id)).toBeUndefined();
+	});
+
+	it('rejects a caller-supplied document id that collides with an existing record', () => {
+		const existing = createDocument(human, { title: 'Existing' });
+		expect(() => createDocument(human, { id: existing.id, title: 'Colliding' })).toThrow(
+			RecordIdConflictError
+		);
+	});
+
+	it('rejects a caller-supplied collection id that collides with an existing document', () => {
+		const existingDoc = createDocument(human, { title: 'Existing Doc' });
+		expect(() =>
+			createCollection(human, { id: existingDoc.id, title: 'Colliding Collection', schema: [] })
+		).toThrow(RecordIdConflictError);
 	});
 });

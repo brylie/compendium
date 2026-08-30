@@ -15,6 +15,13 @@
       "when": 1787770170816,
       "tag": "0001_chilly_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788103543215,
+      "tag": "0002_salty_kid_colt",
+      "breakpoints": true
     }
   ]
 }

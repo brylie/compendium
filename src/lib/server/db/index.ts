@@ -32,6 +32,11 @@ export function getDb(): Db {
 
 	const client = new Database(url);
 	client.pragma('journal_mode = WAL');
+	// better-sqlite3 doesn't enforce foreign keys unless this is set per
+	// connection — without it, the catalog's spaceId foreign keys (see
+	// db/schema.ts) would silently allow an orphaned Space reference instead
+	// of rejecting it.
+	client.pragma('foreign_keys = ON');
 	const db = drizzle(client, { schema });
 	migrate(db, { migrationsFolder: 'drizzle' });
 
