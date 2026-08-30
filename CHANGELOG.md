@@ -5,6 +5,42 @@ All notable changes to Compendium will be documented in this file.
 The project follows [Semantic Versioning](https://semver.org/). Git release
 tags use the `vX.Y.Z` convention.
 
+## [0.2.0] - 2026-08-30
+
+Collection schema management grows up: fields and Select options now have a
+full lifecycle, Board/Calendar get an explicit, user-controlled record
+identity, and Select-driven sorting finally follows the workflow order
+people actually configure.
+
+### Added
+
+- A first-class field manager for Collections — rename, retype, insert,
+  duplicate, hide-in-view, and delete any field from a per-column menu or a
+  collection-wide "Manage fields" dialog shared by Table, Board, and
+  Calendar.
+- Full lifecycle management for Select field options: add, rename, recolor,
+  reorder (drag-and-drop or keyboard), and delete, with a small consistent
+  color palette and a delete confirmation showing how many records are
+  affected.
+- An explicit, Collection-wide primary field controlling each record's title
+  everywhere it's shown — Board and Calendar card titles now follow a
+  deliberate choice (with a sensible automatic fallback) instead of always
+  picking the first text-type field in schema order.
+- Select fields sort by their configured option order (e.g. a workflow's
+  Backlog → In Progress → Done sequence) in Table, Board, and Calendar,
+  matching the order Board's own columns already used.
+
+### Fixed
+
+- Field-menu dropdowns no longer clip or overflow the viewport in dense
+  tables, and the field manager dialog's own layout and stacking issues are
+  resolved.
+- The full-page Collection table view's title and other collection-level
+  state now stay live when changed from another tab, another user, or an
+  MCP agent, instead of only refreshing on the next page load.
+
+[0.2.0]: https://github.com/brylie/compendium/releases/tag/v0.2.0
+
 ## [0.1.0] - 2026-08-28
 
 Compendium's first public pre-release establishes the core human–agent
