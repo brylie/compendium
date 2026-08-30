@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import { createCollection, createRecord, getCollection } from '$lib/data/records';
+import {
+	createCollection,
+	createRecord,
+	getCollection,
+	updateCollectionTitle
+} from '$lib/data/records';
 import Page from './+page.svelte';
 
 let ydoc: Y.Doc;
@@ -25,6 +30,25 @@ describe('table/[id] +page', () => {
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'SSR Title' }
 		});
 		expect(screen.getByPlaceholderText('Untitled Collection')).toHaveValue('Live Title');
+	});
+
+	it('updates the displayed title when the collection is renamed from outside the component', async () => {
+		createCollection(ydoc, { id: 'col-1', title: 'Original Title', schema: [] });
+		render(Page, {
+			params: { id: 'col-1' },
+			form: null,
+			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Original Title' }
+		});
+		expect(screen.getByPlaceholderText('Untitled Collection')).toHaveValue('Original Title');
+
+		updateCollectionTitle(ydoc, 'col-1', 'Renamed From Another Client');
+
+		expect(await screen.findByPlaceholderText('Untitled Collection')).toHaveValue(
+			'Renamed From Another Client'
+		);
+		expect(
+			await screen.findByText('Renamed From Another Client', { selector: 'span.font-medium' })
+		).toBeInTheDocument();
 	});
 
 	it('shows an empty-state row when the collection has no rows', () => {

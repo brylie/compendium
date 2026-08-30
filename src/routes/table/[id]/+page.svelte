@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { nanoid } from 'nanoid';
 	import { getClientDoc } from '$lib/client/yjs-client';
@@ -7,7 +7,6 @@
 	import {
 		createRecord,
 		deleteRecord,
-		getCollection,
 		resolvePrimaryField,
 		updateCollectionSchema,
 		updateCollectionTitle,
@@ -25,8 +24,10 @@
 	let { data }: PageProps = $props();
 
 	let ydoc: ReturnType<typeof getClientDoc> | undefined = $state();
-	let currentCollection = $derived(ydoc ? getCollection(ydoc, data.collectionId) : undefined);
-	let title = $derived(currentCollection?.title ?? data.title);
+	// Initial-render-only snapshot of the SSR-loaded title, shown before ydoc
+	// mounts; refresh() (below) is what keeps it in sync with the Y.Doc
+	// afterwards — untrack() here just tells Svelte that's deliberate.
+	let title: string = $state(untrack(() => data.title));
 	let schema: PropertyDefinition[] = $state([]);
 	let rows: WorkspaceRecord[] = $state([]);
 	let primaryFieldKey: string | undefined = $state();
@@ -35,15 +36,15 @@
 	let fieldManagerOpen = $state(false);
 	let effectivePrimaryKey = $derived(resolvePrimaryField(schema, primaryFieldKey)?.key);
 
-	// `currentCollection` (a $derived keyed off `ydoc`, which is only ever
-	// assigned once) doesn't re-run when a later Yjs mutation streams in —
-	// unlike `schema`/`rows` above, it has no reactive dependency that
-	// changes after mount. `primaryFieldKey` is tracked as its own $state,
-	// reassigned here on every observer-driven refresh(), so the primary-
-	// field indicator stays live the same way schema/rows already do.
+	// `title`/`schema`/`rows`/`primaryFieldKey` are tracked as their own
+	// $state, reassigned here on every observer-driven refresh(), so they
+	// stay live when the Yjs doc mutates from another tab, another user, or
+	// an MCP agent. A $derived keyed off `ydoc` (which is only ever assigned
+	// once, in onMount) would not re-run on those later mutations.
 	function refresh(): void {
 		if (!ydoc) return;
 		const view = getCollectionView(ydoc, data.collectionId);
+		title = view.collection?.title ?? data.title;
 		schema = view.collection?.schema ?? [];
 		rows = view.records;
 		primaryFieldKey = view.collection?.primaryFieldKey;
