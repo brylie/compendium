@@ -120,8 +120,8 @@ Read [`docs/specifications/e2e-testing.md`](docs/specifications/e2e-testing.md) 
 before changing the Yjs schema, WebSocket routing or fan-out, workspace/shard resolution, snapshot persistence,
 or the document/collection ownership model.
 
-- Run `npm run benchmark:workspace` for every PR that changes one of those boundaries. It is deliberately
-  separate from `npm run test` and coverage so normal checks stay bounded.
+- Run `npm run benchmark:workspace` for every PR that changes one of those boundaries or any other Yjs sync
+  behavior. It is deliberately separate from `npm run test` and coverage so normal checks stay bounded.
 - Run `npm run benchmark:workspace:large` manually before and after shard-aware routing, catalog/SSE integration,
   compaction, snapshot-format, persistence, or sync-protocol redesign. Compare like-for-like runs; performance
   values are trend evidence, not universal SLOs. [`e2e-testing.md`](docs/specifications/e2e-testing.md) §6 is
