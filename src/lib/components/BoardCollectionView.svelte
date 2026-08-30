@@ -4,10 +4,12 @@
 	import { getClientDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
 	import {
+		addSelectOption as addSelectOptionToSchema,
 		createRecord,
 		deleteRecord,
 		updateCollectionSchema,
-		updateRecordProperties
+		updateRecordProperties,
+		ValidationError
 	} from '$lib/data/records';
 	import {
 		getCollectionView,
@@ -41,6 +43,7 @@
 	let draggedRecordId: string | null = $state(null);
 	let newGroupingPropertyLabel = $state('Status');
 	let optionDialogPropertyKey: string | null = $state(null);
+	let optionDialogError = $state('');
 
 	// The grouping property is config.groupBy, persisted on the embedding
 	// block — see EmbeddedViewConfig in $lib/data/types. Manual per-card
@@ -120,21 +123,27 @@
 		if (!ydoc) return;
 		const label = rawLabel?.trim();
 		if (!label) return;
-		const nextSchema = schema.map((p) =>
-			p.key === propertyKey
-				? { ...p, options: [...(p.options ?? []), { id: nanoid(6), label }] }
-				: p
-		);
-		updateCollectionSchema(ydoc, collectionId, nextSchema);
+		try {
+			addSelectOptionToSchema(ydoc, collectionId, propertyKey, label);
+			optionDialogPropertyKey = null;
+			optionDialogError = '';
+		} catch (err) {
+			optionDialogError =
+				err instanceof ValidationError
+					? err.message
+					: 'Could not add the option. Please try again.';
+		}
 	}
 
 	function addColumnOption(): void {
 		if (!groupProperty) return;
 		optionDialogPropertyKey = groupProperty.key;
+		optionDialogError = '';
 	}
 
 	function openSelectOptionDialog(propertyKey: string): void {
 		optionDialogPropertyKey = propertyKey;
+		optionDialogError = '';
 	}
 
 	function addCard(column: BoardColumn): void {
@@ -379,9 +388,12 @@
 	label={optionDialogPropertyKey === groupProperty?.key ? 'Column name' : 'Option name'}
 	placeholder={optionDialogPropertyKey === groupProperty?.key ? 'Column name' : 'Option name'}
 	submitLabel="Add"
+	errorMessage={optionDialogError}
 	onSubmit={(value) => {
 		if (optionDialogPropertyKey) addSelectOption(optionDialogPropertyKey, value);
-		optionDialogPropertyKey = null;
 	}}
-	onCancel={() => (optionDialogPropertyKey = null)}
+	onCancel={() => {
+		optionDialogPropertyKey = null;
+		optionDialogError = '';
+	}}
 />

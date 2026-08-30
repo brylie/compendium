@@ -87,6 +87,26 @@ These describe the _pattern_, not a copy-paste implementation — translate each
 
 Inline SVG only — no emoji, no icon font. Stroke-based, `stroke="currentColor"` (so they inherit `fg`/`muted`/`accent` automatically via CSS), viewBox `0 0 20 20`, stroke-width 1.4–1.8, `stroke-linecap="round"` `stroke-linejoin="round"`. The mockup's icon set (document, chevron/tree, callout, toggle, code, divider, table, theme-toggle, checkmark, plus) is the starting vocabulary — extend it in the same style rather than mixing in a different icon set later.
 
-## 5. Source of truth
+## 5. Select-option palette
+
+A Select field's options (`docs/specifications/data-model.md` §1's `PropertyDefinition.options[].color`) need a color distinct from the tokens in §1: those are UI chrome, deliberately low-chroma so nothing shouts; an option's color is categorical data — a workflow-state or tag color meant to be told apart at a glance in Board's column dot and the field editor's swatch picker — so this palette is more saturated on purpose. It's still supplementary, never the only signal: every place that renders one of these colors always renders the option's label alongside it (Board's column header, the field editor's option row), so the palette only needs to be reasonably distinguishable hue-to-hue, not colorblind-disambiguating on its own.
+
+Nine colors, fixed and not user-extensible, defined in `src/lib/data/select-colors.ts` (`SELECT_OPTION_COLORS`):
+
+| Name   | Value                 |
+| ------ | --------------------- |
+| Gray   | `oklch(60% 0.01 250)` |
+| Red    | `oklch(62% 0.18 25)`  |
+| Orange | `oklch(68% 0.15 55)`  |
+| Yellow | `oklch(80% 0.14 95)`  |
+| Green  | `oklch(65% 0.14 145)` |
+| Teal   | `oklch(65% 0.11 195)` |
+| Blue   | `oklch(60% 0.13 250)` |
+| Purple | `oklch(60% 0.15 300)` |
+| Pink   | `oklch(65% 0.15 350)` |
+
+A newly added option (`addSelectOption` in `src/lib/data/records.ts`) auto-assigns the next color in this list, cycling by the field's current option count, so a fresh option is never left gray-by-default. `PropertyDefinition.options[].color` itself stays a bare `string` rather than a reference into this list — an option colored before this palette existed keeps rendering with its own arbitrary CSS color value; the field editor's swatch picker just won't show one of these nine as "currently selected" for it.
+
+## 6. Source of truth
 
 The published design canvas is the visual reference for exact spacing/proportions — this doc is the token/pattern reference for implementation. If they ever disagree, treat that as a bug to reconcile, not a choice between them.

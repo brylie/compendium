@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import {
+	addSelectOption,
 	buildDocumentTree,
 	coercePropertyValue,
 	countRecordsWithProperty,
+	countRecordsWithSelectOption,
 	createCollection,
 	createDocument,
 	createRecord,
@@ -11,6 +13,7 @@ import {
 	deleteCollectionProperty,
 	deleteDocument,
 	deleteRecord,
+	deleteSelectOption,
 	duplicateCollectionProperty,
 	getCollection,
 	getDocument,
@@ -19,6 +22,7 @@ import {
 	listCollections,
 	listDocuments,
 	listRecordsForParent,
+	moveSelectOption,
 	NotFoundError,
 	previewCollectionPropertyTypeChange,
 	setBlockType,
@@ -33,7 +37,9 @@ import {
 	updateDocumentParent,
 	updateDocumentTitle,
 	updateRecordContent,
-	updateRecordProperties
+	updateRecordProperties,
+	updateSelectOption,
+	ValidationError
 } from './records';
 import { yTextToRichText } from './richtext';
 import type { ActorId } from './types';
@@ -575,6 +581,247 @@ describe('collection field lifecycle: rename, retype, duplicate, delete', () => 
 	it('deleteCollectionProperty throws NotFoundError for an unknown collection', () => {
 		const doc = new Y.Doc();
 		expect(() => deleteCollectionProperty(doc, 'missing', 'name')).toThrow(NotFoundError);
+	});
+});
+
+describe('select option lifecycle: add, rename, recolor, reorder, delete (issue #94)', () => {
+	function setupSelectCollection(doc: Y.Doc) {
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [
+				{
+					key: 'status',
+					label: 'Status',
+					type: 'select',
+					options: [
+						{ id: 'todo', label: 'To do', color: 'oklch(60% 0.01 250)' },
+						{ id: 'doing', label: 'Doing', color: 'oklch(62% 0.18 25)' },
+						{ id: 'done', label: 'Done', color: 'oklch(65% 0.14 145)' }
+					]
+				}
+			]
+		});
+		return { collection };
+	}
+
+	function statusOptions(doc: Y.Doc, collectionId: string) {
+		return getCollection(doc, collectionId)?.schema[0].options ?? [];
+	}
+
+	it('addSelectOption appends with a fresh id and an auto-assigned color', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+
+		const option = addSelectOption(doc, collection.id, 'status', 'Blocked');
+
+		expect(option.label).toBe('Blocked');
+		expect(option.color).toBeTruthy();
+		const options = statusOptions(doc, collection.id);
+		expect(options.map((o) => o.label)).toEqual(['To do', 'Doing', 'Done', 'Blocked']);
+		expect(new Set(options.map((o) => o.id)).size).toBe(4);
+	});
+
+	it('addSelectOption rejects a blank label', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+		expect(() => addSelectOption(doc, collection.id, 'status', '   ')).toThrow(ValidationError);
+	});
+
+	it('addSelectOption rejects a case-insensitive duplicate label', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+		expect(() => addSelectOption(doc, collection.id, 'status', 'to do')).toThrow(ValidationError);
+		expect(statusOptions(doc, collection.id)).toHaveLength(3);
+	});
+
+	it('addSelectOption throws NotFoundError for an unknown collection/field, ValidationError for a non-select field', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+		expect(() => addSelectOption(doc, 'missing', 'status', 'x')).toThrow(NotFoundError);
+		expect(() => addSelectOption(doc, collection.id, 'missing', 'x')).toThrow(NotFoundError);
+
+		const withText = createCollection(doc, {
+			title: 'Other',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+		expect(() => addSelectOption(doc, withText.id, 'name', 'x')).toThrow(ValidationError);
+	});
+
+	it('updateSelectOption renames an option without touching its color or id', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+
+		updateSelectOption(doc, collection.id, 'status', 'doing', { label: 'In progress' });
+
+		expect(statusOptions(doc, collection.id)).toEqual([
+			{ id: 'todo', label: 'To do', color: 'oklch(60% 0.01 250)' },
+			{ id: 'doing', label: 'In progress', color: 'oklch(62% 0.18 25)' },
+			{ id: 'done', label: 'Done', color: 'oklch(65% 0.14 145)' }
+		]);
+	});
+
+	it('updateSelectOption recolors an option without touching its label', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+
+		updateSelectOption(doc, collection.id, 'status', 'todo', { color: 'oklch(65% 0.15 350)' });
+
+		expect(statusOptions(doc, collection.id)[0]).toEqual({
+			id: 'todo',
+			label: 'To do',
+			color: 'oklch(65% 0.15 350)'
+		});
+	});
+
+	it('updateSelectOption rejects renaming to a blank or already-used label, leaving the option unchanged', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+
+		expect(() =>
+			updateSelectOption(doc, collection.id, 'status', 'doing', { label: 'done' })
+		).toThrow(ValidationError);
+		expect(() => updateSelectOption(doc, collection.id, 'status', 'doing', { label: ' ' })).toThrow(
+			ValidationError
+		);
+		expect(statusOptions(doc, collection.id)[1].label).toBe('Doing');
+	});
+
+	it('updateSelectOption allows re-saving an option under its own unchanged label', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+		expect(() =>
+			updateSelectOption(doc, collection.id, 'status', 'doing', { label: 'Doing' })
+		).not.toThrow();
+	});
+
+	it('updateSelectOption throws NotFoundError for an unknown option', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+		expect(() =>
+			updateSelectOption(doc, collection.id, 'status', 'missing', { label: 'x' })
+		).toThrow(NotFoundError);
+	});
+
+	it('moveSelectOption reorders within bounds and is the primitive behind Board column/dropdown/filter order', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+
+		moveSelectOption(doc, collection.id, 'status', 'done', 0);
+
+		expect(statusOptions(doc, collection.id).map((o) => o.id)).toEqual(['done', 'todo', 'doing']);
+	});
+
+	it('moveSelectOption clamps an out-of-range target index instead of throwing', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+
+		moveSelectOption(doc, collection.id, 'status', 'todo', 99);
+
+		expect(statusOptions(doc, collection.id).map((o) => o.id)).toEqual(['doing', 'done', 'todo']);
+	});
+
+	it('moveSelectOption is a no-op when the target index equals the current index', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+		const before = statusOptions(doc, collection.id);
+
+		moveSelectOption(doc, collection.id, 'status', 'doing', 1);
+
+		expect(statusOptions(doc, collection.id)).toEqual(before);
+	});
+
+	it('countRecordsWithSelectOption counts only records currently set to that option', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+		createRecord(
+			doc,
+			{ parentId: collection.id, properties: { status: { type: 'select', value: 'todo' } } },
+			human
+		);
+		createRecord(
+			doc,
+			{ parentId: collection.id, properties: { status: { type: 'select', value: 'todo' } } },
+			human
+		);
+		createRecord(
+			doc,
+			{ parentId: collection.id, properties: { status: { type: 'select', value: 'done' } } },
+			human
+		);
+		createRecord(doc, { parentId: collection.id, properties: {} }, human);
+
+		expect(countRecordsWithSelectOption(doc, collection.id, 'status', 'todo')).toBe(2);
+		expect(countRecordsWithSelectOption(doc, collection.id, 'status', 'done')).toBe(1);
+		expect(countRecordsWithSelectOption(doc, collection.id, 'status', 'missing')).toBe(0);
+	});
+
+	it('deleteSelectOption removes the option and clears it (to the documented unassigned state) on every record that held it, leaving other records untouched', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+		const wasTodo = createRecord(
+			doc,
+			{ parentId: collection.id, properties: { status: { type: 'select', value: 'todo' } } },
+			human
+		);
+		const wasDone = createRecord(
+			doc,
+			{ parentId: collection.id, properties: { status: { type: 'select', value: 'done' } } },
+			human
+		);
+
+		deleteSelectOption(doc, collection.id, 'status', 'todo');
+
+		expect(statusOptions(doc, collection.id).map((o) => o.id)).toEqual(['doing', 'done']);
+		expect(getRecord(doc, wasTodo.id)?.properties?.status).toBeUndefined();
+		expect(getRecord(doc, wasDone.id)?.properties?.status).toEqual({
+			type: 'select',
+			value: 'done'
+		});
+	});
+
+	it('deleteSelectOption strips a filter referencing the deleted option from an embedded view, leaving groupBy/other filters alone', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+		const document = createDocument(doc, { title: 'Doc' });
+		const block = createRecord(
+			doc,
+			{
+				parentId: document.id,
+				blockType: 'collection_view',
+				referencedRecordId: collection.id,
+				viewConfig: {
+					viewType: 'board',
+					filters: [
+						{ propertyKey: 'status', op: 'is', value: 'todo' },
+						{ propertyKey: 'status', op: 'is_not', value: 'done' }
+					],
+					groupBy: 'status'
+				}
+			},
+			human
+		);
+
+		deleteSelectOption(doc, collection.id, 'status', 'todo');
+
+		expect(getRecord(doc, block.id)?.viewConfig).toEqual({
+			viewType: 'board',
+			filters: [{ propertyKey: 'status', op: 'is_not', value: 'done' }],
+			groupBy: 'status'
+		});
+	});
+
+	it('deleteSelectOption is a no-op when the option is already gone', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+		deleteSelectOption(doc, collection.id, 'status', 'missing');
+		expect(statusOptions(doc, collection.id)).toHaveLength(3);
+	});
+
+	it('deleteSelectOption throws NotFoundError for an unknown collection or field', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupSelectCollection(doc);
+		expect(() => deleteSelectOption(doc, 'missing', 'status', 'todo')).toThrow(NotFoundError);
+		expect(() => deleteSelectOption(doc, collection.id, 'missing', 'todo')).toThrow(NotFoundError);
 	});
 });
 

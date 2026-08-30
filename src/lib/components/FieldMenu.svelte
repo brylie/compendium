@@ -3,13 +3,20 @@
 	import { nanoid } from 'nanoid';
 	import { getClientDoc } from '$lib/client/yjs-client';
 	import {
+		addSelectOption,
 		countRecordsWithProperty,
+		countRecordsWithSelectOption,
 		deleteCollectionProperty,
+		deleteSelectOption,
 		duplicateCollectionProperty,
+		moveSelectOption,
 		previewCollectionPropertyTypeChange,
 		updateCollectionProperty,
-		updateCollectionSchema
+		updateCollectionSchema,
+		updateSelectOption,
+		ValidationError
 	} from '$lib/data/records';
+	import { SELECT_OPTION_COLORS } from '$lib/data/select-colors';
 	import type { PropertyDefinition, PropertyType } from '$lib/data/types';
 	import Icon from './Icon.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
@@ -37,7 +44,8 @@
 		'relation'
 	];
 
-	const PANEL_WIDTH = 224; // px — matches the panel's w-56
+	const MENU_WIDTH = 224; // px — matches the menu-mode panel's w-56
+	const EDIT_WIDTH = 288; // px — wider, so a select field's option list has room to breathe
 
 	let open = $state(false);
 	let mode = $state<'menu' | 'edit'>('menu');
@@ -47,6 +55,19 @@
 	let deleteAffectedCount = $state(0);
 	let errorMessage = $state('');
 	let panelStyle = $state('');
+
+	// Select option lifecycle (issue #94) — only shown when the field is
+	// already a select field (not while editType is mid-change toward one;
+	// options only exist once the rename/retype form above is saved).
+	const options = $derived(property.type === 'select' ? (property.options ?? []) : []);
+	let newOptionLabel = $state('');
+	let optionError = $state('');
+	let colorPickerOptionId: string | null = $state(null);
+	let draggedOptionId: string | null = $state(null);
+	let dragOverOptionId: string | null = $state(null);
+	let deleteOptionId: string | null = $state(null);
+	let deleteOptionLabel = $state('');
+	let deleteOptionAffectedCount = $state(0);
 
 	let container: HTMLDivElement | undefined = $state();
 	let trigger: HTMLButtonElement | undefined = $state();
@@ -72,12 +93,10 @@
 
 	function updatePanelPosition(): void {
 		if (!trigger) return;
+		const width = mode === 'edit' ? EDIT_WIDTH : MENU_WIDTH;
 		const rect = trigger.getBoundingClientRect();
-		const left = Math.min(
-			Math.max(8, rect.right - PANEL_WIDTH),
-			window.innerWidth - PANEL_WIDTH - 8
-		);
-		panelStyle = `position: fixed; top: ${rect.bottom + 4}px; left: ${left}px;`;
+		const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8);
+		panelStyle = `position: fixed; top: ${rect.bottom + 4}px; left: ${left}px; width: ${width}px;`;
 	}
 
 	// Runs after the panel actually renders (so its real height is known) to
@@ -87,15 +106,13 @@
 	async function refinePanelPosition(): Promise<void> {
 		await tick();
 		if (!trigger || !panel) return;
+		const width = mode === 'edit' ? EDIT_WIDTH : MENU_WIDTH;
 		const rect = trigger.getBoundingClientRect();
 		const panelHeight = panel.getBoundingClientRect().height;
-		const left = Math.min(
-			Math.max(8, rect.right - PANEL_WIDTH),
-			window.innerWidth - PANEL_WIDTH - 8
-		);
+		const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8);
 		const overflowsBelow = rect.bottom + 4 + panelHeight > window.innerHeight - 8;
 		const top = overflowsBelow ? Math.max(8, rect.top - panelHeight - 4) : rect.bottom + 4;
-		panelStyle = `position: fixed; top: ${top}px; left: ${left}px;`;
+		panelStyle = `position: fixed; top: ${top}px; left: ${left}px; width: ${width}px;`;
 	}
 
 	// Dropdowns don't track scroll/resize continuously here — closing on
@@ -193,6 +210,109 @@
 		confirmDeleteOpen = false;
 	}
 
+	function submitAddOption(event: SubmitEvent): void {
+		event.preventDefault();
+		const label = newOptionLabel.trim();
+		if (!label) return;
+		try {
+			addSelectOption(getClientDoc(), collectionId, property.key, label);
+			newOptionLabel = '';
+			optionError = '';
+		} catch (err) {
+			optionError =
+				err instanceof ValidationError
+					? err.message
+					: 'Could not add the option. Please try again.';
+		}
+	}
+
+	function renameOption(optionId: string, rawLabel: string): void {
+		const option = options.find((o) => o.id === optionId);
+		const label = rawLabel.trim();
+		if (!option || label === option.label) return;
+		try {
+			updateSelectOption(getClientDoc(), collectionId, property.key, optionId, { label });
+			optionError = '';
+		} catch (err) {
+			optionError =
+				err instanceof ValidationError
+					? err.message
+					: 'Could not rename the option. Please try again.';
+		}
+	}
+
+	function toggleColorPicker(optionId: string): void {
+		colorPickerOptionId = colorPickerOptionId === optionId ? null : optionId;
+	}
+
+	function setOptionColor(optionId: string, color: string): void {
+		try {
+			updateSelectOption(getClientDoc(), collectionId, property.key, optionId, { color });
+			optionError = '';
+		} catch {
+			optionError = 'Could not recolor the option. Please try again.';
+		}
+		colorPickerOptionId = null;
+	}
+
+	function moveOption(index: number, direction: -1 | 1): void {
+		const option = options[index];
+		if (!option) return;
+		try {
+			moveSelectOption(getClientDoc(), collectionId, property.key, option.id, index + direction);
+			optionError = '';
+		} catch (err) {
+			optionError =
+				err instanceof ValidationError
+					? err.message
+					: 'Could not reorder options. Please try again.';
+		}
+	}
+
+	function handleOptionDragStart(optionId: string): void {
+		draggedOptionId = optionId;
+	}
+
+	function handleOptionDrop(targetOptionId: string): void {
+		const fromId = draggedOptionId;
+		draggedOptionId = null;
+		dragOverOptionId = null;
+		if (!fromId || fromId === targetOptionId) return;
+		const toIndex = options.findIndex((o) => o.id === targetOptionId);
+		if (toIndex === -1) return;
+		try {
+			moveSelectOption(getClientDoc(), collectionId, property.key, fromId, toIndex);
+			optionError = '';
+		} catch (err) {
+			optionError =
+				err instanceof ValidationError
+					? err.message
+					: 'Could not reorder options. Please try again.';
+		}
+	}
+
+	function openDeleteOptionConfirm(optionId: string, label: string): void {
+		deleteOptionId = optionId;
+		deleteOptionLabel = label;
+		deleteOptionAffectedCount = countRecordsWithSelectOption(
+			getClientDoc(),
+			collectionId,
+			property.key,
+			optionId
+		);
+	}
+
+	function confirmDeleteOption(): void {
+		if (!deleteOptionId) return;
+		try {
+			deleteSelectOption(getClientDoc(), collectionId, property.key, deleteOptionId);
+			optionError = '';
+		} catch {
+			optionError = 'Could not delete the option. Please try again.';
+		}
+		deleteOptionId = null;
+	}
+
 	function handleWindowClick(event: MouseEvent): void {
 		if (!open || !container) return;
 		// composedPath() is captured at dispatch time, before any DOM mutation —
@@ -268,7 +388,7 @@
 			tabindex="-1"
 			onkeydown={handleKeydown}
 			style={panelStyle}
-			class="z-50 max-h-[calc(100vh-16px)] w-56 overflow-y-auto rounded-lg border border-border bg-bg p-1 text-left shadow-lg ring-1 ring-black/5"
+			class="z-50 max-h-[calc(100vh-16px)] overflow-y-auto rounded-lg border border-border bg-bg p-1 text-left shadow-lg ring-1 ring-black/5"
 		>
 			{#if mode === 'menu'}
 				<button
@@ -368,6 +488,122 @@
 						>
 					</div>
 				</form>
+				{#if property.type === 'select'}
+					<div class="border-t border-border p-2">
+						<span class="text-xs font-medium text-fg">Options</span>
+						<ul class="mt-1.5 space-y-0.5" role="list">
+							{#each options as option, index (option.id)}
+								<li
+									class="flex items-center gap-1 rounded px-0.5 py-0.5"
+									class:bg-surface={dragOverOptionId === option.id}
+									draggable="true"
+									ondragstart={() => handleOptionDragStart(option.id)}
+									ondragover={(e) => {
+										e.preventDefault();
+										dragOverOptionId = option.id;
+									}}
+									ondragleave={() => {
+										if (dragOverOptionId === option.id) dragOverOptionId = null;
+									}}
+									ondrop={(e) => {
+										e.preventDefault();
+										handleOptionDrop(option.id);
+									}}
+									ondragend={() => {
+										draggedOptionId = null;
+										dragOverOptionId = null;
+									}}
+								>
+									<div class="flex flex-col">
+										<button
+											type="button"
+											onclick={() => moveOption(index, -1)}
+											disabled={index === 0}
+											class="text-muted hover:text-fg disabled:opacity-30"
+											aria-label="Move {option.label} up"
+										>
+											<Icon name="arrow-up" size={9} />
+										</button>
+										<button
+											type="button"
+											onclick={() => moveOption(index, 1)}
+											disabled={index === options.length - 1}
+											class="text-muted hover:text-fg disabled:opacity-30"
+											aria-label="Move {option.label} down"
+										>
+											<Icon name="arrow-down" size={9} />
+										</button>
+									</div>
+									<div class="relative">
+										<button
+											type="button"
+											onclick={() => toggleColorPicker(option.id)}
+											class="h-4 w-4 flex-shrink-0 rounded-full border border-border"
+											style="background-color: {option.color ?? 'transparent'}"
+											aria-label="Color for {option.label}"
+										></button>
+										{#if colorPickerOptionId === option.id}
+											<div
+												class="absolute top-full left-0 z-10 mt-1 grid grid-cols-3 gap-1 rounded border border-border bg-bg p-1.5 shadow-md"
+											>
+												{#each SELECT_OPTION_COLORS as swatch (swatch.value)}
+													<button
+														type="button"
+														onclick={() => setOptionColor(option.id, swatch.value)}
+														class="h-4 w-4 rounded-full border border-border"
+														style="background-color: {swatch.value}"
+														aria-label={swatch.label}
+														title={swatch.label}
+													></button>
+												{/each}
+											</div>
+										{/if}
+									</div>
+									<input
+										type="text"
+										value={option.label}
+										onblur={(e) => renameOption(option.id, (e.target as HTMLInputElement).value)}
+										onkeydown={(e) => {
+											if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+										}}
+										class="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-xs text-fg hover:border-border focus:border-accent focus:outline-none"
+										aria-label="Rename option {option.label}"
+									/>
+									<button
+										type="button"
+										onclick={() => openDeleteOptionConfirm(option.id, option.label)}
+										class="rounded p-0.5 text-muted hover:text-red-600"
+										aria-label="Delete option {option.label}"
+									>
+										<Icon name="trash" size={11} />
+									</button>
+								</li>
+							{:else}
+								<li class="py-1 text-xs text-muted italic">No options yet.</li>
+							{/each}
+						</ul>
+						<form class="mt-1.5 flex gap-1" onsubmit={submitAddOption}>
+							<label class="sr-only" for="field-menu-new-option-{property.key}">Add option</label>
+							<input
+								id="field-menu-new-option-{property.key}"
+								type="text"
+								bind:value={newOptionLabel}
+								placeholder="Add option…"
+								class="min-w-0 flex-1 rounded border border-border bg-surface px-1.5 py-1 text-xs text-fg outline-none placeholder:text-muted focus:border-accent"
+							/>
+							<button
+								type="submit"
+								disabled={!newOptionLabel.trim()}
+								class="rounded bg-accent px-2 py-1 text-xs font-medium text-accent-fg disabled:opacity-40"
+							>
+								Add
+							</button>
+						</form>
+						{#if optionError}
+							<p class="mt-1 text-xs text-red-600" role="alert">{optionError}</p>
+						{/if}
+					</div>
+				{/if}
 			{/if}
 			{#if errorMessage}
 				<p class="border-t border-border px-2 py-1.5 text-xs text-red-600" role="alert">
@@ -385,6 +621,14 @@
 	confirmLabel="Delete field"
 	onConfirm={confirmDelete}
 	onCancel={() => (confirmDeleteOpen = false)}
+/>
+<ConfirmDialog
+	open={deleteOptionId !== null}
+	title="Delete option"
+	message={`Delete "${deleteOptionLabel}"? ${deleteOptionAffectedCount} record(s) currently have this value — they will show as unassigned (Board's "No ${property.label}" column). This cannot be undone.`}
+	confirmLabel="Delete option"
+	onConfirm={confirmDeleteOption}
+	onCancel={() => (deleteOptionId = null)}
 />
 {#if errorMessage && !open}
 	<p class="mt-1 text-xs text-red-600" role="alert">{errorMessage}</p>

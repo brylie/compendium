@@ -4,15 +4,15 @@
 	import { getClientDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
 	import {
+		addSelectOption as addSelectOptionToSchema,
 		createRecord,
 		deleteRecord,
-		updateCollectionSchema,
-		updateRecordProperties
+		updateRecordProperties,
+		ValidationError
 	} from '$lib/data/records';
 	import { getCollectionView, projectRecords, visibleProperties } from '$lib/data/views';
 	import type { ViewConfig } from '$lib/data/views';
 	import type { PropertyDefinition, PropertyValue, WorkspaceRecord } from '$lib/data/types';
-	import { nanoid } from 'nanoid';
 	import Icon from './Icon.svelte';
 	import PropertyValueCell from './PropertyValueCell.svelte';
 	import ViewToolbar from './ViewToolbar.svelte';
@@ -33,6 +33,7 @@
 	let schema: PropertyDefinition[] = $state([]);
 	let rows: WorkspaceRecord[] = $state([]);
 	let optionDialogPropertyKey: string | null = $state(null);
+	let optionDialogError = $state('');
 
 	const columns = $derived(visibleProperties(schema, config));
 	const projected = $derived(projectRecords(rows, config));
@@ -84,16 +85,21 @@
 		if (!ydoc) return;
 		const label = rawLabel.trim();
 		if (!label) return;
-		const nextSchema = schema.map((p) =>
-			p.key === propertyKey
-				? { ...p, options: [...(p.options ?? []), { id: nanoid(6), label }] }
-				: p
-		);
-		updateCollectionSchema(ydoc, collectionId, nextSchema);
+		try {
+			addSelectOptionToSchema(ydoc, collectionId, propertyKey, label);
+			optionDialogPropertyKey = null;
+			optionDialogError = '';
+		} catch (err) {
+			optionDialogError =
+				err instanceof ValidationError
+					? err.message
+					: 'Could not add the option. Please try again.';
+		}
 	}
 
 	function openSelectOptionDialog(propertyKey: string): void {
 		optionDialogPropertyKey = propertyKey;
+		optionDialogError = '';
 	}
 
 	// A column is only ever rendered here when it's visible (columns already
@@ -201,9 +207,12 @@
 	label="Option name"
 	placeholder="Option name"
 	submitLabel="Add option"
+	errorMessage={optionDialogError}
 	onSubmit={(value) => {
 		if (optionDialogPropertyKey) addSelectOption(optionDialogPropertyKey, value);
-		optionDialogPropertyKey = null;
 	}}
-	onCancel={() => (optionDialogPropertyKey = null)}
+	onCancel={() => {
+		optionDialogPropertyKey = null;
+		optionDialogError = '';
+	}}
 />

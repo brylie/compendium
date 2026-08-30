@@ -16,6 +16,7 @@ import type {
 	WorkspaceRecord
 } from './types';
 import { applyRichTextToYText, yTextToRichText } from './richtext';
+import { nextSelectOptionColor } from './select-colors';
 
 const DOCUMENTS = 'documents';
 const COLLECTIONS = 'collections';
@@ -39,6 +40,7 @@ function recordsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
 
 export class NotFoundError extends Error {}
 export class PermissionError extends Error {}
+export class ValidationError extends Error {}
 
 // ---------------------------------------------------------------------------
 // Documents
@@ -471,6 +473,196 @@ export function deleteCollectionProperty(
 		}
 
 		repairEmbeddedViewsAfterPropertyRemoval(doc, collectionId, propertyKey);
+	});
+}
+
+// ---------------------------------------------------------------------------
+// Select field option lifecycle (issue #94) — add/rename/recolor/reorder/
+// delete one option within a `select` field's `options` array. Distinct from
+// updateCollectionProperty/deleteCollectionProperty above, which operate on
+// the field itself; these operate one level down, inside `options`.
+// ---------------------------------------------------------------------------
+
+function getSelectPropertyForMutation(
+	schema: PropertyDefinition[],
+	propertyKey: string
+): {
+	index: number;
+	property: PropertyDefinition;
+	options: { id: string; label: string; color?: string }[];
+} {
+	const index = schema.findIndex((p) => p.key === propertyKey);
+	if (index === -1) throw new NotFoundError(`Property ${propertyKey} not found`);
+	const property = schema[index];
+	if (property.type !== 'select') {
+		throw new ValidationError(`Property ${propertyKey} is not a select field`);
+	}
+	return { index, property, options: property.options ?? [] };
+}
+
+function assertUniqueOptionLabel(
+	options: { id: string; label: string }[],
+	label: string,
+	excludeOptionId?: string
+): string {
+	const trimmed = label.trim();
+	if (!trimmed) throw new ValidationError('Option label cannot be blank');
+	const collides = options.some(
+		(o) => o.id !== excludeOptionId && o.label.trim().toLowerCase() === trimmed.toLowerCase()
+	);
+	if (collides) throw new ValidationError(`An option named "${trimmed}" already exists`);
+	return trimmed;
+}
+
+/** Appends a new option to a select field, auto-assigning the next palette color unless one is given. Rejects a blank or already-used (case-insensitive) label. */
+export function addSelectOption(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string,
+	label: string,
+	color?: string
+): { id: string; label: string; color?: string } {
+	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
+	return doc.transact(() => {
+		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+		const { index, property, options } = getSelectPropertyForMutation(schema, propertyKey);
+		const trimmed = assertUniqueOptionLabel(options, label);
+		const option = {
+			id: nanoid(6),
+			label: trimmed,
+			color: color ?? nextSelectOptionColor(options.length)
+		};
+		const nextSchema = [...schema];
+		nextSchema[index] = { ...property, options: [...options, option] };
+		ymeta.set('schema', nextSchema);
+		return option;
+	});
+}
+
+/** Renames and/or recolors one existing option. Rejects a blank or already-used (case-insensitive) label. */
+export function updateSelectOption(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string,
+	optionId: string,
+	patch: { label?: string; color?: string }
+): void {
+	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
+	doc.transact(() => {
+		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+		const { index, property, options } = getSelectPropertyForMutation(schema, propertyKey);
+		const optIndex = options.findIndex((o) => o.id === optionId);
+		if (optIndex === -1) throw new NotFoundError(`Option ${optionId} not found`);
+		const current = options[optIndex];
+		const nextLabel =
+			patch.label !== undefined
+				? assertUniqueOptionLabel(options, patch.label, optionId)
+				: current.label;
+		const nextOptions = [...options];
+		nextOptions[optIndex] = {
+			...current,
+			label: nextLabel,
+			color: patch.color !== undefined ? patch.color : current.color
+		};
+		const nextSchema = [...schema];
+		nextSchema[index] = { ...property, options: nextOptions };
+		ymeta.set('schema', nextSchema);
+	});
+}
+
+/** Moves one option to `toIndex` within its field's options array (clamped to bounds) — the single reorder primitive behind both the up/down buttons and drag reordering in the field editor. Board column order, the cell dropdown, and filter-value order all derive from this same array, so this is also what reorders those. */
+export function moveSelectOption(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string,
+	optionId: string,
+	toIndex: number
+): void {
+	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
+	doc.transact(() => {
+		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+		const { index, property, options } = getSelectPropertyForMutation(schema, propertyKey);
+		const fromIndex = options.findIndex((o) => o.id === optionId);
+		if (fromIndex === -1) throw new NotFoundError(`Option ${optionId} not found`);
+		const clampedTo = Math.max(0, Math.min(toIndex, options.length - 1));
+		if (clampedTo === fromIndex) return;
+		const nextOptions = [...options];
+		const [moved] = nextOptions.splice(fromIndex, 1);
+		nextOptions.splice(clampedTo, 0, moved);
+		const nextSchema = [...schema];
+		nextSchema[index] = { ...property, options: nextOptions };
+		ymeta.set('schema', nextSchema);
+	});
+}
+
+/** How many of a Collection's records currently hold `optionId` as their value for `propertyKey` — the "affected records" count shown before a destructive option deletion. */
+export function countRecordsWithSelectOption(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string,
+	optionId: string
+): number {
+	return listRecordsForParent(doc, collectionId).filter((r) => {
+		const value = r.properties?.[propertyKey];
+		return value?.type === 'select' && value.value === optionId;
+	}).length;
+}
+
+// Strips a deleted option out of any collection_view block's persisted
+// viewConfig.filters that still reference it by value — a stale option id
+// there would otherwise silently stop matching anything the next time that
+// embed's filter is applied. Unlike repairEmbeddedViewsAfterPropertyRemoval,
+// this never touches groupBy/sort/visibleProperties: those name the field
+// itself, which still exists after only one of its options is removed.
+function repairEmbeddedViewsAfterOptionRemoval(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string,
+	optionId: string
+): void {
+	recordsMap(doc).forEach((yrecord) => {
+		if (yrecord.get('blockType') !== 'collection_view') return;
+		if (yrecord.get('referencedRecordId') !== collectionId) return;
+		const config = yrecord.get('viewConfig') as EmbeddedViewConfig | undefined;
+		if (!config?.filters?.length) return;
+		const nextFilters = config.filters.filter(
+			(f) => !(f.propertyKey === propertyKey && f.value === optionId)
+		);
+		if (nextFilters.length !== config.filters.length) {
+			yrecord.set('viewConfig', { ...config, filters: nextFilters });
+		}
+	});
+}
+
+/** Removes one option from a select field, clears the value on every record currently set to it (the documented "unassigned" state — the same empty/no-value state Board's catch-all column and the cell dropdown's blank entry already represent), and strips any embedded view filter that referenced it. The field itself and its other options are untouched. */
+export function deleteSelectOption(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string,
+	optionId: string
+): void {
+	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
+	doc.transact(() => {
+		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+		const { index, property, options } = getSelectPropertyForMutation(schema, propertyKey);
+		const nextOptions = options.filter((o) => o.id !== optionId);
+		if (nextOptions.length === options.length) return;
+		const nextSchema = [...schema];
+		nextSchema[index] = { ...property, options: nextOptions };
+		ymeta.set('schema', nextSchema);
+
+		for (const record of listRecordsForParent(doc, collectionId)) {
+			const value = record.properties?.[propertyKey];
+			if (value?.type !== 'select' || value.value !== optionId) continue;
+			const yrecord = recordsMap(doc).get(record.id) as Y.Map<unknown> | undefined;
+			yrecord?.delete(PROP_PREFIX + propertyKey);
+		}
+
+		repairEmbeddedViewsAfterOptionRemoval(doc, collectionId, propertyKey, optionId);
 	});
 }
 
