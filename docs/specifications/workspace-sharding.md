@@ -138,15 +138,30 @@ row rather than publishing directly from the initial catalog transaction:
 pending_content → content_durable → publishable → published
 ```
 
-The catalog transaction records the operation ID, affected shards, intended
-catalog revision, and a non-publishable outbox row. The shard transition writes
-the operation ID into its durable snapshot/recovery marker; only then does one
-transaction mark the operation and its outbox row `publishable`. An outbox
-consumer may claim and emit only `publishable` rows. Restart recovery resumes a
-pending operation idempotently by inspecting those durable markers, never by
-assuming a catalog row proves the content transition completed. This applies to
-move and delete events as well as creation, so a client cannot be invalidated
-toward absent or stale content.
+The initial catalog transaction records the operation ID, affected shards,
+hidden desired catalog state, and a non-publishable outbox row. It does not
+allocate a public catalog revision or alter the published catalog projection.
+The shard transition writes the operation ID into its durable
+snapshot/recovery marker; only then does one transaction promote the desired
+state into the published catalog, allocate the next public Workspace revision,
+and mark its outbox row `publishable`. An outbox consumer may claim and emit
+only `publishable` rows.
+
+Page loads, catalog APIs, MCP routing reads, and SSE all use the published
+catalog projection only. While an operation is `pending_content`, a create and
+its reserved record IDs are unrouteable; a move continues to serve its previous
+published locator/hierarchy; and a delete continues to serve its previous
+published state. A failed or recovered operation either promotes atomically or
+leaves that prior public state intact. Restart recovery resumes a pending
+operation idempotently by inspecting durable markers, never by assuming an
+internal catalog intent proves the content transition completed. This prevents a
+client from being routed to absent or stale content.
+
+Public revisions are allocated only at that promotion transaction and are
+strictly ordered per Workspace. An outbox consumer delivers a contiguous prefix
+of publishable public revisions; it cannot advance a stream past an earlier
+unresolved operation. If durable recovery cannot provide that prefix, the
+consumer emits `catalog-resync` rather than advancing a cursor across the gap.
 
 SSE is driven by the committed catalog write, never by the periodic persistence
 of a Y.Doc snapshot. A snapshot callback would be delayed, might batch unrelated
@@ -175,7 +190,11 @@ cursor gap nor an existence signal.
 An SSE subscriber is authorized for a Workspace and a set of Spaces before it
 is registered. Filtering happens before an event is emitted, not after it
 reaches the browser. A permission revocation closes or resynchronizes affected
-subscriptions immediately.
+subscriptions immediately. A move or permission change that crosses an
+authorization boundary sends a generic `catalog-resync` to subscribers whose
+authorized catalog may lose or gain the entry. That signal contains no Document
+ID, destination Space, title, hierarchy, or inaccessible metadata; the
+subscriber reloads its authorized catalog snapshot to remove or add entries.
 
 For the initial single-process deployment, an in-process publisher may drain
 only `publishable` outbox rows immediately. Multiple application processes
@@ -187,13 +206,13 @@ replicas are invalid.
 Every boundary resolves a server-authorized context before reading or mutating
 state:
 
-| Boundary                  | Required context                                                 | Result                                       |
-| ------------------------- | ---------------------------------------------------------------- | -------------------------------------------- |
-| Page load and catalog API | deployment instance, Workspace, authorized Spaces                | Catalog snapshot or a scoped subset.         |
-| Yjs WebSocket upgrade     | deployment instance, Workspace, content shard, caller scope      | One authorized Document or Collection Y.Doc. |
-| SSE connection            | deployment instance, Workspace, authorized Spaces, last revision | Scoped catalog invalidations.                |
-| MCP tool                  | token-derived Workspace and Space scope, target shard            | Authorized catalog or content operation.     |
-| Persistence and audit     | Workspace, Space where applicable, shard                         | Independently keyed durable state.           |
+| Boundary                  | Required context                                                 | Result                                         |
+| ------------------------- | ---------------------------------------------------------------- | ---------------------------------------------- |
+| Page load and catalog API | deployment instance, Workspace, authorized Spaces                | Published catalog snapshot or a scoped subset. |
+| Yjs WebSocket upgrade     | deployment instance, Workspace, content shard, caller scope      | One authorized Document or Collection Y.Doc.   |
+| SSE connection            | deployment instance, Workspace, authorized Spaces, last revision | Scoped catalog invalidations.                  |
+| MCP tool                  | token-derived Workspace and Space scope, target shard            | Authorized catalog or content operation.       |
+| Persistence and audit     | Workspace, Space where applicable, shard                         | Independently keyed durable state.             |
 
 Path segments, query values, and Yjs room names are selectors only. They may
 choose among contexts the server has already authorized for that caller, but
@@ -258,8 +277,8 @@ representative database.
 ## 8. Measurements that decide approval
 
 The completed #31 baseline records the Phase-0 global-workspace envelope. #113
-must rerun the same representative seeded workspace and realistic concurrent
-browser/MCP workload with real shards, recording:
+must rerun a workspace seeded with representative data and a realistic
+concurrent browser/MCP workload with real shards, recording:
 
 - Per-Document and per-Collection encoded state size.
 - Catalog size, catalog refresh payload, and SSE reconnect/resync behavior.
@@ -282,8 +301,14 @@ require further partitioning or compaction.
 - A Space-scoped SSE subscriber never receives an event that reveals an
   inaccessible title, hierarchy, or existence signal.
 - A missed SSE event causes a revision-aware catalog resync, not a stale UI.
+- Pending content operations are absent from routing reads; a move/delete
+  retains its previous published state until its successor is durable.
+- Public outbox delivery cannot advance an SSE cursor past an unresolved earlier
+  Workspace operation; recovery produces a contiguous prefix or resync.
 - An opaque SSE cursor cannot reveal an inaccessible Space change; a changed or
   ambiguous authorized scope causes a catalog resync.
+- A move out of scope, move into scope, and permission change each trigger a
+  generic scoped resync without naming an inaccessible target or destination.
 - UI and MCP operations enforce the same catalog, Space, and shard scope.
 - A cross-document agent hold works only for records the caller can access and
   does not expose active editing state outside the relevant shard.
