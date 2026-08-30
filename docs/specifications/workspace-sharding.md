@@ -1,7 +1,13 @@
 # Workspace catalog and CRDT sharding
 
-**Status:** Proposed — #31's capacity baseline is complete; design approval is
-pending review of the contracts in this document.
+**Status:** Approved (2026-08-30) — the catalog/content-shard boundary,
+ownership model, trusted-routing rules, committed-catalog-write/SSE contract,
+and migration design in this document are the approved direction for #113
+(implementation) and #114 (migration and isolation). Approval is conditional
+per §8/§10: #113 must reproduce the required measurements with real
+shard-aware transport before this boundary is treated as load-bearing, and
+its results may still adjust the Collection partition threshold, event-
+retention window, or snapshot cadence.
 
 **Depends on:** [`prd.md`](../prd.md), [`architecture.md`](./architecture.md),
 [`persistence.md`](./persistence.md), [`collaboration.md`](./collaboration.md),
@@ -29,13 +35,13 @@ not as the universal transport for every reactive interface element.
 - Yjs WebSocket and Awareness connections are scoped to the explicitly opened
   Document or Collection shard.
 
-This is intentionally a proposed decision, not an implementation commitment.
-The completed [#31 capacity baseline](../benchmarks/crdt-capacity-baseline-2026-08-30.md)
+This is the approved architecture direction, not yet an implementation
+commitment. The completed [#31 capacity baseline](../benchmarks/crdt-capacity-baseline-2026-08-30.md)
 supports a small daily Phase-0 workspace and establishes a global-state
 escalation boundary. Its document-size projection supports this shard direction,
-but does not substitute for real shard-aware transport measurements. The
-approval record for #112 must state which assumptions survived that measurement
-and which must be proved by #113.
+but does not substitute for real shard-aware transport measurements. §10
+records which assumptions survived that measurement and which #113 must still
+prove.
 
 ## 2. Terms and boundaries
 
@@ -323,3 +329,46 @@ require further partitioning or compaction.
   the same Compendium version concurrently; a later scale-out implementation
   proves lease, outbox-claim, and event-backplane coordination within one
   Deployment instance.
+
+## 10. Approval decision (recorded 2026-08-30)
+
+Approved for #113/#114 to build against, on the completed #31 baseline and
+the contracts specified above:
+
+- The catalog/content-shard split in §1–§3: a durable SQLite workspace
+  catalog owning Space, Document, and Collection identity/title/hierarchy/
+  scope, separate from one Y.Doc per Document and one Y.Doc per Collection.
+- The trusted-routing rule in §5: every boundary (page load, WebSocket
+  upgrade, SSE, MCP, persistence) resolves a server-authorized Workspace/
+  Space/shard context; a client-supplied selector is never authority.
+- The committed-catalog-write/durable-operation/SSE contract in §4, including
+  the `pending_content → content_durable → publishable → published` state
+  machine, the public-revision/outbox-cursor ordering guarantees, and the
+  `catalog-resync` behavior for scope changes and cursor gaps.
+- The migration design in §7: versioned, idempotent, checksum-verified,
+  ID-preserving migration of the current single-space workspace into one
+  default Space, with the original snapshot retained read-only until
+  verification passes.
+- The deployment-ownership and coordination rules in §2: one process per
+  Deployment instance today; a future scale-out deployment requires durable
+  shard-ownership leases, transactional outbox claims, and a shared event
+  backplane — independent mutable in-memory replicas are invalid.
+
+Explicitly deferred, not settled by this approval:
+
+- The exact Collection row-partition threshold, event-retention window, and
+  snapshot cadence — §8 requires #113 to supply these from real shard-aware
+  measurements, not from the #31 global-workspace projection.
+- Whether the Document/Collection shard granularity itself holds at the
+  concurrency and payload sizes #113 measures; a materially different result
+  reopens this document rather than being silently absorbed into #113.
+- Where a **saved, shareable view configuration** (PRD P1) is addressed once
+  it exists as its own catalog-navigable artifact rather than an embedded
+  `collection_view` block's `viewConfig` (data-model.md §4) — out of scope
+  here because the feature itself isn't built yet; #113 or a follow-up must
+  extend §3.1's catalog fields to cover it before that feature lands.
+- Storage-engine changes to `data-model.md` §4 ("One `Y.Doc` for the whole
+  workspace") and `collaboration.md`'s aggregate-Awareness description — both
+  remain accurate descriptions of current Phase-0 code and are superseded
+  only once #113 actually implements per-shard `Y.Doc`s, not by this
+  approval alone.
