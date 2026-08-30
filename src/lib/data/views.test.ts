@@ -243,16 +243,23 @@ describe('applySort', () => {
 			expect(result.map((r) => r.id)).toEqual(['backlog-record', 'done-record', 'stale-record']);
 		});
 
-		it('falls back to comparableValue when no schema entry is found for the sort key', () => {
+		it('treats every select value as empty (not a lexical id compare) when no schema entry is found for the sort key', () => {
+			// Input order is deliberately the *opposite* of what a lexical id
+			// compare would produce ('aaa-done' < 'zzz-backlog' as strings) — so
+			// if selectOptionRank ever silently fell back to comparing raw ids
+			// instead of returning undefined for a property it can't resolve,
+			// this would come back reordered to ['a', 'b'] and fail.
 			const records = [
-				record('a', { status: { type: 'select', value: 'aaa-done' } }),
-				record('b', { status: { type: 'select', value: 'zzz-backlog' } })
+				record('b', { status: { type: 'select', value: 'zzz-backlog' } }),
+				record('a', { status: { type: 'select', value: 'aaa-done' } })
 			];
-			// No schema passed for 'status' — sortComparableValue can't special-case
-			// a select value it has no PropertyDefinition for, so this exercises the
-			// same plain-string-compare path the pre-#95 code always used.
+			// No schema passed for 'status', so selectOptionRank(undefined, id)
+			// returns undefined for both — every select value lands in the same
+			// "empty" bucket applySort's own isEmptyComparable check already
+			// treats as tied, and a tied comparator preserves input order
+			// (Array.prototype.sort is stable) rather than reordering by id.
 			const result = applySort(records, [], { mode: 'property', propertyKey: 'status' });
-			expect(result.map((r) => r.id)).toEqual(['a', 'b']);
+			expect(result.map((r) => r.id)).toEqual(['b', 'a']);
 		});
 
 		it("agrees with groupBySelectProperty's Board column order — one canonical Select-order contract", () => {
