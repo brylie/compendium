@@ -127,14 +127,16 @@ export const catalogCollections = sqliteTable(
 
 // The workspace-wide (workspace_id, record_id) locator required by §3.1: the
 // mechanism that actually rejects a duplicate id across Documents/Collections
-// (today's separate Y.Maps for each don't prevent that at all).
+// (today's separate Y.Maps for each don't prevent that at all). Also covers
+// individual records/rows within a sharded Collection ('record' kind) — see
+// reserveRecordLocator in catalog.ts.
 export const recordLocator = sqliteTable(
 	'record_locator',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
 		workspaceId: text('workspace_id').notNull().default('default'),
 		recordId: text('record_id').notNull(),
-		kind: text('kind').notNull().$type<'document' | 'collection'>(),
+		kind: text('kind').notNull().$type<'document' | 'collection' | 'record'>(),
 		spaceId: text('space_id').notNull(),
 		shardId: text('shard_id').notNull().default('default'),
 		createdAt: integer('created_at').notNull()

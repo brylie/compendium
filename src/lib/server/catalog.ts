@@ -87,11 +87,13 @@ function bumpRevisionAndAppendOutbox(
  * silent-overwrite-on-duplicate-id behavior of data/records.ts's
  * createDocument/createCollection.
  */
+type LocatorKind = ParentKind | 'record';
+
 function reserveLocator(
 	workspaceId: string,
 	spaceId: string,
 	recordId: string,
-	kind: ParentKind,
+	kind: LocatorKind,
 	shardId: string
 ): void {
 	try {
@@ -123,6 +125,65 @@ export function reserveCollectionLocator(
 	shardId: string
 ): void {
 	reserveLocator(workspaceId, spaceId, id, 'collection', shardId);
+}
+
+/**
+ * Reserves a locator entry for one record/row within a sharded Collection —
+ * unlike Documents/Collections, individual records aren't catalog-navigable
+ * entities (§3.1), so this exists purely so write_record/delete_record/
+ * hold_records/release_records (which only ever receive a bare recordId, no
+ * parent hint) can resolve which shard to operate against. Document blocks
+ * are never locator-tracked — they're always in the default shard as long
+ * as Documents themselves aren't sharded, so resolveShardForRecord's
+ * "not found" fallback already routes them correctly.
+ */
+export function reserveRecordLocator(
+	workspaceId: string,
+	spaceId: string,
+	recordId: string,
+	shardId: string
+): void {
+	reserveLocator(workspaceId, spaceId, recordId, 'record', shardId);
+}
+
+export function releaseRecordLocator(workspaceId: string, recordId: string): void {
+	getDb()
+		.delete(recordLocator)
+		.where(and(eq(recordLocator.workspaceId, workspaceId), eq(recordLocator.recordId, recordId)))
+		.run();
+}
+
+/**
+ * Resolves the shard a Document or Collection lives in, for callers that
+ * already have its own id (query_collection's collectionId, create_record's
+ * parentId). Returns undefined when untracked — content written directly to
+ * the Y.Doc, bypassing the service layer, or an id that doesn't exist —
+ * callers fall back to the default context in that case.
+ */
+export function resolveShardForParent(
+	workspaceId: string,
+	parentId: string
+): { shardId: string; kind: 'document' | 'collection' } | undefined {
+	const row = getDb()
+		.select({ shardId: recordLocator.shardId, kind: recordLocator.kind })
+		.from(recordLocator)
+		.where(and(eq(recordLocator.workspaceId, workspaceId), eq(recordLocator.recordId, parentId)))
+		.get();
+	if (!row || row.kind === 'record') return undefined;
+	return { shardId: row.shardId, kind: row.kind };
+}
+
+/** Resolves the shard a single record/row lives in, for callers that only have a bare recordId. */
+export function resolveShardForRecord(
+	workspaceId: string,
+	recordId: string
+): { shardId: string } | undefined {
+	const row = getDb()
+		.select({ shardId: recordLocator.shardId })
+		.from(recordLocator)
+		.where(and(eq(recordLocator.workspaceId, workspaceId), eq(recordLocator.recordId, recordId)))
+		.get();
+	return row ? { shardId: row.shardId } : undefined;
 }
 
 export function recordCatalogDocumentCreated(input: {

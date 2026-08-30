@@ -1,8 +1,9 @@
 import type { ActorId } from '$lib/data/types';
-import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import { resolveWorkspaceContext, type WorkspaceContext } from '$lib/server/workspace-store';
 import { getRecord } from '$lib/data/records';
 import { tokenAllowsParent, type AccessToken } from '$lib/mcp/tokens';
 import { logAudit } from '$lib/server/audit';
+import { resolveShardForParent, resolveShardForRecord } from '$lib/server/catalog';
 
 export type CallerIdentity = AccessToken | ActorId;
 
@@ -57,7 +58,7 @@ export function requireAccessibleRecord(
 	recordId: string,
 	action?: string
 ): NonNullable<ReturnType<typeof getRecord>> {
-	const { doc } = resolveWorkspaceContext();
+	const { doc } = resolveRecordWorkspaceContext(recordId);
 	const record = getRecord(doc, recordId);
 	if (!record) {
 		logDenial(caller, action, recordId);
@@ -65,4 +66,47 @@ export function requireAccessibleRecord(
 	}
 	requireAccessibleParent(caller, record.parentId, action);
 	return record;
+}
+
+/**
+ * Resolves the WorkspaceContext a Document/Collection actually lives in,
+ * for callers that already have its own id (query_collection's
+ * collectionId, create_record's parentId) — see catalog.ts's
+ * resolveShardForParent. Falls back to the default context when untracked
+ * (content written directly to the Y.Doc, or a Document — Documents aren't
+ * sharded yet, so they're never locator-tracked).
+ */
+export function resolveParentWorkspaceContext(
+	parentId: string
+): WorkspaceContext & { parentKind?: 'document' | 'collection' } {
+	const { workspaceId } = resolveWorkspaceContext();
+	const shard = resolveShardForParent(workspaceId, parentId);
+	const ctx = resolveWorkspaceContext(
+		shard ? { workspaceId, shardId: shard.shardId } : { workspaceId }
+	);
+	return { ...ctx, parentKind: shard?.kind };
+}
+
+/**
+ * Resolves the WorkspaceContext a single record/row lives in, for callers
+ * that only have a bare recordId (write_record, delete_record, get_record).
+ * See catalog.ts's resolveShardForRecord.
+ */
+export function resolveRecordWorkspaceContext(recordId: string): WorkspaceContext {
+	const { workspaceId } = resolveWorkspaceContext();
+	const shard = resolveShardForRecord(workspaceId, recordId);
+	return resolveWorkspaceContext(shard ? { workspaceId, shardId: shard.shardId } : { workspaceId });
+}
+
+/** Groups recordIds by their resolved shard, for a hold/release call that may legitimately span more than one. */
+export function groupRecordIdsByShard(recordIds: string[]): Map<string, string[]> {
+	const { workspaceId, shardId: defaultShardId } = resolveWorkspaceContext();
+	const groups = new Map<string, string[]>();
+	for (const id of recordIds) {
+		const shardId = resolveShardForRecord(workspaceId, id)?.shardId ?? defaultShardId;
+		const list = groups.get(shardId);
+		if (list) list.push(id);
+		else groups.set(shardId, [id]);
+	}
+	return groups;
 }

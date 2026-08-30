@@ -30,12 +30,16 @@ import {
 	createDocument as crdtCreateDocument,
 	createCollection as crdtCreateCollection,
 	getDocument as crdtGetDocument,
-	getCollection as crdtGetCollection
+	getCollection as crdtGetCollection,
+	getRecord as crdtGetRecord
 } from '$lib/data/records';
 import {
 	listCatalogCollections,
 	listCatalogDocuments,
-	RecordIdConflictError
+	RecordIdConflictError,
+	reserveCollectionLocator,
+	recordCatalogCollectionCreated,
+	resolveShardForRecord
 } from '$lib/server/catalog';
 import type { ActorId } from '$lib/data/types';
 
@@ -884,5 +888,144 @@ describe('service layer: catalog stays in sync with Y.Doc document/collection mu
 		).toThrow(RecordIdConflictError);
 		expect(crdtGetDocument(doc, directDocument.id)?.title).toBe('A Document, Written Directly');
 		expect(crdtGetCollection(doc, directDocument.id)).toBeUndefined();
+	});
+});
+
+describe('service layer: resolves a genuinely separate Collection shard (#120)', () => {
+	const OTHER_SHARD = 'other-shard';
+	let nextId = 0;
+
+	// createCollection always assigns shardId 'default' (the real
+	// shard-assignment cutover is a separate, later step — see #120) — this
+	// bypasses it to construct a Collection whose catalog row names a
+	// genuinely different shard, proving every service function resolves it
+	// correctly rather than assuming the default doc.
+	function createSyntheticShardedCollection(): { collectionId: string; workspaceId: string } {
+		const { workspaceId, defaultSpaceId } = resolveWorkspaceContext();
+		const collectionId = `synthetic-shard-collection-${nextId++}`;
+		reserveCollectionLocator(workspaceId, defaultSpaceId, collectionId, OTHER_SHARD);
+		recordCatalogCollectionCreated({
+			workspaceId,
+			spaceId: defaultSpaceId,
+			id: collectionId,
+			title: 'Synthetic Sharded Table',
+			shardId: OTHER_SHARD
+		});
+		const { doc: otherDoc } = resolveWorkspaceContext({ workspaceId, shardId: OTHER_SHARD });
+		crdtCreateCollection(otherDoc, {
+			id: collectionId,
+			title: 'Synthetic Sharded Table',
+			schema: []
+		});
+		return { collectionId, workspaceId };
+	}
+
+	it('queryCollection reads rows from the resolved shard, not the default doc', () => {
+		const { collectionId, workspaceId } = createSyntheticShardedCollection();
+		const { doc: otherDoc } = resolveWorkspaceContext({ workspaceId, shardId: OTHER_SHARD });
+		crdtCreateRecord(
+			otherDoc,
+			{
+				parentId: collectionId,
+				properties: { name: { type: 'text', value: 'Row In Other Shard' } }
+			},
+			human
+		);
+
+		const result = queryCollection(human, collectionId);
+		expect(result.collection?.title).toBe('Synthetic Sharded Table');
+		expect(result.records).toHaveLength(1);
+	});
+
+	it('createRecord targeting a sharded Collection writes into that shard and reserves a row locator', () => {
+		const { collectionId, workspaceId } = createSyntheticShardedCollection();
+
+		const record = createRecord(human, {
+			parentId: collectionId,
+			properties: { name: { type: 'text', value: 'New Row' } }
+		});
+
+		expect(resolveShardForRecord(workspaceId, record.id)).toEqual({ shardId: OTHER_SHARD });
+		const { doc: otherDoc } = resolveWorkspaceContext({ workspaceId, shardId: OTHER_SHARD });
+		expect(crdtGetRecord(otherDoc, record.id)?.properties?.name).toEqual({
+			type: 'text',
+			value: 'New Row'
+		});
+	});
+
+	it('writeRecord updates content in the resolved shard', () => {
+		const { collectionId, workspaceId } = createSyntheticShardedCollection();
+		const record = createRecord(human, { parentId: collectionId, properties: {} });
+
+		writeRecord(human, record.id, { properties: { status: { type: 'text', value: 'Done' } } });
+
+		const { doc: otherDoc } = resolveWorkspaceContext({ workspaceId, shardId: OTHER_SHARD });
+		expect(crdtGetRecord(otherDoc, record.id)?.properties?.status).toEqual({
+			type: 'text',
+			value: 'Done'
+		});
+	});
+
+	it('getRecord reads from the resolved shard', () => {
+		const { collectionId } = createSyntheticShardedCollection();
+		const record = createRecord(human, {
+			parentId: collectionId,
+			properties: { a: { type: 'text', value: '1' } }
+		});
+
+		expect(getRecord(human, record.id)?.properties?.a).toEqual({ type: 'text', value: '1' });
+	});
+
+	it('deleteRecord removes it from the resolved shard and releases its row locator', () => {
+		const { collectionId, workspaceId } = createSyntheticShardedCollection();
+		const record = createRecord(human, { parentId: collectionId, properties: {} });
+
+		deleteRecord(human, record.id);
+
+		expect(resolveShardForRecord(workspaceId, record.id)).toBeUndefined();
+		const { doc: otherDoc } = resolveWorkspaceContext({ workspaceId, shardId: OTHER_SHARD });
+		expect(crdtGetRecord(otherDoc, record.id)).toBeUndefined();
+	});
+
+	it('holdRecords/releaseRecords (token caller) operate against the resolved shard Awareness, never the default one', () => {
+		const { collectionId, workspaceId } = createSyntheticShardedCollection();
+		const record = createRecord(human, { parentId: collectionId, properties: {} });
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Shard Test Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: [collectionId]
+		});
+
+		const holdResult = holdRecords(tokenRecord, [record.id]);
+		expect(holdResult).toEqual({ granted: [record.id], denied: [] });
+
+		function isHeldSomewhere(workspaceIdArg: string, shardId: string | undefined): boolean {
+			const { awareness } = resolveWorkspaceContext(
+				shardId !== undefined
+					? { workspaceId: workspaceIdArg, shardId }
+					: { workspaceId: workspaceIdArg }
+			);
+			return Array.from(awareness.getStates().values()).some((s) =>
+				(s as { heldRecordIds?: string[] } | undefined)?.heldRecordIds?.includes(record.id)
+			);
+		}
+
+		expect(isHeldSomewhere(workspaceId, OTHER_SHARD)).toBe(true);
+		expect(isHeldSomewhere(workspaceId, undefined)).toBe(false);
+
+		releaseRecords(tokenRecord, [record.id]);
+		expect(isHeldSomewhere(workspaceId, OTHER_SHARD)).toBe(false);
+	});
+
+	it('searchWorkspace finds content living in the resolved shard, not just the default doc', () => {
+		const { collectionId } = createSyntheticShardedCollection();
+		createRecord(human, {
+			parentId: collectionId,
+			properties: { name: { type: 'text', value: 'Findable Needle Value' } }
+		});
+
+		const results = searchWorkspace(human, 'needle');
+		expect(results.some((r) => r.snippet.includes('Needle'))).toBe(true);
 	});
 });
