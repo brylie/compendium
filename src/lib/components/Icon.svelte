@@ -45,7 +45,8 @@
 			| 'eye-off'
 			| 'arrow-up'
 			| 'arrow-down'
-			| 'close';
+			| 'close'
+			| 'grip';
 		size?: number;
 		class?: string;
 	} = $props();
@@ -175,5 +176,12 @@
 		<path d="M10 4v12M5 11.5 10 16l5-4.5" />
 	{:else if name === 'close'}
 		<path d="m5 5 10 10M15 5 5 15" />
+	{:else if name === 'grip'}
+		<circle cx="7" cy="5" r="1.3" fill="currentColor" stroke="none" />
+		<circle cx="13" cy="5" r="1.3" fill="currentColor" stroke="none" />
+		<circle cx="7" cy="10" r="1.3" fill="currentColor" stroke="none" />
+		<circle cx="13" cy="10" r="1.3" fill="currentColor" stroke="none" />
+		<circle cx="7" cy="15" r="1.3" fill="currentColor" stroke="none" />
+		<circle cx="13" cy="15" r="1.3" fill="currentColor" stroke="none" />
 	{/if}
 </svg>

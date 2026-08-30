@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import {
@@ -250,6 +250,245 @@ describe('FieldMenu', () => {
 		await user.click(document.body);
 
 		expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+	});
+
+	describe('select field option lifecycle (issue #94)', () => {
+		function renderSelectField() {
+			const collection = createCollection(ydoc, {
+				title: 'T',
+				schema: [
+					{
+						key: 'status',
+						label: 'Status',
+						type: 'select',
+						options: [
+							{ id: 'todo', label: 'To do', color: 'oklch(60% 0.01 250)' },
+							{ id: 'done', label: 'Done', color: 'oklch(65% 0.14 145)' }
+						]
+					}
+				]
+			});
+			return { collection };
+		}
+
+		async function openOptionsEditor(user: ReturnType<typeof userEvent.setup>) {
+			await user.click(screen.getByRole('button', { name: 'Field options for Status' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Edit field' }));
+		}
+
+		it('adds a new option through the inline add form', async () => {
+			const { collection } = renderSelectField();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			await user.type(screen.getByLabelText('Add option'), 'Blocked');
+			await user.click(screen.getByRole('button', { name: 'Add' }));
+
+			const options = getCollection(ydoc, collection.id)?.schema[0].options ?? [];
+			expect(options.map((o) => o.label)).toEqual(['To do', 'Done', 'Blocked']);
+		});
+
+		it('rejects adding a blank or already-used option label', async () => {
+			const { collection } = renderSelectField();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			await user.type(screen.getByLabelText('Add option'), 'done');
+			await user.click(screen.getByRole('button', { name: 'Add' }));
+
+			expect(screen.getByText('An option named "done" already exists')).toBeInTheDocument();
+			expect(getCollection(ydoc, collection.id)?.schema[0].options).toHaveLength(2);
+		});
+
+		it('renames an option by editing its label field', async () => {
+			const { collection } = renderSelectField();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			const input = screen.getByLabelText('Rename option To do');
+			await user.clear(input);
+			await user.type(input, 'Backlog');
+			fireEvent.blur(input);
+
+			const options = getCollection(ydoc, collection.id)?.schema[0].options ?? [];
+			expect(options[0].label).toBe('Backlog');
+		});
+
+		it('restores the input to the stored label when a rename is rejected as a duplicate', async () => {
+			const { collection } = renderSelectField();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			const input = screen.getByLabelText<HTMLInputElement>('Rename option To do');
+			await user.clear(input);
+			await user.type(input, 'done');
+			await fireEvent.blur(input);
+
+			expect(await screen.findByText('An option named "done" already exists')).toBeInTheDocument();
+			expect(input.value).toBe('To do');
+			expect(getCollection(ydoc, collection.id)?.schema[0].options?.[0].label).toBe('To do');
+		});
+
+		it('recolors an option via the swatch picker', async () => {
+			const { collection } = renderSelectField();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			await user.click(screen.getByRole('button', { name: 'Color for To do' }));
+			await user.click(screen.getByRole('button', { name: 'Red' }));
+
+			const options = getCollection(ydoc, collection.id)?.schema[0].options ?? [];
+			expect(options[0].color).toBe('oklch(62% 0.18 25)');
+		});
+
+		it('reorders options with the down/up buttons', async () => {
+			const { collection } = renderSelectField();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			await user.click(screen.getByRole('button', { name: 'Move To do down' }));
+
+			const options = getCollection(ydoc, collection.id)?.schema[0].options ?? [];
+			expect(options.map((o) => o.id)).toEqual(['done', 'todo']);
+		});
+
+		it('reorders options via drag and drop', async () => {
+			const { collection } = renderSelectField();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			const rows = screen.getByRole('list').querySelectorAll('li');
+			const [todoRow, doneRow] = Array.from(rows);
+			const todoHandle = todoRow.querySelector('[draggable="true"]');
+			if (!todoHandle) throw new Error('expected a drag handle inside the option row');
+
+			// jsdom has no DataTransfer constructor — a minimal duck-typed stand-in
+			// is enough since the component only calls dataTransfer.setData().
+			const dataTransfer = { setData: () => {} } as unknown as DataTransfer;
+			await fireEvent.dragStart(todoHandle, { dataTransfer });
+			await fireEvent.dragOver(doneRow);
+			await fireEvent.drop(doneRow);
+
+			const options = getCollection(ydoc, collection.id)?.schema[0].options ?? [];
+			expect(options.map((o) => o.id)).toEqual(['done', 'todo']);
+		});
+
+		it('deletes an option after confirming, showing the affected-record count and clearing it from records', async () => {
+			const { collection } = renderSelectField();
+			const record = createRecord(
+				ydoc,
+				{ parentId: collection.id, properties: { status: { type: 'select', value: 'todo' } } },
+				{ kind: 'human', userId: 'local' }
+			);
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			await user.click(screen.getByRole('button', { name: 'Delete option To do' }));
+
+			const dialog = screen.getByRole('dialog');
+			expect(within(dialog).getByText(/1 record\(s\)/)).toBeInTheDocument();
+			await user.click(within(dialog).getByRole('button', { name: 'Delete option' }));
+
+			const options = getCollection(ydoc, collection.id)?.schema[0].options ?? [];
+			expect(options.map((o) => o.id)).toEqual(['done']);
+			expect(getRecord(ydoc, record.id)?.properties?.status).toBeUndefined();
+		});
+
+		// Regression: confirming (or cancelling) an option delete used to be
+		// misread by handleWindowClick as an outside click — the confirm
+		// button lives in a ConfirmDialog that isn't nested under the field
+		// editor's own panel — which force-closed the whole "Edit field" panel
+		// on every option delete, discarding any error along with it.
+		it('keeps the field editor open after confirming an option delete, so other options stay reachable', async () => {
+			const { collection } = renderSelectField();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			await user.click(screen.getByRole('button', { name: 'Delete option To do' }));
+			await user.click(
+				within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete option' })
+			);
+
+			expect(screen.getByRole('group', { name: 'Edit Status field' })).toBeInTheDocument();
+		});
+
+		it('cancelling the delete-option confirmation leaves it intact', async () => {
+			const { collection } = renderSelectField();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			await user.click(screen.getByRole('button', { name: 'Delete option To do' }));
+			await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+
+			expect(getCollection(ydoc, collection.id)?.schema[0].options).toHaveLength(2);
+		});
+
+		it('surfaces an error instead of throwing when adding an option after a concurrent delete of the collection', async () => {
+			const { collection } = renderSelectField();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			deleteCollection(ydoc, collection.id);
+			await user.type(screen.getByLabelText('Add option'), 'Blocked');
+			await user.click(screen.getByRole('button', { name: 'Add' }));
+
+			expect(screen.getByText('Could not add the option. Please try again.')).toBeInTheDocument();
+		});
 	});
 
 	// Regression coverage for two real bugs found in manual testing: the panel
