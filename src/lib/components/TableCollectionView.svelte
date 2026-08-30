@@ -7,6 +7,7 @@
 		addSelectOption as addSelectOptionToSchema,
 		createRecord,
 		deleteRecord,
+		resolvePrimaryField,
 		updateRecordProperties,
 		ValidationError
 	} from '$lib/data/records';
@@ -32,17 +33,20 @@
 	let ydoc: ReturnType<typeof getClientDoc> | undefined = $state();
 	let schema: PropertyDefinition[] = $state([]);
 	let rows: WorkspaceRecord[] = $state([]);
+	let primaryFieldKey: string | undefined = $state();
 	let optionDialogPropertyKey: string | null = $state(null);
 	let optionDialogError = $state('');
 
 	const columns = $derived(visibleProperties(schema, config));
 	const projected = $derived(projectRecords(rows, config));
+	const effectivePrimaryKey = $derived(resolvePrimaryField(schema, primaryFieldKey)?.key);
 
 	function refresh(): void {
 		if (!ydoc) return;
 		const view = getCollectionView(ydoc, collectionId);
 		schema = view.collection?.schema ?? [];
 		rows = view.records;
+		primaryFieldKey = view.collection?.primaryFieldKey;
 	}
 
 	onMount(() => {
@@ -131,11 +135,18 @@
 					{#each columns as property (property.key)}
 						<th class="border-r border-border/60 px-3.5 py-2.5">
 							<div class="flex items-center justify-between gap-2">
-								<span class="font-medium text-fg">{property.label}</span>
+								<span class="flex items-center gap-1 font-medium text-fg">
+									{property.label}
+									{#if property.key === effectivePrimaryKey}
+										<Icon name="star" size={11} class="text-accent" />
+										<span class="sr-only">Primary field</span>
+									{/if}
+								</span>
 								<FieldMenu
 									{collectionId}
 									{schema}
 									{property}
+									{primaryFieldKey}
 									visible={true}
 									onToggleVisible={() => hideInThisView(property.key)}
 								/>

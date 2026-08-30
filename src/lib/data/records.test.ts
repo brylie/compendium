@@ -25,7 +25,9 @@ import {
 	moveSelectOption,
 	NotFoundError,
 	previewCollectionPropertyTypeChange,
+	resolvePrimaryField,
 	setBlockType,
+	setPrimaryField,
 	setRecordChecked,
 	setRecordCollapsed,
 	setRecordReferencedId,
@@ -581,6 +583,125 @@ describe('collection field lifecycle: rename, retype, duplicate, delete', () => 
 	it('deleteCollectionProperty throws NotFoundError for an unknown collection', () => {
 		const doc = new Y.Doc();
 		expect(() => deleteCollectionProperty(doc, 'missing', 'name')).toThrow(NotFoundError);
+	});
+});
+
+describe('primary field: resolve, set, and migration on delete/retype (issue #96)', () => {
+	function setupCollection(doc: Y.Doc) {
+		return createCollection(doc, {
+			title: 'Tasks',
+			schema: [
+				{ key: 'name', label: 'Name', type: 'text' },
+				{ key: 'notes', label: 'Notes', type: 'text' },
+				{ key: 'assignees', label: 'Assignees', type: 'relation' }
+			]
+		});
+	}
+
+	it('resolvePrimaryField falls back to the first text field when nothing is explicitly set', () => {
+		const doc = new Y.Doc();
+		const collection = setupCollection(doc);
+		expect(resolvePrimaryField(collection.schema, undefined)?.key).toBe('name');
+	});
+
+	it('resolvePrimaryField returns undefined when no eligible field exists', () => {
+		const schema = [{ key: 'assignees', label: 'Assignees', type: 'relation' as const }];
+		expect(resolvePrimaryField(schema, undefined)).toBeUndefined();
+	});
+
+	it('resolvePrimaryField returns undefined when an eligible field exists but none is type text — the fallback only considers text fields', () => {
+		const schema = [{ key: 'qty', label: 'Qty', type: 'number' as const }];
+		expect(resolvePrimaryField(schema, undefined)).toBeUndefined();
+	});
+
+	it('setPrimaryField chooses an explicit field, overriding the first-text fallback', () => {
+		const doc = new Y.Doc();
+		const collection = setupCollection(doc);
+
+		setPrimaryField(doc, collection.id, 'notes');
+
+		const schema = getCollection(doc, collection.id)!.schema;
+		expect(getCollection(doc, collection.id)?.primaryFieldKey).toBe('notes');
+		expect(resolvePrimaryField(schema, 'notes')?.key).toBe('notes');
+	});
+
+	it('setPrimaryField(null) clears the explicit choice, reverting to the automatic fallback', () => {
+		const doc = new Y.Doc();
+		const collection = setupCollection(doc);
+		setPrimaryField(doc, collection.id, 'notes');
+
+		setPrimaryField(doc, collection.id, null);
+
+		expect(getCollection(doc, collection.id)?.primaryFieldKey).toBeUndefined();
+	});
+
+	it('setPrimaryField rejects a relation field — it has no single display value of its own', () => {
+		const doc = new Y.Doc();
+		const collection = setupCollection(doc);
+		expect(() => setPrimaryField(doc, collection.id, 'assignees')).toThrow(ValidationError);
+		expect(getCollection(doc, collection.id)?.primaryFieldKey).toBeUndefined();
+	});
+
+	it('setPrimaryField throws NotFoundError for an unknown collection or field', () => {
+		const doc = new Y.Doc();
+		const collection = setupCollection(doc);
+		expect(() => setPrimaryField(doc, 'missing', 'name')).toThrow(NotFoundError);
+		expect(() => setPrimaryField(doc, collection.id, 'missing')).toThrow(NotFoundError);
+	});
+
+	it('reordering the schema does not change an explicitly chosen primary field', () => {
+		const doc = new Y.Doc();
+		const collection = setupCollection(doc);
+		setPrimaryField(doc, collection.id, 'notes');
+
+		const schema = getCollection(doc, collection.id)!.schema;
+		updateCollectionSchema(doc, collection.id, [...schema].reverse());
+
+		const reordered = getCollection(doc, collection.id)!;
+		expect(resolvePrimaryField(reordered.schema, reordered.primaryFieldKey)?.key).toBe('notes');
+	});
+
+	it('deleteCollectionProperty clears primaryFieldKey when the deleted field was the primary', () => {
+		const doc = new Y.Doc();
+		const collection = setupCollection(doc);
+		setPrimaryField(doc, collection.id, 'notes');
+
+		deleteCollectionProperty(doc, collection.id, 'notes');
+
+		expect(getCollection(doc, collection.id)?.primaryFieldKey).toBeUndefined();
+		// Falls back to the remaining text field rather than showing no title.
+		const schema = getCollection(doc, collection.id)!.schema;
+		expect(resolvePrimaryField(schema, undefined)?.key).toBe('name');
+	});
+
+	it('deleteCollectionProperty leaves primaryFieldKey untouched when an unrelated field is deleted', () => {
+		const doc = new Y.Doc();
+		const collection = setupCollection(doc);
+		setPrimaryField(doc, collection.id, 'notes');
+
+		deleteCollectionProperty(doc, collection.id, 'assignees');
+
+		expect(getCollection(doc, collection.id)?.primaryFieldKey).toBe('notes');
+	});
+
+	it('updateCollectionProperty clears primaryFieldKey when retyping it to an ineligible type', () => {
+		const doc = new Y.Doc();
+		const collection = setupCollection(doc);
+		setPrimaryField(doc, collection.id, 'notes');
+
+		updateCollectionProperty(doc, collection.id, 'notes', { type: 'relation' });
+
+		expect(getCollection(doc, collection.id)?.primaryFieldKey).toBeUndefined();
+	});
+
+	it('updateCollectionProperty preserves primaryFieldKey when retyping it to another eligible type', () => {
+		const doc = new Y.Doc();
+		const collection = setupCollection(doc);
+		setPrimaryField(doc, collection.id, 'notes');
+
+		updateCollectionProperty(doc, collection.id, 'notes', { type: 'number' });
+
+		expect(getCollection(doc, collection.id)?.primaryFieldKey).toBe('notes');
 	});
 });
 

@@ -2,7 +2,7 @@
 	import { tick } from 'svelte';
 	import { nanoid } from 'nanoid';
 	import { getClientDoc } from '$lib/client/yjs-client';
-	import { getCollection, updateCollectionSchema } from '$lib/data/records';
+	import { getCollection, resolvePrimaryField, updateCollectionSchema } from '$lib/data/records';
 	import type { PropertyDefinition, PropertyType } from '$lib/data/types';
 	import Icon from './Icon.svelte';
 	import FieldMenu from './FieldMenu.svelte';
@@ -27,9 +27,12 @@
 	];
 
 	let schema: PropertyDefinition[] = $state([]);
+	let primaryFieldKey: string | undefined = $state();
 	let newFieldLabel = $state('');
 	let newFieldType: PropertyType = $state('text');
 	let errorMessage = $state('');
+
+	const effectivePrimaryKey = $derived(resolvePrimaryField(schema, primaryFieldKey)?.key);
 
 	let dialog: HTMLDivElement | undefined = $state();
 	let closeButton: HTMLButtonElement | undefined = $state();
@@ -37,7 +40,9 @@
 	let downButtons: Record<string, HTMLButtonElement | undefined> = {};
 
 	function refresh(): void {
-		schema = getCollection(getClientDoc(), collectionId)?.schema ?? [];
+		const collection = getCollection(getClientDoc(), collectionId);
+		schema = collection?.schema ?? [];
+		primaryFieldKey = collection?.primaryFieldKey;
 	}
 
 	// Gated on `open` rather than a plain onMount: this dialog is mounted
@@ -185,13 +190,19 @@
 								<Icon name="arrow-down" size={11} />
 							</button>
 						</div>
-						<span class="flex-1 truncate text-sm text-fg">{property.label}</span>
+						<span class="flex flex-1 items-center gap-1 truncate text-sm text-fg">
+							{property.label}
+							{#if property.key === effectivePrimaryKey}
+								<Icon name="star" size={11} class="text-accent" />
+								<span class="sr-only">Primary field</span>
+							{/if}
+						</span>
 						<span
 							class="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[10px] text-muted"
 						>
 							{property.type}
 						</span>
-						<FieldMenu {collectionId} {schema} {property} />
+						<FieldMenu {collectionId} {schema} {property} {primaryFieldKey} />
 					</li>
 				{:else}
 					<li class="py-4 text-center text-sm text-muted italic">No fields yet.</li>

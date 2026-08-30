@@ -7,6 +7,7 @@
 		addSelectOption as addSelectOptionToSchema,
 		createRecord,
 		deleteRecord,
+		resolvePrimaryField,
 		updateCollectionSchema,
 		updateRecordProperties,
 		ValidationError
@@ -14,6 +15,7 @@
 	import {
 		getCollectionView,
 		groupBySelectProperty,
+		primaryFieldDisplayValue,
 		projectRecords,
 		visibleProperties
 	} from '$lib/data/views';
@@ -39,6 +41,7 @@
 	let ydoc: ReturnType<typeof getClientDoc> | undefined = $state();
 	let schema: PropertyDefinition[] = $state([]);
 	let rows: WorkspaceRecord[] = $state([]);
+	let primaryFieldKey: string | undefined = $state();
 	let manualOrder: Record<string, string[]> = $state({});
 	let draggedRecordId: string | null = $state(null);
 	let newGroupingPropertyLabel = $state('Status');
@@ -57,11 +60,10 @@
 	const columns = $derived<BoardColumn[]>(
 		groupProperty ? groupBySelectProperty(projected, groupProperty) : []
 	);
-	const titlePropertyKey = $derived(schema.find((p) => p.type === 'text')?.key);
-	const titleProperty = $derived(schema.find((p) => p.key === titlePropertyKey));
+	const titleProperty = $derived(resolvePrimaryField(schema, primaryFieldKey));
 	const cardFields = $derived(
 		visibleProperties(schema, config).filter(
-			(p) => p.key !== config.groupBy && p.key !== titlePropertyKey
+			(p) => p.key !== config.groupBy && p.key !== titleProperty?.key
 		)
 	);
 
@@ -77,6 +79,7 @@
 		const view = getCollectionView(ydoc, collectionId);
 		schema = view.collection?.schema ?? [];
 		rows = view.records;
+		primaryFieldKey = view.collection?.primaryFieldKey;
 		if (autoGroupByAttempted) return;
 		autoGroupByAttempted = true;
 		const resolvedKey =
@@ -162,8 +165,8 @@
 	}
 
 	function cardTitle(row: WorkspaceRecord): string {
-		const value = titlePropertyKey ? row.properties?.[titlePropertyKey] : undefined;
-		return value?.type === 'text' && value.value ? value.value : 'Untitled';
+		const value = titleProperty ? row.properties?.[titleProperty.key] : undefined;
+		return primaryFieldDisplayValue(value, titleProperty) || 'Untitled';
 	}
 
 	function moveToColumn(column: BoardColumn, recordId: string): void {

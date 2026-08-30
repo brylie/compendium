@@ -10,6 +10,7 @@ import {
 	HoldRequiredError
 } from '$lib/services';
 import type { BlockType } from '$lib/data/types';
+import { resolvePrimaryField } from '$lib/data/records';
 
 const propertyValueSchema = z.discriminatedUnion('type', [
 	z.object({ type: z.literal('text'), value: z.string() }),
@@ -194,7 +195,8 @@ export function createMcpServer(): McpServer {
 			const collections = serviceModules.collections.listCollections(token).map((c) => ({
 				id: c.id,
 				title: c.title,
-				schema: c.schema
+				schema: c.schema,
+				primaryFieldKey: resolvePrimaryField(c.schema, c.primaryFieldKey)?.key
 			}));
 			return textResult(collections);
 		} catch (err) {
@@ -227,6 +229,7 @@ export function createMcpServer(): McpServer {
 					id: collection.id,
 					title: collection.title,
 					schema: collection.schema,
+					primaryFieldKey: resolvePrimaryField(collection.schema, collection.primaryFieldKey)?.key,
 					rows
 				});
 			} catch (err) {

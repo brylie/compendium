@@ -11,6 +11,7 @@
 		duplicateCollectionProperty,
 		moveSelectOption,
 		previewCollectionPropertyTypeChange,
+		setPrimaryField,
 		updateCollectionProperty,
 		updateCollectionSchema,
 		updateSelectOption,
@@ -25,12 +26,14 @@
 		collectionId,
 		schema,
 		property,
+		primaryFieldKey = undefined,
 		visible = undefined,
 		onToggleVisible = undefined
 	}: {
 		collectionId: string;
 		schema: PropertyDefinition[];
 		property: PropertyDefinition;
+		primaryFieldKey?: string;
 		visible?: boolean;
 		onToggleVisible?: () => void;
 	} = $props();
@@ -55,6 +58,18 @@
 	let deleteAffectedCount = $state(0);
 	let errorMessage = $state('');
 	let panelStyle = $state('');
+
+	// The primary field (issue #96) — whether this field is the Collection's
+	// *explicit* primaryFieldKey, not whether it's merely the resolved
+	// fallback (resolvePrimaryField's first-text default). Comparing against
+	// the resolved value here would make the fallback field's own toggle a
+	// no-op forever: with primaryFieldKey unset, resolvePrimaryField already
+	// returns the fallback field, so isPrimary would read true and the menu
+	// would only ever offer "Unset" — clicking it writes null onto an
+	// already-null key, leaving no way to actually persist that field as the
+	// explicit choice. Comparing the raw key lets a user promote the current
+	// fallback field to an explicit primaryFieldKey.
+	const isPrimary = $derived(primaryFieldKey === property.key);
 
 	// Select option lifecycle (issue #94) — only shown when the field is
 	// already a select field (not while editType is mid-change toward one;
@@ -190,6 +205,19 @@
 	function toggleVisible(): void {
 		onToggleVisible?.();
 		closeMenu();
+	}
+
+	function togglePrimary(): void {
+		try {
+			setPrimaryField(getClientDoc(), collectionId, isPrimary ? null : property.key);
+			errorMessage = '';
+			closeMenu();
+		} catch (err) {
+			errorMessage =
+				err instanceof ValidationError
+					? err.message
+					: 'Could not update the primary field. Please try again.';
+		}
 	}
 
 	function openDeleteConfirm(): void {
@@ -452,6 +480,19 @@
 				>
 					<Icon name="duplicate" size={14} />
 					<span>Duplicate</span>
+				</button>
+				<button
+					type="button"
+					role="menuitem"
+					onclick={togglePrimary}
+					disabled={!isPrimary && property.type === 'relation'}
+					class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-fg hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+					title={!isPrimary && property.type === 'relation'
+						? "A relation field can't be the primary field"
+						: undefined}
+				>
+					<Icon name="star" size={14} />
+					<span>{isPrimary ? 'Unset primary field' : 'Set as primary field'}</span>
 				</button>
 				{#if onToggleVisible}
 					<button

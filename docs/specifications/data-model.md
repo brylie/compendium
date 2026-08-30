@@ -118,6 +118,7 @@ interface Collection {
 	title: string;
 	schema: PropertyDefinition[];
 	recordIds: string[]; // membership; row order within a view is a view concern, not stored here
+	primaryFieldKey?: string; // schema key of the record's title/identity field — see collection-views.md §7
 }
 ```
 
