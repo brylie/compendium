@@ -73,6 +73,17 @@ export default defineConfig({
 			{
 				extends: './vite.config.ts',
 				test: {
+					name: 'benchmark',
+					environment: 'node',
+					include: ['tests/benchmark/**/*.test.ts'],
+					setupFiles: ['./tests/setup/isolate-persistence.ts'],
+					fileParallelism: false,
+					testTimeout: 120_000
+				}
+			},
+			{
+				extends: './vite.config.ts',
+				test: {
 					name: 'client',
 					environment: 'jsdom',
 					include: ['src/lib/client/**/*.{test,spec}.{js,ts}']

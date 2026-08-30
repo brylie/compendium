@@ -14,6 +14,8 @@
 		"test:e2e:tier-a": "vitest --run tests/e2e/tier-a.test.ts",
 		"test:e2e:tier-b": "playwright test",
 		"test:e2e": "npm run test:e2e:tier-a && npm run test:e2e:tier-b",
+		"benchmark:workspace": "vitest run --project benchmark",
+		"benchmark:workspace:large": "COMPENDIUM_BENCHMARK_PROFILE=large vitest run --project benchmark",
 		"test": "npm run test:unit -- --run",
 		"test:coverage": "npm run test:unit -- --run --coverage",
 		"lint": "prettier --check . && eslint .",
