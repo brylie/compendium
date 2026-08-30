@@ -16,7 +16,11 @@ import {
 	recordCatalogDocumentMoved,
 	recordCatalogDocumentTitleChanged,
 	RecordIdConflictError,
-	reserveDocumentLocator
+	reserveDocumentLocator,
+	reserveCollectionLocator,
+	recordCatalogCollectionCreated,
+	recordCatalogCollectionTitleChanged,
+	recordCatalogCollectionDeleted
 } from './catalog';
 
 const WS = 'default';
@@ -230,5 +234,100 @@ describe('catalog: document deletion cascades to descendants', () => {
 			.where(eq(catalogDocuments.id, 'renamable'))
 			.get();
 		expect(row?.title).toBe('After');
+	});
+});
+
+describe('catalog: two workspaces reusing the same record id stay isolated', () => {
+	// record_locator scopes uniqueness to (workspaceId, recordId) — a bare
+	// global `id` primary key on catalog_documents/catalog_collections would
+	// let workspace A's reservation succeed, then throw an unhandled SQL
+	// error the moment workspace B tried to insert its own row with the same
+	// id. This proves the composite (workspaceId, id) primary key actually
+	// allows that, and that mutating one workspace's row never touches the
+	// other's.
+	it('lets two workspaces each create a Document with the same id, and update/delete only affects the right one', () => {
+		const docA = new Y.Doc();
+		const { defaultSpaceId: spaceA } = ensureCatalogBootstrapped('workspace-a', SHARD, docA);
+		const docB = new Y.Doc();
+		const { defaultSpaceId: spaceB } = ensureCatalogBootstrapped('workspace-b', SHARD, docB);
+
+		reserveDocumentLocator('workspace-a', spaceA, 'shared-id', SHARD);
+		recordCatalogDocumentCreated({
+			workspaceId: 'workspace-a',
+			spaceId: spaceA,
+			id: 'shared-id',
+			title: 'Workspace A Doc',
+			order: 'a0',
+			shardId: SHARD
+		});
+
+		expect(() => {
+			reserveDocumentLocator('workspace-b', spaceB, 'shared-id', SHARD);
+			recordCatalogDocumentCreated({
+				workspaceId: 'workspace-b',
+				spaceId: spaceB,
+				id: 'shared-id',
+				title: 'Workspace B Doc',
+				order: 'a0',
+				shardId: SHARD
+			});
+		}).not.toThrow();
+
+		recordCatalogDocumentTitleChanged('workspace-a', 'shared-id', 'Renamed A');
+		expect(listCatalogDocuments('workspace-a').find((d) => d.id === 'shared-id')?.title).toBe(
+			'Renamed A'
+		);
+		expect(listCatalogDocuments('workspace-b').find((d) => d.id === 'shared-id')?.title).toBe(
+			'Workspace B Doc'
+		);
+
+		recordCatalogDocumentDeleted('workspace-a', 'shared-id');
+		expect(listCatalogDocuments('workspace-a').find((d) => d.id === 'shared-id')).toBeUndefined();
+		expect(listCatalogDocuments('workspace-b').find((d) => d.id === 'shared-id')?.title).toBe(
+			'Workspace B Doc'
+		);
+	});
+
+	it('lets two workspaces each create a Collection with the same id, and update/delete only affects the right one', () => {
+		const docA = new Y.Doc();
+		const { defaultSpaceId: spaceA } = ensureCatalogBootstrapped('workspace-c', SHARD, docA);
+		const docB = new Y.Doc();
+		const { defaultSpaceId: spaceB } = ensureCatalogBootstrapped('workspace-d', SHARD, docB);
+
+		reserveCollectionLocator('workspace-c', spaceA, 'shared-collection-id', SHARD);
+		recordCatalogCollectionCreated({
+			workspaceId: 'workspace-c',
+			spaceId: spaceA,
+			id: 'shared-collection-id',
+			title: 'Workspace C Table',
+			shardId: SHARD
+		});
+
+		expect(() => {
+			reserveCollectionLocator('workspace-d', spaceB, 'shared-collection-id', SHARD);
+			recordCatalogCollectionCreated({
+				workspaceId: 'workspace-d',
+				spaceId: spaceB,
+				id: 'shared-collection-id',
+				title: 'Workspace D Table',
+				shardId: SHARD
+			});
+		}).not.toThrow();
+
+		recordCatalogCollectionTitleChanged('workspace-c', 'shared-collection-id', 'Renamed C');
+		expect(
+			listCatalogCollections('workspace-c').find((c) => c.id === 'shared-collection-id')?.title
+		).toBe('Renamed C');
+		expect(
+			listCatalogCollections('workspace-d').find((c) => c.id === 'shared-collection-id')?.title
+		).toBe('Workspace D Table');
+
+		recordCatalogCollectionDeleted('workspace-c', 'shared-collection-id');
+		expect(
+			listCatalogCollections('workspace-c').find((c) => c.id === 'shared-collection-id')
+		).toBeUndefined();
+		expect(
+			listCatalogCollections('workspace-d').find((c) => c.id === 'shared-collection-id')?.title
+		).toBe('Workspace D Table');
 	});
 });

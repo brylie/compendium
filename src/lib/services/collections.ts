@@ -9,6 +9,7 @@ import {
 } from '$lib/data/records';
 import { logAudit } from '$lib/server/audit';
 import {
+	RecordIdConflictError,
 	recordCatalogCollectionCreated,
 	recordCatalogCollectionDeleted,
 	recordCatalogCollectionTitleChanged,
@@ -38,6 +39,13 @@ export function createCollection(
 	const actor = actorForCaller(caller);
 
 	const id = input.id ?? nanoid();
+	// See documents.ts's createDocument for why this also checks the live
+	// Y.Doc, not just the catalog locator: a caller-supplied id could collide
+	// with a Collection created by a client writing directly to the Y.Doc,
+	// bypassing the service layer (and therefore the locator) entirely.
+	if (crdtGetCollection(doc, id)) {
+		throw new RecordIdConflictError(id);
+	}
 	reserveCollectionLocator(workspaceId, defaultSpaceId, id, shardId);
 
 	const collection = crdtCreateCollection(doc, {

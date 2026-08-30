@@ -1,16 +1,17 @@
 CREATE TABLE `catalog_collections` (
-	`id` text PRIMARY KEY NOT NULL,
+	`id` text NOT NULL,
 	`workspace_id` text DEFAULT 'default' NOT NULL,
 	`space_id` text NOT NULL,
 	`shard_id` text DEFAULT 'default' NOT NULL,
 	`title` text NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
+	PRIMARY KEY(`workspace_id`, `id`),
 	FOREIGN KEY (`space_id`) REFERENCES `spaces`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE TABLE `catalog_documents` (
-	`id` text PRIMARY KEY NOT NULL,
+	`id` text NOT NULL,
 	`workspace_id` text DEFAULT 'default' NOT NULL,
 	`space_id` text NOT NULL,
 	`shard_id` text DEFAULT 'default' NOT NULL,
@@ -19,6 +20,7 @@ CREATE TABLE `catalog_documents` (
 	`order` text NOT NULL,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
+	PRIMARY KEY(`workspace_id`, `id`),
 	FOREIGN KEY (`space_id`) REFERENCES `spaces`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint

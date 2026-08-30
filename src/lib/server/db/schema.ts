@@ -1,4 +1,4 @@
-import { blob, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { blob, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import type { ActorId } from '$lib/data/types';
 
 export const snapshots = sqliteTable('snapshots', {
@@ -49,41 +49,54 @@ export const spaces = sqliteTable('spaces', {
 	createdAt: integer('created_at').notNull()
 });
 
-export const catalogDocuments = sqliteTable('catalog_documents', {
-	id: text('id').primaryKey(), // == the Y.Doc DocumentMeta.id it mirrors
-	workspaceId: text('workspace_id').notNull().default('default'),
-	spaceId: text('space_id')
-		.notNull()
-		.references(() => spaces.id),
-	shardId: text('shard_id').notNull().default('default'),
-	title: text('title').notNull(),
-	// Deliberately NOT a foreign key: a Document can be created by a client
-	// writing directly to the Y.Doc over Yjs sync, bypassing the service layer
-	// entirely (a supported pattern — see docs/specifications/audit-coverage.md
-	// and tests/e2e/tier-a.test.ts's direct-Yjs-client cases). Its catalog row
-	// wouldn't exist yet, so a strict FK on a real parentDocumentId would throw
-	// on an otherwise-valid nested create. recordCatalogDocumentDeleted (see
-	// catalog.ts) therefore deletes descendants explicitly rather than relying
-	// on ON DELETE CASCADE.
-	parentDocumentId: text('parent_document_id'),
-	order: text('order').notNull(), // mirrors DocumentMeta.order exactly, never independently recomputed
-	createdAt: integer('created_at').notNull(),
-	updatedAt: integer('updated_at').notNull()
-});
+// Primary key is (workspaceId, id), not bare id: record_locator scopes
+// uniqueness the same way (a recordId is only unique *within* a workspace),
+// so a bare global id PK here would throw on an otherwise-valid second
+// workspace reusing the same id — the locator would have already accepted
+// the reservation.
+export const catalogDocuments = sqliteTable(
+	'catalog_documents',
+	{
+		id: text('id').notNull(), // == the Y.Doc DocumentMeta.id it mirrors
+		workspaceId: text('workspace_id').notNull().default('default'),
+		spaceId: text('space_id')
+			.notNull()
+			.references(() => spaces.id),
+		shardId: text('shard_id').notNull().default('default'),
+		title: text('title').notNull(),
+		// Deliberately NOT a foreign key: a Document can be created by a client
+		// writing directly to the Y.Doc over Yjs sync, bypassing the service layer
+		// entirely (a supported pattern — see docs/specifications/audit-coverage.md
+		// and tests/e2e/tier-a.test.ts's direct-Yjs-client cases). Its catalog row
+		// wouldn't exist yet, so a strict FK on a real parentDocumentId would throw
+		// on an otherwise-valid nested create. recordCatalogDocumentDeleted (see
+		// catalog.ts) therefore deletes descendants explicitly rather than relying
+		// on ON DELETE CASCADE.
+		parentDocumentId: text('parent_document_id'),
+		order: text('order').notNull(), // mirrors DocumentMeta.order exactly, never independently recomputed
+		createdAt: integer('created_at').notNull(),
+		updatedAt: integer('updated_at').notNull()
+	},
+	(t) => [primaryKey({ columns: [t.workspaceId, t.id] })]
+);
 
-export const catalogCollections = sqliteTable('catalog_collections', {
-	id: text('id').primaryKey(), // == the Y.Doc CollectionMeta.id it mirrors
-	workspaceId: text('workspace_id').notNull().default('default'),
-	spaceId: text('space_id')
-		.notNull()
-		.references(() => spaces.id),
-	shardId: text('shard_id').notNull().default('default'),
-	title: text('title').notNull(),
-	// No parent/order (Collections are flat) and no schema mirror — schema
-	// stays shard-owned per workspace-sharding.md §3.1/§3.2.
-	createdAt: integer('created_at').notNull(),
-	updatedAt: integer('updated_at').notNull()
-});
+export const catalogCollections = sqliteTable(
+	'catalog_collections',
+	{
+		id: text('id').notNull(), // == the Y.Doc CollectionMeta.id it mirrors
+		workspaceId: text('workspace_id').notNull().default('default'),
+		spaceId: text('space_id')
+			.notNull()
+			.references(() => spaces.id),
+		shardId: text('shard_id').notNull().default('default'),
+		title: text('title').notNull(),
+		// No parent/order (Collections are flat) and no schema mirror — schema
+		// stays shard-owned per workspace-sharding.md §3.1/§3.2.
+		createdAt: integer('created_at').notNull(),
+		updatedAt: integer('updated_at').notNull()
+	},
+	(t) => [primaryKey({ columns: [t.workspaceId, t.id] })]
+);
 
 // The workspace-wide (workspace_id, record_id) locator required by §3.1: the
 // mechanism that actually rejects a duplicate id across Documents/Collections

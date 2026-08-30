@@ -2,6 +2,7 @@ import * as Y from 'yjs';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { getDb } from './store.js';
+import type { Db } from './db/index.js';
 import {
 	catalogCollections,
 	catalogDocuments,
@@ -15,6 +16,11 @@ import {
 	listDocuments as crdtListDocuments
 } from '../data/records.js';
 import type { CollectionMeta, DocumentMeta, ParentKind } from '../data/types.js';
+
+// The transaction handle drizzle's better-sqlite3 driver passes into a
+// db.transaction(...) callback — extracted from Db['transaction'] itself
+// rather than hand-typed, so it can't drift from the real type.
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
 // The catalog: durable SQLite metadata fronting the (today: single, Phase B:
 // per-Document/per-Collection) Y.Doc content shard(s) — see
@@ -33,12 +39,20 @@ export class RecordIdConflictError extends Error {
 
 type CatalogOp = 'create' | 'update' | 'move' | 'delete';
 
+/**
+ * Bumps the workspace's catalog revision and appends its outbox row.
+ * Takes the caller's own transaction handle rather than opening one itself,
+ * so a crash between the catalog mutation, the revision bump, and the
+ * outbox insert can never leave any of the three committed without the
+ * others — the committed-write contract (workspace-sharding.md §4) this
+ * exists to guarantee would otherwise be undermined by exactly that gap.
+ */
 function bumpRevisionAndAppendOutbox(
+	tx: Tx,
 	workspaceId: string,
 	payload: { documents?: string[]; collections?: string[]; op: CatalogOp }
 ): void {
-	const db = getDb();
-	db.insert(catalogRevisions)
+	tx.insert(catalogRevisions)
 		.values({ workspaceId, revision: 1 })
 		.onConflictDoUpdate({
 			target: catalogRevisions.workspaceId,
@@ -46,13 +60,13 @@ function bumpRevisionAndAppendOutbox(
 		})
 		.run();
 	const revision =
-		db
+		tx
 			.select({ revision: catalogRevisions.revision })
 			.from(catalogRevisions)
 			.where(eq(catalogRevisions.workspaceId, workspaceId))
 			.get()?.revision ?? 1;
 	const now = Date.now();
-	db.insert(catalogOutbox)
+	tx.insert(catalogOutbox)
 		.values({
 			workspaceId,
 			revision,
@@ -120,9 +134,8 @@ export function recordCatalogDocumentCreated(input: {
 	order: string;
 	shardId: string;
 }): void {
-	const db = getDb();
 	const now = Date.now();
-	db.transaction((tx) => {
+	getDb().transaction((tx) => {
 		tx.insert(catalogDocuments)
 			.values({
 				id: input.id,
@@ -136,8 +149,8 @@ export function recordCatalogDocumentCreated(input: {
 				updatedAt: now
 			})
 			.run();
+		bumpRevisionAndAppendOutbox(tx, input.workspaceId, { documents: [input.id], op: 'create' });
 	});
-	bumpRevisionAndAppendOutbox(input.workspaceId, { documents: [input.id], op: 'create' });
 }
 
 export function recordCatalogDocumentTitleChanged(
@@ -145,12 +158,13 @@ export function recordCatalogDocumentTitleChanged(
 	id: string,
 	title: string
 ): void {
-	getDb()
-		.update(catalogDocuments)
-		.set({ title, updatedAt: Date.now() })
-		.where(eq(catalogDocuments.id, id))
-		.run();
-	bumpRevisionAndAppendOutbox(workspaceId, { documents: [id], op: 'update' });
+	getDb().transaction((tx) => {
+		tx.update(catalogDocuments)
+			.set({ title, updatedAt: Date.now() })
+			.where(and(eq(catalogDocuments.workspaceId, workspaceId), eq(catalogDocuments.id, id)))
+			.run();
+		bumpRevisionAndAppendOutbox(tx, workspaceId, { documents: [id], op: 'update' });
+	});
 }
 
 export function recordCatalogDocumentMoved(
@@ -159,12 +173,13 @@ export function recordCatalogDocumentMoved(
 	parentDocumentId: string | undefined,
 	order: string
 ): void {
-	getDb()
-		.update(catalogDocuments)
-		.set({ parentDocumentId: parentDocumentId ?? null, order, updatedAt: Date.now() })
-		.where(eq(catalogDocuments.id, id))
-		.run();
-	bumpRevisionAndAppendOutbox(workspaceId, { documents: [id], op: 'move' });
+	getDb().transaction((tx) => {
+		tx.update(catalogDocuments)
+			.set({ parentDocumentId: parentDocumentId ?? null, order, updatedAt: Date.now() })
+			.where(and(eq(catalogDocuments.workspaceId, workspaceId), eq(catalogDocuments.id, id)))
+			.run();
+		bumpRevisionAndAppendOutbox(tx, workspaceId, { documents: [id], op: 'move' });
+	});
 }
 
 /**
@@ -201,9 +216,11 @@ export function recordCatalogDocumentDeleted(workspaceId: string, id: string): v
 		}
 		// parentDocumentId isn't a real FK (see db/schema.ts), so every
 		// descendant is deleted explicitly rather than relying on a cascade.
-		tx.delete(catalogDocuments).where(inArray(catalogDocuments.id, ids)).run();
+		tx.delete(catalogDocuments)
+			.where(and(eq(catalogDocuments.workspaceId, workspaceId), inArray(catalogDocuments.id, ids)))
+			.run();
+		bumpRevisionAndAppendOutbox(tx, workspaceId, { documents: ids, op: 'delete' });
 	});
-	bumpRevisionAndAppendOutbox(workspaceId, { documents: ids, op: 'delete' });
 }
 
 export function recordCatalogCollectionCreated(input: {
@@ -213,9 +230,8 @@ export function recordCatalogCollectionCreated(input: {
 	title: string;
 	shardId: string;
 }): void {
-	const db = getDb();
 	const now = Date.now();
-	db.transaction((tx) => {
+	getDb().transaction((tx) => {
 		tx.insert(catalogCollections)
 			.values({
 				id: input.id,
@@ -227,8 +243,8 @@ export function recordCatalogCollectionCreated(input: {
 				updatedAt: now
 			})
 			.run();
+		bumpRevisionAndAppendOutbox(tx, input.workspaceId, { collections: [input.id], op: 'create' });
 	});
-	bumpRevisionAndAppendOutbox(input.workspaceId, { collections: [input.id], op: 'create' });
 }
 
 export function recordCatalogCollectionTitleChanged(
@@ -236,23 +252,25 @@ export function recordCatalogCollectionTitleChanged(
 	id: string,
 	title: string
 ): void {
-	getDb()
-		.update(catalogCollections)
-		.set({ title, updatedAt: Date.now() })
-		.where(eq(catalogCollections.id, id))
-		.run();
-	bumpRevisionAndAppendOutbox(workspaceId, { collections: [id], op: 'update' });
+	getDb().transaction((tx) => {
+		tx.update(catalogCollections)
+			.set({ title, updatedAt: Date.now() })
+			.where(and(eq(catalogCollections.workspaceId, workspaceId), eq(catalogCollections.id, id)))
+			.run();
+		bumpRevisionAndAppendOutbox(tx, workspaceId, { collections: [id], op: 'update' });
+	});
 }
 
 export function recordCatalogCollectionDeleted(workspaceId: string, id: string): void {
-	const db = getDb();
-	db.transaction((tx) => {
+	getDb().transaction((tx) => {
 		tx.delete(recordLocator)
 			.where(and(eq(recordLocator.workspaceId, workspaceId), eq(recordLocator.recordId, id)))
 			.run();
-		tx.delete(catalogCollections).where(eq(catalogCollections.id, id)).run();
+		tx.delete(catalogCollections)
+			.where(and(eq(catalogCollections.workspaceId, workspaceId), eq(catalogCollections.id, id)))
+			.run();
+		bumpRevisionAndAppendOutbox(tx, workspaceId, { collections: [id], op: 'delete' });
 	});
-	bumpRevisionAndAppendOutbox(workspaceId, { collections: [id], op: 'delete' });
 }
 
 export function listCatalogDocuments(workspaceId: string): DocumentMeta[] {

@@ -25,7 +25,13 @@ import {
 import { createToken, verifyToken } from '$lib/mcp/tokens';
 import { queryAuditLog } from '$lib/server/audit';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
-import { createRecord as crdtCreateRecord } from '$lib/data/records';
+import {
+	createRecord as crdtCreateRecord,
+	createDocument as crdtCreateDocument,
+	createCollection as crdtCreateCollection,
+	getDocument as crdtGetDocument,
+	getCollection as crdtGetCollection
+} from '$lib/data/records';
 import {
 	listCatalogCollections,
 	listCatalogDocuments,
@@ -819,5 +825,32 @@ describe('service layer: catalog stays in sync with Y.Doc document/collection mu
 		expect(() =>
 			createCollection(human, { id: existingDoc.id, title: 'Colliding Collection', schema: [] })
 		).toThrow(RecordIdConflictError);
+	});
+
+	it('rejects a caller-supplied id colliding with a document written directly to the Y.Doc, bypassing the service layer (never overwrites it)', () => {
+		const { doc } = resolveWorkspaceContext();
+		// Simulates a real Yjs client writing straight to the Y.Doc — the
+		// locator/catalog never learn about this id, since it never went
+		// through reserveDocumentLocator/recordCatalogDocumentCreated.
+		const direct = crdtCreateDocument(doc, { title: 'Written Directly To The Y.Doc' });
+
+		expect(() => createDocument(human, { id: direct.id, title: 'Overwrite Attempt' })).toThrow(
+			RecordIdConflictError
+		);
+		// The original content must survive untouched.
+		expect(crdtGetDocument(doc, direct.id)?.title).toBe('Written Directly To The Y.Doc');
+	});
+
+	it('rejects a caller-supplied id colliding with a collection written directly to the Y.Doc, bypassing the service layer (never overwrites it)', () => {
+		const { doc } = resolveWorkspaceContext();
+		const direct = crdtCreateCollection(doc, {
+			title: 'Written Directly To The Y.Doc',
+			schema: []
+		});
+
+		expect(() =>
+			createCollection(human, { id: direct.id, title: 'Overwrite Attempt', schema: [] })
+		).toThrow(RecordIdConflictError);
+		expect(crdtGetCollection(doc, direct.id)?.title).toBe('Written Directly To The Y.Doc');
 	});
 });

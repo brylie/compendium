@@ -11,6 +11,7 @@ import {
 } from '$lib/data/records';
 import { logAudit } from '$lib/server/audit';
 import {
+	RecordIdConflictError,
 	recordCatalogDocumentCreated,
 	recordCatalogDocumentDeleted,
 	recordCatalogDocumentMoved,
@@ -50,8 +51,15 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 	// Reserve the id in the catalog's workspace-wide record locator *before*
 	// any Y.Doc content is written — throws RecordIdConflictError on a
 	// collision instead of the Y.Doc primitive's prior silent overwrite (see
-	// docs/specifications/workspace-sharding.md §3.1).
+	// docs/specifications/workspace-sharding.md §3.1). The locator alone
+	// can't catch a collision with content a client wrote directly to the
+	// Y.Doc (bypassing the service layer, and therefore the locator) — a
+	// caller-supplied id is checked against the live Y.Doc too, since
+	// crdtCreateDocument would otherwise silently overwrite it.
 	const id = input.id ?? nanoid();
+	if (crdtGetDocument(doc, id)) {
+		throw new RecordIdConflictError(id);
+	}
 	reserveDocumentLocator(workspaceId, defaultSpaceId, id, shardId);
 
 	const document = crdtCreateDocument(doc, {
