@@ -43,7 +43,7 @@ export interface TestHarness {
 		allowedCollectionIds: string[];
 	}) => { token: string; record: AccessToken };
 	getMcpClient: (token: string) => Promise<Client>;
-	getYjsClient: (options?: { disableBc?: boolean }) => {
+	getYjsClient: (options?: { disableBc?: boolean; room?: string }) => {
 		doc: Y.Doc;
 		provider: WebsocketProvider;
 		awareness: WebsocketProvider['awareness'];
@@ -217,7 +217,7 @@ export async function createTestHarness(): Promise<TestHarness> {
 		return client;
 	}
 
-	function getYjsClient(options: { disableBc?: boolean } = {}): {
+	function getYjsClient(options: { disableBc?: boolean; room?: string } = {}): {
 		doc: Y.Doc;
 		provider: WebsocketProvider;
 		awareness: WebsocketProvider['awareness'];
@@ -242,7 +242,7 @@ export async function createTestHarness(): Promise<TestHarness> {
 				});
 			}
 		}
-		const provider = new WebsocketProvider(wsUrl, 'workspace', doc, {
+		const provider = new WebsocketProvider(wsUrl, options.room ?? 'workspace', doc, {
 			WebSocketPolyfill: InstrumentedWebSocket as unknown as typeof globalThis.WebSocket,
 			disableBc: options.disableBc
 		});
