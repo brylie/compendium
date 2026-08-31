@@ -143,10 +143,17 @@ every benchmark provider, including the seed client: otherwise same-process
 BroadcastChannel sharing bypasses WebSocket traffic and makes the transport
 envelope appear smaller than it is.
 
-Use the current [CRDT capacity baseline](../benchmarks/crdt-capacity-baseline-2026-08-30.md)
-as the decision record. Compare like-for-like results rather than treating
+Use the current [CRDT capacity — shard-aware transport](../benchmarks/crdt-capacity-shard-aware-2026-08-31.md)
+note as the decision record (#123) — it superseded the
+[2026-08-30 global-workspace baseline](../benchmarks/crdt-capacity-baseline-2026-08-30.md)
+once the benchmark itself was rewritten to seed through the real per-Document/
+per-Collection shard transport instead of one shared `Y.Doc`; the two aren't
+directly comparable metric-for-metric (per-shard vs. global-aggregate), so
+read the 2026-08-31 note's own "Interpretation" section for the translated
+comparison. Compare like-for-like results rather than treating
 machine-specific timings as universal SLOs. A daily-profile guardrail failure,
-a global snapshot of 2 MiB or more, or event-loop p99 of 100 ms or more is a
-sharding/compaction escalation: document it and link the related issue or PR.
-When an intentional fixture or architecture change makes a new baseline valid,
-write a new dated note; do not silently overwrite an old decision record.
+a single shard's snapshot of 2 MiB or more, or event-loop p99 of 100 ms or
+more is a sharding/compaction escalation: document it and link the related
+issue or PR. When an intentional fixture or architecture change makes a new
+baseline valid, write a new dated note; do not silently overwrite an old
+decision record.

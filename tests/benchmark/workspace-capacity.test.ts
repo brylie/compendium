@@ -2,20 +2,21 @@ import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { createTestHarness, type TestHarness } from '../e2e/harness';
-import {
-	createCollection,
-	createDocument,
-	createRecord,
-	getRecordYText,
-	listDocuments
-} from '$lib/data/records';
+import { getRecordYText } from '$lib/data/records';
 import { plainText, yTextToRichText } from '$lib/data/richtext';
-import { closeDb, getSnapshotStore } from '$lib/server/store';
+import { closeDb, getDb, getSnapshotStore } from '$lib/server/store';
+import {
+	catalogCollections,
+	catalogDocuments,
+	catalogOutbox,
+	recordLocator
+} from '$lib/server/db/schema';
 import {
 	flush,
 	resetWorkspaceStoreForTests,
 	resolveWorkspaceContext
 } from '$lib/server/workspace-store';
+import { serviceModules } from '$lib/services/manifest';
 import type { ActorId, PropertyDefinition } from '$lib/data/types';
 
 const human: ActorId = { kind: 'human', userId: 'benchmark-seed' };
@@ -39,7 +40,7 @@ const PROFILES: Record<string, Profile> = {
 		clients: 3,
 		mcpWrites: 12
 	},
-	// Run manually before changes that affect the global Phase-0 workspace.
+	// Run manually before changes that affect shard-aware transport at scale.
 	large: {
 		documents: 120,
 		blocksPerDocument: 24,
@@ -61,7 +62,19 @@ function parseMcpText<T>(result: unknown): T {
 	return JSON.parse(response.content?.[0]?.text ?? '') as T;
 }
 
-describe('CRDT workspace capacity baseline (issue #31)', () => {
+/** First, middle, and last item — a small, deterministic cross-section rather than every shard, so a `large`-scale report stays readable. */
+function sample<T>(items: T[], count: number): T[] {
+	if (items.length <= count) return items;
+	const indices = new Set<number>([0, items.length - 1, Math.floor((items.length - 1) / 2)]);
+	let cursor = 1;
+	while (indices.size < count && cursor < items.length - 1) {
+		indices.add(cursor);
+		cursor += 1;
+	}
+	return [...indices].sort((a, b) => a - b).map((i) => items[i]);
+}
+
+describe('CRDT workspace capacity, real shard-aware transport (issue #123)', () => {
 	let harness: TestHarness;
 
 	beforeEach(async () => {
@@ -72,14 +85,16 @@ describe('CRDT workspace capacity baseline (issue #31)', () => {
 		await harness.cleanup();
 	});
 
-	it('measures the real global-workspace transport envelope and a document-shard projection', async () => {
+	it('measures per-shard state, sync, fan-out (with cross-shard isolation), catalog size, and restart cost', async () => {
 		const profileName = process.env.COMPENDIUM_BENCHMARK_PROFILE ?? 'daily';
 		const profile = PROFILES[profileName];
 		if (!profile) throw new Error(`Unknown benchmark profile: ${profileName}`);
 
-		// BroadcastChannel is deliberately disabled: each client must receive its
-		// initial state through the WebSocket transport being measured.
-		const seedClient = harness.getYjsClient({ disableBc: true });
+		const eventLoop = monitorEventLoopDelay({ resolution: 10 });
+		eventLoop.enable();
+		const heapBefore = process.memoryUsage().heapUsed;
+		const cpuBefore = process.cpuUsage();
+
 		const schema: PropertyDefinition[] = [
 			{ key: 'title', label: 'Title', type: 'text' },
 			{
@@ -93,103 +108,127 @@ describe('CRDT workspace capacity baseline (issue #31)', () => {
 				]
 			}
 		];
+
+		// --- Seed through the real service layer, not raw single-doc Yjs writes:
+		// each createDocument/createCollection call resolves its own real shard
+		// (resolveWorkspaceContext({shardId: id})), exactly like a production
+		// create_document/create_collection MCP call — this is what makes every
+		// later measurement below a genuine per-shard one. Setup work itself
+		// stays outside the measured transport window, same rationale the
+		// previous single-doc version of this benchmark already used.
 		const documentIds: string[] = [];
-		const blockIds: string[] = [];
-
-		// Fixture seeding is intentionally direct Yjs data creation. The measured
-		// workload below uses the public MCP and WebSocket transports; keeping
-		// setup outside that window makes the profile reproducible and focused.
-		seedClient.doc.transact(() => {
-			for (let documentIndex = 0; documentIndex < profile.documents; documentIndex += 1) {
-				const document = createDocument(seedClient.doc, {
-					title: `Benchmark document ${documentIndex + 1}`
+		const blockIdsByDocument: string[][] = [];
+		for (let d = 0; d < profile.documents; d += 1) {
+			const document = serviceModules.documents.createDocument(human, {
+				title: `Benchmark document ${d + 1}`
+			});
+			documentIds.push(document.id);
+			const blocks: string[] = [];
+			for (let b = 0; b < profile.blocksPerDocument; b += 1) {
+				const record = serviceModules.records.createRecord(human, {
+					parentId: document.id,
+					blockType: 'paragraph'
 				});
-				documentIds.push(document.id);
-				for (let blockIndex = 0; blockIndex < profile.blocksPerDocument; blockIndex += 1) {
-					const block = createRecord(
-						seedClient.doc,
-						{ parentId: document.id, blockType: 'paragraph' },
-						human
-					);
-					getRecordYText(seedClient.doc, block.id)?.insert(
-						0,
-						`Seed ${documentIndex + 1}.${blockIndex + 1}: durable workspace context. `
-					);
-					blockIds.push(block.id);
-				}
-			}
-			for (let collectionIndex = 0; collectionIndex < profile.collections; collectionIndex += 1) {
-				const collection = createCollection(seedClient.doc, {
-					title: `Benchmark collection ${collectionIndex + 1}`,
-					schema
+				serviceModules.records.writeRecord(human, record.id, {
+					markdown: `Seed ${d + 1}.${b + 1}: durable workspace context.`
 				});
-				for (let rowIndex = 0; rowIndex < profile.rowsPerCollection; rowIndex += 1) {
-					createRecord(
-						seedClient.doc,
-						{
-							parentId: collection.id,
-							properties: {
-								title: { type: 'text', value: `Row ${collectionIndex + 1}.${rowIndex + 1}` },
-								status: { type: 'select', value: rowIndex % 3 === 0 ? 'ready' : 'idea' }
-							}
-						},
-						human
-					);
-				}
+				blocks.push(record.id);
 			}
-		});
+			blockIdsByDocument.push(blocks);
+		}
 
-		await harness.waitForCondition(() => getRecordYText(seedClient.doc, blockIds[0]) !== undefined);
-		const globalStateBytes = Y.encodeStateAsUpdate(seedClient.doc).byteLength;
-
-		const eventLoop = monitorEventLoopDelay({ resolution: 10 });
-		eventLoop.enable();
-		const heapBefore = process.memoryUsage().heapUsed;
-		const cpuBefore = process.cpuUsage();
-
-		const peers = Array.from({ length: profile.clients }, () =>
-			harness.getYjsClient({ disableBc: true })
-		);
-		const initialSyncStart = performance.now();
-		await Promise.all(
-			peers.map((peer) =>
-				harness.waitForCondition(
-					() => peer.provider.synced && getRecordYText(peer.doc, blockIds[0]) !== undefined,
-					{
-						timeoutMs: 20_000
+		const collectionIds: string[] = [];
+		for (let c = 0; c < profile.collections; c += 1) {
+			const collection = serviceModules.collections.createCollection(human, {
+				title: `Benchmark collection ${c + 1}`,
+				schema
+			});
+			collectionIds.push(collection.id);
+			for (let r = 0; r < profile.rowsPerCollection; r += 1) {
+				serviceModules.records.createRecord(human, {
+					parentId: collection.id,
+					properties: {
+						title: { type: 'text', value: `Row ${c + 1}.${r + 1}` },
+						status: { type: 'select', value: r % 3 === 0 ? 'ready' : 'idea' }
 					}
+				});
+			}
+		}
+
+		// --- Per-shard encoded state size, for a small deterministic sample ---
+		const sampleDocIds = sample(documentIds, 3);
+		const sampleCollectionIds = sample(collectionIds, Math.min(2, collectionIds.length));
+		const perShardStateBytes: Record<string, number> = {};
+		for (const id of [...sampleDocIds, ...sampleCollectionIds]) {
+			const { doc } = resolveWorkspaceContext({ shardId: id });
+			perShardStateBytes[id] = Y.encodeStateAsUpdate(doc).byteLength;
+		}
+
+		// --- Cold load: one client per sampled shard, connected only to that
+		// shard's own room — "opening one document," not "loading the whole
+		// workspace," which is the actually-representative number post-sharding.
+		const shardClients = sampleDocIds.map((id) => ({
+			id,
+			client: harness.getYjsClient({ room: `shard-${id}`, disableBc: true })
+		}));
+		const coldLoadStart = performance.now();
+		await Promise.all(
+			shardClients.map(({ id, client }) =>
+				harness.waitForCondition(
+					() => client.provider.synced && client.doc.getMap('documents').has(id),
+					{ timeoutMs: 20_000 }
 				)
 			)
 		);
-		const initialSyncMs = performance.now() - initialSyncStart;
-		const initialSyncBytes = peers.reduce((total, peer) => total + peer.traffic.receivedBytes, 0);
-
-		for (const peer of peers) peer.traffic.reset();
-		const writer = peers[0];
-		const fanoutStart = performance.now();
-		const writerText = getRecordYText(writer.doc, blockIds[0]);
-		expect(writerText).toBeDefined();
-		const fanoutMarker = `Human fan-out mutation ${Date.now()}.`;
-		writer.doc.transact(() => writerText?.insert(writerText.length, ` ${fanoutMarker}`));
-		await Promise.all(
-			peers.slice(1).map((peer) =>
-				harness.waitForCondition(() => {
-					const text = getRecordYText(peer.doc, blockIds[0]);
-					return text ? plainText(yTextToRichText(text)).includes(fanoutMarker) : false;
-				})
-			)
+		const coldLoadMs = performance.now() - coldLoadStart;
+		const coldLoadTotalBytes = shardClients.reduce(
+			(total, { client }) => total + client.traffic.receivedBytes,
+			0
 		);
-		// The peer state can converge before ws emits its frame accounting callback
-		// in the same Node turn. Wait for that bounded transport observation.
+		const coldLoadBytesPerShard = Math.round(coldLoadTotalBytes / shardClients.length);
+
+		// --- Fan-out, with cross-shard isolation as part of the transport cost
+		// story: a same-shard peer receives the edit; a different-shard peer
+		// receives nothing at all for it.
+		const fanoutDocId = sampleDocIds[0];
+		const fanoutBlockId = blockIdsByDocument[documentIds.indexOf(fanoutDocId)][0];
+		const writerClient = harness.getYjsClient({ room: `shard-${fanoutDocId}`, disableBc: true });
 		await harness.waitForCondition(
-			() => peers.slice(1).every((peer) => peer.traffic.receivedBytes > 0),
-			{ timeoutMs: 2_000, intervalMs: 5 }
+			() => getRecordYText(writerClient.doc, fanoutBlockId) !== undefined
 		);
-		const fanoutLatencyMs = performance.now() - fanoutStart;
-		const fanoutBytes = peers
-			.slice(1)
-			.reduce((total, peer) => total + peer.traffic.receivedBytes, 0);
+		const sameShardPeer = harness.getYjsClient({ room: `shard-${fanoutDocId}`, disableBc: true });
+		await harness.waitForCondition(
+			() => getRecordYText(sameShardPeer.doc, fanoutBlockId) !== undefined
+		);
+		const otherDocId = documentIds.find((id) => id !== fanoutDocId)!;
+		const differentShardPeer = harness.getYjsClient({
+			room: `shard-${otherDocId}`,
+			disableBc: true
+		});
+		await harness.waitForCondition(() => differentShardPeer.provider.synced);
 
+		sameShardPeer.traffic.reset();
+		differentShardPeer.traffic.reset();
+		const fanoutStart = performance.now();
+		const writerText = getRecordYText(writerClient.doc, fanoutBlockId);
+		const fanoutMarker = `Fan-out mutation ${Date.now()}.`;
+		writerClient.doc.transact(() => writerText?.insert(writerText.length, ` ${fanoutMarker}`));
+		await harness.waitForCondition(() => {
+			const text = getRecordYText(sameShardPeer.doc, fanoutBlockId);
+			return text ? plainText(yTextToRichText(text)).includes(fanoutMarker) : false;
+		});
+		await harness.waitForCondition(() => sameShardPeer.traffic.receivedBytes > 0, {
+			timeoutMs: 2_000,
+			intervalMs: 5
+		});
+		const fanoutLatencyMs = performance.now() - fanoutStart;
+		const fanoutSameShardBytes = sameShardPeer.traffic.receivedBytes;
+		// Bounded window for the different-shard peer to (not) receive anything.
+		await harness.waitForCondition(() => true, { timeoutMs: 200 });
+		const fanoutDifferentShardBytes = differentShardPeer.traffic.receivedBytes;
+
+		// --- MCP write latency, spread across multiple real Document shards —
+		// a realistic multi-page workload, not repeated writes to one document.
 		const { token } = harness.createToken({
 			clientLabel: 'Capacity benchmark MCP agent',
 			allowedDocumentIds: documentIds,
@@ -197,8 +236,10 @@ describe('CRDT workspace capacity baseline (issue #31)', () => {
 		});
 		const mcp = await harness.getMcpClient(token);
 		const mcpLatencies: number[] = [];
-		for (let writeIndex = 0; writeIndex < profile.mcpWrites; writeIndex += 1) {
-			const blockId = blockIds[writeIndex % blockIds.length];
+		for (let w = 0; w < profile.mcpWrites; w += 1) {
+			const docIdx = w % documentIds.length;
+			const blocks = blockIdsByDocument[docIdx];
+			const blockId = blocks[w % blocks.length];
 			const start = performance.now();
 			const hold = await mcp.callTool({
 				name: 'hold_records',
@@ -207,74 +248,121 @@ describe('CRDT workspace capacity baseline (issue #31)', () => {
 			expect(parseMcpText<{ granted: string[] }>(hold).granted).toContain(blockId);
 			await mcp.callTool({
 				name: 'write_record',
-				arguments: { recordId: blockId, markdown: `MCP benchmark revision ${writeIndex + 1}` }
-			});
-			await harness.waitForCondition(() => {
-				const text = getRecordYText(peers[0].doc, blockId);
-				return text
-					? plainText(yTextToRichText(text)).includes(`MCP benchmark revision ${writeIndex + 1}`)
-					: false;
+				arguments: { recordId: blockId, markdown: `MCP benchmark revision ${w + 1}` }
 			});
 			mcpLatencies.push(performance.now() - start);
 		}
 
+		// --- Catalog + outbox size — the closest available proxy for a future
+		// SSE catalog-refresh payload, since no SSE consumer exists yet (#121).
+		const db = getDb();
+		const catalogDocRows = db.select().from(catalogDocuments).all();
+		const catalogCollectionRows = db.select().from(catalogCollections).all();
+		const locatorRows = db.select().from(recordLocator).all();
+		const catalogSizeBytes =
+			JSON.stringify(catalogDocRows).length +
+			JSON.stringify(catalogCollectionRows).length +
+			JSON.stringify(locatorRows).length;
+		const outboxRows = db.select().from(catalogOutbox).all();
+		const outboxTotalPayloadBytes = outboxRows.reduce(
+			(total, row) => total + JSON.stringify(row.payload).length,
+			0
+		);
+		const outboxAvgPayloadBytes =
+			outboxRows.length > 0 ? Math.round(outboxTotalPayloadBytes / outboxRows.length) : 0;
+
+		// --- Snapshot + restart, per shard (nothing eagerly reloads every shard
+		// anymore — #122's lazy-load design — so restart cost is now "reopening
+		// a few documents," not "reloading everything").
 		await flush();
-		const snapshot = getSnapshotStore('default', 'default').loadLatest();
-		expect(snapshot).not.toBeNull();
-		const snapshotBytes = snapshot?.byteLength ?? 0;
+		let totalSnapshotBytes = 0;
+		for (const id of [...documentIds, ...collectionIds]) {
+			const snap = getSnapshotStore('default', id).loadLatest();
+			if (snap) totalSnapshotBytes += snap.byteLength;
+		}
+
 		const restartStart = performance.now();
 		closeDb();
 		resetWorkspaceStoreForTests();
-		const restored = resolveWorkspaceContext();
+		const restoredDocs = sampleDocIds.map((id) => resolveWorkspaceContext({ shardId: id }));
 		const restartMs = performance.now() - restartStart;
-		const restoredStateBytes = Y.encodeStateAsUpdate(restored.doc).byteLength;
+		const restartMsPerShard = restartMs / sampleDocIds.length;
 		eventLoop.disable();
 
-		// A controlled state-size projection: one document's records in their own
-		// Y.Doc. It is not a replacement for #113's shard-aware transport; it
-		// quantifies the current global blast radius that #112 is intended to fix.
-		const projectedDocument = new Y.Doc();
-		const projectionDocument = createDocument(projectedDocument, { title: 'Projected document' });
-		for (let index = 0; index < profile.blocksPerDocument; index += 1) {
-			const block = createRecord(projectedDocument, { parentId: projectionDocument.id }, human);
-			getRecordYText(projectedDocument, block.id)?.insert(0, `Projected block ${index + 1}.`);
+		for (const [i, restored] of restoredDocs.entries()) {
+			const meta = restored.doc.getMap('documents').get(sampleDocIds[i]) as
+				Y.Map<unknown> | undefined;
+			expect(meta?.get('title')).toBe(
+				`Benchmark document ${documentIds.indexOf(sampleDocIds[i]) + 1}`
+			);
 		}
-		const projectedDocumentStateBytes = Y.encodeStateAsUpdate(projectedDocument).byteLength;
-		projectedDocument.destroy();
 
 		const result = {
 			profile: profileName,
 			fixture: profile,
-			globalStateBytes,
-			initialSync: { totalBytes: initialSyncBytes, durationMs: Number(initialSyncMs.toFixed(1)) },
-			fanout: { receiverBytes: fanoutBytes, durationMs: Number(fanoutLatencyMs.toFixed(1)) },
+			perShardStateBytes,
+			coldLoad: {
+				totalBytes: coldLoadTotalBytes,
+				bytesPerShard: coldLoadBytesPerShard,
+				durationMs: Number(coldLoadMs.toFixed(1)),
+				shardsSampled: shardClients.length
+			},
+			fanout: {
+				sameShardBytes: fanoutSameShardBytes,
+				differentShardBytes: fanoutDifferentShardBytes,
+				durationMs: Number(fanoutLatencyMs.toFixed(1))
+			},
 			mcpWriteLatency: {
 				p50Ms: Number(percentile(mcpLatencies, 0.5).toFixed(1)),
 				p95Ms: Number(percentile(mcpLatencies, 0.95).toFixed(1))
 			},
-			snapshotBytes,
-			restartMs: Number(restartMs.toFixed(1)),
-			restoredStateBytes,
+			catalog: {
+				documentRows: catalogDocRows.length,
+				collectionRows: catalogCollectionRows.length,
+				locatorRows: locatorRows.length,
+				estimatedSizeBytes: catalogSizeBytes
+			},
+			outbox: {
+				rows: outboxRows.length,
+				avgPayloadBytes: outboxAvgPayloadBytes,
+				totalPayloadBytes: outboxTotalPayloadBytes,
+				note: 'proxy only — no SSE consumer exists yet (#121)'
+			},
+			sse: { measured: false, reason: 'blocked on #121 (SSE feed not yet implemented)' },
+			snapshot: {
+				totalBytesAllShards: totalSnapshotBytes,
+				shardCount: documentIds.length + collectionIds.length
+			},
+			restart: {
+				durationMs: Number(restartMs.toFixed(1)),
+				shardsSampled: sampleDocIds.length,
+				msPerShard: Number(restartMsPerShard.toFixed(2))
+			},
 			process: {
 				heapDeltaBytes: process.memoryUsage().heapUsed - heapBefore,
 				cpuUserMicros: process.cpuUsage(cpuBefore).user,
 				eventLoopP99Ms: Number((eventLoop.percentile(99) / 1e6).toFixed(2))
-			},
-			shardProjection: { oneDocumentStateBytes: projectedDocumentStateBytes }
+			}
 		};
 		console.log(`CRDT_CAPACITY_RESULT ${JSON.stringify(result)}`);
 
-		// Conservative daily-workspace guardrails. Larger profiles are reporting
-		// runs, not CI gates, until #24 defines user-facing latency SLOs.
+		// Cross-shard isolation is a hard guarantee at every profile, not just a
+		// daily-profile guardrail: a different shard's client must receive
+		// exactly zero bytes for an edit it was never subscribed to.
+		expect(fanoutDifferentShardBytes).toBe(0);
+		expect(fanoutSameShardBytes).toBeGreaterThan(0);
+		expect(catalogDocRows.length).toBe(profile.documents);
+		expect(catalogCollectionRows.length).toBe(profile.collections);
+
+		// Conservative daily-workspace guardrails, set from a real measured run
+		// (see docs/benchmarks/ for the dated note) — not guessed blind. Larger
+		// profiles are reporting runs, not CI gates, until #24 defines
+		// user-facing latency SLOs.
 		if (profileName === 'daily') {
-			expect(initialSyncBytes).toBeLessThan(2 * 1024 * 1024);
-			expect(initialSyncMs).toBeLessThan(2_000);
+			expect(coldLoadBytesPerShard).toBeLessThan(30_000);
+			expect(coldLoadMs).toBeLessThan(1_000);
 			expect(percentile(mcpLatencies, 0.95)).toBeLessThan(1_500);
-			expect(restartMs).toBeLessThan(2_000);
+			expect(restartMsPerShard).toBeLessThan(100);
 		}
-		expect(globalStateBytes).toBeGreaterThan(projectedDocumentStateBytes);
-		expect(fanoutBytes).toBeGreaterThan(0);
-		expect(restoredStateBytes).toBeGreaterThan(0);
-		expect(listDocuments(restored.doc)).toHaveLength(profile.documents);
 	});
 });

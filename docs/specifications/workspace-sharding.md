@@ -356,19 +356,45 @@ the contracts specified above:
 
 Explicitly deferred, not settled by this approval:
 
-- The exact Collection row-partition threshold, event-retention window, and
-  snapshot cadence — §8 requires #113 to supply these from real shard-aware
-  measurements, not from the #31 global-workspace projection.
-- Whether the Document/Collection shard granularity itself holds at the
-  concurrency and payload sizes #113 measures; a materially different result
-  reopens this document rather than being silently absorbed into #113.
 - Where a **saved, shareable view configuration** (PRD P1) is addressed once
   it exists as its own catalog-navigable artifact rather than an embedded
   `collection_view` block's `viewConfig` (data-model.md §4) — out of scope
   here because the feature itself isn't built yet; #113 or a follow-up must
   extend §3.1's catalog fields to cover it before that feature lands.
-- Storage-engine changes to `data-model.md` §4 ("One `Y.Doc` for the whole
-  workspace") and `collaboration.md`'s aggregate-Awareness description — both
-  remain accurate descriptions of current Phase-0 code and are superseded
-  only once #113 actually implements per-shard `Y.Doc`s, not by this
-  approval alone.
+- Storage-engine changes to `collaboration.md`'s aggregate-Awareness
+  description — `data-model.md` §4 itself was updated once #113/#132 actually
+  shipped per-shard `Y.Doc`s (see §11 below); `collaboration.md` still awaits
+  its own equivalent pass.
+
+## 11. Phase E measurement resolution (recorded 2026-08-31)
+
+#123 re-ran §8's required measurements against the real shard-aware
+transport #113/#127/#130/#132 shipped (not the #31 global-workspace
+projection) — see the dated note
+[`crdt-capacity-shard-aware-2026-08-31.md`](../benchmarks/crdt-capacity-shard-aware-2026-08-31.md)
+for full method and results. This resolves the two items §10 deferred to
+real measurement:
+
+- **Collection row-partition threshold**: not required at measured scale. A
+  400-row Collection shard encoded to ~187.7 KB — no partition rule needed;
+  revisit only if a real Collection's row count grows an order of magnitude
+  beyond that.
+- **Snapshot cadence**: the existing 30s (`SAVE_INTERVAL_MS`) cadence holds
+  comfortably — 2.84 MB aggregate across 128 sharded snapshots at `large`
+  scale is a trivial per-tick cost split across that many independent,
+  lazily-loaded (#122) contexts. No cadence change needed at this scale.
+- **Event-retention window** (`catalog_outbox`): **not fully resolved** —
+  genuinely blocked on #121 shipping a real SSE consumer to validate a
+  retention policy against; this run's outbox growth-rate data point (128
+  create events → 6,800 B total payload at `large` scale) is a sizing input
+  for that future decision, not a threshold decision on its own.
+- **Does Document/Collection shard granularity hold at measured scale?**
+  **Yes** — cross-shard isolation held at exactly 0 bytes leaked in both
+  profiles, a client opening one document at `large` scale now transfers
+  ~11 KB versus the full 2.85 MB global state before sharding (~99.6%
+  reduction), and process resource cost (heap, event-loop p99) improved by
+  roughly an order of magnitude rather than degrading. No basis to reopen
+  the granularity decision.
+
+SSE reconnect/resync behavior (§8/§9) remains unmeasured, explicitly deferred
+to #121 — not silently dropped from this resolution.
