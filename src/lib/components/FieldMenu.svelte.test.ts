@@ -12,7 +12,7 @@ import {
 import FieldMenu from './FieldMenu.svelte';
 
 let ydoc: Y.Doc;
-vi.mock('$lib/client/yjs-client', () => ({ getShardDoc: () => ydoc }));
+vi.mock('$lib/client/yjs-client', () => ({ getShardDoc: () => ydoc, getClientDoc: () => ydoc }));
 
 const human = { kind: 'human' as const, userId: 'local' };
 

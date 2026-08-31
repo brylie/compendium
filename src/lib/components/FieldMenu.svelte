@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { nanoid } from 'nanoid';
-	import { getShardDoc } from '$lib/client/yjs-client';
+	import { getClientDoc, getShardDoc } from '$lib/client/yjs-client';
 	import {
 		addSelectOption,
 		countRecordsWithProperty,
@@ -239,7 +239,9 @@
 
 	function confirmDelete(): void {
 		try {
-			deleteCollectionProperty(getShardDoc(shardId), collectionId, property.key);
+			// documentsDoc (Documents aren't sharded — #120) so the embedded
+			// collection_view repair scans where those blocks actually live.
+			deleteCollectionProperty(getShardDoc(shardId), collectionId, property.key, getClientDoc());
 			errorMessage = '';
 		} catch {
 			// Close the confirmation too, not just clear it — ConfirmDialog is a
@@ -363,7 +365,15 @@
 	function confirmDeleteOption(): void {
 		if (!deleteOptionId) return;
 		try {
-			deleteSelectOption(getShardDoc(shardId), collectionId, property.key, deleteOptionId);
+			// documentsDoc (Documents aren't sharded — #120) so the embedded
+			// collection_view repair scans where those blocks actually live.
+			deleteSelectOption(
+				getShardDoc(shardId),
+				collectionId,
+				property.key,
+				deleteOptionId,
+				getClientDoc()
+			);
 			optionError = '';
 		} catch {
 			optionError = 'Could not delete the option. Please try again.';

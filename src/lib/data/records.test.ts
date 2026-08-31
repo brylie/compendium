@@ -549,6 +549,27 @@ describe('collection field lifecycle: rename, retype, duplicate, delete', () => 
 		});
 	});
 
+	it('deleteCollectionProperty repairs an embed living in a separate documentsDoc (#120: Collections are sharded, Documents are not)', () => {
+		const collectionDoc = new Y.Doc();
+		const { collection } = setupCollection(collectionDoc);
+		const documentsDoc = new Y.Doc();
+		const document = createDocument(documentsDoc, { title: 'Doc' });
+		const block = createRecord(
+			documentsDoc,
+			{
+				parentId: document.id,
+				blockType: 'collection_view',
+				referencedRecordId: collection.id,
+				viewConfig: { viewType: 'table', groupBy: 'name' }
+			},
+			human
+		);
+
+		deleteCollectionProperty(collectionDoc, collection.id, 'name', documentsDoc);
+
+		expect(getRecord(documentsDoc, block.id)?.viewConfig?.groupBy).toBeUndefined();
+	});
+
 	it('deleteCollectionProperty leaves an embed that references a different collection untouched', () => {
 		const doc = new Y.Doc();
 		const { collection } = setupCollection(doc);
@@ -929,6 +950,31 @@ describe('select option lifecycle: add, rename, recolor, reorder, delete (issue 
 			filters: [{ propertyKey: 'status', op: 'is_not', value: 'done' }],
 			groupBy: 'status'
 		});
+	});
+
+	it('deleteSelectOption repairs an embed living in a separate documentsDoc (#120: Collections are sharded, Documents are not)', () => {
+		const collectionDoc = new Y.Doc();
+		const { collection } = setupSelectCollection(collectionDoc);
+		const documentsDoc = new Y.Doc();
+		const document = createDocument(documentsDoc, { title: 'Doc' });
+		const block = createRecord(
+			documentsDoc,
+			{
+				parentId: document.id,
+				blockType: 'collection_view',
+				referencedRecordId: collection.id,
+				viewConfig: {
+					viewType: 'board',
+					filters: [{ propertyKey: 'status', op: 'is', value: 'todo' }],
+					groupBy: 'status'
+				}
+			},
+			human
+		);
+
+		deleteSelectOption(collectionDoc, collection.id, 'status', 'todo', documentsDoc);
+
+		expect(getRecord(documentsDoc, block.id)?.viewConfig?.filters).toEqual([]);
 	});
 
 	it('deleteSelectOption is a no-op when the option is already gone', () => {
