@@ -518,11 +518,23 @@ function repairEmbeddedViewsAfterPropertyRemoval(
 	});
 }
 
-/** Removes a field from a Collection's schema, strips its value off every record, and repairs any embedded view's config that referenced it — the "explicitly destructive" delete path §93 of the field manager asks for. */
+/**
+ * Removes a field from a Collection's schema, strips its value off every
+ * record, and repairs any embedded view's config that referenced it — the
+ * "explicitly destructive" delete path §93 of the field manager asks for.
+ *
+ * `documentsDoc` — the doc holding the Document blocks (`collection_view`
+ * embeds) whose viewConfig needs repairing — defaults to `doc` for callers
+ * that keep everything in one Y.Doc (every pure unit test, and any future
+ * caller with no shard split), but since #120 sharded Collections while
+ * Documents stayed on the shared doc, a real caller must pass that doc
+ * explicitly or the repair silently scans the wrong (empty) doc.
+ */
 export function deleteCollectionProperty(
 	doc: Y.Doc,
 	collectionId: string,
-	propertyKey: string
+	propertyKey: string,
+	documentsDoc: Y.Doc = doc
 ): void {
 	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
 	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
@@ -542,9 +554,10 @@ export function deleteCollectionProperty(
 		if (ymeta.get('primaryFieldKey') === propertyKey) {
 			ymeta.delete('primaryFieldKey');
 		}
-
-		repairEmbeddedViewsAfterPropertyRemoval(doc, collectionId, propertyKey);
 	});
+	// Outside the transact above: documentsDoc may be a different Y.Doc than
+	// doc (see param doc), and Yjs transactions don't span docs anyway.
+	repairEmbeddedViewsAfterPropertyRemoval(documentsDoc, collectionId, propertyKey);
 }
 
 // ---------------------------------------------------------------------------
@@ -708,20 +721,32 @@ function repairEmbeddedViewsAfterOptionRemoval(
 	});
 }
 
-/** Removes one option from a select field, clears the value on every record currently set to it (the documented "unassigned" state — the same empty/no-value state Board's catch-all column and the cell dropdown's blank entry already represent), and strips any embedded view filter that referenced it. The field itself and its other options are untouched. */
+/**
+ * Removes one option from a select field, clears the value on every record
+ * currently set to it (the documented "unassigned" state — the same
+ * empty/no-value state Board's catch-all column and the cell dropdown's
+ * blank entry already represent), and strips any embedded view filter that
+ * referenced it. The field itself and its other options are untouched.
+ *
+ * `documentsDoc` — see deleteCollectionProperty's doc comment; same reason,
+ * same default.
+ */
 export function deleteSelectOption(
 	doc: Y.Doc,
 	collectionId: string,
 	propertyKey: string,
-	optionId: string
+	optionId: string,
+	documentsDoc: Y.Doc = doc
 ): void {
 	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
 	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
+	let removed = false;
 	doc.transact(() => {
 		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
 		const { index, property, options } = getSelectPropertyForMutation(schema, propertyKey);
 		const nextOptions = options.filter((o) => o.id !== optionId);
 		if (nextOptions.length === options.length) return;
+		removed = true;
 		const nextSchema = [...schema];
 		nextSchema[index] = { ...property, options: nextOptions };
 		ymeta.set('schema', nextSchema);
@@ -732,9 +757,9 @@ export function deleteSelectOption(
 			const yrecord = recordsMap(doc).get(record.id) as Y.Map<unknown> | undefined;
 			yrecord?.delete(PROP_PREFIX + propertyKey);
 		}
-
-		repairEmbeddedViewsAfterOptionRemoval(doc, collectionId, propertyKey, optionId);
 	});
+	if (removed)
+		repairEmbeddedViewsAfterOptionRemoval(documentsDoc, collectionId, propertyKey, optionId);
 }
 
 export function deleteCollection(doc: Y.Doc, id: string): void {

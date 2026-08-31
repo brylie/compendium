@@ -11,24 +11,44 @@ import {
 import Page from './+page.svelte';
 
 let ydoc: Y.Doc;
-vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
+vi.mock('$lib/client/yjs-client', () => ({
+	getClientDoc: () => ydoc,
+	getShardDoc: () => ydoc
+}));
+
+// +page.svelte resolves its real shard via a fetch before connecting — see
+// #120. The table itself (unlike TableCollectionView) is unconditionally
+// rendered rather than gated behind a schema check, so most of this file's
+// assertions would otherwise race the async effect rather than fail cleanly.
+// A macrotask flush after render reliably waits out that whole chain
+// (2 microtask awaits + Svelte's own reactive flush, all settled before a
+// setTimeout(0) fires) without needing a bespoke findBy per test.
+async function flushShardResolution(): Promise<void> {
+	await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 describe('table/[id] +page', () => {
 	beforeEach(() => {
 		ydoc = new Y.Doc();
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => ({ json: async () => ({ shardId: 'test-shard' }) }))
+		);
 	});
 
 	afterEach(() => {
 		ydoc.destroy();
+		vi.unstubAllGlobals();
 	});
 
-	it('shows the SSR title before the Y.Doc mounts, then the live title once it has', () => {
+	it('shows the SSR title before the Y.Doc mounts, then the live title once it has', async () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Live Title', schema: [] });
 		render(Page, {
 			params: { id: 'col-1' },
 			form: null,
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'SSR Title' }
 		});
+		await flushShardResolution();
 		expect(screen.getByPlaceholderText('Untitled Collection')).toHaveValue('Live Title');
 	});
 
@@ -39,6 +59,7 @@ describe('table/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Original Title' }
 		});
+		await flushShardResolution();
 		expect(screen.getByPlaceholderText('Untitled Collection')).toHaveValue('Original Title');
 
 		updateCollectionTitle(ydoc, 'col-1', 'Renamed From Another Client');
@@ -82,6 +103,7 @@ describe('table/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'First' }
 		});
+		await flushShardResolution();
 		expect(screen.getByPlaceholderText('Untitled Collection')).toHaveValue('First');
 		expect(screen.getByDisplayValue('From collection one')).toBeInTheDocument();
 
@@ -90,23 +112,25 @@ describe('table/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], collectionId: 'col-2', title: 'Second' }
 		});
+		await flushShardResolution();
 
 		expect(screen.getByPlaceholderText('Untitled Collection')).toHaveValue('Second');
 		expect(screen.queryByDisplayValue('From collection one')).not.toBeInTheDocument();
 		expect(screen.getByDisplayValue('From collection two')).toBeInTheDocument();
 	});
 
-	it('shows an empty-state row when the collection has no rows', () => {
+	it('shows an empty-state row when the collection has no rows', async () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Empty', schema: [] });
 		render(Page, {
 			params: { id: 'col-1' },
 			form: null,
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Empty' }
 		});
+		await flushShardResolution();
 		expect(screen.getByText('No rows in this collection.')).toBeInTheDocument();
 	});
 
-	it('renders a text cell bound to the row property value', () => {
+	it('renders a text cell bound to the row property value', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'T',
@@ -122,6 +146,7 @@ describe('table/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
 		});
+		await flushShardResolution();
 		expect(screen.getByDisplayValue('Alice')).toBeInTheDocument();
 	});
 
@@ -133,6 +158,7 @@ describe('table/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
 		});
+		await flushShardResolution();
 
 		await user.click(screen.getByRole('button', { name: 'Manage fields' }));
 		await user.type(screen.getByPlaceholderText('Field name…'), 'Status');
@@ -157,6 +183,7 @@ describe('table/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
 		});
+		await flushShardResolution();
 
 		const checkbox = screen.getByRole('checkbox');
 		await user.click(checkbox);
@@ -178,6 +205,7 @@ describe('table/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
 		});
+		await flushShardResolution();
 
 		const table = screen.getByRole('table');
 		expect(within(table).queryAllByRole('textbox')).toHaveLength(0);
@@ -204,6 +232,7 @@ describe('table/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
 		});
+		await flushShardResolution();
 
 		expect(screen.getByDisplayValue('Bob')).toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Delete row' }));
@@ -223,6 +252,7 @@ describe('table/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
 		});
+		await flushShardResolution();
 
 		await user.click(screen.getByRole('button', { name: 'Field options for Name' }));
 		await user.click(screen.getByRole('menuitem', { name: 'Delete field' }));
@@ -247,6 +277,7 @@ describe('table/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
 		});
+		await flushShardResolution();
 
 		await user.click(screen.getByTitle('Add option'));
 		await user.type(screen.getByLabelText('Option name'), 'Done');
@@ -266,6 +297,7 @@ describe('table/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
 		});
+		await flushShardResolution();
 
 		await user.click(screen.getByRole('button', { name: 'Manage fields' }));
 
@@ -311,6 +343,7 @@ describe('table/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
 		});
+		await flushShardResolution();
 
 		const numberInput = screen.getByDisplayValue('1');
 		await user.clear(numberInput);

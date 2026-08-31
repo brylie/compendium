@@ -19,34 +19,14 @@ export interface HoldAwarenessState {
 
 const AGENT_HOLD_TTL_MS = 100_000; // PRD target: 90-120s
 
-// Keyed by Awareness *and* clientId, not clientId alone: the synthetic
-// clientId is deterministic per access token (see clientIdForToken below),
-// so the same token produces the same clientId regardless of which shard's
-// Awareness it's operating against. A cross-shard agent hold batch (a
-// stated acceptance criterion — see docs/specifications/collaboration.md)
-// can legitimately hold records on two different Awareness instances under
-// the same clientId; a flat Map<number, ...> would let the second
-// scheduleTtl() call silently cancel the first shard's timer.
-const agentClocks = new Map<Awareness, Map<number, number>>();
-const agentTtlTimers = new Map<Awareness, Map<number, ReturnType<typeof setTimeout>>>();
+// Keyed by Awareness (not just clientId): the same synthetic clientId can now
+// appear on multiple independent per-shard Awareness instances at once (#120),
+// so a clientId-only key would let one shard's TTL timer/clock clobber
+// another's for the same token. WeakMap also means a destroyed Awareness's
+// entries aren't strongly retained for the process lifetime.
+const agentClocks = new WeakMap<Awareness, Map<number, number>>();
+const agentTtlTimers = new WeakMap<Awareness, Map<number, ReturnType<typeof setTimeout>>>();
 
-function clocksFor(awareness: Awareness): Map<number, number> {
-	let clocks = agentClocks.get(awareness);
-	if (!clocks) {
-		clocks = new Map();
-		agentClocks.set(awareness, clocks);
-	}
-	return clocks;
-}
-
-function timersFor(awareness: Awareness): Map<number, ReturnType<typeof setTimeout>> {
-	let timers = agentTtlTimers.get(awareness);
-	if (!timers) {
-		timers = new Map();
-		agentTtlTimers.set(awareness, timers);
-	}
-	return timers;
-}
 // Per-Awareness-instance, not a single module-level flag: workspace-store.ts
 // can resolve more than one concurrent {workspaceId, shardId} context (each
 // with its own Awareness) — a single boolean guard would wire eviction only
@@ -117,11 +97,7 @@ export function initHoldEviction(awareness: Awareness): void {
 
 export function resetHoldEvictionForTests(): void {
 	wiredAwareness = new WeakSet<Awareness>();
-	agentClocks.clear();
-	for (const timers of agentTtlTimers.values()) {
-		for (const timer of timers.values()) clearTimeout(timer);
-	}
-	agentTtlTimers.clear();
+	clearAllTestTimers();
 }
 
 function evictFromOthers(awareness: Awareness, recordId: string, exceptClientId: number): void {
@@ -135,6 +111,35 @@ function evictFromOthers(awareness: Awareness, recordId: string, exceptClientId:
 			heldRecordIds: nextHeld
 		} as HoldAwarenessState);
 	});
+}
+
+function clocksFor(awareness: Awareness): Map<number, number> {
+	let clocks = agentClocks.get(awareness);
+	if (!clocks) {
+		clocks = new Map();
+		agentClocks.set(awareness, clocks);
+	}
+	return clocks;
+}
+
+function timersFor(awareness: Awareness): Map<number, ReturnType<typeof setTimeout>> {
+	let timers = agentTtlTimers.get(awareness);
+	if (!timers) {
+		timers = new Map();
+		agentTtlTimers.set(awareness, timers);
+	}
+	return timers;
+}
+
+// Test-only flat registry of every currently-scheduled timer, independent of
+// which Awareness/clientId it belongs to — a WeakMap can't be enumerated, so
+// resetHoldsForTests/resetHoldEvictionForTests need this side channel to
+// cancel leftover timers between test runs.
+const activeTestTimers = new Set<ReturnType<typeof setTimeout>>();
+
+function clearAllTestTimers(): void {
+	activeTestTimers.forEach((timer) => clearTimeout(timer));
+	activeTestTimers.clear();
 }
 
 /** Directly injects/overwrites a (possibly synthetic) remote client's Awareness
@@ -246,28 +251,28 @@ export function isHeldByClient(awareness: Awareness, clientId: number, recordId:
 
 function scheduleTtl(awareness: Awareness, clientId: number): void {
 	clearTtl(awareness, clientId);
-	const timers = timersFor(awareness);
 	const timer = setTimeout(() => {
 		writeRemoteState(awareness, clientId, null);
 		timersFor(awareness).delete(clientId);
+		activeTestTimers.delete(timer);
 	}, AGENT_HOLD_TTL_MS);
 	timer.unref?.();
-	timers.set(clientId, timer);
+	timersFor(awareness).set(clientId, timer);
+	activeTestTimers.add(timer);
 }
 
 function clearTtl(awareness: Awareness, clientId: number): void {
-	const timers = timersFor(awareness);
-	const timer = timers.get(clientId);
-	if (timer) clearTimeout(timer);
-	timers.delete(clientId);
+	const timers = agentTtlTimers.get(awareness);
+	const timer = timers?.get(clientId);
+	if (timer) {
+		clearTimeout(timer);
+		activeTestTimers.delete(timer);
+	}
+	timers?.delete(clientId);
 }
 
 /** Test-only: drop module-level state between test runs. */
 export function resetHoldsForTests(): void {
-	agentClocks.clear();
-	for (const timers of agentTtlTimers.values()) {
-		for (const timer of timers.values()) clearTimeout(timer);
-	}
-	agentTtlTimers.clear();
+	clearAllTestTimers();
 	wiredAwareness = new WeakSet<Awareness>();
 }

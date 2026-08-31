@@ -924,7 +924,7 @@
 						</div>
 					{:else if bt === 'collection_view'}
 						{#if ydoc}
-							<CollectionViewBlock {block} {ydoc} />
+							<CollectionViewBlock {block} {ydoc} collections={data.collections} />
 						{/if}
 					{:else}
 						<!-- Standard text blocks: headings, paragraph, to_do text, toggle text -->

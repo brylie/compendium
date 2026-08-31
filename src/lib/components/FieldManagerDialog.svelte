@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { nanoid } from 'nanoid';
-	import { getClientDoc } from '$lib/client/yjs-client';
+	import { getShardDoc } from '$lib/client/yjs-client';
 	import { getCollection, resolvePrimaryField, updateCollectionSchema } from '$lib/data/records';
 	import type { PropertyDefinition, PropertyType } from '$lib/data/types';
 	import Icon from './Icon.svelte';
@@ -10,10 +10,12 @@
 	let {
 		open,
 		collectionId,
+		shardId,
 		onClose
 	}: {
 		open: boolean;
 		collectionId: string;
+		shardId: string;
 		onClose: () => void;
 	} = $props();
 
@@ -40,18 +42,18 @@
 	let downButtons: Record<string, HTMLButtonElement | undefined> = {};
 
 	function refresh(): void {
-		const collection = getCollection(getClientDoc(), collectionId);
+		const collection = getCollection(getShardDoc(shardId), collectionId);
 		schema = collection?.schema ?? [];
 		primaryFieldKey = collection?.primaryFieldKey;
 	}
 
 	// Gated on `open` rather than a plain onMount: this dialog is mounted
 	// (closed) alongside every embedded view via ViewToolbar, so touching
-	// getClientDoc()/the Yjs doc unconditionally would open a live connection
+	// getShardDoc()/the Yjs doc unconditionally would open a live connection
 	// and subscribe observers for a dialog nobody has opened yet.
 	$effect(() => {
 		if (!open) return;
-		const doc = getClientDoc();
+		const doc = getShardDoc(shardId);
 		refresh();
 		const collectionsMap = doc.getMap('collections');
 		const recordsMap = doc.getMap('records');
@@ -75,7 +77,7 @@
 		[next[index], next[target]] = [next[target], next[index]];
 		const key = schema[index].key;
 		try {
-			updateCollectionSchema(getClientDoc(), collectionId, next);
+			updateCollectionSchema(getShardDoc(shardId), collectionId, next);
 			// The moved field's own up/down button becomes `disabled` (and loses
 			// focus to document.body) when the move lands it at either edge of
 			// the list — move focus to the counterpart button on the same field
@@ -101,7 +103,7 @@
 			options: newFieldType === 'select' ? [] : undefined
 		};
 		try {
-			updateCollectionSchema(getClientDoc(), collectionId, [...schema, field]);
+			updateCollectionSchema(getShardDoc(shardId), collectionId, [...schema, field]);
 			newFieldLabel = '';
 			newFieldType = 'text';
 			errorMessage = '';
@@ -202,7 +204,7 @@
 						>
 							{property.type}
 						</span>
-						<FieldMenu {collectionId} {schema} {property} {primaryFieldKey} />
+						<FieldMenu {collectionId} {shardId} {schema} {property} {primaryFieldKey} />
 					</li>
 				{:else}
 					<li class="py-4 text-center text-sm text-muted italic">No fields yet.</li>

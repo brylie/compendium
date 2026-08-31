@@ -10,11 +10,11 @@ describe('routes/doc/[id]/+page.server', () => {
 
 		const result = load({ params: { id: docMeta.id } } as Parameters<typeof load>[0]);
 
-		expect(result).toEqual({ documentId: docMeta.id, title: 'My Doc' });
+		expect(result).toEqual({ documentId: docMeta.id, title: 'My Doc', collections: [] });
 	});
 
 	it('falls back to "Untitled" for a nonexistent document', () => {
 		const result = load({ params: { id: 'nonexistent' } } as Parameters<typeof load>[0]);
-		expect(result).toEqual({ documentId: 'nonexistent', title: 'Untitled' });
+		expect(result).toEqual({ documentId: 'nonexistent', title: 'Untitled', collections: [] });
 	});
 });

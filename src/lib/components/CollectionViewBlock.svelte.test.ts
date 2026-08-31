@@ -13,24 +13,39 @@ import {
 import CollectionViewBlock from './CollectionViewBlock.svelte';
 
 let ydoc: Y.Doc;
-vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
+vi.mock('$lib/client/yjs-client', () => ({
+	getClientDoc: () => ydoc,
+	getShardDoc: () => ydoc
+}));
 
 const actor = { kind: 'human' as const, userId: 'local' };
 
 describe('CollectionViewBlock', () => {
 	beforeEach(() => {
 		ydoc = new Y.Doc();
+		// The nested Table/Board/Calendar views (once a block is configured)
+		// each resolve their real shard via a fetch before connecting — see
+		// #120. Stubbed to resolve immediately against the same test doc.
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => ({ json: async () => ({ shardId: 'test-shard' }) }))
+		);
 	});
 
 	afterEach(() => {
 		ydoc.destroy();
+		vi.unstubAllGlobals();
 	});
 
 	it('shows a picker when the block has no target set yet', () => {
 		const doc = createDocument(ydoc, { title: 'Team Page' });
 		const block = createRecord(ydoc, { parentId: doc.id, blockType: 'collection_view' }, actor);
 
-		render(CollectionViewBlock, { block: getRecord(ydoc, block.id)!, ydoc });
+		render(CollectionViewBlock, {
+			block: getRecord(ydoc, block.id)!,
+			ydoc,
+			collections: listCollections(ydoc)
+		});
 
 		expect(screen.getByText('Embed a collection view:')).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Insert' })).toBeDisabled();
@@ -42,7 +57,11 @@ describe('CollectionViewBlock', () => {
 		const block = createRecord(ydoc, { parentId: doc.id, blockType: 'collection_view' }, actor);
 		const user = userEvent.setup();
 
-		render(CollectionViewBlock, { block: getRecord(ydoc, block.id)!, ydoc });
+		render(CollectionViewBlock, {
+			block: getRecord(ydoc, block.id)!,
+			ydoc,
+			collections: listCollections(ydoc)
+		});
 
 		const selects = screen.getAllByRole('combobox');
 		await user.selectOptions(selects[0], 'board');
@@ -71,7 +90,11 @@ describe('CollectionViewBlock', () => {
 			actor
 		);
 
-		render(CollectionViewBlock, { block: getRecord(ydoc, block.id)!, ydoc });
+		render(CollectionViewBlock, {
+			block: getRecord(ydoc, block.id)!,
+			ydoc,
+			collections: listCollections(ydoc)
+		});
 
 		expect(screen.getByText('Sprint Tasks')).toBeInTheDocument();
 		expect(screen.getByText('· board')).toBeInTheDocument();
@@ -92,7 +115,11 @@ describe('CollectionViewBlock', () => {
 		);
 		deleteCollection(ydoc, collection.id);
 
-		render(CollectionViewBlock, { block: getRecord(ydoc, block.id)!, ydoc });
+		render(CollectionViewBlock, {
+			block: getRecord(ydoc, block.id)!,
+			ydoc,
+			collections: listCollections(ydoc)
+		});
 
 		expect(screen.getByText('Embedded collection was deleted')).toBeInTheDocument();
 		expect(getRecord(ydoc, block.id)?.referencedRecordId).toBe(collection.id);
@@ -115,7 +142,11 @@ describe('CollectionViewBlock', () => {
 		deleteCollection(ydoc, collection.id);
 		const user = userEvent.setup();
 
-		render(CollectionViewBlock, { block: getRecord(ydoc, block.id)!, ydoc });
+		render(CollectionViewBlock, {
+			block: getRecord(ydoc, block.id)!,
+			ydoc,
+			collections: listCollections(ydoc)
+		});
 		await user.click(screen.getByRole('button', { name: 'Change' }));
 
 		const selects = screen.getAllByRole('combobox');
@@ -139,7 +170,11 @@ describe('CollectionViewBlock', () => {
 		);
 		const user = userEvent.setup();
 
-		render(CollectionViewBlock, { block: getRecord(ydoc, block.id)!, ydoc });
+		render(CollectionViewBlock, {
+			block: getRecord(ydoc, block.id)!,
+			ydoc,
+			collections: listCollections(ydoc)
+		});
 		await user.click(screen.getByRole('button', { name: 'Change' }));
 
 		const selects = screen.getAllByRole('combobox');
@@ -150,7 +185,7 @@ describe('CollectionViewBlock', () => {
 		expect(getRecord(ydoc, block.id)?.referencedRecordId).toBe(collectionB.id);
 	});
 
-	it('renders the resolved collection as a Calendar when configured', () => {
+	it('renders the resolved collection as a Calendar when configured', async () => {
 		const doc = createDocument(ydoc, { title: 'Team Page' });
 		const collection = createCollection(ydoc, {
 			title: 'Launch Dates',
@@ -167,10 +202,18 @@ describe('CollectionViewBlock', () => {
 			actor
 		);
 
-		render(CollectionViewBlock, { block: getRecord(ydoc, block.id)!, ydoc });
+		render(CollectionViewBlock, {
+			block: getRecord(ydoc, block.id)!,
+			ydoc,
+			collections: listCollections(ydoc)
+		});
 
 		expect(screen.getByText('Launch Dates')).toBeInTheDocument();
-		expect(screen.getByText('Dates from')).toBeInTheDocument();
+		// CalendarCollectionView resolves its shard asynchronously (#120) before
+		// rendering schema-driven content, so this needs to wait rather than
+		// assert synchronously like the title above (rendered by
+		// CollectionViewBlock itself, not the nested view).
+		expect(await screen.findByText('Dates from')).toBeInTheDocument();
 	});
 
 	it('cancels out of the change picker back to the resolved view', async () => {
@@ -188,7 +231,11 @@ describe('CollectionViewBlock', () => {
 		);
 		const user = userEvent.setup();
 
-		render(CollectionViewBlock, { block: getRecord(ydoc, block.id)!, ydoc });
+		render(CollectionViewBlock, {
+			block: getRecord(ydoc, block.id)!,
+			ydoc,
+			collections: listCollections(ydoc)
+		});
 		await user.click(screen.getByRole('button', { name: 'Change' }));
 		expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
 

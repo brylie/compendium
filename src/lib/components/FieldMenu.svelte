@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { nanoid } from 'nanoid';
-	import { getClientDoc } from '$lib/client/yjs-client';
+	import { getClientDoc, getShardDoc } from '$lib/client/yjs-client';
 	import {
 		addSelectOption,
 		countRecordsWithProperty,
@@ -24,6 +24,7 @@
 
 	let {
 		collectionId,
+		shardId,
 		schema,
 		property,
 		primaryFieldKey = undefined,
@@ -31,6 +32,7 @@
 		onToggleVisible = undefined
 	}: {
 		collectionId: string;
+		shardId: string;
 		schema: PropertyDefinition[];
 		property: PropertyDefinition;
 		primaryFieldKey?: string;
@@ -142,7 +144,12 @@
 
 	const typeChangePreview = $derived(
 		mode === 'edit' && editType !== property.type
-			? previewCollectionPropertyTypeChange(getClientDoc(), collectionId, property.key, editType)
+			? previewCollectionPropertyTypeChange(
+					getShardDoc(shardId),
+					collectionId,
+					property.key,
+					editType
+				)
 			: { affected: 0, total: 0 }
 	);
 
@@ -169,7 +176,7 @@
 		const label = editLabel.trim();
 		if (!label) return;
 		try {
-			updateCollectionProperty(getClientDoc(), collectionId, property.key, {
+			updateCollectionProperty(getShardDoc(shardId), collectionId, property.key, {
 				label: label !== property.label ? label : undefined,
 				type: editType !== property.type ? editType : undefined
 			});
@@ -186,7 +193,7 @@
 		const field: PropertyDefinition = { key: nanoid(8), label: 'New field', type: 'text' };
 		const next = [...schema.slice(0, insertAt), field, ...schema.slice(insertAt)];
 		try {
-			updateCollectionSchema(getClientDoc(), collectionId, next);
+			updateCollectionSchema(getShardDoc(shardId), collectionId, next);
 			closeMenu();
 		} catch {
 			errorMessage = 'Could not insert a field. Please try again.';
@@ -195,7 +202,7 @@
 
 	function duplicate(): void {
 		try {
-			duplicateCollectionProperty(getClientDoc(), collectionId, property.key);
+			duplicateCollectionProperty(getShardDoc(shardId), collectionId, property.key);
 			closeMenu();
 		} catch {
 			errorMessage = 'Could not duplicate the field. Please try again.';
@@ -209,7 +216,7 @@
 
 	function togglePrimary(): void {
 		try {
-			setPrimaryField(getClientDoc(), collectionId, isPrimary ? null : property.key);
+			setPrimaryField(getShardDoc(shardId), collectionId, isPrimary ? null : property.key);
 			errorMessage = '';
 			closeMenu();
 		} catch (err) {
@@ -221,14 +228,20 @@
 	}
 
 	function openDeleteConfirm(): void {
-		deleteAffectedCount = countRecordsWithProperty(getClientDoc(), collectionId, property.key);
+		deleteAffectedCount = countRecordsWithProperty(
+			getShardDoc(shardId),
+			collectionId,
+			property.key
+		);
 		confirmDeleteOpen = true;
 		open = false;
 	}
 
 	function confirmDelete(): void {
 		try {
-			deleteCollectionProperty(getClientDoc(), collectionId, property.key);
+			// documentsDoc (Documents aren't sharded — #120) so the embedded
+			// collection_view repair scans where those blocks actually live.
+			deleteCollectionProperty(getShardDoc(shardId), collectionId, property.key, getClientDoc());
 			errorMessage = '';
 		} catch {
 			// Close the confirmation too, not just clear it — ConfirmDialog is a
@@ -244,7 +257,7 @@
 		const label = newOptionLabel.trim();
 		if (!label) return;
 		try {
-			addSelectOption(getClientDoc(), collectionId, property.key, label);
+			addSelectOption(getShardDoc(shardId), collectionId, property.key, label);
 			newOptionLabel = '';
 			optionError = '';
 		} catch (err) {
@@ -266,7 +279,7 @@
 		const label = rawLabel.trim();
 		if (!option || label === option.label) return true;
 		try {
-			updateSelectOption(getClientDoc(), collectionId, property.key, optionId, { label });
+			updateSelectOption(getShardDoc(shardId), collectionId, property.key, optionId, { label });
 			optionError = '';
 			return true;
 		} catch (err) {
@@ -284,7 +297,7 @@
 
 	function setOptionColor(optionId: string, color: string): void {
 		try {
-			updateSelectOption(getClientDoc(), collectionId, property.key, optionId, { color });
+			updateSelectOption(getShardDoc(shardId), collectionId, property.key, optionId, { color });
 			optionError = '';
 		} catch {
 			optionError = 'Could not recolor the option. Please try again.';
@@ -296,7 +309,13 @@
 		const option = options[index];
 		if (!option) return;
 		try {
-			moveSelectOption(getClientDoc(), collectionId, property.key, option.id, index + direction);
+			moveSelectOption(
+				getShardDoc(shardId),
+				collectionId,
+				property.key,
+				option.id,
+				index + direction
+			);
 			optionError = '';
 		} catch (err) {
 			optionError =
@@ -322,7 +341,7 @@
 		const toIndex = options.findIndex((o) => o.id === targetOptionId);
 		if (toIndex === -1) return;
 		try {
-			moveSelectOption(getClientDoc(), collectionId, property.key, fromId, toIndex);
+			moveSelectOption(getShardDoc(shardId), collectionId, property.key, fromId, toIndex);
 			optionError = '';
 		} catch (err) {
 			optionError =
@@ -336,7 +355,7 @@
 		deleteOptionId = optionId;
 		deleteOptionLabel = label;
 		deleteOptionAffectedCount = countRecordsWithSelectOption(
-			getClientDoc(),
+			getShardDoc(shardId),
 			collectionId,
 			property.key,
 			optionId
@@ -346,7 +365,15 @@
 	function confirmDeleteOption(): void {
 		if (!deleteOptionId) return;
 		try {
-			deleteSelectOption(getClientDoc(), collectionId, property.key, deleteOptionId);
+			// documentsDoc (Documents aren't sharded — #120) so the embedded
+			// collection_view repair scans where those blocks actually live.
+			deleteSelectOption(
+				getShardDoc(shardId),
+				collectionId,
+				property.key,
+				deleteOptionId,
+				getClientDoc()
+			);
 			optionError = '';
 		} catch {
 			optionError = 'Could not delete the option. Please try again.';

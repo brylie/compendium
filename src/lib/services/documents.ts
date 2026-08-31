@@ -28,6 +28,7 @@ import {
 	actorForCaller,
 	isAccessToken,
 	requireAccessibleParent,
+	resolveParentWorkspaceContext,
 	type CallerIdentity
 } from './permissions';
 
@@ -200,9 +201,16 @@ export function getDocument(
 			!r.referencedRecordId ||
 			!isAccessToken(caller) ||
 			tokenAllowsParent(caller, r.referencedRecordId);
+		// The reference target can be a Document (unsharded, always in `doc`)
+		// or a Collection (its own shard, possibly a different doc entirely).
+		// Try `doc` itself first, then fall back to resolving its real shard.
 		const resolvedTarget =
 			(isPageLink || isCollectionView) && r.referencedRecordId && targetInScope
-				? resolveInternalLinkTarget(doc, r.referencedRecordId)
+				? (resolveInternalLinkTarget(doc, r.referencedRecordId) ??
+					resolveInternalLinkTarget(
+						resolveParentWorkspaceContext(r.referencedRecordId).doc,
+						r.referencedRecordId
+					))
 				: undefined;
 		const linkedTarget = isCollectionView
 			? resolvedTarget?.kind === 'collection'

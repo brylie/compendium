@@ -646,6 +646,22 @@ describe('service layer: collections — grants, listing, query, delete, rename'
 		const { collection: after } = queryCollection(human, collection.id);
 		expect(after).toBeUndefined();
 	});
+
+	it('createCollection assigns a real, distinct shard — its own id — not the default doc (#120)', () => {
+		const collection = createCollection(human, { title: 'Sharded' });
+
+		const { workspaceId } = resolveWorkspaceContext();
+		const shardDoc = resolveWorkspaceContext({ workspaceId, shardId: collection.id }).doc;
+		const defaultDoc = resolveWorkspaceContext({ workspaceId }).doc;
+
+		expect(crdtGetCollection(shardDoc, collection.id)?.title).toBe('Sharded');
+		expect(crdtGetCollection(defaultDoc, collection.id)).toBeUndefined();
+
+		// listCollections finds it via the catalog fan-out, reading full
+		// CollectionMeta (schema) from its real shard.
+		const listed = listCollections(human).find((c) => c.id === collection.id);
+		expect(listed?.title).toBe('Sharded');
+	});
 });
 
 describe('service layer: records — write validation, delete, and direct read', () => {

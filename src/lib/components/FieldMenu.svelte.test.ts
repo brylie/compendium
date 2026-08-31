@@ -12,7 +12,7 @@ import {
 import FieldMenu from './FieldMenu.svelte';
 
 let ydoc: Y.Doc;
-vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
+vi.mock('$lib/client/yjs-client', () => ({ getShardDoc: () => ydoc, getClientDoc: () => ydoc }));
 
 const human = { kind: 'human' as const, userId: 'local' };
 
@@ -32,6 +32,7 @@ describe('FieldMenu', () => {
 		});
 		const user = userEvent.setup();
 		render(FieldMenu, {
+			shardId: 'test-shard',
 			collectionId: collection.id,
 			schema: collection.schema,
 			property: collection.schema[0]
@@ -59,6 +60,7 @@ describe('FieldMenu', () => {
 		);
 		const user = userEvent.setup();
 		render(FieldMenu, {
+			shardId: 'test-shard',
 			collectionId: collection.id,
 			schema: collection.schema,
 			property: collection.schema[0]
@@ -83,6 +85,7 @@ describe('FieldMenu', () => {
 		});
 		const user = userEvent.setup();
 		render(FieldMenu, {
+			shardId: 'test-shard',
 			collectionId: collection.id,
 			schema: collection.schema,
 			property: collection.schema[0]
@@ -107,6 +110,7 @@ describe('FieldMenu', () => {
 		);
 		const user = userEvent.setup();
 		render(FieldMenu, {
+			shardId: 'test-shard',
 			collectionId: collection.id,
 			schema: collection.schema,
 			property: collection.schema[0]
@@ -131,6 +135,7 @@ describe('FieldMenu', () => {
 		const onToggleVisible = vi.fn();
 		const user = userEvent.setup();
 		render(FieldMenu, {
+			shardId: 'test-shard',
 			collectionId: collection.id,
 			schema: collection.schema,
 			property: collection.schema[0],
@@ -152,6 +157,7 @@ describe('FieldMenu', () => {
 		});
 		const user = userEvent.setup();
 		render(FieldMenu, {
+			shardId: 'test-shard',
 			collectionId: collection.id,
 			schema: collection.schema,
 			property: collection.schema[0]
@@ -174,6 +180,7 @@ describe('FieldMenu', () => {
 		);
 		const user = userEvent.setup();
 		render(FieldMenu, {
+			shardId: 'test-shard',
 			collectionId: collection.id,
 			schema: collection.schema,
 			property: collection.schema[0]
@@ -196,6 +203,7 @@ describe('FieldMenu', () => {
 		});
 		const user = userEvent.setup();
 		render(FieldMenu, {
+			shardId: 'test-shard',
 			collectionId: collection.id,
 			schema: collection.schema,
 			property: collection.schema[0]
@@ -215,6 +223,7 @@ describe('FieldMenu', () => {
 		});
 		const user = userEvent.setup();
 		render(FieldMenu, {
+			shardId: 'test-shard',
 			collectionId: collection.id,
 			schema: collection.schema,
 			property: collection.schema[0],
@@ -239,6 +248,7 @@ describe('FieldMenu', () => {
 		});
 		const user = userEvent.setup();
 		render(FieldMenu, {
+			shardId: 'test-shard',
 			collectionId: collection.id,
 			schema: collection.schema,
 			property: collection.schema[0]
@@ -267,6 +277,7 @@ describe('FieldMenu', () => {
 			const collection = renderTwoTextFields();
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[1] // 'notes' — not the auto-fallback first text field
@@ -282,6 +293,7 @@ describe('FieldMenu', () => {
 			const collection = renderTwoTextFields();
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0] // 'name' — the resolved fallback with no explicit primaryFieldKey set
@@ -299,6 +311,7 @@ describe('FieldMenu', () => {
 			const collection = renderTwoTextFields();
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[1],
@@ -313,6 +326,7 @@ describe('FieldMenu', () => {
 			const collection = renderTwoTextFields();
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[1],
@@ -332,6 +346,7 @@ describe('FieldMenu', () => {
 			});
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -371,6 +386,7 @@ describe('FieldMenu', () => {
 			const { collection } = renderSelectField();
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -388,6 +404,7 @@ describe('FieldMenu', () => {
 			const { collection } = renderSelectField();
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -405,6 +422,7 @@ describe('FieldMenu', () => {
 			const { collection } = renderSelectField();
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -424,6 +442,7 @@ describe('FieldMenu', () => {
 			const { collection } = renderSelectField();
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -444,6 +463,7 @@ describe('FieldMenu', () => {
 			const { collection } = renderSelectField();
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -461,6 +481,7 @@ describe('FieldMenu', () => {
 			const { collection } = renderSelectField();
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -477,6 +498,7 @@ describe('FieldMenu', () => {
 			const { collection } = renderSelectField();
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -508,6 +530,7 @@ describe('FieldMenu', () => {
 			);
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -534,6 +557,7 @@ describe('FieldMenu', () => {
 			const { collection } = renderSelectField();
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -552,6 +576,7 @@ describe('FieldMenu', () => {
 			const { collection } = renderSelectField();
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -568,6 +593,7 @@ describe('FieldMenu', () => {
 			const { collection } = renderSelectField();
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -596,6 +622,7 @@ describe('FieldMenu', () => {
 			});
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -613,6 +640,7 @@ describe('FieldMenu', () => {
 			});
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -633,6 +661,7 @@ describe('FieldMenu', () => {
 			});
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -650,6 +679,7 @@ describe('FieldMenu', () => {
 			});
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -674,6 +704,7 @@ describe('FieldMenu', () => {
 			});
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -694,6 +725,7 @@ describe('FieldMenu', () => {
 			});
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -713,6 +745,7 @@ describe('FieldMenu', () => {
 			});
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]
@@ -734,6 +767,7 @@ describe('FieldMenu', () => {
 			});
 			const user = userEvent.setup();
 			render(FieldMenu, {
+				shardId: 'test-shard',
 				collectionId: collection.id,
 				schema: collection.schema,
 				property: collection.schema[0]

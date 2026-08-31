@@ -14,11 +14,13 @@
 
 	let {
 		collectionId = 'col-1',
+		shardId = 'default',
 		schema,
 		initialConfig = {},
 		onConfigChange
 	}: {
 		collectionId?: string;
+		shardId?: string;
 		schema: PropertyDefinition[];
 		initialConfig?: ViewConfig;
 		onConfigChange?: (config: ViewConfig) => void;
@@ -31,4 +33,4 @@
 	});
 </script>
 
-<ViewToolbar {collectionId} {schema} bind:config />
+<ViewToolbar {collectionId} {shardId} {schema} bind:config />

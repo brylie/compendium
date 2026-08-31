@@ -12,10 +12,12 @@
 
 	let {
 		collectionId,
+		shardId,
 		schema,
 		config = $bindable()
 	}: {
 		collectionId: string;
+		shardId: string;
 		schema: PropertyDefinition[];
 		config: ViewConfig;
 	} = $props();
@@ -259,5 +261,6 @@
 <FieldManagerDialog
 	open={fieldManagerOpen}
 	{collectionId}
+	{shardId}
 	onClose={() => (fieldManagerOpen = false)}
 />
