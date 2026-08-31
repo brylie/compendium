@@ -1,5 +1,4 @@
 import * as Y from 'yjs';
-import { getClientDoc } from './yjs-client';
 
 // Local, per-actor undo/redo (#8): each browser tab tracks only its own
 // locally-originated Yjs transactions, never a collaborator's — including a
@@ -34,24 +33,30 @@ export function createUndoManager(doc: Y.Doc): Y.UndoManager {
 	return new Y.UndoManager(SCOPE_MAP_NAMES.map((name) => doc.getMap(name)));
 }
 
-let manager: Y.UndoManager | null = null;
-let managerDoc: Y.Doc | null = null;
+// Keyed by Y.Doc instance, not a single module-level singleton: each
+// Document now has its own shard (#120), so the manager must be re-created
+// per open Document rather than staying bound to one process-wide doc —
+// this is the "revisit" undo-redo.md §4 already flagged once Documents
+// stopped sharing a single workspace Y.Doc. Cached per doc (not recreated on
+// every call) so switching back to a previously-open Document's tab-local
+// history doesn't lose it, matching a real editor's per-document undo stack.
+const managers = new Map<Y.Doc, Y.UndoManager>();
 
-function getManager(): Y.UndoManager {
-	const doc = getClientDoc();
-	if (!manager || managerDoc !== doc) {
+function getManager(doc: Y.Doc): Y.UndoManager {
+	let manager = managers.get(doc);
+	if (!manager) {
 		manager = createUndoManager(doc);
-		managerDoc = doc;
+		managers.set(doc, manager);
 	}
 	return manager;
 }
 
-export function undo(): void {
-	getManager().undo();
+export function undo(doc: Y.Doc): void {
+	getManager(doc).undo();
 }
 
-export function redo(): void {
-	getManager().redo();
+export function redo(doc: Y.Doc): void {
+	getManager(doc).redo();
 }
 
 export interface UndoRedoState {
@@ -63,9 +68,12 @@ function readState(um: Y.UndoManager): UndoRedoState {
 	return { canUndo: um.undoStack.length > 0, canRedo: um.redoStack.length > 0 };
 }
 
-/** Reactive canUndo/canRedo, for driving the toolbar's disabled state. */
-export function subscribeUndoRedoState(onChange: (state: UndoRedoState) => void): () => void {
-	const um = getManager();
+/** Reactive canUndo/canRedo for `doc`, for driving the toolbar's disabled state — re-subscribe when the open Document (and therefore its shard doc) changes. */
+export function subscribeUndoRedoState(
+	doc: Y.Doc,
+	onChange: (state: UndoRedoState) => void
+): () => void {
+	const um = getManager(doc);
 	const compute = () => onChange(readState(um));
 	um.on('stack-item-added', compute);
 	um.on('stack-item-popped', compute);

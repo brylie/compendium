@@ -1,5 +1,4 @@
 import { nanoid } from 'nanoid';
-import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { clientIdForToken, isHeldByClient, releaseAgentHold } from '$lib/server/holds';
 import {
 	createRecord as crdtCreateRecord,
@@ -47,7 +46,10 @@ export class InvalidLinkTargetError extends Error {
 }
 
 function validatePageLinkTarget(caller: CallerIdentity, targetId: string): void {
-	const { doc } = resolveWorkspaceContext();
+	// A page_link's target is always a Document, which has its own real shard
+	// (#120) — resolveParentWorkspaceContext finds it via the catalog locator,
+	// falling back to the default doc for an untracked/legacy target.
+	const { doc } = resolveParentWorkspaceContext(targetId);
 	const target = crdtGetDocument(doc, targetId);
 	if (!target) throw new InvalidLinkTargetError(targetId);
 	if (isAccessToken(caller) && !tokenAllowsParent(caller, targetId)) {
@@ -65,7 +67,7 @@ export function createRecord(
 		referencedRecordId?: string;
 	}
 ): WorkspaceRecord {
-	const { doc, workspaceId, shardId, defaultSpaceId, parentKind } = resolveParentWorkspaceContext(
+	const { doc, workspaceId, shardId, defaultSpaceId } = resolveParentWorkspaceContext(
 		input.parentId
 	);
 	const actor = actorForCaller(caller);
@@ -87,13 +89,13 @@ export function createRecord(
 	// colliding id), nothing has been written yet. If the CRDT write then
 	// fails, the reservation is rolled back so no orphaned locator survives it.
 	//
-	// Document blocks stay untracked — they're always in the default shard as
-	// long as Documents themselves aren't sharded, so resolveRecordWorkspaceContext's
-	// "not found" fallback already routes them correctly without a locator row.
+	// Reserved regardless of parentKind: Documents have their own shard too
+	// (#120), so a Document's own block needs to be locator-tracked exactly
+	// like a Collection row — without it, resolveRecordWorkspaceContext's
+	// "not found" fallback would route every later write_record/delete_record/
+	// hold_records call for this block to the wrong (default) shard.
 	const id = nanoid();
-	if (parentKind === 'collection') {
-		reserveRecordLocator(workspaceId, defaultSpaceId, id, shardId);
-	}
+	reserveRecordLocator(workspaceId, defaultSpaceId, id, shardId);
 
 	let record: WorkspaceRecord;
 	try {
@@ -110,7 +112,7 @@ export function createRecord(
 			actor
 		);
 	} catch (err) {
-		if (parentKind === 'collection') releaseRecordLocator(workspaceId, id);
+		releaseRecordLocator(workspaceId, id);
 		throw err;
 	}
 

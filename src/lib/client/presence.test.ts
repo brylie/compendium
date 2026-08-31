@@ -29,17 +29,15 @@ class FakeAwareness {
 	}
 }
 
-const fakeAwareness = new FakeAwareness();
-
-vi.mock('./yjs-client', () => ({ getClientAwareness: () => fakeAwareness }));
+let fakeAwareness: FakeAwareness;
 
 describe('presence: block holds via Awareness', () => {
 	beforeEach(() => {
-		fakeAwareness.getStates().clear();
+		fakeAwareness = new FakeAwareness();
 	});
 
 	it("claims a block as this browser tab's local state", () => {
-		claimBlockPresence('r1');
+		claimBlockPresence(fakeAwareness as never, 'r1');
 		expect(fakeAwareness.getStates().get(fakeAwareness.clientID)).toEqual({
 			actor: CURRENT_USER,
 			heldRecordIds: ['r1']
@@ -47,8 +45,8 @@ describe('presence: block holds via Awareness', () => {
 	});
 
 	it('releases the block by clearing heldRecordIds', () => {
-		claimBlockPresence('r1');
-		releaseBlockPresence();
+		claimBlockPresence(fakeAwareness as never, 'r1');
+		releaseBlockPresence(fakeAwareness as never);
 		expect(fakeAwareness.getStates().get(fakeAwareness.clientID)).toEqual({
 			actor: CURRENT_USER,
 			heldRecordIds: []
@@ -57,12 +55,12 @@ describe('presence: block holds via Awareness', () => {
 
 	it('reports records held by other clients, ignoring this tab and states with no hold', () => {
 		const onChange = vi.fn();
-		const unsubscribe = subscribeHeldByOthers(onChange);
+		const unsubscribe = subscribeHeldByOthers(fakeAwareness as never, onChange);
 
 		const other: ActorId = { kind: 'agent', agentId: 'a1', name: 'Bot' };
 		fakeAwareness.setRemoteState(2, { actor: other, heldRecordIds: ['r2'] });
 		fakeAwareness.setRemoteState(3, {}); // no heldRecordIds/actor -> ignored
-		claimBlockPresence('r1'); // own state -> excluded from "others"
+		claimBlockPresence(fakeAwareness as never, 'r1'); // own state -> excluded from "others"
 
 		const lastCall = onChange.mock.calls.at(-1)![0] as Map<string, ActorId>;
 		expect(lastCall.get('r2')).toEqual(other);
@@ -76,7 +74,7 @@ describe('presence: block holds via Awareness', () => {
 		const other1: ActorId = { kind: 'agent', agentId: 'a1', name: 'First' };
 		const other2: ActorId = { kind: 'agent', agentId: 'a2', name: 'Second' };
 		fakeAwareness.setRemoteState(2, { actor: other1, heldRecordIds: ['r9'] });
-		subscribeHeldByOthers(onChange);
+		subscribeHeldByOthers(fakeAwareness as never, onChange);
 		fakeAwareness.setRemoteState(3, { actor: other2, heldRecordIds: ['r9'] });
 
 		const lastCall = onChange.mock.calls.at(-1)![0] as Map<string, ActorId>;
@@ -85,7 +83,7 @@ describe('presence: block holds via Awareness', () => {
 
 	it('stops notifying after unsubscribe', () => {
 		const onChange = vi.fn();
-		const unsubscribe = subscribeHeldByOthers(onChange);
+		const unsubscribe = subscribeHeldByOthers(fakeAwareness as never, onChange);
 		const callsAtSubscribe = onChange.mock.calls.length;
 
 		unsubscribe();

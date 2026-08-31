@@ -1,5 +1,6 @@
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import {
+	computeSiblingOrder,
 	createDocument as crdtCreateDocument,
 	createRecord as crdtCreateRecord,
 	deleteDocument as crdtDeleteDocument,
@@ -13,6 +14,7 @@ import {
 import { logAudit } from '$lib/server/audit';
 import {
 	RecordIdConflictError,
+	listCatalogDocuments,
 	recordCatalogDocumentCreated,
 	recordCatalogDocumentDeleted,
 	recordCatalogDocumentMoved,
@@ -41,7 +43,12 @@ export interface CreateDocumentInput {
 }
 
 export function createDocument(caller: CallerIdentity, input: CreateDocumentInput): DocumentMeta {
-	const { doc, workspaceId, shardId, defaultSpaceId } = resolveWorkspaceContext();
+	const id = input.id ?? nanoid();
+	// A Document's shard is its own id — same pattern as createCollection
+	// (#120). resolveWorkspaceContext lazily creates the shard on first
+	// resolution, so this is safe to call before anything exists there yet.
+	const { doc, workspaceId, shardId, defaultSpaceId } = resolveWorkspaceContext({ shardId: id });
+	const { doc: defaultDoc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	// Decision: In single-tenant Phase 0/1, any authenticated caller is permitted
@@ -50,29 +57,36 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 		requireAccessibleParent(caller, input.parentDocumentId, 'create_document');
 	}
 
-	// Reserve the id in the catalog's workspace-wide record locator *before*
-	// any Y.Doc content is written — throws RecordIdConflictError on a
-	// collision instead of the Y.Doc primitive's prior silent overwrite (see
-	// docs/specifications/workspace-sharding.md §3.1). The locator alone
-	// can't catch a collision with content a client wrote directly to the
-	// Y.Doc (bypassing the service layer, and therefore the locator) — a
-	// caller-supplied id is checked against the live Y.Doc too, since
-	// crdtCreateDocument would otherwise silently overwrite it. Checked
-	// against *both* maps: an id colliding with an existing Collection
-	// wouldn't overwrite it (documents/collections are separate Y.Maps), but
-	// would leave it permanently unreachable via parentKindOf, which checks
-	// the documents map first.
-	const id = input.id ?? nanoid();
-	if (crdtGetDocument(doc, id) || crdtGetCollection(doc, id)) {
+	// Collision check spans the target shard (a caller-supplied id already
+	// used there) and the default doc (content written directly to the Y.Doc,
+	// bypassing the service layer and therefore the locator — still possible
+	// since the shared 'workspace' room exists for as-yet-unmigrated content).
+	// Checked against both maps in the default doc: an id colliding with an
+	// existing Collection there wouldn't overwrite it (documents/collections
+	// are separate Y.Maps), but would leave it permanently unreachable via
+	// parentKindOf, which checks the documents map first.
+	if (
+		crdtGetDocument(doc, id) ||
+		crdtGetDocument(defaultDoc, id) ||
+		crdtGetCollection(defaultDoc, id)
+	) {
 		throw new RecordIdConflictError(id);
 	}
 	reserveDocumentLocator(workspaceId, defaultSpaceId, id, shardId);
+
+	// Sibling order is computed from the catalog, not this doc's own
+	// listDocuments(): true siblings can live in entirely different shards
+	// once each Document has its own (see computeSiblingOrder's doc comment).
+	const siblings = listCatalogDocuments(workspaceId).filter(
+		(d) => d.parentDocumentId === input.parentDocumentId
+	);
+	const order = computeSiblingOrder(siblings, input.afterDocumentId);
 
 	const document = crdtCreateDocument(doc, {
 		id,
 		title: input.title,
 		parentDocumentId: input.parentDocumentId,
-		afterDocumentId: input.afterDocumentId
+		order
 	});
 
 	recordCatalogDocumentCreated({
@@ -106,7 +120,7 @@ export function moveDocument(
 	documentId: string,
 	options: { parentDocumentId?: string; afterDocumentId?: string }
 ): void {
-	const { doc, workspaceId } = resolveWorkspaceContext();
+	const { doc, workspaceId } = resolveParentWorkspaceContext(documentId);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'move_document');
@@ -114,11 +128,21 @@ export function moveDocument(
 		requireAccessibleParent(caller, options.parentDocumentId, 'move_document');
 	}
 
-	crdtUpdateDocumentParent(doc, documentId, options.parentDocumentId, options.afterDocumentId);
-	const moved = crdtGetDocument(doc, documentId);
-	if (moved) {
-		recordCatalogDocumentMoved(workspaceId, documentId, moved.parentDocumentId, moved.order);
-	}
+	// Catalog-sourced siblings, not doc's own listDocuments() — see
+	// createDocument's identical reasoning.
+	const siblings = listCatalogDocuments(workspaceId).filter(
+		(d) => d.id !== documentId && d.parentDocumentId === options.parentDocumentId
+	);
+	const order = computeSiblingOrder(siblings, options.afterDocumentId);
+
+	crdtUpdateDocumentParent(
+		doc,
+		documentId,
+		options.parentDocumentId,
+		options.afterDocumentId,
+		order
+	);
+	recordCatalogDocumentMoved(workspaceId, documentId, options.parentDocumentId, order);
 	logAudit({
 		actor,
 		action: 'move_document',
@@ -127,12 +151,41 @@ export function moveDocument(
 	});
 }
 
+/** Walks the catalog's own parent chain (not a Y.Doc) to find every descendant of rootId, since descendants can each live in a different shard — mirrors catalog.ts's recordCatalogDocumentDeleted recursive CTE, one level up. */
+function collectDescendantIds(allDocs: DocumentMeta[], rootId: string): string[] {
+	const ids = [rootId];
+	const stack = [rootId];
+	while (stack.length > 0) {
+		const current = stack.pop()!;
+		for (const candidate of allDocs) {
+			if (candidate.parentDocumentId === current) {
+				ids.push(candidate.id);
+				stack.push(candidate.id);
+			}
+		}
+	}
+	return ids;
+}
+
 export function deleteDocument(caller: CallerIdentity, documentId: string): void {
-	const { doc, workspaceId } = resolveWorkspaceContext();
+	const { workspaceId } = resolveParentWorkspaceContext(documentId);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'delete_document');
-	crdtDeleteDocument(doc, documentId);
+
+	// Each descendant's own shard contains only that Document, so calling the
+	// existing recursive crdtDeleteDocument against it is automatically
+	// non-recursive in practice (its internal child-lookup finds nothing in
+	// an isolated shard) — recursion instead happens here, over the catalog,
+	// which is the only place the full cross-shard tree is visible.
+	const descendantIds = collectDescendantIds(listCatalogDocuments(workspaceId), documentId);
+	for (const id of descendantIds) {
+		const { doc } = resolveParentWorkspaceContext(id);
+		crdtDeleteDocument(doc, id);
+	}
+
+	// One call cascades the whole subtree — recordCatalogDocumentDeleted
+	// already walks its own recursive CTE (catalog.ts).
 	recordCatalogDocumentDeleted(workspaceId, documentId);
 	logAudit({ actor, action: 'delete_document', targetRecordId: documentId });
 }
@@ -142,7 +195,7 @@ export function updateDocumentTitle(
 	documentId: string,
 	title: string
 ): void {
-	const { doc, workspaceId } = resolveWorkspaceContext();
+	const { doc, workspaceId } = resolveParentWorkspaceContext(documentId);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'update_document_title');
@@ -184,7 +237,7 @@ export function getDocument(
 		markdown: string;
 	}>;
 } | null {
-	const { doc } = resolveWorkspaceContext();
+	const { doc } = resolveParentWorkspaceContext(documentId);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'get_document');
@@ -256,10 +309,21 @@ export function getDocument(
 }
 
 export function listDocuments(caller: CallerIdentity): DocumentMeta[] {
-	const { doc } = resolveWorkspaceContext();
-	const docs = crdtListDocuments(doc);
-	if (isAccessToken(caller)) {
-		return docs.filter((d) => tokenAllowsParent(caller, d.id));
+	const { workspaceId, doc: defaultDoc } = resolveWorkspaceContext();
+	const allowed = (id: string) => !isAccessToken(caller) || tokenAllowsParent(caller, id);
+
+	const catalogDocs = listCatalogDocuments(workspaceId);
+	const catalogDocumentIds = new Set(catalogDocs.map((d) => d.id));
+	const results = catalogDocs.filter((d) => allowed(d.id));
+
+	// Then any Document written directly to the Y.Doc, bypassing the service
+	// layer entirely (and therefore uncataloged) — mirrors listCollections'
+	// identical catalog-then-uncataloged-fallback union pattern.
+	for (const document of crdtListDocuments(defaultDoc)) {
+		if (catalogDocumentIds.has(document.id)) continue;
+		if (!allowed(document.id)) continue;
+		results.push(document);
 	}
-	return docs;
+
+	return results;
 }

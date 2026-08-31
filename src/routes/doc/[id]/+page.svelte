@@ -1,16 +1,14 @@
 <script lang="ts">
-	import { onMount, tick, untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { resolve } from '$app/paths';
-	import { getClientDoc } from '$lib/client/yjs-client';
+	import { getShardAwareness, getShardDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
 	import {
 		createRecord,
 		deleteRecord,
 		getDocument,
 		getRecordYText,
-		listCollections,
-		listDocuments,
 		listRecordsForParent,
 		setBlockType,
 		setRecordChecked,
@@ -18,7 +16,7 @@
 		setRecordReferencedId,
 		updateDocumentTitle
 	} from '$lib/data/records';
-	import { listIncomingLinks, RECORD_LINK_SCHEME } from '$lib/data/links';
+	import { RECORD_LINK_SCHEME, type InternalLinkTarget } from '$lib/data/links';
 	import {
 		appendRichTextToYText,
 		applyRichTextToYText,
@@ -44,14 +42,13 @@
 
 	let { data }: PageProps = $props();
 
-	let ydoc: ReturnType<typeof getClientDoc> | undefined = $state();
+	let ydoc: ReturnType<typeof getShardDoc> | undefined = $state();
 	// Initial-render-only snapshot of the SSR-loaded title, shown before ydoc
 	// mounts; refresh() (below) is what keeps it in sync with the Y.Doc
 	// afterwards, including on navigation to a different document and on
 	// remote title edits — untrack() here just tells Svelte that's deliberate.
 	let title = $state(untrack(() => data.title));
 	let blocks: WorkspaceRecord[] = $state([]);
-	let backlinks: ReturnType<typeof listIncomingLinks> = $state([]);
 	let slashMenuBlockId: string | null = $state(null);
 	let slashQuery = $state('');
 	let heldByOthers: Map<string, ActorId> = $state(new Map());
@@ -69,10 +66,30 @@
 	let linkUrlInput: HTMLInputElement | undefined = $state();
 	let linkDialog: HTMLDivElement | undefined = $state();
 
+	// Catalog-backed (data.documents), not derived from ydoc: a sharded
+	// Document's own meta entry doesn't live in *this* Document's doc at all
+	// (#120) — only its own shard does, which this page has no connection to.
+	// Not live, same accepted tradeoff as Sidebar's list.
 	const documentMetadataById = $derived(
-		ydoc
-			? new Map(listDocuments(ydoc).map((document) => [document.id, document]))
-			: new Map<string, ReturnType<typeof listDocuments>[number]>()
+		new Map(data.documents.map((document) => [document.id, document]))
+	);
+
+	// Passed down to every BlockEditor for inline record: wiki-link
+	// resolution (title/kind/existence) — an inline link's target is very
+	// often a *different* Document, now its own isolated shard (#120) this
+	// page's own ydoc has no connection to, so this must come from the
+	// catalog-backed data.documents/data.collections rather than a live doc.
+	const linkTargets = $derived(
+		new Map<string, InternalLinkTarget>([
+			...data.documents.map((d): [string, InternalLinkTarget] => [
+				d.id,
+				{ id: d.id, kind: 'document', title: d.title }
+			]),
+			...data.collections.map((c): [string, InternalLinkTarget] => [
+				c.id,
+				{ id: c.id, kind: 'collection', title: c.title }
+			])
+		])
 	);
 
 	interface BlockEditorHandle {
@@ -94,11 +111,10 @@
 		if (!ydoc) return;
 		const nextBlocks = listRecordsForParent(ydoc, data.documentId);
 		blocks = nextBlocks;
-		backlinks = listIncomingLinks(ydoc, data.documentId);
 		const docMeta = getDocument(ydoc, data.documentId);
 		title = docMeta?.title ?? data.title;
 		if (docMeta?.parentDocumentId) {
-			const parent = getDocument(ydoc, docMeta.parentDocumentId);
+			const parent = documentMetadataById.get(docMeta.parentDocumentId);
 			parentDocTitle = parent?.title || 'Parent document';
 		} else {
 			parentDocTitle = null;
@@ -130,7 +146,7 @@
 
 	function handleFocusBlock(blockId: string, presenceBlockId = blockId): void {
 		activeBlockId = blockId;
-		claimBlockPresence(presenceBlockId);
+		if (awareness) claimBlockPresence(awareness, presenceBlockId);
 		syncToolbarSelection();
 	}
 
@@ -199,7 +215,6 @@
 	}
 
 	function documentLocation(documentId: string): string {
-		if (!ydoc) return '';
 		const parts: string[] = [];
 		const visited = new SvelteSet<string>();
 		let current = documentMetadataById.get(documentId);
@@ -242,37 +257,62 @@
 		void addBlockAfter(activeBlockId ?? blocks.at(-1)?.id, blockType);
 	}
 
-	onMount(() => {
-		const doc = getClientDoc();
-		ydoc = doc;
-		// Register the backlink index before this page's Yjs observers. That
-		// keeps the index current before refresh() reads it after a remote edit.
-		backlinks = listIncomingLinks(doc, data.documentId);
+	let awareness: ReturnType<typeof getShardAwareness> | undefined = $state();
 
-		const recordsMap = doc.getMap('records');
-		const documentsMap = doc.getMap('documents');
-		const observer = () => refresh();
-		recordsMap.observeDeep(observer);
-		documentsMap.observeDeep(observer);
+	// Resolves this Document's real shard (#120) and (re)connects whenever
+	// data.documentId changes — SvelteKit reuses this component instance
+	// across client-side navigations between two /doc/[id] routes, so this
+	// can't be a one-time onMount. Mirrors table/[id]/+page.svelte's
+	// identical pattern, plus this page's own presence/undo subscriptions,
+	// which both need this Document's real shard's Awareness/Y.Doc, not a
+	// single shared instance.
+	$effect(() => {
+		const id = data.documentId;
+		let cancelled = false;
+		let cleanup: (() => void) | undefined;
 
-		const unsubscribePresence = subscribeHeldByOthers((held) => {
-			heldByOthers = held;
-		});
+		(async () => {
+			const res = await fetch(`/api/documents/${id}/shard`);
+			const { shardId: resolvedShardId } = await res.json();
+			if (cancelled) return;
 
-		// Subscribed immediately on mount, before any local edit can happen —
-		// this is what puts the tab's Y.UndoManager in place from the start of
-		// the session, since it only tracks transactions made after it exists.
-		const unsubscribeUndoRedo = subscribeUndoRedoState((state) => {
-			canUndo = state.canUndo;
-			canRedo = state.canRedo;
-		});
+			const doc = getShardDoc(resolvedShardId);
+			const docAwareness = getShardAwareness(resolvedShardId);
+			ydoc = doc;
+			awareness = docAwareness;
+
+			const recordsMap = doc.getMap('records');
+			const documentsMap = doc.getMap('documents');
+			const observer = () => refresh();
+			recordsMap.observeDeep(observer);
+			documentsMap.observeDeep(observer);
+			refresh();
+
+			const unsubscribePresence = subscribeHeldByOthers(docAwareness, (held) => {
+				heldByOthers = held;
+			});
+
+			// Subscribed immediately once the shard resolves, before any local
+			// edit can happen — this is what puts this Document's Y.UndoManager
+			// in place from the start, since it only tracks transactions made
+			// after it exists.
+			const unsubscribeUndoRedo = subscribeUndoRedoState(doc, (state) => {
+				canUndo = state.canUndo;
+				canRedo = state.canRedo;
+			});
+
+			cleanup = () => {
+				recordsMap.unobserveDeep(observer);
+				documentsMap.unobserveDeep(observer);
+				unsubscribePresence();
+				unsubscribeUndoRedo();
+				releaseBlockPresence(docAwareness);
+			};
+		})();
 
 		return () => {
-			recordsMap.unobserveDeep(observer);
-			documentsMap.unobserveDeep(observer);
-			unsubscribePresence();
-			unsubscribeUndoRedo();
-			releaseBlockPresence();
+			cancelled = true;
+			cleanup?.();
 		};
 	});
 
@@ -285,27 +325,19 @@
 	// (e.g. undoing a delete brings back a block that no longer exists to
 	// focus).
 	function handleGlobalKeydown(event: KeyboardEvent): void {
+		if (!ydoc) return;
 		const key = event.key.toLowerCase();
 		if ((event.metaKey || event.ctrlKey) && key === 'z') {
 			event.preventDefault();
-			if (event.shiftKey) redo();
-			else undo();
+			if (event.shiftKey) redo(ydoc);
+			else undo(ydoc);
 			return;
 		}
 		if (event.ctrlKey && !event.metaKey && key === 'y') {
 			event.preventDefault();
-			redo();
+			redo(ydoc);
 		}
 	}
-
-	// SvelteKit reuses this component instance across client-side navigations
-	// between two /doc/[id] routes (onMount doesn't re-run) — refresh() must
-	// re-run whenever data.documentId changes, not just on mount/Yjs updates,
-	// or `blocks` keeps showing the previously-open document.
-	$effect(() => {
-		if (!ydoc) return;
-		refresh();
-	});
 
 	$effect(() => {
 		if (!linkDialogBlockId || linkMode !== 'url') return;
@@ -573,8 +605,8 @@
 	{canRedo}
 	onFormat={applyToolbarFormat}
 	onInsert={insertToolbarBlock}
-	onUndo={undo}
-	onRedo={redo}
+	onUndo={() => ydoc && undo(ydoc)}
+	onRedo={() => ydoc && redo(ydoc)}
 />
 
 <div class="mx-auto max-w-3xl px-6 py-10">
@@ -600,35 +632,13 @@
 		placeholder="Untitled document"
 	/>
 
-	<section
-		class="mt-5 rounded-lg border border-border bg-surface/50 p-3"
-		aria-labelledby="backlinks-heading"
-	>
-		<div class="flex items-center gap-2 text-xs font-semibold tracking-wider text-muted uppercase">
-			<Icon name="link" size={15} class="text-accent" />
-			<h2 id="backlinks-heading">Backlinks</h2>
-			<span class="normal-case">{backlinks.length}</span>
-		</div>
-		{#if backlinks.length > 0}
-			<ul class="mt-2 space-y-2">
-				{#each backlinks as backlink, index (`${backlink.sourceRecordId}-${index}`)}
-					<li class="min-w-0 text-sm">
-						<a
-							href={resolve('/doc/[id]', { id: backlink.sourceDocumentId })}
-							class="font-medium text-fg underline underline-offset-2 transition-colors hover:text-accent"
-						>
-							{backlink.sourceDocumentTitle || 'Untitled Document'}
-						</a>
-						<p class="mt-0.5 truncate text-xs text-muted" title={backlink.context}>
-							{backlink.context}
-						</p>
-					</li>
-				{/each}
-			</ul>
-		{:else}
-			<p class="mt-2 text-xs text-muted italic">No pages link here yet.</p>
-		{/if}
-	</section>
+	<!--
+		Backlinks panel removed (#120): listIncomingLinks builds its reverse
+		index by scanning every Document within one shared Y.Doc, structurally
+		incompatible with per-Document shards. A real workspace-wide backlink
+		index is tracked separately as #21 — this panel comes back once that
+		exists, rather than being served here via an expensive full-shard scan.
+	-->
 
 	<!-- Blocks Canvas (Click anywhere below title to start writing) -->
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -733,6 +743,7 @@
 										bind:this={blockRefs[block.id]}
 										{ytext}
 										recordId={block.id}
+										{linkTargets}
 										placeholder="Callout note…"
 										onInputText={() => handleBlockInput(block.id)}
 										onEnter={(caretOffset) => handleEnter(block, caretOffset)}
@@ -751,6 +762,7 @@
 									bind:this={blockRefs[block.id]}
 									{ytext}
 									recordId={block.id}
+									{linkTargets}
 									placeholder="Quote…"
 									onInputText={() => handleBlockInput(block.id)}
 									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
@@ -768,6 +780,7 @@
 									bind:this={blockRefs[block.id]}
 									{ytext}
 									recordId={block.id}
+									{linkTargets}
 									class="font-mono text-[13.5px]"
 									placeholder="Code snippet…"
 									onInputText={() => handleBlockInput(block.id)}
@@ -825,6 +838,7 @@
 									bind:this={blockRefs[block.id]}
 									{ytext}
 									recordId={block.id}
+									{linkTargets}
 									placeholder="Synced content…"
 									onInputText={() => handleBlockInput(block.id)}
 									onEnter={() => addBlockAfter(block.id)}
@@ -841,10 +855,9 @@
 							{/if}
 						</div>
 					{:else if bt === 'page_link'}
-						{@const linkedDoc =
-							block.referencedRecordId && ydoc
-								? getDocument(ydoc, block.referencedRecordId)
-								: undefined}
+						{@const linkedDoc = block.referencedRecordId
+							? documentMetadataById.get(block.referencedRecordId)
+							: undefined}
 						{@const isBroken = !!block.referencedRecordId && !linkedDoc}
 						<div class="my-1 rounded-lg border border-border bg-surface/50 p-2.5 shadow-xs">
 							{#if linkedDoc}
@@ -870,7 +883,7 @@
 												CURRENT_USER
 											)}
 									>
-										{#each listDocuments(ydoc!) as document (document.id)}
+										{#each data.documents as document (document.id)}
 											{#if document.id !== data.documentId}
 												<option value={document.id}>{documentLocation(document.id)}</option>
 											{/if}
@@ -892,7 +905,7 @@
 										}}
 									>
 										<option value="">Choose a document…</option>
-										{#each listDocuments(ydoc!) as document (document.id)}
+										{#each data.documents as document (document.id)}
 											{#if document.id !== data.documentId}
 												<option value={document.id}>{documentLocation(document.id)}</option>
 											{/if}
@@ -912,7 +925,7 @@
 											class="rounded border border-border bg-bg px-2 py-1 text-xs text-fg focus:border-accent"
 										>
 											<option value="">Select document…</option>
-											{#each listDocuments(ydoc) as d (d.id)}
+											{#each data.documents as d (d.id)}
 												{#if d.id !== data.documentId}
 													<option value={d.id}>{documentLocation(d.id)}</option>
 												{/if}
@@ -937,6 +950,7 @@
 									bind:this={blockRefs[block.id]}
 									{ytext}
 									recordId={block.id}
+									{linkTargets}
 									class={bt === 'heading_1'
 										? 'font-display text-2xl font-bold text-fg'
 										: bt === 'heading_2'
@@ -1069,20 +1083,18 @@
 						class="mt-1.5 w-full rounded border border-border bg-surface px-3 py-2 text-sm text-fg outline-none focus:border-accent"
 					>
 						<option value="">Choose a page or collection…</option>
-						{#if ydoc}
-							<optgroup label="Pages">
-								{#each listDocuments(ydoc) as document (document.id)}
-									{#if document.id !== data.documentId}
-										<option value={document.id}>{documentLocation(document.id)}</option>
-									{/if}
-								{/each}
-							</optgroup>
-							<optgroup label="Collections">
-								{#each listCollections(ydoc) as collection (collection.id)}
-									<option value={collection.id}>{collection.title || 'Untitled collection'}</option>
-								{/each}
-							</optgroup>
-						{/if}
+						<optgroup label="Pages">
+							{#each data.documents as document (document.id)}
+								{#if document.id !== data.documentId}
+									<option value={document.id}>{documentLocation(document.id)}</option>
+								{/if}
+							{/each}
+						</optgroup>
+						<optgroup label="Collections">
+							{#each data.collections as collection (collection.id)}
+								<option value={collection.id}>{collection.title || 'Untitled collection'}</option>
+							{/each}
+						</optgroup>
 					</select>
 				</label>
 			{/if}

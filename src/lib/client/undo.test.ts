@@ -11,19 +11,15 @@ import {
 	updateRecordProperties
 } from '$lib/data/records';
 import type { ActorId } from '$lib/data/types';
-import { createUndoManager } from './undo';
-
-let singletonDoc: Y.Doc;
-vi.mock('./yjs-client', () => ({ getClientDoc: () => singletonDoc }));
+import { createUndoManager, redo, subscribeUndoRedoState, undo } from './undo';
 
 // createUndoManager(doc) is exercised directly against real Y.Doc instances
-// here, with no mocking of $lib/client/yjs-client — these are the tests that
-// prove the actual CRDT-level guarantees the feature is built on (issue #8):
-// scoping, grouping, and — the two hardest requirements — that undo never
-// reverts another actor's transaction, and redo restores exactly the local
-// action even after a remote edit lands in between. The thin singleton
-// wrapper (undo(), redo(), subscribeUndoRedoState()) has its own smaller
-// suite further down, since that part is just plumbing to getClientDoc().
+// here — these are the tests that prove the actual CRDT-level guarantees the
+// feature is built on (issue #8): scoping, grouping, and — the two hardest
+// requirements — that undo never reverts another actor's transaction, and
+// redo restores exactly the local action even after a remote edit lands in
+// between. The thin per-doc manager cache (undo(doc), redo(doc),
+// subscribeUndoRedoState(doc)) has its own smaller suite further down.
 
 const HUMAN: ActorId = { kind: 'human', userId: 'local' };
 const REMOTE_ACTOR: ActorId = { kind: 'human', userId: 'collaborator' };
@@ -327,54 +323,72 @@ describe('createUndoManager: per-actor isolation', () => {
 	});
 });
 
-describe('undo/redo singleton (bound to getClientDoc())', () => {
-	beforeEach(async () => {
-		singletonDoc = new Y.Doc();
-		// Each test gets a fresh Y.Doc; the module's cached manager must not
-		// leak state from a previous test's doc.
-		vi.resetModules();
+describe('undo/redo per-doc manager cache', () => {
+	let docA: Y.Doc;
+	let docB: Y.Doc;
+
+	beforeEach(() => {
+		docA = new Y.Doc();
+		docB = new Y.Doc();
 	});
 
 	afterEach(() => {
-		singletonDoc.destroy();
+		docA.destroy();
+		docB.destroy();
 	});
 
-	it('undo()/redo() operate on the doc returned by getClientDoc()', async () => {
-		createDocument(singletonDoc, { id: 'd1', title: 'Doc' });
-		const { undo, redo, subscribeUndoRedoState } = await import('./undo');
-		// Forces the module's lazy manager into existence before the action
-		// under test, the same way the app's onMount subscribes immediately on
-		// page load — otherwise a manager created only inside the first
-		// undo() call would have nothing on its stack yet, since Y.UndoManager
-		// only tracks transactions that occur after it's constructed.
-		subscribeUndoRedoState(() => {});
-		const record = createRecord(singletonDoc, { parentId: 'd1', blockType: 'paragraph' }, HUMAN);
-		expect(getDocument(singletonDoc, 'd1')?.recordIds).toEqual([record.id]);
+	it('undo(doc)/redo(doc) operate on the passed-in doc', () => {
+		createDocument(docA, { id: 'd1', title: 'Doc' });
+		// Forces the manager into existence before the action under test, the
+		// same way the app's onMount subscribes immediately on page load —
+		// otherwise a manager created only inside the first undo() call would
+		// have nothing on its stack yet, since Y.UndoManager only tracks
+		// transactions that occur after it's constructed.
+		subscribeUndoRedoState(docA, () => {});
+		const record = createRecord(docA, { parentId: 'd1', blockType: 'paragraph' }, HUMAN);
+		expect(getDocument(docA, 'd1')?.recordIds).toEqual([record.id]);
 
-		undo();
-		expect(getDocument(singletonDoc, 'd1')?.recordIds).toEqual([]);
+		undo(docA);
+		expect(getDocument(docA, 'd1')?.recordIds).toEqual([]);
 
-		redo();
-		expect(getDocument(singletonDoc, 'd1')?.recordIds).toEqual([record.id]);
+		redo(docA);
+		expect(getDocument(docA, 'd1')?.recordIds).toEqual([record.id]);
 	});
 
-	it('subscribeUndoRedoState reports canUndo/canRedo and reacts as the stacks change', async () => {
-		const { subscribeUndoRedoState, undo } = await import('./undo');
-		createDocument(singletonDoc, { id: 'd1', title: 'Doc' });
+	it('subscribeUndoRedoState reports canUndo/canRedo and reacts as the stacks change', () => {
+		createDocument(docA, { id: 'd1', title: 'Doc' });
 
 		const onChange = vi.fn();
-		const unsubscribe = subscribeUndoRedoState(onChange);
+		const unsubscribe = subscribeUndoRedoState(docA, onChange);
 		expect(onChange).toHaveBeenLastCalledWith({ canUndo: false, canRedo: false });
 
-		createRecord(singletonDoc, { parentId: 'd1', blockType: 'paragraph' }, HUMAN);
+		createRecord(docA, { parentId: 'd1', blockType: 'paragraph' }, HUMAN);
 		expect(onChange).toHaveBeenLastCalledWith({ canUndo: true, canRedo: false });
 
-		undo();
+		undo(docA);
 		expect(onChange).toHaveBeenLastCalledWith({ canUndo: false, canRedo: true });
 
 		unsubscribe();
-		createRecord(singletonDoc, { parentId: 'd1', blockType: 'paragraph' }, HUMAN);
+		createRecord(docA, { parentId: 'd1', blockType: 'paragraph' }, HUMAN);
 		// No further calls after unsubscribe — still reflects the pre-unsubscribe state.
 		expect(onChange).toHaveBeenLastCalledWith({ canUndo: false, canRedo: true });
+	});
+
+	it('keeps independent undo history per doc, so switching open Documents does not cross-pollute the stack', () => {
+		createDocument(docA, { id: 'd1', title: 'Doc A' });
+		createDocument(docB, { id: 'd2', title: 'Doc B' });
+		subscribeUndoRedoState(docA, () => {});
+		subscribeUndoRedoState(docB, () => {});
+
+		const recordA = createRecord(docA, { parentId: 'd1', blockType: 'paragraph' }, HUMAN);
+		expect(getDocument(docA, 'd1')?.recordIds).toEqual([recordA.id]);
+		expect(getDocument(docB, 'd2')?.recordIds).toEqual([]);
+
+		// Undoing doc B must not touch doc A's pending local edit.
+		undo(docB);
+		expect(getDocument(docA, 'd1')?.recordIds).toEqual([recordA.id]);
+
+		undo(docA);
+		expect(getDocument(docA, 'd1')?.recordIds).toEqual([]);
 	});
 });

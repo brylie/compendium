@@ -1,7 +1,15 @@
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
-import { listCollections, listDocuments, listRecordsForParent } from '$lib/data/records';
+import {
+	listCollections,
+	listDocuments as crdtListDocuments,
+	listRecordsForParent
+} from '$lib/data/records';
 import { logAudit } from '$lib/server/audit';
-import { listCatalogCollections, resolveShardForParent } from '$lib/server/catalog';
+import {
+	listCatalogCollections,
+	listCatalogDocuments,
+	resolveShardForParent
+} from '$lib/server/catalog';
 import { tokenAllowsParent } from '$lib/mcp/tokens';
 import { richTextToMarkdown } from '$lib/mcp/markdown-transcode';
 import { actorForCaller, isAccessToken, type CallerIdentity } from './permissions';
@@ -23,14 +31,38 @@ export function searchWorkspace(
 	const needle = query.toLowerCase();
 	const results: Array<{ recordId: string; snippet: string }> = [];
 
-	for (const document of listDocuments(doc)) {
-		if (isAccessToken(caller) && !tokenAllowsParent(caller, document.id)) continue;
-		for (const record of listRecordsForParent(doc, document.id)) {
-			const text = record.content ? richTextToMarkdown(doc, record.content) : '';
+	function searchDocumentRecords(documentId: string, documentDoc: typeof doc): void {
+		for (const record of listRecordsForParent(documentDoc, documentId)) {
+			const text = record.content ? richTextToMarkdown(documentDoc, record.content) : '';
 			if (text.toLowerCase().includes(needle)) {
 				results.push({ recordId: record.id, snippet: snippetAround(text, needle) });
 			}
 		}
+	}
+
+	// Catalog-listed Documents first — resolving each one's own shard from the
+	// locator (#120: each Document now has its own shard, same as Collections
+	// already did), since listDocuments(doc) below could never see one that
+	// lives outside the default doc.
+	const catalogDocumentIds = new Set<string>();
+	for (const documentMeta of listCatalogDocuments(workspaceId)) {
+		catalogDocumentIds.add(documentMeta.id);
+		if (isAccessToken(caller) && !tokenAllowsParent(caller, documentMeta.id)) continue;
+		const shard = resolveShardForParent(workspaceId, documentMeta.id);
+		const documentDoc = shard
+			? resolveWorkspaceContext({ workspaceId, shardId: shard.shardId }).doc
+			: doc;
+		searchDocumentRecords(documentMeta.id, documentDoc);
+	}
+
+	// Then any Document written directly to the Y.Doc, bypassing the service
+	// layer entirely (and therefore uncataloged) — only findable via the
+	// default doc directly, matching the Collection loop's identical fallback
+	// below.
+	for (const document of crdtListDocuments(doc)) {
+		if (catalogDocumentIds.has(document.id)) continue;
+		if (isAccessToken(caller) && !tokenAllowsParent(caller, document.id)) continue;
+		searchDocumentRecords(document.id, doc);
 	}
 
 	function searchCollectionRows(collectionId: string, collectionDoc: typeof doc): void {

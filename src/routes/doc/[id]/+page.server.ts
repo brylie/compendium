@@ -1,18 +1,23 @@
-import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { getDocument } from '$lib/data/records';
-import { listCatalogCollections } from '$lib/server/catalog';
+import { listDocuments, listCollections } from '$lib/services';
+import { CURRENT_USER } from '$lib/server/current-user';
+import { resolveParentWorkspaceContext } from '$lib/services/permissions';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = ({ params }) => {
-	const { doc, workspaceId } = resolveWorkspaceContext();
+	// Resolves the Document's real shard, not the default doc — a Document's
+	// own meta entry lives in its own shard (see #120).
+	const { doc } = resolveParentWorkspaceContext(params.id);
 	const document = getDocument(doc, params.id);
 	return {
 		documentId: params.id,
 		title: document?.title ?? 'Untitled',
-		// Catalog-backed, not the live Y.Doc: a sharded Collection's own meta
-		// entry doesn't live in this Document's doc at all. Used by
-		// CollectionViewBlock's "embed a collection" picker (#120) — not live,
-		// same accepted tradeoff as Sidebar's collections list.
-		collections: listCatalogCollections(workspaceId)
+		// Routed through the service layer, not the bare catalog reads
+		// directly — see +layout.server.ts's identical comment. Used for the
+		// page_link/"Add link" pickers, breadcrumb parent title, and
+		// page_link target rendering. Not live, same accepted tradeoff as
+		// Sidebar's lists.
+		documents: listDocuments(CURRENT_USER),
+		collections: listCollections(CURRENT_USER)
 	};
 };

@@ -20,7 +20,8 @@ function handlers() {
 		onEnter: vi.fn(),
 		onBackspaceAtStart: vi.fn(),
 		onFocusBlock: vi.fn(),
-		onSlashKey: vi.fn()
+		onSlashKey: vi.fn(),
+		linkTargets: new Map()
 	};
 }
 
@@ -71,7 +72,10 @@ describe('BlockEditor', () => {
 		const target = createDocument(doc, { title: 'Q3 Roadmap' });
 		const ytext = doc.getText('a');
 		ytext.insert(0, 'Q3 Roadmap', { link: `record:${target.id}` });
-		const { container } = render(BlockEditor, { ytext, ...handlers() });
+		const linkTargets = new Map([
+			[target.id, { id: target.id, kind: 'document' as const, title: 'Q3 Roadmap' }]
+		]);
+		const { container } = render(BlockEditor, { ytext, ...handlers(), linkTargets });
 		const anchor = container.querySelector('a')!;
 		expect(anchor).toHaveAttribute('href', `/doc/${target.id}`);
 		expect(anchor).toHaveTextContent('Q3 Roadmap');
@@ -83,41 +87,35 @@ describe('BlockEditor', () => {
 		ytext.insert(0, 'Q3 Roadmap', { link: `record:${target.id}` });
 		deleteDocument(doc, target.id);
 
+		// linkTargets (catalog-backed — see BlockEditor's own comment) no
+		// longer carries the deleted target either, matching a real page load
+		// after the deletion.
 		const { container } = render(BlockEditor, { ytext, ...handlers() });
 		expect(container.querySelector('a')).toBeNull();
 		const span = container.querySelector('[title="Linked page was deleted"]')!;
 		expect(span).toHaveTextContent('Q3 Roadmap');
 	});
 
-	it('re-renders an already-mounted inline wiki-link to show the current title, not the stale stored text, when its target is renamed', () => {
+	it("resolves an inline wiki-link's title/kind from linkTargets, not the stale stored run text", () => {
+		// linkTargets is catalog-backed (data.documents/data.collections in
+		// +page.svelte), sourced fresh at each page load — not live against
+		// ytext.doc once each Document has its own shard (#120). A rename
+		// elsewhere is reflected the next time linkTargets is resolved (i.e.
+		// the next page load), not instantly in an already-mounted block; see
+		// BlockEditor's own $effect comment for why.
 		const target = createDocument(doc, { title: 'Draft' });
 		const ytext = doc.getText('a');
 		ytext.insert(0, 'Draft', { link: `record:${target.id}` });
-
-		const { container } = render(BlockEditor, { ytext, ...handlers() });
-		expect(container.querySelector('a')).toHaveTextContent('Draft');
-
 		updateDocumentTitle(doc, target.id, 'Published');
+
+		const linkTargets = new Map([
+			[target.id, { id: target.id, kind: 'document' as const, title: 'Published' }]
+		]);
+		const { container } = render(BlockEditor, { ytext, ...handlers(), linkTargets });
 
 		const anchor = container.querySelector('a')!;
 		expect(anchor).toHaveTextContent('Published');
 		expect(anchor).toHaveAttribute('href', `/doc/${target.id}`);
-	});
-
-	it('re-renders an already-mounted inline wiki-link to the broken state when its target is deleted afterward', () => {
-		const target = createDocument(doc, { title: 'Q3 Roadmap' });
-		const ytext = doc.getText('a');
-		ytext.insert(0, 'Q3 Roadmap', { link: `record:${target.id}` });
-
-		const { container } = render(BlockEditor, { ytext, ...handlers() });
-		expect(container.querySelector('a')).toHaveAttribute('href', `/doc/${target.id}`);
-
-		deleteDocument(doc, target.id);
-
-		expect(container.querySelector('a')).toBeNull();
-		expect(container.querySelector('[title="Linked page was deleted"]')).toHaveTextContent(
-			'Q3 Roadmap'
-		);
 	});
 
 	it('escapes HTML special characters in the plain text', () => {

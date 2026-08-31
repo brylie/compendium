@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import * as Y from 'yjs';
-import { createDocument } from '$lib/data/records';
 import Sidebar from './Sidebar.svelte';
 
 const { mockPageState } = vi.hoisted(() => ({
@@ -23,18 +21,12 @@ const isDark = vi.hoisted(() => vi.fn(() => false));
 const toggleTheme = vi.hoisted(() => vi.fn(() => true));
 vi.mock('$lib/client/theme', () => ({ isDark, toggleTheme }));
 
-let ydoc: Y.Doc;
-vi.mock('$lib/client/yjs-client', () => ({
-	getClientDoc: () => ydoc
-}));
-
 function setPath(path: string): void {
 	mockPageState.url = new URL(`http://localhost${path}`);
 }
 
 describe('Sidebar', () => {
 	beforeEach(() => {
-		ydoc = new Y.Doc();
 		setPath('/');
 		goto.mockClear();
 		invalidateAll.mockClear();
@@ -55,7 +47,6 @@ describe('Sidebar', () => {
 	});
 
 	afterEach(() => {
-		ydoc.destroy();
 		vi.unstubAllGlobals();
 		vi.restoreAllMocks();
 	});
@@ -88,11 +79,9 @@ describe('Sidebar', () => {
 		expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
 	});
 
-	it('lists documents from the live Y.Doc, preferring them over the SSR snapshot', () => {
-		createDocument(ydoc, { id: 'doc-1', title: 'Live Doc' });
-		render(Sidebar, { initialDocuments: [{ id: 'stale', title: 'Stale SSR Doc' } as never] });
-		expect(screen.getByText('Live Doc')).toBeInTheDocument();
-		expect(screen.queryByText('Stale SSR Doc')).not.toBeInTheDocument();
+	it('lists documents from initialDocuments (catalog-backed, not derived from ydoc — #120)', () => {
+		render(Sidebar, { initialDocuments: [{ id: 'doc-1', title: 'A Doc' } as never] });
+		expect(screen.getByText('A Doc')).toBeInTheDocument();
 	});
 
 	it('falls back to the SSR snapshot before the Y.Doc has populated anything', () => {
@@ -103,11 +92,14 @@ describe('Sidebar', () => {
 	});
 
 	it('renders nested sub-pages once the parent is expanded, and highlights the active document', async () => {
-		createDocument(ydoc, { id: 'parent', title: 'Parent Doc' });
-		createDocument(ydoc, { id: 'child', title: 'Child Doc', parentDocumentId: 'parent' });
 		setPath('/doc/child');
 		const user = userEvent.setup();
-		render(Sidebar, {});
+		render(Sidebar, {
+			initialDocuments: [
+				{ id: 'parent', title: 'Parent Doc', order: 'a0' } as never,
+				{ id: 'child', title: 'Child Doc', parentDocumentId: 'parent', order: 'a0' } as never
+			]
+		});
 
 		expect(screen.queryByText('Child Doc')).not.toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Expand sub-pages' }));
@@ -173,23 +165,29 @@ describe('Sidebar', () => {
 		);
 	});
 
-	it('deletes a document after confirmation and navigates home if it was the active one', async () => {
-		createDocument(ydoc, { id: 'doc-1', title: 'To Delete' });
+	it('calls the delete API for a document after confirmation and navigates home if it was the active one', async () => {
+		// Deletion is routed through the service layer via a DELETE call
+		// (#120, a Document lives in its own shard) rather than a raw CRDT
+		// write against ydoc — and since `documents` is catalog-backed only,
+		// it won't disappear from this render until the parent's SSR data
+		// refreshes; asserting the API call is what's actually observable here.
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
 		setPath('/doc/doc-1');
 		const user = userEvent.setup();
-		render(Sidebar, {});
+		render(Sidebar, { initialDocuments: [{ id: 'doc-1', title: 'To Delete' } as never] });
 
 		await user.click(screen.getByRole('button', { name: 'Delete document' }));
 		await user.click(screen.getByRole('button', { name: 'Delete' }));
 
-		expect(screen.queryByText('To Delete')).not.toBeInTheDocument();
+		await vi.waitFor(() =>
+			expect(fetch).toHaveBeenCalledWith('/api/documents/doc-1', { method: 'DELETE' })
+		);
 		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
 	});
 
 	it('keeps the document when deletion is cancelled', async () => {
-		createDocument(ydoc, { id: 'doc-1', title: 'Keep Me' });
 		const user = userEvent.setup();
-		render(Sidebar, {});
+		render(Sidebar, { initialDocuments: [{ id: 'doc-1', title: 'Keep Me' } as never] });
 
 		await user.click(screen.getByRole('button', { name: 'Delete document' }));
 		await user.click(screen.getByRole('button', { name: 'Cancel' }));

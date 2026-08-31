@@ -7,8 +7,7 @@ import {
 	createDocument,
 	createRecord,
 	getDocument,
-	getRecordYText,
-	updateRecordContent
+	getRecordYText
 } from '$lib/data/records';
 import type { ActorId } from '$lib/data/types';
 import Page from './+page.svelte';
@@ -33,13 +32,26 @@ function selectEditorText(element: HTMLElement, start: number, end: number): voi
 let ydoc: Y.Doc;
 vi.mock('$lib/client/yjs-client', () => ({
 	getClientDoc: () => ydoc,
-	getShardDoc: () => ydoc
+	getShardDoc: () => ydoc,
+	getShardAwareness: () => ({})
 }));
+
+// +page.svelte resolves its real shard via a fetch before connecting — see
+// #120. The document canvas is unconditionally rendered rather than gated
+// behind a schema check, so most of this file's assertions would otherwise
+// race the async effect rather than fail cleanly. A macrotask flush after
+// render reliably waits out that whole chain (2 microtask awaits + Svelte's
+// own reactive flush, all settled before a setTimeout(0) fires) without
+// needing a bespoke findBy per test — same technique as table/[id]'s own
+// page.svelte.test.ts.
+async function flushShardResolution(): Promise<void> {
+	await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 const claimBlockPresence = vi.hoisted(() => vi.fn());
 const releaseBlockPresence = vi.hoisted(() => vi.fn());
 const subscribeHeldByOthers = vi.hoisted(() =>
-	vi.fn((onChange: (held: Map<string, ActorId>) => void) => {
+	vi.fn((_awareness: unknown, onChange: (held: Map<string, ActorId>) => void) => {
 		onChange(new Map());
 		return () => {};
 	})
@@ -70,13 +82,14 @@ describe('doc/[id] +page', () => {
 		vi.unstubAllGlobals();
 	});
 
-	it('shows a prompt to start writing when the document has no blocks', () => {
+	it('shows a prompt to start writing when the document has no blocks', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'Empty Doc' });
 		render(Page, {
 			params: { id: 'doc-1' },
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'Empty Doc' }
 		});
+		await flushShardResolution();
 		expect(screen.getByText("Type '/' for commands, or start typing...")).toBeInTheDocument();
 	});
 
@@ -88,6 +101,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'Empty Doc' }
 		});
+		await flushShardResolution();
 
 		await user.click(
 			screen.getByText("Type '/' for commands, or start typing...", { selector: 'button' })
@@ -97,13 +111,14 @@ describe('doc/[id] +page', () => {
 		expect(screen.getByRole('textbox', { name: /Block content|Type/ })).toBeInTheDocument();
 	});
 
-	it('renders the SSR title before mount, then the live document title', () => {
+	it('renders the SSR title before mount, then the live document title', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'Live Title' });
 		render(Page, {
 			params: { id: 'doc-1' },
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'SSR Title' }
 		});
+		await flushShardResolution();
 		expect(screen.getByDisplayValue('Live Title')).toBeInTheDocument();
 	});
 
@@ -115,6 +130,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'Old' }
 		});
+		await flushShardResolution();
 
 		const titleInput = screen.getByDisplayValue('Old');
 		await user.clear(titleInput);
@@ -123,18 +139,21 @@ describe('doc/[id] +page', () => {
 		expect(getDocument(ydoc, 'doc-1')?.title).toBe('New Title');
 	});
 
-	it('shows the parent document breadcrumb for a sub-page', () => {
-		createDocument(ydoc, { id: 'parent', title: 'Parent Doc' });
+	it('shows the parent document breadcrumb for a sub-page', async () => {
+		const parent = createDocument(ydoc, { id: 'parent', title: 'Parent Doc' });
 		createDocument(ydoc, { id: 'child', title: 'Child Doc', parentDocumentId: 'parent' });
 		render(Page, {
 			params: { id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'child', title: 'Child Doc' }
+			// documentMetadataById (breadcrumb parent lookup) is catalog-backed
+			// (data.documents), not derived from ydoc (#120).
+			data: { documents: [parent], collections: [], documentId: 'child', title: 'Child Doc' }
 		});
+		await flushShardResolution();
 		expect(screen.getByText('Parent Doc')).toBeInTheDocument();
 	});
 
-	it('renders a paragraph block with its text content', () => {
+	it('renders a paragraph block with its text content', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 		getRecordYText(ydoc, record.id)!.insert(0, 'Hello block');
@@ -143,6 +162,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 		expect(screen.getByText('Hello block')).toBeInTheDocument();
 	});
 
@@ -155,6 +175,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		const toggle = screen.getByRole('button', { name: 'Mark as complete' });
 		await user.click(toggle);
@@ -165,7 +186,7 @@ describe('doc/[id] +page', () => {
 		expect(yrecord.get('checked')).toBe(true);
 	});
 
-	it('renders a divider block', () => {
+	it('renders a divider block', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'divider' }, HUMAN);
 		const { container } = render(Page, {
@@ -173,10 +194,11 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 		expect(container.querySelector('.border-t.border-border')).toBeInTheDocument();
 	});
 
-	it('renders a callout block with its icon and text', () => {
+	it('renders a callout block with its icon and text', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'callout' }, HUMAN);
 		getRecordYText(ydoc, record.id)!.insert(0, 'Careful!');
@@ -185,6 +207,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 		expect(screen.getByText('Careful!')).toBeInTheDocument();
 	});
 
@@ -197,6 +220,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		await user.click(screen.getByRole('button', { name: 'Collapse section' }));
 
@@ -204,7 +228,7 @@ describe('doc/[id] +page', () => {
 		expect(yrecord.get('collapsed')).toBe(true);
 	});
 
-	it('renders a table of contents block listing heading blocks', () => {
+	it('renders a table of contents block listing heading blocks', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const h1 = createRecord(ydoc, { parentId: 'doc-1', blockType: 'heading_1' }, HUMAN);
 		getRecordYText(ydoc, h1.id)!.insert(0, 'Section One');
@@ -214,6 +238,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		// Scoped to the rendered block itself, not a document-wide text
 		// query: the toolbar's "Insert Table of contents" control shares the
@@ -227,7 +252,7 @@ describe('doc/[id] +page', () => {
 		expect(within(tocBlock).getByText('Section One')).toBeInTheDocument();
 	});
 
-	it('shows an in-page control for a synced block with no target yet', () => {
+	it('shows an in-page control for a synced block with no target yet', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'synced_block' }, HUMAN);
 		render(Page, {
@@ -235,6 +260,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 		expect(screen.getByText('Set target ID')).toBeInTheDocument();
 	});
 
@@ -249,6 +275,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		await user.click(screen.getByText('Set target ID'));
 		await user.type(screen.getByLabelText('Block record ID'), target.id);
@@ -257,15 +284,18 @@ describe('doc/[id] +page', () => {
 		expect(screen.getAllByText('Original content').length).toBeGreaterThan(0);
 	});
 
-	it('shows a document picker for an unlinked page_link block', () => {
+	it('shows a document picker for an unlinked page_link block', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
-		createDocument(ydoc, { id: 'other', title: 'Other Doc' });
+		const other = createDocument(ydoc, { id: 'other', title: 'Other Doc' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'page_link' }, HUMAN);
 		render(Page, {
 			params: { id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			// The picker's candidate list is catalog-backed (data.documents),
+			// not derived from ydoc (#120).
+			data: { documents: [other], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 		expect(screen.getByText('Link to page:')).toBeInTheDocument();
 		expect(screen.getByRole('option', { name: 'Other Doc' })).toBeInTheDocument();
 	});
@@ -280,6 +310,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		const editor = screen.getByRole('textbox', { name: /Type '\/' for commands/ });
 		selectEditorText(editor, 0, 5);
@@ -294,9 +325,9 @@ describe('doc/[id] +page', () => {
 		]);
 	});
 
-	it('renders a linked page_link block as a navigable link to the target document', () => {
+	it('renders a linked page_link block as a navigable link to the target document', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
-		createDocument(ydoc, { id: 'other', title: 'Other Doc' });
+		const other = createDocument(ydoc, { id: 'other', title: 'Other Doc' });
 		createRecord(
 			ydoc,
 			{ parentId: 'doc-1', blockType: 'page_link', referencedRecordId: 'other' },
@@ -305,44 +336,15 @@ describe('doc/[id] +page', () => {
 		render(Page, {
 			params: { id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			// The linked target's title is resolved from data.documents
+			// (catalog-backed), not ydoc (#120).
+			data: { documents: [other], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 		expect(screen.getByRole('link', { name: /Other Doc/ })).toHaveAttribute('href', '/doc/other');
 	});
 
-	it('shows backlinks from page_link and inline wiki-link sources with navigable context', () => {
-		createDocument(ydoc, { id: 'doc-1', title: 'Target' });
-		createDocument(ydoc, { id: 'source', title: 'Source document' });
-		createRecord(
-			ydoc,
-			{ parentId: 'source', blockType: 'page_link', referencedRecordId: 'doc-1' },
-			HUMAN
-		);
-		const inlineBlock = createRecord(ydoc, { parentId: 'source', blockType: 'paragraph' }, HUMAN);
-		updateRecordContent(
-			ydoc,
-			inlineBlock.id,
-			{ runs: [{ text: 'Related notes', marks: { link: 'record:doc-1' } }] },
-			HUMAN
-		);
-
-		render(Page, {
-			params: { id: 'doc-1' },
-			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'Target' }
-		});
-
-		expect(screen.getByRole('heading', { name: 'Backlinks' })).toBeInTheDocument();
-		expect(screen.getByText('2')).toBeInTheDocument();
-		expect(screen.getAllByRole('link', { name: 'Source document' })).toHaveLength(2);
-		expect(screen.getAllByRole('link', { name: 'Source document' })[0]).toHaveAttribute(
-			'href',
-			'/doc/source'
-		);
-		expect(screen.getByText('Related notes')).toBeInTheDocument();
-	});
-
-	it('shows an explicit "deleted" state for a page_link whose target no longer exists, distinct from an unlinked block', () => {
+	it('shows an explicit "deleted" state for a page_link whose target no longer exists, distinct from an unlinked block', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		// 'gone' was never created (or was since deleted) — referencedRecordId
 		// still points at it, same shape as a real delete-after-link scenario.
@@ -356,12 +358,13 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 		expect(screen.getByText('Linked page was deleted')).toBeInTheDocument();
 		expect(screen.queryByText('Link to page:')).not.toBeInTheDocument();
 		expect(screen.queryByRole('link', { name: /gone/ })).not.toBeInTheDocument();
 	});
 
-	it('renders a collection_view block inline as an embedded picker when unconfigured', () => {
+	it('renders a collection_view block inline as an embedded picker when unconfigured', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'collection_view' }, HUMAN);
 		render(Page, {
@@ -369,10 +372,11 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 		expect(screen.getByText('Embed a collection view:')).toBeInTheDocument();
 	});
 
-	it('renders a configured collection_view block as an embedded Board inline in the document', () => {
+	it('renders a configured collection_view block as an embedded Board inline in the document', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const collection = createCollection(ydoc, { title: 'Sprint Tasks', schema: [] });
 		createRecord(
@@ -392,6 +396,7 @@ describe('doc/[id] +page', () => {
 			// not derived from ydoc (#120) — see CollectionViewBlock.svelte.
 			data: { documents: [], collections: [collection], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 		expect(screen.getByText('Sprint Tasks')).toBeInTheDocument();
 		expect(screen.getByText('· board')).toBeInTheDocument();
 	});
@@ -405,6 +410,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		await user.click(screen.getByRole('button', { name: 'Add block' }));
 
@@ -420,6 +426,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		const editor = container.querySelector('[contenteditable]') as HTMLElement;
 		editor.textContent = '/';
@@ -435,19 +442,22 @@ describe('doc/[id] +page', () => {
 		expect(yrecord.get('blockType')).toBe('heading_1');
 	});
 
-	it('shows a placeholder row instead of the editor for a block held by another actor', () => {
+	it('shows a placeholder row instead of the editor for a block held by another actor', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
-		subscribeHeldByOthers.mockImplementation((onChange: (held: Map<string, ActorId>) => void) => {
-			onChange(new Map([[record.id, { kind: 'agent', agentId: 'a1', name: 'Claude' }]]));
-			return () => {};
-		});
+		subscribeHeldByOthers.mockImplementation(
+			(_awareness: unknown, onChange: (held: Map<string, ActorId>) => void) => {
+				onChange(new Map([[record.id, { kind: 'agent', agentId: 'a1', name: 'Claude' }]]));
+				return () => {};
+			}
+		);
 
 		render(Page, {
 			params: { id: 'doc-1' },
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		expect(screen.getByText('Claude editing…')).toBeInTheDocument();
 	});
@@ -467,12 +477,14 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'First' }
 		});
+		await flushShardResolution();
 		expect(screen.getByText('From doc one')).toBeInTheDocument();
 		await user.click(container.querySelector('[contenteditable]') as HTMLElement);
 
 		await rerender({
 			data: { documents: [], collections: [], documentId: 'doc-2', title: 'Second' }
 		});
+		await flushShardResolution();
 
 		expect(screen.queryByText('From doc one')).not.toBeInTheDocument();
 		expect(screen.getByText('From doc two')).toBeInTheDocument();
@@ -487,6 +499,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		const editor = container.querySelector('[contenteditable]') as HTMLElement;
 		await user.click(editor);
@@ -496,7 +509,7 @@ describe('doc/[id] +page', () => {
 		expect(releaseBlockPresence).toHaveBeenCalledOnce();
 	});
 
-	it('renders a quote block and a code block with their text', () => {
+	it('renders a quote block and a code block with their text', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const quote = createRecord(ydoc, { parentId: 'doc-1', blockType: 'quote' }, HUMAN);
 		getRecordYText(ydoc, quote.id)!.insert(0, 'A quote');
@@ -508,12 +521,13 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		expect(screen.getByText('A quote')).toBeInTheDocument();
 		expect(screen.getByText('const x = 1;')).toBeInTheDocument();
 	});
 
-	it('numbers sequential numbered_list_item blocks starting from 1', () => {
+	it('numbers sequential numbered_list_item blocks starting from 1', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'numbered_list_item' }, HUMAN);
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'numbered_list_item' }, HUMAN);
@@ -524,6 +538,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		expect(screen.getByText('1.')).toBeInTheDocument();
 		expect(screen.getByText('2.')).toBeInTheDocument();
@@ -537,6 +552,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		const titleInput = screen.getByPlaceholderText('Untitled document');
 		titleInput.focus();
@@ -554,6 +570,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		const canvas = container.querySelector('.cursor-text.flex-col') as HTMLElement;
 		await user.click(canvas);
@@ -570,6 +587,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		await user.click(screen.getByText('Set target ID'));
 		await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -586,6 +604,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		await user.click(screen.getByRole('button', { name: 'Add block' }));
 		expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(1);
@@ -605,6 +624,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		await user.click(screen.getByRole('button', { name: 'Add block' }));
 		await user.keyboard('{Control>}z{/Control}');
@@ -622,6 +642,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled();
 
@@ -641,6 +662,7 @@ describe('doc/[id] +page', () => {
 			form: null,
 			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 		});
+		await flushShardResolution();
 
 		// This tab's own local action, made through the UI after mount so
 		// it's actually tracked by this tab's Y.UndoManager.
@@ -674,8 +696,8 @@ describe('doc/[id] +page', () => {
 
 	it('changes the target of an already-linked page_link block', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
-		createDocument(ydoc, { id: 'target-a', title: 'Target A' });
-		createDocument(ydoc, { id: 'target-b', title: 'Target B' });
+		const targetA = createDocument(ydoc, { id: 'target-a', title: 'Target A' });
+		const targetB = createDocument(ydoc, { id: 'target-b', title: 'Target B' });
 		const record = createRecord(
 			ydoc,
 			{ parentId: 'doc-1', blockType: 'page_link', referencedRecordId: 'target-a' },
@@ -685,8 +707,16 @@ describe('doc/[id] +page', () => {
 		render(Page, {
 			params: { id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			// The linked target and the "Change" dropdown's candidates are both
+			// catalog-backed (data.documents), not derived from ydoc (#120).
+			data: {
+				documents: [targetA, targetB],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
+		await flushShardResolution();
 
 		await user.selectOptions(
 			screen.getByRole('combobox', { name: 'Change target document' }),

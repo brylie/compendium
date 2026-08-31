@@ -69,7 +69,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		await expect(page.locator('.shimmer-bar')).not.toBeVisible();
 	});
 
-	test('Sidebar tree updates live on MCP create_document without manual page refresh', async ({
+	test('Sidebar tree reflects an MCP-created document only after a refresh, not live (#120 accepted tradeoff)', async ({
 		page
 	}) => {
 		const rootDoc = createDocument(human, {
@@ -98,7 +98,16 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 			}
 		});
 
-		// 3. Browser sidebar should reactively display the newly created document without page reload
+		// 3. Sidebar's document list is catalog-backed only since #120 (each
+		// Document has its own shard, so there's no single shared doc left to
+		// observe for a live tree) — the new document is absent until the SSR
+		// snapshot refreshes, not reflected instantly.
+		await page.waitForTimeout(500);
+		await expect(page.locator('aside')).not.toContainText('Realtime Child Doc');
+
+		// 4. A refresh picks it up, proving the catalog itself was updated
+		// correctly even though the open tab wasn't told live.
+		await page.reload();
 		await expect(page.locator('aside')).toContainText('Realtime Child Doc', {
 			timeout: 5000
 		});
@@ -150,7 +159,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		});
 	});
 
-	test('Document created via MCP appears live in the sidebar; a human edit typed in the browser is visible via MCP', async ({
+	test('Document created via MCP appears in the sidebar after a refresh; a human edit typed in the browser is visible via MCP', async ({
 		page
 	}) => {
 		// 1. Human has the workspace open before the agent does anything
@@ -170,7 +179,10 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		const docId = JSON.parse(createRes.content?.[0]?.text ?? '{}').id as string;
 		expect(docId).toBeTruthy();
 
-		// 3. Sidebar reflects the new document without a page reload
+		// 3. Sidebar's document list is catalog-backed only since #120 — a
+		// refresh is needed to pick up the agent-created document, the same
+		// accepted tradeoff as the dedicated Sidebar-liveness test above.
+		await page.reload();
 		await expect(page.locator('aside')).toContainText('Agent-Created Page', { timeout: 5000 });
 
 		// 4. Human clicks into the agent-created page and types directly in the editor

@@ -178,6 +178,58 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		expect(parseMcpText<{ recordId: string }>(createBlockRes).recordId).toBeDefined();
 	});
 
+	it("3b. A Document created via the service layer lives in its own real shard, and a client connected to it never sees another shard's updates (#120)", async () => {
+		const { token } = harness.createToken({
+			clientLabel: 'Shard Isolation Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+		const mcp = await harness.getMcpClient(token);
+
+		// create_document goes through the service layer, so this Document
+		// gets a real, distinct shard — its own id (see services/documents.ts).
+		const createRes = await mcp.callTool({
+			name: 'create_document',
+			arguments: { title: 'Sharded Doc' }
+		});
+		const newDoc = parseMcpText<{ id: string }>(createRes);
+
+		const createBlockRes = await mcp.callTool({
+			name: 'create_record',
+			arguments: { parentId: newDoc.id, blockType: 'paragraph' }
+		});
+		const block = parseMcpText<{ recordId: string }>(createBlockRes);
+
+		const holdRes = await mcp.callTool({
+			name: 'hold_records',
+			arguments: { recordIds: [block.recordId] }
+		});
+		expect(parseMcpText<{ granted: string[] }>(holdRes).granted).toContain(block.recordId);
+
+		await mcp.callTool({
+			name: 'write_record',
+			arguments: { recordId: block.recordId, markdown: 'Real shard content' }
+		});
+
+		// A Yjs client connected to this Document's own real shard room
+		// observes the content.
+		const shardClient = harness.getYjsClient({ room: `shard-${newDoc.id}` });
+		await harness.waitForCondition(() => {
+			const ytext = getRecordYText(shardClient.doc, block.recordId);
+			if (!ytext) return false;
+			return plainText(yTextToRichText(ytext)).includes('Real shard content');
+		});
+
+		// A Yjs client connected to the shared 'workspace' room (unsharded
+		// Documents' room, and every pre-#120 client's default) never
+		// receives this shard's content — proving shard isolation, not just
+		// that connecting to the right room happens to work.
+		const workspaceClient = harness.getYjsClient();
+		await harness.waitForCondition(() => true, { timeoutMs: 200 }); // let sync settle
+		expect(getRecordYText(workspaceClient.doc, block.recordId)).toBeUndefined();
+		expect(workspaceClient.doc.getMap('documents').has(newDoc.id)).toBe(false);
+	});
+
 	it('4. MCP hold_records on block where human cursor is -> denied for that block, granted for others', async () => {
 		const yjs = harness.getYjsClient();
 		const docMeta = createDocument(yjs.doc, { title: 'Shared Doc' });

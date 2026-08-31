@@ -70,6 +70,31 @@ function readDocumentMeta(id: string, ymeta: Y.Map<unknown>): DocumentMeta {
 	};
 }
 
+/**
+ * Computes a new fractional-index order value for a document being inserted
+ * into (or moved within) a sibling list — extracted from createDocument's
+ * inline logic so a caller with siblings sourced from *outside* this Y.Doc
+ * (the catalog, once Documents are sharded and true siblings may live in
+ * different shards entirely) can compute the same value createDocument would
+ * have computed for a single, unsharded doc.
+ */
+export function computeSiblingOrder(siblings: DocumentMeta[], afterDocumentId?: string): string {
+	let before: string | null = null;
+	let after: string | null = null;
+
+	if (afterDocumentId) {
+		const idx = siblings.findIndex((s) => s.id === afterDocumentId);
+		if (idx !== -1) {
+			before = siblings[idx].order;
+			after = idx + 1 < siblings.length ? siblings[idx + 1].order : null;
+		}
+	} else if (siblings.length > 0) {
+		before = siblings[siblings.length - 1].order;
+	}
+
+	return generateKeyBetween(before, after);
+}
+
 export function createDocument(
 	doc: Y.Doc,
 	input: {
@@ -77,29 +102,24 @@ export function createDocument(
 		title: string;
 		parentDocumentId?: string;
 		afterDocumentId?: string;
+		// Pre-computed order, for a caller (services/documents.ts) that already
+		// resolved true cross-shard siblings via the catalog — see
+		// computeSiblingOrder's doc comment. Falls back to this doc's own
+		// listDocuments() when omitted, correct for any caller (tests, a
+		// not-yet-sharded doc) where every sibling genuinely lives in `doc`.
+		order?: string;
 	}
 ): DocumentMeta {
 	const id = input.id ?? nanoid();
 	const parentDocumentId = input.parentDocumentId || undefined;
 
 	return doc.transact(() => {
-		const allDocs = listDocuments(doc);
-		const siblings = allDocs.filter((d) => d.parentDocumentId === parentDocumentId);
-
-		let before: string | null = null;
-		let after: string | null = null;
-
-		if (input.afterDocumentId) {
-			const idx = siblings.findIndex((s) => s.id === input.afterDocumentId);
-			if (idx !== -1) {
-				before = siblings[idx].order;
-				after = idx + 1 < siblings.length ? siblings[idx + 1].order : null;
-			}
-		} else if (siblings.length > 0) {
-			before = siblings[siblings.length - 1].order;
-		}
-
-		const order = generateKeyBetween(before, after);
+		const order =
+			input.order ??
+			computeSiblingOrder(
+				listDocuments(doc).filter((d) => d.parentDocumentId === parentDocumentId),
+				input.afterDocumentId
+			);
 
 		const ymeta = new Y.Map<unknown>();
 		ymeta.set('id', id);
@@ -127,40 +147,37 @@ export function updateDocumentTitle(doc: Y.Doc, id: string, title: string): void
 	ymeta.set('title', title);
 }
 
+/**
+ * `order` — see createDocument's doc comment on computeSiblingOrder: a
+ * caller with catalog-sourced cross-shard siblings passes the pre-computed
+ * value; omitted, this falls back to `doc`'s own listDocuments().
+ */
 export function updateDocumentParent(
 	doc: Y.Doc,
 	id: string,
 	parentDocumentId?: string,
-	afterDocumentId?: string
+	afterDocumentId?: string,
+	order?: string
 ): void {
 	const ymeta = documentsMap(doc).get(id) as Y.Map<unknown> | undefined;
 	if (!ymeta) throw new NotFoundError(`Document ${id} not found`);
 
 	doc.transact(() => {
-		const allDocs = listDocuments(doc).filter((d) => d.id !== id);
-		const siblings = allDocs.filter((d) => d.parentDocumentId === (parentDocumentId || undefined));
-
-		let before: string | null = null;
-		let after: string | null = null;
-
-		if (afterDocumentId) {
-			const idx = siblings.findIndex((s) => s.id === afterDocumentId);
-			if (idx !== -1) {
-				before = siblings[idx].order;
-				after = idx + 1 < siblings.length ? siblings[idx + 1].order : null;
-			}
-		} else if (siblings.length > 0) {
-			before = siblings[siblings.length - 1].order;
-		}
-
-		const order = generateKeyBetween(before, after);
+		const resolvedOrder =
+			order ??
+			computeSiblingOrder(
+				listDocuments(doc)
+					.filter((d) => d.id !== id)
+					.filter((d) => d.parentDocumentId === (parentDocumentId || undefined)),
+				afterDocumentId
+			);
 
 		if (parentDocumentId) {
 			ymeta.set('parentDocumentId', parentDocumentId);
 		} else {
 			ymeta.delete('parentDocumentId');
 		}
-		ymeta.set('order', order);
+		ymeta.set('order', resolvedOrder);
 	});
 }
 

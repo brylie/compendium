@@ -5,7 +5,7 @@ import { listCollections, listDocuments } from '$lib/data/records';
 import { RECORD_LINK_SCHEME, resolveInternalLinkTarget } from '$lib/data/links';
 import { resolveParentWorkspaceContext } from '$lib/services/permissions';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
-import { listCatalogCollections } from '$lib/server/catalog';
+import { listCatalogCollections, listCatalogDocuments } from '$lib/server/catalog';
 import type { RichText, TextMarks } from '$lib/data/types';
 
 // Per docs/technical-design.md §6: CommonMark + GFM as the baseline, plus two
@@ -40,10 +40,10 @@ function runToMarkdown(doc: Y.Doc, text: string, marks: TextMarks): string {
 	if (marks.mention) return `@${text}`;
 	if (marks.link?.startsWith(RECORD_LINK_SCHEME)) {
 		const id = marks.link.slice(RECORD_LINK_SCHEME.length);
-		// A wiki-link target can be a Document (unsharded, always in `doc`) or
-		// a Collection (its own shard, possibly a different doc entirely).
-		// Try `doc` itself first — cheap, and correct whenever the target
-		// really is local to it — then fall back to resolving its real shard.
+		// A wiki-link target's own shard (#120: Documents and Collections both
+		// have one) may or may not be `doc` itself. Try `doc` first — cheap,
+		// and correct whenever the target really is local to it — then fall
+		// back to resolving its real shard.
 		const target =
 			resolveInternalLinkTarget(doc, id) ??
 			resolveInternalLinkTarget(resolveParentWorkspaceContext(id).doc, id);
@@ -137,14 +137,16 @@ function resolveMentionId(name: string): string {
 }
 
 function resolveTitleToId(doc: Y.Doc, title: string): string | undefined {
-	const documentMatch = listDocuments(doc).find((d) => d.title === title)?.id;
-	if (documentMatch) return documentMatch;
-	// Try `doc`'s own Collections first (cheap, and correct whenever the
-	// target really is local to it), then fall back to the catalog — always
-	// complete regardless of which shard each Collection's content lives in,
-	// unlike `doc`'s own collections map once a Collection has its own shard.
+	// Try `doc`'s own Documents/Collections first (cheap, and correct whenever
+	// the target really is local to it), then fall back to the catalog —
+	// always complete regardless of which shard each Document/Collection's
+	// content lives in, unlike `doc`'s own maps once each has its own shard (#120).
+	const localDocumentMatch = listDocuments(doc).find((d) => d.title === title)?.id;
+	if (localDocumentMatch) return localDocumentMatch;
 	const localCollectionMatch = listCollections(doc).find((c) => c.title === title)?.id;
 	if (localCollectionMatch) return localCollectionMatch;
 	const { workspaceId } = resolveWorkspaceContext();
+	const catalogDocumentMatch = listCatalogDocuments(workspaceId).find((d) => d.title === title)?.id;
+	if (catalogDocumentMatch) return catalogDocumentMatch;
 	return listCatalogCollections(workspaceId).find((c) => c.title === title)?.id;
 }

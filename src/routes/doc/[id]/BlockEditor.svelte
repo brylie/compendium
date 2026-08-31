@@ -3,7 +3,7 @@
 	import { diffPlainText } from '$lib/client/text-diff';
 	import { getCaretOffset, getSelectionOffsets, setCaretOffset } from '$lib/client/caret';
 	import { plainText, yTextToRichText } from '$lib/data/richtext';
-	import { RECORD_LINK_SCHEME, resolveInternalLinkTarget } from '$lib/data/links';
+	import { RECORD_LINK_SCHEME, type InternalLinkTarget } from '$lib/data/links';
 	import type { TextMarks } from '$lib/data/types';
 
 	let {
@@ -11,6 +11,7 @@
 		recordId = '',
 		placeholder = '',
 		class: className = '',
+		linkTargets,
 		onInputText,
 		onEnter,
 		onBackspaceAtStart,
@@ -22,6 +23,12 @@
 		recordId?: string;
 		placeholder?: string;
 		class?: string;
+		// Catalog-backed (data.documents + data.collections), not resolved from
+		// a live Y.Doc: an inline record: wiki-link's target is very often a
+		// *different* Document, which now lives in its own isolated shard
+		// (#120) this block's own doc has no connection to. Not live, same
+		// accepted tradeoff as every other catalog-backed lookup on this page.
+		linkTargets: Map<string, InternalLinkTarget>;
 		onInputText: () => void;
 		onEnter: (caretOffset: number) => void;
 		onBackspaceAtStart: () => void;
@@ -59,16 +66,15 @@
 	// rather than passed through safeHref, so renaming its target doesn't
 	// break it and deleting its target renders as an explicit broken state
 	// instead of a silently dead generic link.
-	function runToHtml(text: string, marks: TextMarks, doc: Y.Doc | null | undefined): string {
+	function runToHtml(text: string, marks: TextMarks): string {
 		// Resolved up front (not just to decide the branch below) because a
 		// live target's *label* must track its current title too — the stored
 		// run text is whatever the title was at link-creation time, and a
 		// rename since then must not leave the visible label stale even
 		// though the href/broken-check already re-resolve live.
-		const target =
-			marks.link?.startsWith(RECORD_LINK_SCHEME) && doc
-				? resolveInternalLinkTarget(doc, marks.link.slice(RECORD_LINK_SCHEME.length))
-				: undefined;
+		const target = marks.link?.startsWith(RECORD_LINK_SCHEME)
+			? linkTargets.get(marks.link.slice(RECORD_LINK_SCHEME.length))
+			: undefined;
 		let html = escapeHtml(target ? target.title : text);
 		if (marks.code)
 			html = `<code class="bg-surface px-1 py-0.5 rounded font-mono text-[0.9em] border border-border">${html}</code>`;
@@ -96,7 +102,7 @@
 		// re-derives the DOM from the now-current ytext (local edit included).
 		if (isComposing) return;
 		const richText = yTextToRichText(ytext);
-		const html = richText.runs.map((r) => runToHtml(r.text, r.marks, ytext.doc)).join('');
+		const html = richText.runs.map((r) => runToHtml(r.text, r.marks)).join('');
 		const caret = document.activeElement === el ? getCaretOffset(el) : null;
 		// Bespoke rich-text rendering: this contenteditable's content is derived
 		// entirely from the Y.Text CRDT, not from Svelte-owned markup, so direct
@@ -268,19 +274,19 @@
 	$effect(() => {
 		ytext.observe(render);
 		render();
-		// An inline record: link (§ runToHtml) resolves its target live against
-		// the Documents/Collections index, not just this block's own ytext — so
-		// a rename or delete of that target elsewhere must also re-render this
-		// already-mounted block, not just the next time its own text changes.
-		const doc = ytext.doc;
-		const documentsMap = doc?.getMap('documents');
-		const collectionsMap = doc?.getMap('collections');
-		documentsMap?.observeDeep(render);
-		collectionsMap?.observeDeep(render);
+		// An inline record: link (§ runToHtml) resolves its target's title/kind
+		// from linkTargets — catalog-backed (data.documents/data.collections),
+		// not this block's own ytext.doc. Before #120, that doc was the single
+		// shared workspace doc every Document/Collection lived in, so observing
+		// its documents/collections maps caught a rename or delete anywhere and
+		// re-rendered this already-mounted block instantly. Post-#120 that's no
+		// longer possible: this doc is now just this block's own Document's
+		// isolated shard, which never sees another Document's mutations. A
+		// rename/delete elsewhere is accurate as of the next page load instead
+		// — the same accepted tradeoff as Sidebar's document tree (#120, #121
+		// tracks a real live catalog feed).
 		return () => {
 			ytext.unobserve(render);
-			documentsMap?.unobserveDeep(render);
-			collectionsMap?.unobserveDeep(render);
 		};
 	});
 </script>

@@ -1,11 +1,16 @@
-import { listCatalogCollections, listCatalogDocuments } from '$lib/server/catalog';
-import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import { listDocuments, listCollections } from '$lib/services';
+import { CURRENT_USER } from '$lib/server/current-user';
 import type { LayoutServerLoad } from './$types';
 
+// Routed through the service layer, not the bare catalog reads directly:
+// listDocuments/listCollections both fan out across the catalog *and* any
+// content still written directly to a Y.Doc, bypassing the service layer
+// (and therefore uncataloged) — a plain listCatalogDocuments/
+// listCatalogCollections call would silently drop that content from the
+// sidebar entirely, since Sidebar.svelte's own list is catalog-only (#120).
 export const load: LayoutServerLoad = () => {
-	const { workspaceId } = resolveWorkspaceContext();
 	return {
-		documents: listCatalogDocuments(workspaceId),
-		collections: listCatalogCollections(workspaceId)
+		documents: listDocuments(CURRENT_USER),
+		collections: listCollections(CURRENT_USER)
 	};
 };
