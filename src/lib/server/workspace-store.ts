@@ -7,6 +7,7 @@ import {
 	resetAuditObserverForTests
 } from './audit-observer.js';
 import { initHoldEviction, resetHoldEvictionForTests } from './holds.js';
+import { ensureCatalogBootstrapped } from './catalog.js';
 
 // This is the one place a {workspaceId, shardId} selector resolves to a live
 // Y.Doc/Awareness/persistence/connection bundle. Every boundary that used to
@@ -49,6 +50,8 @@ export interface WorkspaceContext {
 	readonly awareness: Awareness;
 	/** Live WebSocket connections currently bound to this context — see registerConnection/unregisterConnection. */
 	readonly connections: ReadonlySet<unknown>;
+	/** The catalog Space this context's Documents/Collections are bootstrapped into — see ./catalog.ts. */
+	readonly defaultSpaceId: string;
 }
 
 interface InternalContext extends WorkspaceContext {
@@ -83,8 +86,11 @@ function createContext(workspaceId: string, shardId: string): InternalContext {
 	if (snapshot) {
 		Y.applyUpdate(doc, snapshot);
 	}
-	// Attached only after the snapshot load above, so replaying prior state on
-	// process start never produces a spurious audit trail for it.
+	// Backfills/bootstraps the catalog from this doc's current content the
+	// first time this {workspaceId, shardId} resolves — see catalog.ts. Runs
+	// after the snapshot load (so it sees real content) and before the audit
+	// observer attaches (so it never produces a spurious audit trail).
+	const { defaultSpaceId } = ensureCatalogBootstrapped(workspaceId, shardId, doc);
 	attachDocAuditObserver(doc);
 
 	const awareness = new Awareness(doc);
@@ -95,6 +101,7 @@ function createContext(workspaceId: string, shardId: string): InternalContext {
 		shardId,
 		doc,
 		awareness,
+		defaultSpaceId,
 		connections: new Set(),
 		saveTimer: null,
 		dirty: false

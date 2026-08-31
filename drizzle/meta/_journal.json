@@ -15,6 +15,13 @@
       "when": 1787770170816,
       "tag": "0001_chilly_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788106972389,
+      "tag": "0002_lovely_stranger",
+      "breakpoints": true
     }
   ]
 }

@@ -160,4 +160,14 @@ describe('workspace-store: isolation between independently-resolved contexts', (
 
 		expect(releaseContextIfIdle('space-a', 'main')).toBe(false);
 	});
+
+	it('bootstraps a stable defaultSpaceId per workspace, distinct across workspaces', () => {
+		const a1 = resolveWorkspaceContext({ workspaceId: 'space-a', shardId: 'main' });
+		const a2 = resolveWorkspaceContext({ workspaceId: 'space-a', shardId: 'main' });
+		const b = resolveWorkspaceContext({ workspaceId: 'space-b', shardId: 'main' });
+
+		expect(a1.defaultSpaceId).toBeTruthy();
+		expect(a2.defaultSpaceId).toBe(a1.defaultSpaceId);
+		expect(b.defaultSpaceId).not.toBe(a1.defaultSpaceId);
+	});
 });

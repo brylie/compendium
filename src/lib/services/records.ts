@@ -1,3 +1,4 @@
+import { nanoid } from 'nanoid';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { clientIdForToken, isHeldByClient, releaseAgentHold } from '$lib/server/holds';
 import {
@@ -10,6 +11,7 @@ import {
 	updateRecordProperties
 } from '$lib/data/records';
 import { logAudit } from '$lib/server/audit';
+import { reserveRecordLocator, releaseRecordLocator } from '$lib/server/catalog';
 import { markdownToRichText } from '$lib/mcp/markdown-transcode';
 import { yTextToRichText } from '$lib/data/richtext';
 import { tokenAllowsParent } from '$lib/mcp/tokens';
@@ -19,6 +21,8 @@ import {
 	isAccessToken,
 	requireAccessibleParent,
 	requireAccessibleRecord,
+	resolveParentWorkspaceContext,
+	resolveRecordWorkspaceContext,
 	type CallerIdentity
 } from './permissions';
 
@@ -61,7 +65,9 @@ export function createRecord(
 		referencedRecordId?: string;
 	}
 ): WorkspaceRecord {
-	const { doc } = resolveWorkspaceContext();
+	const { doc, workspaceId, shardId, defaultSpaceId, parentKind } = resolveParentWorkspaceContext(
+		input.parentId
+	);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, input.parentId, 'create_record');
@@ -76,17 +82,37 @@ export function createRecord(
 		validatePageLinkTarget(caller, input.referencedRecordId);
 	}
 
-	const record = crdtCreateRecord(
-		doc,
-		{
-			parentId: input.parentId,
-			afterRecordId: input.afterRecordId,
-			blockType: input.blockType,
-			properties: input.properties,
-			referencedRecordId: input.referencedRecordId
-		},
-		actor
-	);
+	// Reserved before the CRDT write (not after) so a row can never exist in a
+	// non-default shard without a locator: if reservation itself fails (e.g. a
+	// colliding id), nothing has been written yet. If the CRDT write then
+	// fails, the reservation is rolled back so no orphaned locator survives it.
+	//
+	// Document blocks stay untracked — they're always in the default shard as
+	// long as Documents themselves aren't sharded, so resolveRecordWorkspaceContext's
+	// "not found" fallback already routes them correctly without a locator row.
+	const id = nanoid();
+	if (parentKind === 'collection') {
+		reserveRecordLocator(workspaceId, defaultSpaceId, id, shardId);
+	}
+
+	let record: WorkspaceRecord;
+	try {
+		record = crdtCreateRecord(
+			doc,
+			{
+				id,
+				parentId: input.parentId,
+				afterRecordId: input.afterRecordId,
+				blockType: input.blockType,
+				properties: input.properties,
+				referencedRecordId: input.referencedRecordId
+			},
+			actor
+		);
+	} catch (err) {
+		if (parentKind === 'collection') releaseRecordLocator(workspaceId, id);
+		throw err;
+	}
 
 	logAudit({ actor, action: 'create_record', targetRecordId: record.id });
 	return record;
@@ -105,7 +131,7 @@ export function writeRecord(
 		throw new Error('write_record requires markdown, properties, or referencedRecordId');
 	}
 
-	const { doc, awareness } = resolveWorkspaceContext();
+	const { doc, awareness } = resolveRecordWorkspaceContext(recordId);
 	const actor = actorForCaller(caller);
 	const record = requireAccessibleRecord(caller, recordId, 'write_record');
 
@@ -188,11 +214,21 @@ export function writeRecord(
 }
 
 export function deleteRecord(caller: CallerIdentity, recordId: string): void {
-	const { doc } = resolveWorkspaceContext();
+	const { doc, workspaceId } = resolveRecordWorkspaceContext(recordId);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleRecord(caller, recordId, 'delete_record');
 	crdtDeleteRecord(doc, recordId);
+	// The CRDT delete has already committed at this point — a release failure
+	// here must not throw back to the caller as if deletion itself failed. Log
+	// it instead: a stale locator row for a since-deleted record fails safe
+	// (getRecord on it 404s from the CRDT side either way), whereas throwing
+	// would misreport a completed deletion as an error.
+	try {
+		releaseRecordLocator(workspaceId, recordId);
+	} catch (err) {
+		console.error(`[records] failed to release locator for deleted record ${recordId}`, err);
+	}
 	logAudit({ actor, action: 'delete_record', targetRecordId: recordId });
 }
 

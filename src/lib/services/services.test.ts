@@ -25,7 +25,22 @@ import {
 import { createToken, verifyToken } from '$lib/mcp/tokens';
 import { queryAuditLog } from '$lib/server/audit';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
-import { createRecord as crdtCreateRecord } from '$lib/data/records';
+import {
+	createRecord as crdtCreateRecord,
+	createDocument as crdtCreateDocument,
+	createCollection as crdtCreateCollection,
+	getDocument as crdtGetDocument,
+	getCollection as crdtGetCollection,
+	getRecord as crdtGetRecord
+} from '$lib/data/records';
+import {
+	listCatalogCollections,
+	listCatalogDocuments,
+	RecordIdConflictError,
+	reserveCollectionLocator,
+	recordCatalogCollectionCreated,
+	resolveShardForRecord
+} from '$lib/server/catalog';
 import type { ActorId } from '$lib/data/types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
@@ -757,5 +772,260 @@ describe('service layer: denied access attempts are themselves audited (docs/spe
 		);
 		expect(entry).toBeDefined();
 		expect(entry?.diff).toBeUndefined();
+	});
+});
+
+describe('service layer: catalog stays in sync with Y.Doc document/collection mutations (#113 Phase A)', () => {
+	function catalogWorkspaceId(): string {
+		return resolveWorkspaceContext().workspaceId;
+	}
+
+	it('mirrors document create, rename, move, and delete into the catalog', () => {
+		const parent = createDocument(human, { title: 'Catalog Parent' });
+		const child = createDocument(human, { title: 'Catalog Child' });
+
+		let catalog = listCatalogDocuments(catalogWorkspaceId());
+		expect(catalog.find((d) => d.id === parent.id)?.title).toBe('Catalog Parent');
+		expect(catalog.find((d) => d.id === child.id)?.parentDocumentId).toBeUndefined();
+
+		updateDocumentTitle(human, child.id, 'Renamed Child');
+		catalog = listCatalogDocuments(catalogWorkspaceId());
+		expect(catalog.find((d) => d.id === child.id)?.title).toBe('Renamed Child');
+
+		moveDocument(human, child.id, { parentDocumentId: parent.id });
+		catalog = listCatalogDocuments(catalogWorkspaceId());
+		expect(catalog.find((d) => d.id === child.id)?.parentDocumentId).toBe(parent.id);
+
+		deleteDocument(human, parent.id);
+		catalog = listCatalogDocuments(catalogWorkspaceId());
+		expect(catalog.find((d) => d.id === parent.id)).toBeUndefined();
+		expect(catalog.find((d) => d.id === child.id)).toBeUndefined(); // recursive descendant delete
+	});
+
+	it('mirrors collection create, rename, and delete into the catalog', () => {
+		const col = createCollection(human, { title: 'Catalog Table', schema: [] });
+
+		let catalog = listCatalogCollections(catalogWorkspaceId());
+		expect(catalog.find((c) => c.id === col.id)?.title).toBe('Catalog Table');
+
+		updateCollectionTitle(human, col.id, 'Renamed Table');
+		catalog = listCatalogCollections(catalogWorkspaceId());
+		expect(catalog.find((c) => c.id === col.id)?.title).toBe('Renamed Table');
+
+		deleteCollection(human, col.id);
+		catalog = listCatalogCollections(catalogWorkspaceId());
+		expect(catalog.find((c) => c.id === col.id)).toBeUndefined();
+	});
+
+	it('rejects a caller-supplied document id that collides with an existing record', () => {
+		const existing = createDocument(human, { title: 'Existing' });
+		expect(() => createDocument(human, { id: existing.id, title: 'Colliding' })).toThrow(
+			RecordIdConflictError
+		);
+	});
+
+	it('rejects a caller-supplied collection id that collides with an existing document', () => {
+		const existingDoc = createDocument(human, { title: 'Existing Doc' });
+		expect(() =>
+			createCollection(human, { id: existingDoc.id, title: 'Colliding Collection', schema: [] })
+		).toThrow(RecordIdConflictError);
+	});
+
+	it('rejects a caller-supplied id colliding with a document written directly to the Y.Doc, bypassing the service layer (never overwrites it)', () => {
+		const { doc } = resolveWorkspaceContext();
+		// Simulates a real Yjs client writing straight to the Y.Doc — the
+		// locator/catalog never learn about this id, since it never went
+		// through reserveDocumentLocator/recordCatalogDocumentCreated.
+		const direct = crdtCreateDocument(doc, { title: 'Written Directly To The Y.Doc' });
+
+		expect(() => createDocument(human, { id: direct.id, title: 'Overwrite Attempt' })).toThrow(
+			RecordIdConflictError
+		);
+		// The original content must survive untouched.
+		expect(crdtGetDocument(doc, direct.id)?.title).toBe('Written Directly To The Y.Doc');
+	});
+
+	it('rejects a caller-supplied id colliding with a collection written directly to the Y.Doc, bypassing the service layer (never overwrites it)', () => {
+		const { doc } = resolveWorkspaceContext();
+		const direct = crdtCreateCollection(doc, {
+			title: 'Written Directly To The Y.Doc',
+			schema: []
+		});
+
+		expect(() =>
+			createCollection(human, { id: direct.id, title: 'Overwrite Attempt', schema: [] })
+		).toThrow(RecordIdConflictError);
+		expect(crdtGetCollection(doc, direct.id)?.title).toBe('Written Directly To The Y.Doc');
+	});
+
+	it('rejects createDocument when the id already names a Collection (cross-type collision, direct Y.Doc write)', () => {
+		const { doc } = resolveWorkspaceContext();
+		const directCollection = crdtCreateCollection(doc, {
+			title: 'A Collection, Written Directly',
+			schema: []
+		});
+
+		expect(() =>
+			createDocument(human, { id: directCollection.id, title: 'Cross-Type Attempt' })
+		).toThrow(RecordIdConflictError);
+		// The Collection must remain intact and still reachable — not silently
+		// shadowed by a same-id Document entry (documentsMap/collectionsMap are
+		// separate Y.Maps, so a same-id Document wouldn't overwrite it, but
+		// parentKindOf checks the documents map first, making the Collection
+		// permanently unreachable via any parentId lookup once both exist).
+		expect(crdtGetCollection(doc, directCollection.id)?.title).toBe(
+			'A Collection, Written Directly'
+		);
+		expect(crdtGetDocument(doc, directCollection.id)).toBeUndefined();
+	});
+
+	it('rejects createCollection when the id already names a Document (cross-type collision, direct Y.Doc write)', () => {
+		const { doc } = resolveWorkspaceContext();
+		const directDocument = crdtCreateDocument(doc, { title: 'A Document, Written Directly' });
+
+		expect(() =>
+			createCollection(human, { id: directDocument.id, title: 'Cross-Type Attempt', schema: [] })
+		).toThrow(RecordIdConflictError);
+		expect(crdtGetDocument(doc, directDocument.id)?.title).toBe('A Document, Written Directly');
+		expect(crdtGetCollection(doc, directDocument.id)).toBeUndefined();
+	});
+});
+
+describe('service layer: resolves a genuinely separate Collection shard (#120)', () => {
+	const OTHER_SHARD = 'other-shard';
+	let nextId = 0;
+
+	// createCollection always assigns shardId 'default' (the real
+	// shard-assignment cutover is a separate, later step — see #120) — this
+	// bypasses it to construct a Collection whose catalog row names a
+	// genuinely different shard, proving every service function resolves it
+	// correctly rather than assuming the default doc.
+	function createSyntheticShardedCollection(): { collectionId: string; workspaceId: string } {
+		const { workspaceId, defaultSpaceId } = resolveWorkspaceContext();
+		const collectionId = `synthetic-shard-collection-${nextId++}`;
+		reserveCollectionLocator(workspaceId, defaultSpaceId, collectionId, OTHER_SHARD);
+		recordCatalogCollectionCreated({
+			workspaceId,
+			spaceId: defaultSpaceId,
+			id: collectionId,
+			title: 'Synthetic Sharded Table',
+			shardId: OTHER_SHARD
+		});
+		const { doc: otherDoc } = resolveWorkspaceContext({ workspaceId, shardId: OTHER_SHARD });
+		crdtCreateCollection(otherDoc, {
+			id: collectionId,
+			title: 'Synthetic Sharded Table',
+			schema: []
+		});
+		return { collectionId, workspaceId };
+	}
+
+	it('queryCollection reads rows from the resolved shard, not the default doc', () => {
+		const { collectionId, workspaceId } = createSyntheticShardedCollection();
+		const { doc: otherDoc } = resolveWorkspaceContext({ workspaceId, shardId: OTHER_SHARD });
+		crdtCreateRecord(
+			otherDoc,
+			{
+				parentId: collectionId,
+				properties: { name: { type: 'text', value: 'Row In Other Shard' } }
+			},
+			human
+		);
+
+		const result = queryCollection(human, collectionId);
+		expect(result.collection?.title).toBe('Synthetic Sharded Table');
+		expect(result.records).toHaveLength(1);
+	});
+
+	it('createRecord targeting a sharded Collection writes into that shard and reserves a row locator', () => {
+		const { collectionId, workspaceId } = createSyntheticShardedCollection();
+
+		const record = createRecord(human, {
+			parentId: collectionId,
+			properties: { name: { type: 'text', value: 'New Row' } }
+		});
+
+		expect(resolveShardForRecord(workspaceId, record.id)).toEqual({ shardId: OTHER_SHARD });
+		const { doc: otherDoc } = resolveWorkspaceContext({ workspaceId, shardId: OTHER_SHARD });
+		expect(crdtGetRecord(otherDoc, record.id)?.properties?.name).toEqual({
+			type: 'text',
+			value: 'New Row'
+		});
+	});
+
+	it('writeRecord updates content in the resolved shard', () => {
+		const { collectionId, workspaceId } = createSyntheticShardedCollection();
+		const record = createRecord(human, { parentId: collectionId, properties: {} });
+
+		writeRecord(human, record.id, { properties: { status: { type: 'text', value: 'Done' } } });
+
+		const { doc: otherDoc } = resolveWorkspaceContext({ workspaceId, shardId: OTHER_SHARD });
+		expect(crdtGetRecord(otherDoc, record.id)?.properties?.status).toEqual({
+			type: 'text',
+			value: 'Done'
+		});
+	});
+
+	it('getRecord reads from the resolved shard', () => {
+		const { collectionId } = createSyntheticShardedCollection();
+		const record = createRecord(human, {
+			parentId: collectionId,
+			properties: { a: { type: 'text', value: '1' } }
+		});
+
+		expect(getRecord(human, record.id)?.properties?.a).toEqual({ type: 'text', value: '1' });
+	});
+
+	it('deleteRecord removes it from the resolved shard and releases its row locator', () => {
+		const { collectionId, workspaceId } = createSyntheticShardedCollection();
+		const record = createRecord(human, { parentId: collectionId, properties: {} });
+
+		deleteRecord(human, record.id);
+
+		expect(resolveShardForRecord(workspaceId, record.id)).toBeUndefined();
+		const { doc: otherDoc } = resolveWorkspaceContext({ workspaceId, shardId: OTHER_SHARD });
+		expect(crdtGetRecord(otherDoc, record.id)).toBeUndefined();
+	});
+
+	it('holdRecords/releaseRecords (token caller) operate against the resolved shard Awareness, never the default one', () => {
+		const { collectionId, workspaceId } = createSyntheticShardedCollection();
+		const record = createRecord(human, { parentId: collectionId, properties: {} });
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Shard Test Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: [collectionId]
+		});
+
+		const holdResult = holdRecords(tokenRecord, [record.id]);
+		expect(holdResult).toEqual({ granted: [record.id], denied: [] });
+
+		function isHeldSomewhere(workspaceIdArg: string, shardId: string | undefined): boolean {
+			const { awareness } = resolveWorkspaceContext(
+				shardId !== undefined
+					? { workspaceId: workspaceIdArg, shardId }
+					: { workspaceId: workspaceIdArg }
+			);
+			return Array.from(awareness.getStates().values()).some((s) =>
+				(s as { heldRecordIds?: string[] } | undefined)?.heldRecordIds?.includes(record.id)
+			);
+		}
+
+		expect(isHeldSomewhere(workspaceId, OTHER_SHARD)).toBe(true);
+		expect(isHeldSomewhere(workspaceId, undefined)).toBe(false);
+
+		releaseRecords(tokenRecord, [record.id]);
+		expect(isHeldSomewhere(workspaceId, OTHER_SHARD)).toBe(false);
+	});
+
+	it('searchWorkspace finds content living in the resolved shard, not just the default doc', () => {
+		const { collectionId } = createSyntheticShardedCollection();
+		createRecord(human, {
+			parentId: collectionId,
+			properties: { name: { type: 'text', value: 'Findable Needle Value' } }
+		});
+
+		const results = searchWorkspace(human, 'needle');
+		expect(results.some((r) => r.snippet.includes('Needle'))).toBe(true);
 	});
 });

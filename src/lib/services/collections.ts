@@ -3,17 +3,27 @@ import {
 	createCollection as crdtCreateCollection,
 	deleteCollection as crdtDeleteCollection,
 	getCollection as crdtGetCollection,
+	getDocument as crdtGetDocument,
 	listCollections as crdtListCollections,
 	listRecordsForParent as crdtListRecordsForParent,
 	updateCollectionTitle as crdtUpdateCollectionTitle
 } from '$lib/data/records';
 import { logAudit } from '$lib/server/audit';
+import {
+	RecordIdConflictError,
+	recordCatalogCollectionCreated,
+	recordCatalogCollectionDeleted,
+	recordCatalogCollectionTitleChanged,
+	reserveCollectionLocator
+} from '$lib/server/catalog';
 import { grantCollectionAccess, tokenAllowsParent } from '$lib/mcp/tokens';
 import type { CollectionMeta, PropertyDefinition, WorkspaceRecord } from '$lib/data/types';
+import { nanoid } from 'nanoid';
 import {
 	actorForCaller,
 	isAccessToken,
 	requireAccessibleParent,
+	resolveParentWorkspaceContext,
 	type CallerIdentity
 } from './permissions';
 
@@ -27,13 +37,32 @@ export function createCollection(
 	caller: CallerIdentity,
 	input: CreateCollectionInput
 ): CollectionMeta {
-	const { doc } = resolveWorkspaceContext();
+	const { doc, workspaceId, shardId, defaultSpaceId } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
+	const id = input.id ?? nanoid();
+	// See documents.ts's createDocument for why this also checks the live
+	// Y.Doc, not just the catalog locator: a caller-supplied id could collide
+	// with content created by a client writing directly to the Y.Doc,
+	// bypassing the service layer (and therefore the locator) entirely.
+	// Checked against both maps — see createDocument's comment for why.
+	if (crdtGetCollection(doc, id) || crdtGetDocument(doc, id)) {
+		throw new RecordIdConflictError(id);
+	}
+	reserveCollectionLocator(workspaceId, defaultSpaceId, id, shardId);
+
 	const collection = crdtCreateCollection(doc, {
-		id: input.id,
+		id,
 		title: input.title,
 		schema: input.schema ?? []
+	});
+
+	recordCatalogCollectionCreated({
+		workspaceId,
+		spaceId: defaultSpaceId,
+		id: collection.id,
+		title: collection.title,
+		shardId
 	});
 
 	if (isAccessToken(caller)) {
@@ -63,7 +92,7 @@ export function queryCollection(
 	collection: CollectionMeta | undefined;
 	records: WorkspaceRecord[];
 } {
-	const { doc } = resolveWorkspaceContext();
+	const { doc } = resolveParentWorkspaceContext(collectionId);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, collectionId, 'query_collection');
@@ -75,11 +104,12 @@ export function queryCollection(
 }
 
 export function deleteCollection(caller: CallerIdentity, collectionId: string): void {
-	const { doc } = resolveWorkspaceContext();
+	const { doc, workspaceId } = resolveParentWorkspaceContext(collectionId);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, collectionId, 'delete_collection');
 	crdtDeleteCollection(doc, collectionId);
+	recordCatalogCollectionDeleted(workspaceId, collectionId);
 	logAudit({ actor, action: 'delete_collection', targetRecordId: collectionId });
 }
 
@@ -88,11 +118,12 @@ export function updateCollectionTitle(
 	collectionId: string,
 	title: string
 ): void {
-	const { doc } = resolveWorkspaceContext();
+	const { doc, workspaceId } = resolveParentWorkspaceContext(collectionId);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, collectionId, 'update_collection_title');
 	crdtUpdateCollectionTitle(doc, collectionId, title);
+	recordCatalogCollectionTitleChanged(workspaceId, collectionId, title);
 	logAudit({
 		actor,
 		action: 'update_collection_title',
