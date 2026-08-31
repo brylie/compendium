@@ -13,6 +13,7 @@ import {
 	recordCatalogDocumentCreated,
 	reserveDocumentLocator
 } from '$lib/server/catalog';
+import { grantDocumentAccess } from '$lib/mcp/tokens';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { plainText, yTextToRichText } from '$lib/data/richtext';
 import { serviceModules, serviceSurfaces } from '$lib/services/manifest';
@@ -242,7 +243,7 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 	});
 
 	it("3c. MCP search_workspace's space_id never crosses a Space boundary (#114/#133)", async () => {
-		const { token } = harness.createToken({
+		const { token, record } = harness.createToken({
 			clientLabel: 'Space Isolation Bot',
 			allowedDocumentIds: [],
 			allowedCollectionIds: []
@@ -301,6 +302,23 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 			{ runs: [{ text: 'unicornsparkle', marks: {} }] },
 			human
 		);
+
+		// Grant this same token access to docB too — otherwise the pre-existing
+		// per-ID token filter alone would exclude recordB regardless of whether
+		// space_id filtering does anything at all, and the isolation assertion
+		// below would pass for the wrong reason.
+		grantDocumentAccess(record.tokenHash, docB.id);
+
+		// Baseline: with no Space filter, the token can see both records —
+		// proves access and content are both genuinely in place before testing
+		// that space_id actually does the excluding.
+		const unscopedRes = await mcp.callTool({
+			name: 'search_workspace',
+			arguments: { query: 'unicornsparkle' }
+		});
+		const unscopedResults = parseMcpText<Array<{ recordId: string }>>(unscopedRes);
+		expect(unscopedResults.map((r) => r.recordId)).toContain(recordA.recordId);
+		expect(unscopedResults.map((r) => r.recordId)).toContain(recordB.id);
 
 		// The real MCP client, scoped to Space A, never sees Space B's match —
 		// exercised over the actual HTTP transport, not an in-process call.
