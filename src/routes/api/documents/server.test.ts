@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { POST } from './+server';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 function jsonRequest(body: unknown): Parameters<typeof POST>[0] {
 	return {
 		request: new Request('http://localhost/api/documents', {
 			method: 'POST',
 			body: JSON.stringify(body)
-		})
-	} as Parameters<typeof POST>[0];
+		}),
+		locals: { requestContext: resolveRequestContext() }
+	} as unknown as Parameters<typeof POST>[0];
 }
 
 describe('routes/api/documents', () => {
