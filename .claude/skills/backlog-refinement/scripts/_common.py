@@ -22,7 +22,14 @@ def run_graphql(query: str, **variables) -> dict:
     Variables are passed with -F (not -f) so gh sends them as a proper
     variables object instead of string-interpolating them into the query —
     this matters once a variable holds free text (a comment body, an issue
-    title) that could otherwise break the query's syntax.
+    title) that could otherwise break the query's syntax. But -F also
+    type-sniffs: a str value that merely *looks* numeric (e.g. a project
+    field's opaque option id like "79628723") gets silently sent as a
+    GraphQL number, which fails against a String!/ID! argument. So the
+    choice between -F and -f is made per variable from its Python type —
+    real int/bool values (an issue number, a project number) use -F to get
+    proper GraphQL Int/Boolean typing; str values always use -f, forcing
+    them to stay strings regardless of what they look like.
     A variable whose value is None is omitted entirely, which GraphQL
     treats as unset/null for optional arguments (used for cursor-based
     pagination's first page).
@@ -31,7 +38,8 @@ def run_graphql(query: str, **variables) -> dict:
     for key, value in variables.items():
         if value is None:
             continue
-        args += ["-F", f"{key}={value}"]
+        flag = "-F" if isinstance(value, (int, bool)) else "-f"
+        args += [flag, f"{key}={value}"]
 
     proc = subprocess.run(args, capture_output=True, text=True)
     if proc.returncode != 0:
