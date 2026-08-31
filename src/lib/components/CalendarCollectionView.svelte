@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { nanoid } from 'nanoid';
-	import { getClientDoc } from '$lib/client/yjs-client';
+	import type * as Y from 'yjs';
+	import { getShardDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
 	import {
 		createRecord,
@@ -37,7 +37,8 @@
 
 	const today = new Date();
 
-	let ydoc: ReturnType<typeof getClientDoc> | undefined = $state();
+	let ydoc: Y.Doc | undefined = $state();
+	let shardId: string | undefined = $state();
 	let schema: PropertyDefinition[] = $state([]);
 	let rows: WorkspaceRecord[] = $state([]);
 	let primaryFieldKey: string | undefined = $state();
@@ -149,26 +150,42 @@
 		}
 	}
 
-	onMount(() => {
-		const doc = getClientDoc();
-		ydoc = doc;
+	// Resolves this Collection's real shard (#120) and (re)connects whenever
+	// collectionId changes — see TableCollectionView's identical pattern for
+	// why this can't just be a one-time onMount now that Collections have
+	// their own shards.
+	$effect(() => {
+		const id = collectionId;
+		autoGroupByAttempted = false;
+		let cancelled = false;
+		let cleanup: (() => void) | undefined;
 
-		const recordsMap = doc.getMap('records');
-		const collectionsMap = doc.getMap('collections');
-		const observer = () => refresh();
-		recordsMap.observeDeep(observer);
-		collectionsMap.observeDeep(observer);
+		(async () => {
+			const res = await fetch(`/api/collections/${id}/shard`);
+			const { shardId: resolvedShardId } = await res.json();
+			if (cancelled) return;
+
+			shardId = resolvedShardId;
+			const doc = getShardDoc(resolvedShardId);
+			ydoc = doc;
+
+			const recordsMap = doc.getMap('records');
+			const collectionsMap = doc.getMap('collections');
+			const observer = () => refresh();
+			recordsMap.observeDeep(observer);
+			collectionsMap.observeDeep(observer);
+			refresh();
+
+			cleanup = () => {
+				recordsMap.unobserveDeep(observer);
+				collectionsMap.unobserveDeep(observer);
+			};
+		})();
 
 		return () => {
-			recordsMap.unobserveDeep(observer);
-			collectionsMap.unobserveDeep(observer);
+			cancelled = true;
+			cleanup?.();
 		};
-	});
-
-	$effect(() => {
-		void collectionId;
-		autoGroupByAttempted = false;
-		untrack(() => refresh());
 	});
 
 	function addDateProperty(): void {
@@ -236,7 +253,12 @@
 </script>
 
 {#if schema.length > 0}
-	<ViewToolbar {collectionId} {schema} bind:config={() => config, onConfigChange} />
+	<ViewToolbar
+		{collectionId}
+		shardId={shardId!}
+		{schema}
+		bind:config={() => config, onConfigChange}
+	/>
 {/if}
 
 {#if dateProperties.length === 0}

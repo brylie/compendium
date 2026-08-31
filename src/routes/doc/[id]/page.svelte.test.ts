@@ -31,7 +31,10 @@ function selectEditorText(element: HTMLElement, start: number, end: number): voi
 }
 
 let ydoc: Y.Doc;
-vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
+vi.mock('$lib/client/yjs-client', () => ({
+	getClientDoc: () => ydoc,
+	getShardDoc: () => ydoc
+}));
 
 const claimBlockPresence = vi.hoisted(() => vi.fn());
 const releaseBlockPresence = vi.hoisted(() => vi.fn());
@@ -53,10 +56,18 @@ describe('doc/[id] +page', () => {
 		claimBlockPresence.mockClear();
 		releaseBlockPresence.mockClear();
 		subscribeHeldByOthers.mockClear().mockImplementation(() => () => {});
+		// A rendered collection_view block's nested Table/Board/Calendar view
+		// resolves its real shard via a fetch before connecting — see #120.
+		// Stubbed to resolve immediately against the same test doc.
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => ({ json: async () => ({ shardId: 'test-shard' }) }))
+		);
 	});
 
 	afterEach(() => {
 		ydoc.destroy();
+		vi.unstubAllGlobals();
 	});
 
 	it('shows a prompt to start writing when the document has no blocks', () => {
@@ -377,7 +388,9 @@ describe('doc/[id] +page', () => {
 		render(Page, {
 			params: { id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			// CollectionViewBlock's picker/lookup is catalog-backed (data.collections),
+			// not derived from ydoc (#120) — see CollectionViewBlock.svelte.
+			data: { documents: [], collections: [collection], documentId: 'doc-1', title: 'D' }
 		});
 		expect(screen.getByText('Sprint Tasks')).toBeInTheDocument();
 		expect(screen.getByText('· board')).toBeInTheDocument();

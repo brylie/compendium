@@ -5,13 +5,7 @@
 	import { goto, invalidateAll } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { getClientDoc } from '$lib/client/yjs-client';
-	import {
-		buildDocumentTree,
-		deleteCollection,
-		deleteDocument,
-		listCollections,
-		listDocuments
-	} from '$lib/data/records';
+	import { buildDocumentTree, deleteDocument, listDocuments } from '$lib/data/records';
 	import { isDark, toggleTheme } from '$lib/client/theme';
 	import type { CollectionMeta, DocumentMeta, DocumentTreeNode } from '$lib/data/types';
 	import Icon from './Icon.svelte';
@@ -27,11 +21,18 @@
 	} = $props();
 
 	let clientDocs: DocumentMeta[] = $state([]);
-	let clientCols: CollectionMeta[] = $state([]);
 
-	// Prefer live client YDoc data once populated; fallback to initial layout data
+	// Documents prefer live client YDoc data once populated (Documents aren't
+	// sharded — see #120); fallback to initial layout data before it connects.
 	let documents = $derived(clientDocs.length > 0 ? clientDocs : (initialDocuments ?? []));
-	let collections = $derived(clientCols.length > 0 ? clientCols : (initialCollections ?? []));
+	// Collections are catalog-backed (initialCollections) only, never live —
+	// a sharded Collection's own meta entry doesn't live in the shared
+	// 'workspace' doc this component observes, so there's nothing correct to
+	// merge in here. An explicit, accepted gap until Phase C's SSE feed (#121)
+	// exists: creating/renaming/deleting a Collection needs a refresh to show
+	// up in the sidebar. A Collection's own content stays fully live once its
+	// shard connects (see TableCollectionView etc).
+	let collections = $derived(initialCollections ?? []);
 
 	let collapsed = $state(false);
 	let darkMode = $state(false);
@@ -54,10 +55,7 @@
 
 	function refresh(): void {
 		if (!ydoc) return;
-		const docs = listDocuments(ydoc);
-		const cols = listCollections(ydoc);
-		clientDocs = docs;
-		clientCols = cols;
+		clientDocs = listDocuments(ydoc);
 	}
 
 	onMount(() => {
@@ -74,18 +72,15 @@
 
 		const recordsMap = doc.getMap('records');
 		const documentsMap = doc.getMap('documents');
-		const collectionsMap = doc.getMap('collections');
 
 		const observer = () => refresh();
 		recordsMap.observeDeep(observer);
 		documentsMap.observeDeep(observer);
-		collectionsMap.observeDeep(observer);
 		doc.on('update', observer);
 
 		return () => {
 			recordsMap.unobserveDeep(observer);
 			documentsMap.unobserveDeep(observer);
-			collectionsMap.unobserveDeep(observer);
 			doc.off('update', observer);
 		};
 	});
@@ -200,10 +195,10 @@
 				}
 			} else {
 				const id = deletion.id;
-				if (ydoc) {
-					deleteCollection(ydoc, id);
-					refresh();
-				}
+				// Routed through the service layer, not the raw CRDT primitive
+				// against the shared doc: a Collection lives in its own shard
+				// since #120, which this component has no direct connection to.
+				await fetch(`/api/collections/${id}`, { method: 'DELETE' });
 				await invalidateAll();
 				if (currentTableId === id) {
 					await goto(resolve('/'));

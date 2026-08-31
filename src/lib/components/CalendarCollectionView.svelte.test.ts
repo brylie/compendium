@@ -7,7 +7,10 @@ import type { ViewConfig } from '$lib/data/views';
 import CalendarCollectionViewHarness from './CalendarCollectionViewHarness.svelte';
 
 let ydoc: Y.Doc;
-vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
+vi.mock('$lib/client/yjs-client', () => ({
+	getClientDoc: () => ydoc,
+	getShardDoc: () => ydoc
+}));
 
 const actor = { kind: 'human' as const, userId: 'local' };
 
@@ -19,17 +22,25 @@ describe('CalendarCollectionView', () => {
 	beforeEach(() => {
 		ydoc = new Y.Doc();
 		vi.setSystemTime(new Date('2026-03-15T12:00:00Z'));
+		// CalendarCollectionView resolves its real shard via a fetch before
+		// connecting — see #120. Stubbed to resolve immediately against the
+		// same test doc.
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => ({ json: async () => ({ shardId: 'test-shard' }) }))
+		);
 	});
 
 	afterEach(() => {
 		ydoc.destroy();
 		vi.useRealTimers();
+		vi.unstubAllGlobals();
 	});
 
-	it('prompts to add a date property when the collection has none', () => {
+	it('prompts to add a date property when the collection has none', async () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Cal', schema: [] });
 		renderCalendar('col-1');
-		expect(screen.getByText(/doesn't have one yet/)).toBeInTheDocument();
+		expect(await screen.findByText(/doesn't have one yet/)).toBeInTheDocument();
 	});
 
 	it('adds a date property from the inline empty-state form and switches into the calendar grid', async () => {
@@ -37,7 +48,7 @@ describe('CalendarCollectionView', () => {
 		const user = userEvent.setup();
 		renderCalendar('col-1');
 
-		expect(screen.getByRole('textbox', { name: 'Date property name' })).toHaveValue('Date');
+		expect(await screen.findByRole('textbox', { name: 'Date property name' })).toHaveValue('Date');
 		await user.click(screen.getByRole('button', { name: 'Add a date property' }));
 
 		expect(screen.getByRole('option', { name: 'Date' })).toBeInTheDocument();
@@ -47,7 +58,7 @@ describe('CalendarCollectionView', () => {
 		]);
 	});
 
-	it('places a record on its matching day cell', () => {
+	it('places a record on its matching day cell', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'Cal',
@@ -69,11 +80,11 @@ describe('CalendarCollectionView', () => {
 		);
 		renderCalendar('col-1', { groupBy: 'due' });
 
-		expect(screen.getByText('Launch')).toBeInTheDocument();
+		expect(await screen.findByText('Launch')).toBeInTheDocument();
 		expect(screen.queryByText('Unscheduled')).not.toBeInTheDocument();
 	});
 
-	it('lists a record with no date value under Unscheduled', () => {
+	it('lists a record with no date value under Unscheduled', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'Cal',
@@ -89,7 +100,7 @@ describe('CalendarCollectionView', () => {
 		);
 		renderCalendar('col-1', { groupBy: 'due' });
 
-		expect(screen.getByText('Unscheduled')).toBeInTheDocument();
+		expect(await screen.findByText('Unscheduled')).toBeInTheDocument();
 		expect(screen.getByText('No date yet')).toBeInTheDocument();
 	});
 
@@ -102,7 +113,7 @@ describe('CalendarCollectionView', () => {
 		const user = userEvent.setup();
 		renderCalendar('col-1', { groupBy: 'due' });
 
-		await user.click(screen.getByRole('button', { name: 'Add entry on 2026-03-20' }));
+		await user.click(await screen.findByRole('button', { name: 'Add entry on 2026-03-20' }));
 
 		const created = Array.from(ydoc.getMap('records').values()).find(
 			(v) => (v as Y.Map<unknown>).get('parentId') === 'col-1'
@@ -132,7 +143,7 @@ describe('CalendarCollectionView', () => {
 		);
 		renderCalendar('col-1', { groupBy: 'due' });
 
-		const dateInput = screen.getByDisplayValue('2026-03-05');
+		const dateInput = await screen.findByDisplayValue('2026-03-05');
 		await fireEvent.change(dateInput, { target: { value: '2026-03-25' } });
 
 		expect(getRecord(ydoc, record.id)?.properties?.due).toEqual({
@@ -157,7 +168,7 @@ describe('CalendarCollectionView', () => {
 		);
 		renderCalendar('col-1', { groupBy: 'due' });
 
-		const unscheduledSection = screen.getByText('Unscheduled').closest('section')!;
+		const unscheduledSection = (await screen.findByText('Unscheduled')).closest('section')!;
 		const dateInput = within(unscheduledSection).getByDisplayValue('');
 		await fireEvent.change(dateInput, { target: { value: '2026-03-10' } });
 
@@ -187,7 +198,7 @@ describe('CalendarCollectionView', () => {
 		const user = userEvent.setup();
 		renderCalendar('col-1', { groupBy: 'due' });
 
-		await user.click(screen.getByTitle('Add option'));
+		await user.click(await screen.findByTitle('Add option'));
 		await user.type(screen.getByLabelText('Option name'), 'Ready');
 		await user.click(
 			within(screen.getByRole('dialog')).getByRole('button', { name: 'Add option' })
@@ -221,7 +232,7 @@ describe('CalendarCollectionView', () => {
 		const user = userEvent.setup();
 		renderCalendar('col-1', { groupBy: 'due' });
 
-		await user.click(screen.getByRole('button', { name: 'Delete entry' }));
+		await user.click(await screen.findByRole('button', { name: 'Delete entry' }));
 
 		expect(getRecord(ydoc, record.id)).toBeUndefined();
 	});
@@ -235,7 +246,7 @@ describe('CalendarCollectionView', () => {
 		const user = userEvent.setup();
 		renderCalendar('col-1', { groupBy: 'due' });
 
-		expect(screen.getByText('March 2026')).toBeInTheDocument();
+		expect(await screen.findByText('March 2026')).toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Next month' }));
 		expect(screen.getByText('April 2026')).toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Today' }));

@@ -6,7 +6,7 @@ import { createCollection, deleteCollection, getCollection } from '$lib/data/rec
 import FieldManagerDialog from './FieldManagerDialog.svelte';
 
 let ydoc: Y.Doc;
-vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
+vi.mock('$lib/client/yjs-client', () => ({ getShardDoc: () => ydoc }));
 
 describe('FieldManagerDialog', () => {
 	beforeEach(() => {
@@ -25,7 +25,12 @@ describe('FieldManagerDialog', () => {
 				{ key: 'b', label: 'Beta', type: 'number' }
 			]
 		});
-		render(FieldManagerDialog, { open: true, collectionId: collection.id, onClose: vi.fn() });
+		render(FieldManagerDialog, {
+			open: true,
+			collectionId: collection.id,
+			shardId: 'test-shard',
+			onClose: vi.fn()
+		});
 
 		const list = screen.getByRole('list');
 		const items = within(list).getAllByRole('listitem');
@@ -37,7 +42,12 @@ describe('FieldManagerDialog', () => {
 
 	it('renders nothing when closed', () => {
 		const collection = createCollection(ydoc, { title: 'T', schema: [] });
-		render(FieldManagerDialog, { open: false, collectionId: collection.id, onClose: vi.fn() });
+		render(FieldManagerDialog, {
+			open: false,
+			collectionId: collection.id,
+			shardId: 'test-shard',
+			onClose: vi.fn()
+		});
 		expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 	});
 
@@ -50,7 +60,12 @@ describe('FieldManagerDialog', () => {
 			]
 		});
 		const user = userEvent.setup();
-		render(FieldManagerDialog, { open: true, collectionId: collection.id, onClose: vi.fn() });
+		render(FieldManagerDialog, {
+			open: true,
+			collectionId: collection.id,
+			shardId: 'test-shard',
+			onClose: vi.fn()
+		});
 
 		await user.click(screen.getByRole('button', { name: 'Move Alpha down' }));
 		expect(getCollection(ydoc, collection.id)?.schema.map((p) => p.label)).toEqual([
@@ -73,7 +88,12 @@ describe('FieldManagerDialog', () => {
 				{ key: 'b', label: 'Beta', type: 'text' }
 			]
 		});
-		render(FieldManagerDialog, { open: true, collectionId: collection.id, onClose: vi.fn() });
+		render(FieldManagerDialog, {
+			open: true,
+			collectionId: collection.id,
+			shardId: 'test-shard',
+			onClose: vi.fn()
+		});
 
 		expect(screen.getByRole('button', { name: 'Move Alpha up' })).toBeDisabled();
 		expect(screen.getByRole('button', { name: 'Move Beta down' })).toBeDisabled();
@@ -82,7 +102,12 @@ describe('FieldManagerDialog', () => {
 	it('adds a new field via the bottom form', async () => {
 		const collection = createCollection(ydoc, { title: 'T', schema: [] });
 		const user = userEvent.setup();
-		render(FieldManagerDialog, { open: true, collectionId: collection.id, onClose: vi.fn() });
+		render(FieldManagerDialog, {
+			open: true,
+			collectionId: collection.id,
+			shardId: 'test-shard',
+			onClose: vi.fn()
+		});
 
 		expect(screen.getByRole('button', { name: 'Add field' })).toBeDisabled();
 
@@ -99,7 +124,12 @@ describe('FieldManagerDialog', () => {
 		const collection = createCollection(ydoc, { title: 'T', schema: [] });
 		const onClose = vi.fn();
 		const user = userEvent.setup();
-		render(FieldManagerDialog, { open: true, collectionId: collection.id, onClose });
+		render(FieldManagerDialog, {
+			open: true,
+			collectionId: collection.id,
+			shardId: 'test-shard',
+			onClose
+		});
 
 		await user.keyboard('{Escape}');
 
@@ -113,7 +143,12 @@ describe('FieldManagerDialog', () => {
 		});
 		const onClose = vi.fn();
 		const user = userEvent.setup();
-		render(FieldManagerDialog, { open: true, collectionId: collection.id, onClose });
+		render(FieldManagerDialog, {
+			open: true,
+			collectionId: collection.id,
+			shardId: 'test-shard',
+			onClose
+		});
 
 		await user.click(screen.getByRole('button', { name: 'Field options for Alpha' }));
 		await user.click(screen.getByRole('menuitem', { name: 'Delete field' }));
@@ -134,7 +169,12 @@ describe('FieldManagerDialog', () => {
 		it('surfaces an error instead of throwing when adding a field', async () => {
 			const collection = createCollection(ydoc, { title: 'T', schema: [] });
 			const user = userEvent.setup();
-			render(FieldManagerDialog, { open: true, collectionId: collection.id, onClose: vi.fn() });
+			render(FieldManagerDialog, {
+				open: true,
+				collectionId: collection.id,
+				shardId: 'test-shard',
+				onClose: vi.fn()
+			});
 
 			await user.type(screen.getByPlaceholderText('Field name…'), 'Status');
 			deleteCollection(ydoc, collection.id);
@@ -148,7 +188,12 @@ describe('FieldManagerDialog', () => {
 		const collection = createCollection(ydoc, { title: 'T', schema: [] });
 		const onClose = vi.fn();
 		const user = userEvent.setup();
-		render(FieldManagerDialog, { open: true, collectionId: collection.id, onClose });
+		render(FieldManagerDialog, {
+			open: true,
+			collectionId: collection.id,
+			shardId: 'test-shard',
+			onClose
+		});
 
 		await user.click(screen.getByRole('presentation'));
 
@@ -159,7 +204,12 @@ describe('FieldManagerDialog', () => {
 		const collection = createCollection(ydoc, { title: 'T', schema: [] });
 		const onClose = vi.fn();
 		const user = userEvent.setup();
-		render(FieldManagerDialog, { open: true, collectionId: collection.id, onClose });
+		render(FieldManagerDialog, {
+			open: true,
+			collectionId: collection.id,
+			shardId: 'test-shard',
+			onClose
+		});
 
 		await user.click(screen.getByRole('dialog'));
 
@@ -177,7 +227,12 @@ describe('FieldManagerDialog', () => {
 			schema: [{ key: 'a', label: 'Alpha', type: 'text' }]
 		});
 		const user = userEvent.setup();
-		render(FieldManagerDialog, { open: true, collectionId: collection.id, onClose: vi.fn() });
+		render(FieldManagerDialog, {
+			open: true,
+			collectionId: collection.id,
+			shardId: 'test-shard',
+			onClose: vi.fn()
+		});
 
 		await user.click(screen.getByRole('button', { name: 'Field options for Alpha' }));
 

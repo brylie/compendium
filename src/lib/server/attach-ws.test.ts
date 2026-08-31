@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { createServer } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { attachYjsWebSocket } from './attach-ws';
-import { resetWorkspaceStoreForTests } from './workspace-store';
+import { resetWorkspaceStoreForTests, resolveWorkspaceContext } from './workspace-store';
 import { resetHoldsForTests } from './holds';
 
 // Minimal stand-in for `ws`'s WebSocket, matching the one already used in
@@ -122,6 +122,43 @@ describe('attachYjsWebSocket: upgrade routing', () => {
 
 		// setupWSConnection ran for real and wired the doc/awareness listeners.
 		expect(ws.listenerCount('message')).toBeGreaterThan(0);
+		wss.close();
+	});
+
+	it('derives a shardId selector from a "shard-<id>" room, connecting to that shard\'s own context (#120)', () => {
+		const server = new EventEmitter();
+		const wss = attachYjsWebSocket(
+			server as unknown as Parameters<typeof attachYjsWebSocket>[0],
+			'/ws'
+		);
+		const ws = new MockWebSocket();
+		vi.spyOn(wss, 'handleUpgrade').mockImplementation((req, _socket, _head, cb) => {
+			cb(ws as never, req);
+		});
+
+		server.emit('upgrade', { url: '/ws/shard-abc123' }, new FakeSocket(), Buffer.alloc(0));
+
+		const shardContext = resolveWorkspaceContext({ shardId: 'abc123' });
+		expect(shardContext.connections.has(ws)).toBe(true);
+		const defaultContext = resolveWorkspaceContext();
+		expect(defaultContext.connections.has(ws)).toBe(false);
+		wss.close();
+	});
+
+	it('the "workspace" room still resolves to the default context, unchanged', () => {
+		const server = new EventEmitter();
+		const wss = attachYjsWebSocket(
+			server as unknown as Parameters<typeof attachYjsWebSocket>[0],
+			'/ws'
+		);
+		const ws = new MockWebSocket();
+		vi.spyOn(wss, 'handleUpgrade').mockImplementation((req, _socket, _head, cb) => {
+			cb(ws as never, req);
+		});
+
+		server.emit('upgrade', { url: '/ws/workspace' }, new FakeSocket(), Buffer.alloc(0));
+
+		expect(resolveWorkspaceContext().connections.has(ws)).toBe(true);
 		wss.close();
 	});
 });

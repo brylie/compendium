@@ -6,7 +6,10 @@ import { createCollection, createRecord, getRecord, setPrimaryField } from '$lib
 import TableCollectionViewHarness from './TableCollectionViewHarness.svelte';
 
 let ydoc: Y.Doc;
-vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
+vi.mock('$lib/client/yjs-client', () => ({
+	getClientDoc: () => ydoc,
+	getShardDoc: () => ydoc
+}));
 
 const actor = { kind: 'human' as const, userId: 'local' };
 
@@ -20,10 +23,18 @@ function renderTable(
 describe('TableCollectionView', () => {
 	beforeEach(() => {
 		ydoc = new Y.Doc();
+		// TableCollectionView resolves its real shard via a fetch before
+		// connecting — see #120. Stubbed to resolve immediately against the
+		// same test doc.
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => ({ json: async () => ({ shardId: 'test-shard' }) }))
+		);
 	});
 
 	afterEach(() => {
 		ydoc.destroy();
+		vi.unstubAllGlobals();
 	});
 
 	it('links to the full table when the collection has no properties yet', () => {
@@ -35,14 +46,14 @@ describe('TableCollectionView', () => {
 		);
 	});
 
-	it('shows an empty-state row when the collection has no rows', () => {
+	it('shows an empty-state row when the collection has no rows', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'T',
 			schema: [{ key: 'name', label: 'Name', type: 'text' }]
 		});
 		renderTable('col-1');
-		expect(screen.getByText('No rows in this collection.')).toBeInTheDocument();
+		expect(await screen.findByText('No rows in this collection.')).toBeInTheDocument();
 	});
 
 	it('renders and edits a text cell', async () => {
@@ -59,7 +70,7 @@ describe('TableCollectionView', () => {
 		const user = userEvent.setup();
 		renderTable('col-1');
 
-		const input = screen.getByDisplayValue('Alice');
+		const input = await screen.findByDisplayValue('Alice');
 		await user.clear(input);
 		await user.type(input, 'Bob');
 		await user.tab();
@@ -76,7 +87,7 @@ describe('TableCollectionView', () => {
 		const user = userEvent.setup();
 		renderTable('col-1');
 
-		const table = screen.getByRole('table');
+		const table = await screen.findByRole('table');
 		expect(within(table).queryAllByRole('textbox')).toHaveLength(0);
 		await user.click(screen.getByRole('button', { name: 'Add row' }));
 
@@ -98,7 +109,7 @@ describe('TableCollectionView', () => {
 		const user = userEvent.setup();
 		renderTable('col-1');
 
-		expect(screen.getByDisplayValue('Bob')).toBeInTheDocument();
+		expect(await screen.findByDisplayValue('Bob')).toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Delete row' }));
 
 		expect(getRecord(ydoc, record.id)).toBeUndefined();
@@ -114,7 +125,7 @@ describe('TableCollectionView', () => {
 		const user = userEvent.setup();
 		renderTable('col-1');
 
-		await user.click(screen.getByTitle('Add option'));
+		await user.click(await screen.findByTitle('Add option'));
 		await user.type(screen.getByLabelText('Option name'), 'Done');
 		await user.click(
 			within(screen.getByRole('dialog')).getByRole('button', { name: 'Add option' })
@@ -124,7 +135,7 @@ describe('TableCollectionView', () => {
 		expect(within(select).getByText('Done')).toBeInTheDocument();
 	});
 
-	it('marks the resolved primary field column with a visible indicator (issue #96)', () => {
+	it('marks the resolved primary field column with a visible indicator (issue #96)', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'T',
@@ -135,13 +146,13 @@ describe('TableCollectionView', () => {
 		});
 		renderTable('col-1');
 
-		const nameHeader = screen.getByRole('columnheader', { name: /^Name/ });
+		const nameHeader = await screen.findByRole('columnheader', { name: /^Name/ });
 		const notesHeader = screen.getByRole('columnheader', { name: /^Notes/ });
 		expect(within(nameHeader).getByText('Primary field')).toBeInTheDocument();
 		expect(within(notesHeader).queryByText('Primary field')).not.toBeInTheDocument();
 	});
 
-	it('moves the primary-field indicator once an explicit primary field is chosen', () => {
+	it('moves the primary-field indicator once an explicit primary field is chosen', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'T',
@@ -153,7 +164,7 @@ describe('TableCollectionView', () => {
 		setPrimaryField(ydoc, 'col-1', 'notes');
 		renderTable('col-1');
 
-		const nameHeader = screen.getByRole('columnheader', { name: /^Name/ });
+		const nameHeader = await screen.findByRole('columnheader', { name: /^Name/ });
 		const notesHeader = screen.getByRole('columnheader', { name: /^Notes/ });
 		expect(within(nameHeader).queryByText('Primary field')).not.toBeInTheDocument();
 		expect(within(notesHeader).getByText('Primary field')).toBeInTheDocument();
@@ -169,7 +180,7 @@ describe('TableCollectionView', () => {
 		const user = userEvent.setup();
 		renderTable('col-1');
 
-		await user.click(screen.getByTitle('Add option'));
+		await user.click(await screen.findByTitle('Add option'));
 		await user.click(
 			within(screen.getByRole('dialog')).getByRole('button', { name: 'Add option' })
 		);
@@ -179,7 +190,7 @@ describe('TableCollectionView', () => {
 		).toBeInTheDocument();
 	});
 
-	it('sorts rows by a Select field in configured option order, not by opaque option id (issue #95)', () => {
+	it('sorts rows by a Select field in configured option order, not by opaque option id (issue #95)', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'T',
@@ -235,6 +246,7 @@ describe('TableCollectionView', () => {
 
 		renderTable('col-1', { sort: { mode: 'property', propertyKey: 'status' } });
 
+		await screen.findByRole('table');
 		const rows = screen.getAllByRole('row').slice(1); // drop the header row
 		const names = rows.map((row) => (within(row).getByRole('textbox') as HTMLInputElement).value);
 		expect(names).toEqual(['Draft it', 'Build it', 'Ship it']);

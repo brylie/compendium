@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { untrack } from 'svelte';
+	import type * as Y from 'yjs';
 	import { resolve } from '$app/paths';
 	import { nanoid } from 'nanoid';
-	import { getClientDoc } from '$lib/client/yjs-client';
+	import { getShardDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
 	import {
 		createRecord,
@@ -23,7 +24,8 @@
 
 	let { data }: PageProps = $props();
 
-	let ydoc: ReturnType<typeof getClientDoc> | undefined = $state();
+	let ydoc: Y.Doc | undefined = $state();
+	let shardId: string | undefined = $state();
 	// Initial-render-only snapshot of the SSR-loaded title, shown before ydoc
 	// mounts; refresh() (below) is what keeps it in sync with the Y.Doc
 	// afterwards — untrack() here just tells Svelte that's deliberate.
@@ -50,31 +52,41 @@
 		primaryFieldKey = view.collection?.primaryFieldKey;
 	}
 
-	onMount(() => {
-		const doc = getClientDoc();
-		ydoc = doc;
-		refresh();
+	// SvelteKit reuses this component instance across client-side navigations
+	// between two /table/[id] routes — this effect re-runs whenever
+	// data.collectionId changes (not just on mount), resolving that
+	// Collection's real shard (#120) and reconnecting to it.
+	$effect(() => {
+		const id = data.collectionId;
+		let cancelled = false;
+		let cleanup: (() => void) | undefined;
 
-		const recordsMap = doc.getMap('records');
-		const collectionsMap = doc.getMap('collections');
-		const observer = () => refresh();
-		recordsMap.observeDeep(observer);
-		collectionsMap.observeDeep(observer);
+		(async () => {
+			const res = await fetch(`/api/collections/${id}/shard`);
+			const { shardId: resolvedShardId } = await res.json();
+			if (cancelled) return;
+
+			shardId = resolvedShardId;
+			const doc = getShardDoc(resolvedShardId);
+			ydoc = doc;
+			refresh();
+
+			const recordsMap = doc.getMap('records');
+			const collectionsMap = doc.getMap('collections');
+			const observer = () => refresh();
+			recordsMap.observeDeep(observer);
+			collectionsMap.observeDeep(observer);
+
+			cleanup = () => {
+				recordsMap.unobserveDeep(observer);
+				collectionsMap.unobserveDeep(observer);
+			};
+		})();
 
 		return () => {
-			recordsMap.unobserveDeep(observer);
-			collectionsMap.unobserveDeep(observer);
+			cancelled = true;
+			cleanup?.();
 		};
-	});
-
-	// SvelteKit reuses this component instance across client-side navigations
-	// between two /table/[id] routes (onMount doesn't re-run) — refresh()
-	// must re-run whenever data.collectionId changes, not just on
-	// mount/Yjs updates, or the page keeps showing the previously-open
-	// collection.
-	$effect(() => {
-		if (!ydoc) return;
-		refresh();
 	});
 
 	function handleTitleInput(event: Event): void {
@@ -174,6 +186,7 @@
 									</span>
 									<FieldMenu
 										collectionId={data.collectionId}
+										shardId={shardId!}
 										{schema}
 										{property}
 										{primaryFieldKey}
@@ -244,6 +257,7 @@
 <FieldManagerDialog
 	open={fieldManagerOpen}
 	collectionId={data.collectionId}
+	shardId={shardId!}
 	onClose={() => (fieldManagerOpen = false)}
 />
 

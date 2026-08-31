@@ -2,6 +2,29 @@ import type { Server } from 'node:http';
 import type { Http2SecureServer } from 'node:http2';
 import { WebSocketServer } from 'ws';
 import { setupWSConnection } from './yjs-ws-server.js';
+import type { WorkspaceSelector } from './workspace-store.js';
+
+const SHARD_ROOM_PREFIX = 'shard-';
+
+/**
+ * Turns the room-name path segment the y-websocket client appended
+ * (serverUrl + '/' + roomname) into a WorkspaceSelector. `'workspace'` (or no
+ * segment at all) is the existing shared room — Documents, unsharded — and
+ * resolves to no selector, exactly as before. `'shard-<id>'` is one
+ * Collection's own shard (#120); the client always obtains `<id>` from the
+ * server first (GET /api/collections/[id]/shard), never assumes it equals
+ * the collectionId, so this is trusted the same bounded way every other
+ * Phase-0 boundary already is — no auth exists to independently verify it
+ * against, but an unknown/fabricated id just lazily resolves to a fresh,
+ * empty, harmless Y.Doc (resolveWorkspaceContext's existing behavior),
+ * never someone else's real data.
+ */
+function selectorFromRoom(room: string): WorkspaceSelector | undefined {
+	if (room.startsWith(SHARD_ROOM_PREFIX)) {
+		return { shardId: room.slice(SHARD_ROOM_PREFIX.length) };
+	}
+	return undefined;
+}
 
 /**
  * Attaches the Yjs sync/awareness WebSocket endpoint to a raw Node HTTP server.
@@ -13,20 +36,14 @@ export function attachYjsWebSocket(
 	path = '/ws'
 ): WebSocketServer {
 	const wss = new WebSocketServer({ noServer: true });
-	// No selector passed through here — see the room-name comment below for why.
-	wss.on('connection', (ws) => setupWSConnection(ws));
+	wss.on('connection', (ws, request) => {
+		const { pathname } = new URL(request.url ?? '/', 'http://localhost');
+		const room = pathname === path ? '' : pathname.slice(path.length + 1);
+		setupWSConnection(ws, selectorFromRoom(room));
+	});
 
 	server.on('upgrade', (request, socket, head) => {
 		const { pathname } = new URL(request.url ?? '/', 'http://localhost');
-		// The y-websocket client always appends a room name segment
-		// (serverUrl + '/' + roomname), matched here by prefix only to tell
-		// "is this our endpoint" from "is this Vite HMR's" apart. That segment is
-		// deliberately *not* forwarded into setupWSConnection as a workspace
-		// selector: Phase 0 has no auth to validate a client-supplied room name
-		// against, so every connection binds to the explicit trusted-local
-		// default context regardless of what room it asked for (issue #30) — a
-		// client-controlled value is a selector, never authority, until #13 adds
-		// the auth layer that could make one trustworthy.
 		if (pathname !== path && !pathname.startsWith(path + '/')) {
 			// On a server shared with another 'upgrade' listener (notably
 			// Vite's own HMR websocket, registered on this same httpServer in

@@ -14,7 +14,10 @@ import type { ViewConfig } from '$lib/data/views';
 import BoardCollectionViewHarness from './BoardCollectionViewHarness.svelte';
 
 let ydoc: Y.Doc;
-vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
+vi.mock('$lib/client/yjs-client', () => ({
+	getClientDoc: () => ydoc,
+	getShardDoc: () => ydoc
+}));
 
 const actor = { kind: 'human' as const, userId: 'local' };
 
@@ -28,16 +31,24 @@ function renderBoard(
 describe('BoardCollectionView', () => {
 	beforeEach(() => {
 		ydoc = new Y.Doc();
+		// BoardCollectionView resolves its real shard via a fetch before
+		// connecting — see #120. Stubbed to resolve immediately against the
+		// same test doc.
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => ({ json: async () => ({ shardId: 'test-shard' }) }))
+		);
 	});
 
 	afterEach(() => {
 		ydoc.destroy();
+		vi.unstubAllGlobals();
 	});
 
-	it('prompts to add a select property when the collection has none', () => {
+	it('prompts to add a select property when the collection has none', async () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Board', schema: [] });
 		renderBoard('col-1');
-		expect(screen.getByText(/doesn't have one yet/)).toBeInTheDocument();
+		expect(await screen.findByText(/doesn't have one yet/)).toBeInTheDocument();
 	});
 
 	it('adds a select property from the inline empty-state form', async () => {
@@ -45,7 +56,9 @@ describe('BoardCollectionView', () => {
 		const user = userEvent.setup();
 		renderBoard('col-1');
 
-		expect(screen.getByRole('textbox', { name: 'Select property name' })).toHaveValue('Status');
+		expect(await screen.findByRole('textbox', { name: 'Select property name' })).toHaveValue(
+			'Status'
+		);
 		await user.click(screen.getByRole('button', { name: 'Add a select property' }));
 
 		expect(screen.getByText('No Status')).toBeInTheDocument();
@@ -54,7 +67,7 @@ describe('BoardCollectionView', () => {
 		]);
 	});
 
-	it('renders one column per select option, plus a catch-all, even when empty', () => {
+	it('renders one column per select option, plus a catch-all, even when empty', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'Board',
@@ -72,7 +85,7 @@ describe('BoardCollectionView', () => {
 		});
 		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
-		expect(screen.getByText('To do')).toBeInTheDocument();
+		expect(await screen.findByText('To do')).toBeInTheDocument();
 		expect(screen.getByText('Done')).toBeInTheDocument();
 		expect(screen.getByText('No Status')).toBeInTheDocument();
 	});
@@ -100,7 +113,7 @@ describe('BoardCollectionView', () => {
 		const user = userEvent.setup();
 		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
-		const titleInput = screen.getByDisplayValue('Ship it');
+		const titleInput = await screen.findByDisplayValue('Ship it');
 		await user.clear(titleInput);
 		await user.type(titleInput, 'Ship it today');
 		await user.tab();
@@ -123,7 +136,7 @@ describe('BoardCollectionView', () => {
 		const user = userEvent.setup();
 		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
-		await user.click(screen.getByRole('button', { name: 'Add card to Done' }));
+		await user.click(await screen.findByRole('button', { name: 'Add card to Done' }));
 
 		expect(screen.getByRole('button', { name: 'Delete card' })).toBeInTheDocument();
 	});
@@ -145,7 +158,7 @@ describe('BoardCollectionView', () => {
 		const user = userEvent.setup();
 		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
-		expect(screen.getByDisplayValue('Doomed card')).toBeInTheDocument();
+		expect(await screen.findByDisplayValue('Doomed card')).toBeInTheDocument();
 		await user.click(screen.getByRole('button', { name: 'Delete card' }));
 
 		expect(getRecord(ydoc, record.id)).toBeUndefined();
@@ -181,7 +194,9 @@ describe('BoardCollectionView', () => {
 		);
 		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
-		const card = screen.getByDisplayValue('Movable').closest('[draggable="true"]') as HTMLElement;
+		const card = (await screen.findByDisplayValue('Movable')).closest(
+			'[draggable="true"]'
+		) as HTMLElement;
 		const doneColumn = screen.getByRole('group', { name: 'Done column' });
 
 		const { fireEvent } = await import('@testing-library/dom');
@@ -226,7 +241,7 @@ describe('BoardCollectionView', () => {
 		const user = userEvent.setup();
 		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
-		const moveSelect = screen.getByLabelText('Move Movable to column');
+		const moveSelect = await screen.findByLabelText('Move Movable to column');
 		await user.selectOptions(moveSelect, 'done');
 
 		expect(getRecord(ydoc, record.id)?.properties?.status).toEqual({
@@ -235,7 +250,7 @@ describe('BoardCollectionView', () => {
 		});
 	});
 
-	it('uses the explicitly chosen primary field as the card title, not just the first text field (issue #96)', () => {
+	it('uses the explicitly chosen primary field as the card title, not just the first text field (issue #96)', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'Board',
@@ -262,10 +277,10 @@ describe('BoardCollectionView', () => {
 		// The chosen primary field ('notes'), not the schema-first text field
 		// ('title'), is the one rendered as the card's featured title cell —
 		// 'title' still renders too, but only as an ordinary field row.
-		expect(screen.getByDisplayValue('Chosen primary field')).toBeInTheDocument();
+		expect(await screen.findByDisplayValue('Chosen primary field')).toBeInTheDocument();
 	});
 
-	it('keeps an explicitly chosen primary field after the schema is reordered', () => {
+	it('keeps an explicitly chosen primary field after the schema is reordered', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'Board',
@@ -288,7 +303,7 @@ describe('BoardCollectionView', () => {
 		updateCollectionSchema(ydoc, 'col-1', [...schema].reverse());
 		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
-		expect(screen.getByDisplayValue('Still primary')).toBeInTheDocument();
+		expect(await screen.findByDisplayValue('Still primary')).toBeInTheDocument();
 	});
 
 	it('adds a new option to a non-grouping select field from a card without touching the grouping property', async () => {
@@ -313,7 +328,7 @@ describe('BoardCollectionView', () => {
 		const user = userEvent.setup();
 		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
-		await user.click(screen.getByTitle('Add option'));
+		await user.click(await screen.findByTitle('Add option'));
 		await user.type(screen.getByLabelText('Option name'), 'High');
 		await user.click(screen.getByRole('button', { name: 'Add' }));
 

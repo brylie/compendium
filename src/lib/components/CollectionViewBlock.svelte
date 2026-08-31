@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { CURRENT_USER } from '$lib/client/actor';
-	import {
-		getCollection,
-		listCollections,
-		setRecordReferencedId,
-		setRecordViewConfig
-	} from '$lib/data/records';
-	import type { EmbeddedViewConfig, ViewType, WorkspaceRecord } from '$lib/data/types';
+	import { setRecordReferencedId, setRecordViewConfig } from '$lib/data/records';
+	import type {
+		CollectionMeta,
+		EmbeddedViewConfig,
+		ViewType,
+		WorkspaceRecord
+	} from '$lib/data/types';
 	import type * as Y from 'yjs';
 	import Icon from './Icon.svelte';
 	import TableCollectionView from './TableCollectionView.svelte';
@@ -16,10 +16,16 @@
 
 	let {
 		block,
-		ydoc
+		ydoc,
+		collections
 	}: {
 		block: WorkspaceRecord;
 		ydoc: Y.Doc;
+		// Catalog-backed (see doc/[id]/+page.server.ts), not derived from ydoc:
+		// a sharded Collection's own meta entry doesn't live in this Document's
+		// doc at all (#120) — only its own shard does, which this component has
+		// no connection to. Not live, same accepted tradeoff as Sidebar's list.
+		collections: CollectionMeta[];
 	} = $props();
 
 	const VIEW_TYPES: { value: ViewType; label: string; icon: 'table' | 'board' | 'calendar' }[] = [
@@ -29,7 +35,9 @@
 	];
 
 	const collection = $derived(
-		block.referencedRecordId ? getCollection(ydoc, block.referencedRecordId) : undefined
+		block.referencedRecordId
+			? collections.find((c) => c.id === block.referencedRecordId)
+			: undefined
 	);
 	const isBroken = $derived(!!block.referencedRecordId && !collection);
 	const isConfigured = $derived(!!collection && !!block.viewConfig?.viewType);
@@ -39,7 +47,7 @@
 	let changing = $state(false);
 
 	function insert(): void {
-		if (!pickerCollectionId || !getCollection(ydoc, pickerCollectionId)) return;
+		if (!pickerCollectionId || !collections.some((c) => c.id === pickerCollectionId)) return;
 		setRecordReferencedId(ydoc, block.id, pickerCollectionId, CURRENT_USER);
 		setRecordViewConfig(ydoc, block.id, { viewType: pickerViewType }, CURRENT_USER);
 		changing = false;
@@ -122,7 +130,7 @@
 				class="rounded border border-border bg-bg px-2 py-1 text-xs text-fg focus:border-accent"
 			>
 				<option value="">Select collection…</option>
-				{#each listCollections(ydoc) as c (c.id)}
+				{#each collections as c (c.id)}
 					<option value={c.id}>{c.title || 'Untitled'}</option>
 				{/each}
 			</select>

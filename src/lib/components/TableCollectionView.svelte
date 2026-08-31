@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import type * as Y from 'yjs';
 	import { resolve } from '$app/paths';
-	import { getClientDoc } from '$lib/client/yjs-client';
+	import { getShardDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
 	import {
 		addSelectOption as addSelectOptionToSchema,
@@ -30,7 +30,8 @@
 		onConfigChange: (config: ViewConfig) => void;
 	} = $props();
 
-	let ydoc: ReturnType<typeof getClientDoc> | undefined = $state();
+	let ydoc: Y.Doc | undefined = $state();
+	let shardId: string | undefined = $state();
 	let schema: PropertyDefinition[] = $state([]);
 	let rows: WorkspaceRecord[] = $state([]);
 	let primaryFieldKey: string | undefined = $state();
@@ -49,25 +50,43 @@
 		primaryFieldKey = view.collection?.primaryFieldKey;
 	}
 
-	onMount(() => {
-		const doc = getClientDoc();
-		ydoc = doc;
+	// Resolves this Collection's real shard (#120) — never assumed equal to
+	// collectionId, since a Collection created before the shard-assignment
+	// cutover still resolves to the default shard — and (re)connects
+	// whenever collectionId changes (a component instance can be retargeted
+	// to a different Collection without remounting, e.g. via
+	// CollectionViewBlock's change-embed flow).
+	$effect(() => {
+		const id = collectionId;
+		let cancelled = false;
+		let cleanup: (() => void) | undefined;
 
-		const recordsMap = doc.getMap('records');
-		const collectionsMap = doc.getMap('collections');
-		const observer = () => refresh();
-		recordsMap.observeDeep(observer);
-		collectionsMap.observeDeep(observer);
+		(async () => {
+			const res = await fetch(`/api/collections/${id}/shard`);
+			const { shardId: resolvedShardId } = await res.json();
+			if (cancelled) return;
+
+			shardId = resolvedShardId;
+			const doc = getShardDoc(resolvedShardId);
+			ydoc = doc;
+
+			const recordsMap = doc.getMap('records');
+			const collectionsMap = doc.getMap('collections');
+			const observer = () => refresh();
+			recordsMap.observeDeep(observer);
+			collectionsMap.observeDeep(observer);
+			refresh();
+
+			cleanup = () => {
+				recordsMap.unobserveDeep(observer);
+				collectionsMap.unobserveDeep(observer);
+			};
+		})();
 
 		return () => {
-			recordsMap.unobserveDeep(observer);
-			collectionsMap.unobserveDeep(observer);
+			cancelled = true;
+			cleanup?.();
 		};
-	});
-
-	$effect(() => {
-		void collectionId;
-		untrack(() => refresh());
 	});
 
 	function addRow(): void {
@@ -124,7 +143,12 @@
 		>.
 	</p>
 {:else}
-	<ViewToolbar {collectionId} {schema} bind:config={() => config, onConfigChange} />
+	<ViewToolbar
+		{collectionId}
+		shardId={shardId!}
+		{schema}
+		bind:config={() => config, onConfigChange}
+	/>
 
 	<div class="overflow-x-auto rounded-lg border border-border bg-bg shadow-xs">
 		<table class="w-full border-collapse text-left text-sm">
@@ -144,6 +168,7 @@
 								</span>
 								<FieldMenu
 									{collectionId}
+									shardId={shardId!}
 									{schema}
 									{property}
 									{primaryFieldKey}

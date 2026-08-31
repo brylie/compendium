@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import { createDocument, createCollection } from '$lib/data/records';
+import { createDocument } from '$lib/data/records';
 import Sidebar from './Sidebar.svelte';
 
 const { mockPageState } = vi.hoisted(() => ({
@@ -116,9 +116,12 @@ describe('Sidebar', () => {
 	});
 
 	it('lists collections and highlights the active one', () => {
-		createCollection(ydoc, { id: 'col-1', title: 'My Table', schema: [] });
+		// Collections are catalog-backed only (#120), never derived from the live
+		// ydoc — see Sidebar.svelte's `collections` derived.
 		setPath('/table/col-1');
-		render(Sidebar, {});
+		render(Sidebar, {
+			initialCollections: [{ id: 'col-1', title: 'My Table', schema: [] } as never]
+		});
 		const link = screen.getByText('My Table').closest('a')!;
 		expect(link).toHaveClass('text-accent');
 	});
@@ -194,15 +197,24 @@ describe('Sidebar', () => {
 		expect(screen.getByText('Keep Me')).toBeInTheDocument();
 	});
 
-	it('deletes a collection after confirmation', async () => {
-		createCollection(ydoc, { id: 'col-1', title: 'Drop Table', schema: [] });
+	it('calls the delete API for a collection after confirmation', async () => {
+		// Deletion is routed through the service layer via a DELETE call (#120,
+		// a Collection lives in its own shard) rather than a raw CRDT write
+		// against ydoc — and since `collections` is catalog-backed only, it
+		// won't disappear from this render until the parent's SSR data
+		// refreshes; asserting the API call is what's actually observable here.
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
 		const user = userEvent.setup();
-		render(Sidebar, {});
+		render(Sidebar, {
+			initialCollections: [{ id: 'col-1', title: 'Drop Table', schema: [] } as never]
+		});
 
 		await user.click(screen.getByRole('button', { name: 'Delete collection' }));
 		await user.click(screen.getByRole('button', { name: 'Delete' }));
 
-		expect(screen.queryByText('Drop Table')).not.toBeInTheDocument();
+		await vi.waitFor(() =>
+			expect(fetch).toHaveBeenCalledWith('/api/collections/col-1', { method: 'DELETE' })
+		);
 	});
 
 	it('toggles dark mode via the footer button', async () => {
