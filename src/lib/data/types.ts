@@ -115,6 +115,19 @@ export interface WorkspaceRecord {
 	lastEditedAt: number;
 }
 
+// A Space is a catalog-only concept (docs/specifications/workspace-sharding.md
+// §2) — an organizational grouping of Documents/Collections within one
+// workspace, not part of the Yjs domain model itself (no Space Y.Doc, no
+// Space CRDT content). Read from the `spaces` table (src/lib/server/db/
+// schema.ts), never derived from a Y.Doc the way DocumentMeta/CollectionMeta
+// are — kept here anyway since it's the same "read-model shape a caller gets
+// back" role those types play.
+export interface SpaceMeta {
+	id: string;
+	workspaceId: string;
+	name: string;
+}
+
 export interface DocumentMeta {
 	id: string;
 	title: string;
