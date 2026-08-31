@@ -1,15 +1,15 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { createCollection, createDocument } from '$lib/services';
+import { createCollection, createDocument, listCollections, listDocuments } from '$lib/services';
 import { CURRENT_USER } from '$lib/server/current-user';
-import { listCatalogCollections, listCatalogDocuments } from '$lib/server/catalog';
-import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import type { Actions, PageServerLoad } from './$types';
 
+// Routed through the service layer, not the bare catalog reads directly —
+// see +layout.server.ts's identical comment for why (uncataloged content
+// would otherwise silently vanish from these cards).
 export const load: PageServerLoad = () => {
-	const { workspaceId } = resolveWorkspaceContext();
 	return {
-		documents: listCatalogDocuments(workspaceId),
-		collections: listCatalogCollections(workspaceId)
+		documents: listDocuments(CURRENT_USER),
+		collections: listCollections(CURRENT_USER)
 	};
 };
 

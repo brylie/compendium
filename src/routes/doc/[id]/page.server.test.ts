@@ -12,10 +12,13 @@ describe('routes/doc/[id]/+page.server', () => {
 
 		const result = load({ params: { id: docMeta.id } } as Parameters<typeof load>[0]);
 
+		// documents is routed through the service layer's listDocuments, which
+		// still finds this uncataloged (raw-CRDT-written) document via its
+		// catalog-plus-uncataloged-fallback union — not empty.
 		expect(result).toEqual({
 			documentId: docMeta.id,
 			title: 'My Doc',
-			documents: [],
+			documents: [expect.objectContaining({ id: docMeta.id, title: 'My Doc' })],
 			collections: []
 		});
 	});
