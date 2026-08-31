@@ -27,8 +27,23 @@ const AGENT_HOLD_TTL_MS = 100_000; // PRD target: 90-120s
 // can legitimately hold records on two different Awareness instances under
 // the same clientId; a flat Map<number, ...> would let the second
 // scheduleTtl() call silently cancel the first shard's timer.
-const agentClocks = new Map<Awareness, Map<number, number>>();
-const agentTtlTimers = new Map<Awareness, Map<number, ReturnType<typeof setTimeout>>>();
+//
+// WeakMap (not Map) so a destroyed Awareness instance — a shard whose
+// connections have all closed — isn't strongly retained for the process
+// lifetime just because it once held an agent's clock/timer state.
+const agentClocks = new WeakMap<Awareness, Map<number, number>>();
+const agentTtlTimers = new WeakMap<Awareness, Map<number, ReturnType<typeof setTimeout>>>();
+
+// Test-only flat registry of every currently-scheduled timer, independent of
+// which Awareness/clientId it belongs to — a WeakMap can't be enumerated, so
+// resetHoldsForTests/resetHoldEvictionForTests need this side channel to
+// cancel leftover timers between test runs.
+const activeTestTimers = new Set<ReturnType<typeof setTimeout>>();
+
+function clearAllTestTimers(): void {
+	activeTestTimers.forEach((timer) => clearTimeout(timer));
+	activeTestTimers.clear();
+}
 
 function clocksFor(awareness: Awareness): Map<number, number> {
 	let clocks = agentClocks.get(awareness);
@@ -117,11 +132,7 @@ export function initHoldEviction(awareness: Awareness): void {
 
 export function resetHoldEvictionForTests(): void {
 	wiredAwareness = new WeakSet<Awareness>();
-	agentClocks.clear();
-	for (const timers of agentTtlTimers.values()) {
-		for (const timer of timers.values()) clearTimeout(timer);
-	}
-	agentTtlTimers.clear();
+	clearAllTestTimers();
 }
 
 function evictFromOthers(awareness: Awareness, recordId: string, exceptClientId: number): void {
@@ -250,24 +261,25 @@ function scheduleTtl(awareness: Awareness, clientId: number): void {
 	const timer = setTimeout(() => {
 		writeRemoteState(awareness, clientId, null);
 		timersFor(awareness).delete(clientId);
+		activeTestTimers.delete(timer);
 	}, AGENT_HOLD_TTL_MS);
 	timer.unref?.();
 	timers.set(clientId, timer);
+	activeTestTimers.add(timer);
 }
 
 function clearTtl(awareness: Awareness, clientId: number): void {
 	const timers = timersFor(awareness);
 	const timer = timers.get(clientId);
-	if (timer) clearTimeout(timer);
+	if (timer) {
+		clearTimeout(timer);
+		activeTestTimers.delete(timer);
+	}
 	timers.delete(clientId);
 }
 
 /** Test-only: drop module-level state between test runs. */
 export function resetHoldsForTests(): void {
-	agentClocks.clear();
-	for (const timers of agentTtlTimers.values()) {
-		for (const timer of timers.values()) clearTimeout(timer);
-	}
-	agentTtlTimers.clear();
+	clearAllTestTimers();
 	wiredAwareness = new WeakSet<Awareness>();
 }
