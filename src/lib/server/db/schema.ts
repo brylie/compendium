@@ -177,3 +177,53 @@ export const catalogOutbox = sqliteTable('catalog_outbox', {
 	createdAt: integer('created_at').notNull(),
 	publishedAt: integer('published_at')
 });
+
+// --- Workspace migration manifest (#114/#132, workspace-sharding.md §7) ---
+//
+// Tracks one legacy-workspace migration attempt and its per-target durable
+// state — the mechanism behind §7's "re-running a migration reuses verified
+// targets from that manifest and creates no duplicate rows, records, or
+// snapshots." Deliberately separate from the catalog tables above: a
+// migration target's durability here is orthogonal to whether a catalog row
+// already exists for it (ensureCatalogBootstrapped may have already created
+// a placeholder catalog_documents/catalog_collections/record_locator row
+// pointing at the shared default shard — this manifest is what actually
+// tracks "has this legacy id been moved to its own real shard yet," and
+// migration.ts upserts those placeholder rows in place rather than treating
+// their prior existence as a signal that migration already happened).
+export const migrationRuns = sqliteTable(
+	'migration_runs',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		workspaceId: text('workspace_id').notNull().default('default'),
+		legacySnapshotId: text('legacy_snapshot_id').notNull(),
+		migrationVersion: text('migration_version').notNull(),
+		status: text('status').notNull().$type<'running' | 'complete' | 'failed'>(),
+		startedAt: integer('started_at').notNull(),
+		completedAt: integer('completed_at')
+	},
+	(t) => [
+		uniqueIndex('migration_runs_identity_unique').on(
+			t.workspaceId,
+			t.legacySnapshotId,
+			t.migrationVersion
+		)
+	]
+);
+
+export const migrationTargets = sqliteTable(
+	'migration_targets',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		runId: integer('run_id')
+			.notNull()
+			.references(() => migrationRuns.id),
+		legacyId: text('legacy_id').notNull(), // the original Document/Collection id, preserved exactly
+		kind: text('kind').notNull().$type<'document' | 'collection'>(),
+		targetShardId: text('target_shard_id').notNull(),
+		checksum: text('checksum'),
+		durable: integer('durable', { mode: 'boolean' }).notNull().default(false),
+		migratedAt: integer('migrated_at')
+	},
+	(t) => [uniqueIndex('migration_targets_run_legacy_unique').on(t.runId, t.legacyId)]
+);
