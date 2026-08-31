@@ -6,6 +6,11 @@ import {
 	flushPendingAuditEvents,
 	resetAuditObserverForTests
 } from './audit-observer.js';
+import {
+	attachCatalogMirrorObserver,
+	flushPendingCatalogMirrorEvents,
+	resetCatalogMirrorObserverForTests
+} from './catalog-mirror-observer.js';
 import { initHoldEviction, resetHoldEvictionForTests } from './holds.js';
 import { ensureCatalogBootstrapped } from './catalog.js';
 
@@ -92,6 +97,7 @@ function createContext(workspaceId: string, shardId: string): InternalContext {
 	// observer attaches (so it never produces a spurious audit trail).
 	const { defaultSpaceId } = ensureCatalogBootstrapped(workspaceId, shardId, doc);
 	attachDocAuditObserver(doc);
+	attachCatalogMirrorObserver(workspaceId, doc);
 
 	const awareness = new Awareness(doc);
 	initHoldEviction(awareness);
@@ -193,6 +199,7 @@ function wireShutdownOnce(): void {
 	globalThis.__workspaceShutdownWired = true;
 	const shutdown = () => {
 		flushPendingAuditEvents();
+		flushPendingCatalogMirrorEvents();
 		flush();
 		process.exit(0);
 	};
@@ -208,5 +215,6 @@ export function resetWorkspaceStoreForTests(): void {
 	}
 	globalThis.__workspaceContexts = undefined;
 	resetAuditObserverForTests();
+	resetCatalogMirrorObserverForTests();
 	resetHoldEvictionForTests();
 }
