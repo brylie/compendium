@@ -190,3 +190,120 @@ describe('holds: agent hold requests', () => {
 		expect(isHeldByClient(awareness, clientId, 'r2')).toBe(false);
 	});
 });
+
+describe('holds: eviction wiring across multiple concurrent Awareness instances (#120)', () => {
+	// workspace-store.ts can resolve more than one concurrent {workspaceId,
+	// shardId} context in the same process — each with its own Awareness —
+	// and calls initHoldEviction() on every one of them. A single
+	// module-level "already wired" flag would only ever wire the first one,
+	// leaving every subsequent shard's cross-client hold eviction silently
+	// dead. This proves eviction works independently on a *second* instance
+	// resolved after the first, without needing real Collection sharding.
+	let docA: Y.Doc;
+	let docB: Y.Doc;
+	let awarenessA: Awareness;
+	let awarenessB: Awareness;
+
+	beforeEach(() => {
+		resetHoldsForTests();
+		docA = new Y.Doc();
+		docB = new Y.Doc();
+		awarenessA = new Awareness(docA);
+		awarenessB = new Awareness(docB);
+	});
+
+	afterEach(() => {
+		awarenessA.destroy();
+		awarenessB.destroy();
+	});
+
+	it('wires eviction independently on every distinct Awareness instance, not just the first', () => {
+		initHoldEviction(awarenessA);
+		initHoldEviction(awarenessB);
+
+		const clientId = clientIdForToken('token-a');
+		requestAgentHold(awarenessA, clientId, agent, ['r1'], () => true);
+		requestAgentHold(awarenessB, clientId, agent, ['r1'], () => true);
+		expect(isHeldByClient(awarenessA, clientId, 'r1')).toBe(true);
+		expect(isHeldByClient(awarenessB, clientId, 'r1')).toBe(true);
+
+		setHumanCursor(awarenessA, 'r1');
+		setHumanCursor(awarenessB, 'r1');
+
+		expect(isHeldByClient(awarenessA, clientId, 'r1')).toBe(false);
+		expect(isHeldByClient(awarenessB, clientId, 'r1')).toBe(false);
+	});
+
+	it('still wires the second instance even when the first was initialized long before it', () => {
+		initHoldEviction(awarenessA);
+		// Simulate real usage: awarenessB is only created/wired well after A.
+		const clientId = clientIdForToken('token-a');
+		requestAgentHold(awarenessA, clientId, agent, ['r1'], () => true);
+		setHumanCursor(awarenessA, 'r1');
+		expect(isHeldByClient(awarenessA, clientId, 'r1')).toBe(false);
+
+		initHoldEviction(awarenessB);
+		requestAgentHold(awarenessB, clientId, agent, ['r2'], () => true);
+		setHumanCursor(awarenessB, 'r2');
+		expect(isHeldByClient(awarenessB, clientId, 'r2')).toBe(false);
+	});
+});
+
+describe('holds: TTL timers scoped per-Awareness, not by clientId alone (#120)', () => {
+	// The same access token always maps to the same synthetic clientId,
+	// regardless of which shard's Awareness it's holding records on — a
+	// cross-shard agent hold batch (a stated acceptance criterion) can
+	// legitimately hold under that same clientId on two different Awareness
+	// instances at once. A TTL timer map keyed only by clientId would let
+	// the second shard's scheduleTtl() silently cancel the first shard's
+	// timer, so the first hold would never auto-expire.
+	let docA: Y.Doc;
+	let docB: Y.Doc;
+	let awarenessA: Awareness;
+	let awarenessB: Awareness;
+
+	beforeEach(() => {
+		resetHoldsForTests();
+		docA = new Y.Doc();
+		docB = new Y.Doc();
+		awarenessA = new Awareness(docA);
+		awarenessB = new Awareness(docB);
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		awarenessA.destroy();
+		awarenessB.destroy();
+	});
+
+	it('a hold on one shard keeps its own TTL even after the same clientId schedules a hold on another shard', () => {
+		const clientId = clientIdForToken('token-a');
+
+		requestAgentHold(awarenessA, clientId, agent, ['r1'], () => true);
+		vi.advanceTimersByTime(60_000);
+		// Scheduling a second, later hold under the *same* clientId on a
+		// *different* Awareness must not reset or cancel shard A's timer.
+		requestAgentHold(awarenessB, clientId, agent, ['r2'], () => true);
+
+		vi.advanceTimersByTime(39_999); // 99,999ms since A's grant
+		expect(isHeldByClient(awarenessA, clientId, 'r1')).toBe(true);
+		vi.advanceTimersByTime(1); // 100,000ms since A's grant
+		expect(isHeldByClient(awarenessA, clientId, 'r1')).toBe(false);
+	});
+
+	it('both shards expire independently at their own 100s boundary', () => {
+		const clientId = clientIdForToken('token-a');
+
+		requestAgentHold(awarenessA, clientId, agent, ['r1'], () => true);
+		vi.advanceTimersByTime(50_000);
+		requestAgentHold(awarenessB, clientId, agent, ['r2'], () => true);
+
+		vi.advanceTimersByTime(50_000); // 100,000ms since A, 50,000ms since B
+		expect(isHeldByClient(awarenessA, clientId, 'r1')).toBe(false);
+		expect(isHeldByClient(awarenessB, clientId, 'r2')).toBe(true);
+
+		vi.advanceTimersByTime(50_000); // 100,000ms since B
+		expect(isHeldByClient(awarenessB, clientId, 'r2')).toBe(false);
+	});
+});
