@@ -1,7 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
-import { createDocument, createRecord, getRecord, getRecordYText } from '$lib/data/records';
+import {
+	createDocument,
+	createRecord,
+	getRecord,
+	getRecordYText,
+	updateRecordContent
+} from '$lib/data/records';
 import { queryAuditLog } from '$lib/server/audit';
+import {
+	createSpace,
+	recordCatalogDocumentCreated,
+	reserveDocumentLocator
+} from '$lib/server/catalog';
+import { grantDocumentAccess } from '$lib/mcp/tokens';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { plainText, yTextToRichText } from '$lib/data/richtext';
 import { serviceModules, serviceSurfaces } from '$lib/services/manifest';
@@ -228,6 +240,96 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		await harness.waitForCondition(() => true, { timeoutMs: 200 }); // let sync settle
 		expect(getRecordYText(workspaceClient.doc, block.recordId)).toBeUndefined();
 		expect(workspaceClient.doc.getMap('documents').has(newDoc.id)).toBe(false);
+	});
+
+	it("3c. MCP search_workspace's space_id never crosses a Space boundary (#114/#133)", async () => {
+		const { token, record } = harness.createToken({
+			clientLabel: 'Space Isolation Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+		const mcp = await harness.getMcpClient(token);
+
+		// create_document (real MCP call, service layer) lands in the
+		// workspace's default Space and auto-grants this token access to it.
+		const createRes = await mcp.callTool({
+			name: 'create_document',
+			arguments: { title: 'Space A Doc' }
+		});
+		const docA = parseMcpText<{ id: string }>(createRes);
+		const blockA = await mcp.callTool({
+			name: 'create_record',
+			arguments: { parentId: docA.id, blockType: 'paragraph' }
+		});
+		const recordA = parseMcpText<{ recordId: string }>(blockA);
+		await mcp.callTool({
+			name: 'hold_records',
+			arguments: { recordIds: [recordA.recordId] }
+		});
+		await mcp.callTool({
+			name: 'write_record',
+			arguments: { recordId: recordA.recordId, markdown: 'unicornsparkle' }
+		});
+
+		// A second Space, with a Document created directly (no MCP tool for
+		// this exists yet — see #133's own non-goal), holding the same
+		// searchable text — proving a real cross-Space leak would be caught,
+		// not just that an empty other Space returns nothing.
+		const { workspaceId } = resolveWorkspaceContext();
+		const spaceB = createSpace(workspaceId, 'Space B');
+		const docBShard = resolveWorkspaceContext({ workspaceId, shardId: 'tier-a-space-b-doc' });
+		const docB = createDocument(docBShard.doc, {
+			id: 'tier-a-space-b-doc',
+			title: 'Space B Doc'
+		});
+		reserveDocumentLocator(workspaceId, spaceB.id, docB.id, docBShard.shardId);
+		recordCatalogDocumentCreated({
+			workspaceId,
+			spaceId: spaceB.id,
+			id: docB.id,
+			title: docB.title,
+			order: docB.order,
+			shardId: docBShard.shardId
+		});
+		const recordB = createRecord(
+			docBShard.doc,
+			{ parentId: docB.id, blockType: 'paragraph' },
+			human
+		);
+		updateRecordContent(
+			docBShard.doc,
+			recordB.id,
+			{ runs: [{ text: 'unicornsparkle', marks: {} }] },
+			human
+		);
+
+		// Grant this same token access to docB too — otherwise the pre-existing
+		// per-ID token filter alone would exclude recordB regardless of whether
+		// space_id filtering does anything at all, and the isolation assertion
+		// below would pass for the wrong reason.
+		grantDocumentAccess(record.tokenHash, docB.id);
+
+		// Baseline: with no Space filter, the token can see both records —
+		// proves access and content are both genuinely in place before testing
+		// that space_id actually does the excluding.
+		const unscopedRes = await mcp.callTool({
+			name: 'search_workspace',
+			arguments: { query: 'unicornsparkle' }
+		});
+		const unscopedResults = parseMcpText<Array<{ recordId: string }>>(unscopedRes);
+		expect(unscopedResults.map((r) => r.recordId)).toContain(recordA.recordId);
+		expect(unscopedResults.map((r) => r.recordId)).toContain(recordB.id);
+
+		// The real MCP client, scoped to Space A, never sees Space B's match —
+		// exercised over the actual HTTP transport, not an in-process call.
+		const { defaultSpaceId: spaceAId } = resolveWorkspaceContext();
+		const scopedRes = await mcp.callTool({
+			name: 'search_workspace',
+			arguments: { query: 'unicornsparkle', space_id: spaceAId }
+		});
+		const scopedResults = parseMcpText<Array<{ recordId: string }>>(scopedRes);
+		expect(scopedResults.map((r) => r.recordId)).toContain(recordA.recordId);
+		expect(scopedResults.map((r) => r.recordId)).not.toContain(recordB.id);
 	});
 
 	it('4. MCP hold_records on block where human cursor is -> denied for that block, granted for others', async () => {
