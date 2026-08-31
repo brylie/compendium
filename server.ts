@@ -13,11 +13,25 @@ const port = Number(process.env.PORT ?? 3000);
 const server = createServer(handler);
 attachYjsWebSocket(server);
 
+// DATABASE_URL is usually a local sqlite file path, but nothing prevents it
+// from being a connection string with embedded credentials — strip
+// userinfo before it ever reaches a log line.
+function sanitizeDbPath(raw: string): string {
+	try {
+		const url = new URL(raw);
+		url.username = '';
+		url.password = '';
+		return url.toString();
+	} catch {
+		return raw;
+	}
+}
+
 server.listen(port, () => {
 	// Instance/workspace identity and DB path, not secrets — makes the
 	// isolation boundary #111 introduces observable at a glance rather than
 	// something only inferrable from DATABASE_URL (#111).
-	const dbPath = process.env.DATABASE_URL ?? '.data/compendium.db';
+	const dbPath = sanitizeDbPath(process.env.DATABASE_URL ?? '.data/compendium.db');
 	console.log(
 		`Compendium listening on http://localhost:${port} ` +
 			`(instance/workspace: ${getInstanceWorkspaceId()}, db: ${dbPath})`

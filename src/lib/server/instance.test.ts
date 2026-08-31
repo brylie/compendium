@@ -1,9 +1,17 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { getInstanceWorkspaceId } from './instance';
 
 describe('instance: getInstanceWorkspaceId (#111)', () => {
+	const originalInstanceId = process.env.COMPENDIUM_INSTANCE_ID;
+
 	afterEach(() => {
 		delete process.env.COMPENDIUM_INSTANCE_ID;
+	});
+
+	afterAll(() => {
+		if (originalInstanceId !== undefined) {
+			process.env.COMPENDIUM_INSTANCE_ID = originalInstanceId;
+		}
 	});
 
 	it("falls back to 'default' when COMPENDIUM_INSTANCE_ID is unset", () => {

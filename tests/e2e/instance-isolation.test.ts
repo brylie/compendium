@@ -118,5 +118,22 @@ describe('Instance isolation: two configured instances never cross-observe (#111
 		const listResB = await mcpB.callTool({ name: 'list_documents', arguments: {} });
 		const listB = parseMcpText<Array<{ id: string }>>(listResB);
 		expect(listB.map((d) => d.id)).not.toContain(docA.id);
+
+		// Even a client that somehow already knows docA.id (guessed, leaked,
+		// whatever) can't connect to its shard room from instance-b: the
+		// server-side isKnownShard check (#111/#138) is scoped by the
+		// *resolving* instance's own workspaceId, so docA's shard is unknown
+		// from instance-b's catalog even though the id itself is valid on
+		// instance-a. Still on COMPENDIUM_INSTANCE_ID = 'instance-b' here.
+		const shardClientB = harness.getYjsClient({ room: `shard-${docA.id}` });
+		const closeEvent = await new Promise<{ code: number; reason: string }>((resolve, reject) => {
+			const timeout = setTimeout(() => reject(new Error('connection-close not observed')), 2000);
+			shardClientB.provider.on('connection-close', (event: CloseEvent | null) => {
+				clearTimeout(timeout);
+				resolve({ code: event?.code ?? -1, reason: event?.reason ?? '' });
+			});
+		});
+		expect(closeEvent.code).toBe(4404);
+		shardClientB.disconnect();
 	});
 });

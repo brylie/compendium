@@ -173,11 +173,37 @@ describe('attachYjsWebSocket: upgrade routing', () => {
 			Buffer.alloc(0)
 		);
 
-		expect(closeSpy).toHaveBeenCalledWith(4004, 'Unknown shard');
+		expect(closeSpy).toHaveBeenCalledWith(4404, 'Unknown shard');
 		// No context was created for the fabricated id — resolving it now
 		// would be a *fresh* resolution, not proof one already existed, but
 		// the connection itself never got wired up (no message listener).
 		expect(ws.listenerCount('message')).toBe(0);
+		wss.close();
+	});
+
+	it("connects a \"shard-default\" room even though no locator row's recordId equals 'default' (#111/#138 regression)", () => {
+		// A pre-migration Document/Collection's own shard id is
+		// DEFAULT_SHARD_ID, not its own id (GET /api/{documents,collections}/
+		// [id]/shard's own contract) — the shardId a real client sends here is
+		// never a record id to look up in the locator by recordId. Regression
+		// guard for a real bug: an earlier version of this check queried the
+		// locator by recordId === shardId, which would have rejected every
+		// legitimate connection to un-migrated content.
+		const server = new EventEmitter();
+		const wss = attachYjsWebSocket(
+			server as unknown as Parameters<typeof attachYjsWebSocket>[0],
+			'/ws'
+		);
+		const ws = new MockWebSocket();
+		const closeSpy = vi.spyOn(ws, 'close');
+		vi.spyOn(wss, 'handleUpgrade').mockImplementation((req, _socket, _head, cb) => {
+			cb(ws as never, req);
+		});
+
+		server.emit('upgrade', { url: '/ws/shard-default' }, new FakeSocket(), Buffer.alloc(0));
+
+		expect(closeSpy).not.toHaveBeenCalled();
+		expect(resolveWorkspaceContext().connections.has(ws)).toBe(true);
 		wss.close();
 	});
 

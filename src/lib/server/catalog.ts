@@ -186,6 +186,32 @@ export function resolveShardForRecord(
 	return row ? { shardId: row.shardId } : undefined;
 }
 
+/**
+ * True when `shardId` is a real Document or Collection's own shard — i.e.
+ * *some* row in the locator was actually assigned there (#111/#138's
+ * WebSocket shard-room validation). Deliberately keyed by
+ * `recordLocator.shardId`, not `recordId`: a caller here only has the
+ * server-issued shard id (from GET /api/{documents,collections}/[id]/shard),
+ * which is **not** always equal to the resource's own id — a pre-migration
+ * Document/Collection still resolves to the shared default shard (see that
+ * endpoint's own comment), so checking `recordId = shardId` would wrongly
+ * reject every legitimate connection to un-migrated content.
+ */
+export function isKnownShard(workspaceId: string, shardId: string): boolean {
+	const row = getDb()
+		.select({ id: recordLocator.id })
+		.from(recordLocator)
+		.where(
+			and(
+				eq(recordLocator.workspaceId, workspaceId),
+				eq(recordLocator.shardId, shardId),
+				inArray(recordLocator.kind, ['document', 'collection'])
+			)
+		)
+		.get();
+	return row !== undefined;
+}
+
 export function recordCatalogDocumentCreated(input: {
 	workspaceId: string;
 	spaceId: string;

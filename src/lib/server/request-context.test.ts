@@ -1,12 +1,24 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveRequestContext } from './request-context';
 import { createSpace } from './catalog';
 import { resolveWorkspaceContext } from './workspace-store';
 import { CURRENT_USER } from './current-user';
 
 describe('request-context: resolveRequestContext (#111/#138)', () => {
+	const originalInstanceId = process.env.COMPENDIUM_INSTANCE_ID;
+
+	beforeEach(() => {
+		delete process.env.COMPENDIUM_INSTANCE_ID;
+	});
+
 	afterEach(() => {
 		delete process.env.COMPENDIUM_INSTANCE_ID;
+	});
+
+	afterAll(() => {
+		if (originalInstanceId !== undefined) {
+			process.env.COMPENDIUM_INSTANCE_ID = originalInstanceId;
+		}
 	});
 
 	it('defaults caller to CURRENT_USER and resolves workspaceId from instance config', () => {
