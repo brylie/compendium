@@ -3,12 +3,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { closeDb } from './store';
+import { clientIdForToken, requestAgentHold } from './holds';
 import {
 	flush,
 	registerConnection,
 	releaseContextIfIdle,
 	resetWorkspaceStoreForTests,
-	resolveWorkspaceContext
+	resolveWorkspaceContext,
+	sweepIdleContexts
 } from './workspace-store';
 
 describe('workspace-store: snapshot persistence survives a process restart', () => {
@@ -159,6 +161,62 @@ describe('workspace-store: isolation between independently-resolved contexts', (
 		registerConnection(a, { fakeSocket: true });
 
 		expect(releaseContextIfIdle('space-a', 'main')).toBe(false);
+	});
+
+	it('does not release a context with zero connections but an active agent hold', () => {
+		const a = resolveWorkspaceContext({ workspaceId: 'space-a', shardId: 'main' });
+		const clientId = clientIdForToken('test-token');
+		const result = requestAgentHold(
+			a.awareness,
+			clientId,
+			{ kind: 'agent', agentId: 'a1', name: 'Test Agent' },
+			['record-1'],
+			() => true
+		);
+		expect(result.granted).toEqual(['record-1']);
+
+		expect(releaseContextIfIdle('space-a', 'main')).toBe(false);
+	});
+
+	it('sweepIdleContexts releases only genuinely-idle contexts across a mix', () => {
+		const idle = resolveWorkspaceContext({ workspaceId: 'space-idle', shardId: 'main' });
+		const connected = resolveWorkspaceContext({ workspaceId: 'space-connected', shardId: 'main' });
+		const held = resolveWorkspaceContext({ workspaceId: 'space-held', shardId: 'main' });
+
+		registerConnection(connected, { fakeSocket: true });
+		requestAgentHold(
+			held.awareness,
+			clientIdForToken('test-token'),
+			{ kind: 'agent', agentId: 'a1', name: 'Test Agent' },
+			['record-1'],
+			() => true
+		);
+
+		sweepIdleContexts();
+
+		const reResolvedIdle = resolveWorkspaceContext({ workspaceId: 'space-idle', shardId: 'main' });
+		expect(reResolvedIdle.doc).not.toBe(idle.doc); // released and freshly recreated
+
+		const reResolvedConnected = resolveWorkspaceContext({
+			workspaceId: 'space-connected',
+			shardId: 'main'
+		});
+		expect(reResolvedConnected.doc).toBe(connected.doc); // never released
+
+		const reResolvedHeld = resolveWorkspaceContext({ workspaceId: 'space-held', shardId: 'main' });
+		expect(reResolvedHeld.doc).toBe(held.doc); // never released
+	});
+
+	it('survives an idle-unload-then-reload cycle with content intact', () => {
+		const a = resolveWorkspaceContext({ workspaceId: 'space-a', shardId: 'main' });
+		a.doc.getMap('workspace').set('title', 'Space A content');
+
+		const released = releaseContextIfIdle('space-a', 'main');
+		expect(released).toBe(true);
+
+		const reloaded = resolveWorkspaceContext({ workspaceId: 'space-a', shardId: 'main' });
+		expect(reloaded.doc).not.toBe(a.doc);
+		expect(reloaded.doc.getMap('workspace').get('title')).toBe('Space A content');
 	});
 
 	it('bootstraps a stable defaultSpaceId per workspace, distinct across workspaces', () => {

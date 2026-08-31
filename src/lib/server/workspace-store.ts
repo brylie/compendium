@@ -11,7 +11,7 @@ import {
 	flushPendingCatalogMirrorEvents,
 	resetCatalogMirrorObserverForTests
 } from './catalog-mirror-observer.js';
-import { initHoldEviction, resetHoldEvictionForTests } from './holds.js';
+import { aggregateHolds, initHoldEviction, resetHoldEvictionForTests } from './holds.js';
 import { ensureCatalogBootstrapped } from './catalog.js';
 
 // This is the one place a {workspaceId, shardId} selector resolves to a live
@@ -41,6 +41,7 @@ export const DEFAULT_WORKSPACE_ID = 'default';
 export const DEFAULT_SHARD_ID = 'default';
 
 const SAVE_INTERVAL_MS = 30_000;
+const IDLE_SWEEP_INTERVAL_MS = 60_000;
 
 export interface WorkspaceSelector {
 	workspaceId?: string;
@@ -68,6 +69,7 @@ interface InternalContext extends WorkspaceContext {
 declare global {
 	var __workspaceContexts: Map<string, InternalContext> | undefined;
 	var __workspaceShutdownWired: boolean | undefined;
+	var __workspaceIdleSweepWired: boolean | undefined;
 }
 
 function registry(): Map<string, InternalContext> {
@@ -121,6 +123,7 @@ function createContext(workspaceId: string, shardId: string): InternalContext {
 	context.saveTimer.unref?.();
 
 	wireShutdownOnce();
+	wireIdleSweepOnce();
 
 	return context;
 }
@@ -174,24 +177,42 @@ export function registerConnection(context: WorkspaceContext, connection: unknow
 }
 
 /**
- * Flushes and drops a context from the registry if it currently has no live
- * connections. Not wired into automatic disconnect handling yet — Phase 0
- * keeps its one workspace resident for the life of the process, since MCP
- * calls have no "connection" to hold it open the way a WebSocket does and
- * unloading it on every browser tab close would just reload it on the very
- * next MCP call. This is the seam #13's real per-shard lifecycle policy
- * plugs into once idle-unload is actually needed.
+ * Flushes and drops a context from the registry if it's currently idle:
+ * no live connections, and no active hold — checked separately, since an
+ * MCP agent's hold is a synthetic Awareness client with no WebSocket
+ * connection at all (holds.ts's clientIdForToken; agents are stateless
+ * HTTP). Unloading on "zero connections" alone would destroy an
+ * in-progress agent hold's Awareness state out from under it. Called by
+ * sweepIdleContexts() on a timer (see wireIdleSweepOnce below) and
+ * directly by tests; not itself timer-driven.
  */
 export function releaseContextIfIdle(workspaceId: string, shardId: string): boolean {
 	const key = keyFor(workspaceId, shardId);
 	const context = registry().get(key);
-	if (!context || context.connections.size > 0) return false;
+	if (!context) return false;
+	if (context.connections.size > 0) return false;
+	if (aggregateHolds(context.awareness).size > 0) return false;
 
 	flushContext(context);
 	if (context.saveTimer) clearInterval(context.saveTimer);
 	context.awareness.destroy();
 	registry().delete(key);
 	return true;
+}
+
+/**
+ * Re-evaluates every currently-resolved context and releases whichever are
+ * idle. Exported directly (not just reachable via the timer below) so tests
+ * can call it deterministically instead of waiting on real time — the same
+ * testability shape flush() already has relative to the save timer. The
+ * default {workspaceId: 'default', shardId: 'default'} context is not
+ * special-cased: once truly idle it unloads and reloads like any other,
+ * lazily reloading its snapshot on next resolution (see createContext).
+ */
+export function sweepIdleContexts(): void {
+	for (const context of registry().values()) {
+		releaseContextIfIdle(context.workspaceId, context.shardId);
+	}
 }
 
 function wireShutdownOnce(): void {
@@ -205,6 +226,13 @@ function wireShutdownOnce(): void {
 	};
 	process.once('SIGINT', shutdown);
 	process.once('SIGTERM', shutdown);
+}
+
+function wireIdleSweepOnce(): void {
+	if (globalThis.__workspaceIdleSweepWired) return;
+	globalThis.__workspaceIdleSweepWired = true;
+	const timer = setInterval(sweepIdleContexts, IDLE_SWEEP_INTERVAL_MS);
+	timer.unref?.();
 }
 
 /** Test-only: drop every resolved context so a fresh doc/awareness is created next call. */
