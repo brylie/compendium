@@ -242,11 +242,19 @@ export function createMcpServer(): McpServer {
 	registerFromManifest(
 		server,
 		'search.searchWorkspace',
-		{ query: z.string() },
-		async ({ query }, extra) => {
+		{
+			query: z.string(),
+			space_id: z
+				.string()
+				.optional()
+				.describe(
+					'Restrict results to one Space. Omitted, searches every Space in the workspace (current default behavior).'
+				)
+		},
+		async ({ query, space_id }, extra) => {
 			try {
 				const token = requireToken(extra);
-				const results = serviceModules.search.searchWorkspace(token, query);
+				const results = serviceModules.search.searchWorkspace(token, query, space_id);
 				return textResult(results);
 			} catch (err) {
 				return handleToolError(err);
