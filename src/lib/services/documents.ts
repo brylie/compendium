@@ -308,13 +308,25 @@ export function getDocument(
 	};
 }
 
-export function listDocuments(caller: CallerIdentity): DocumentMeta[] {
+/**
+ * `spaceId` is optional and additive — omitted, this is exactly today's
+ * behavior (every Document in the workspace, catalog plus uncataloged
+ * fallback). Passed, results are strictly catalog-scoped to that Space: the
+ * uncataloged fallback is skipped entirely, since content not yet in the
+ * catalog has no reliably known Space membership to check (see #132's
+ * migration, which is what actually gives such content a real spaceId) —
+ * silently guessing it belongs to the requested Space would be exactly the
+ * kind of leak #133 exists to close.
+ */
+export function listDocuments(caller: CallerIdentity, spaceId?: string): DocumentMeta[] {
 	const { workspaceId, doc: defaultDoc } = resolveWorkspaceContext();
 	const allowed = (id: string) => !isAccessToken(caller) || tokenAllowsParent(caller, id);
 
-	const catalogDocs = listCatalogDocuments(workspaceId);
+	const catalogDocs = listCatalogDocuments(workspaceId, spaceId);
 	const catalogDocumentIds = new Set(catalogDocs.map((d) => d.id));
 	const results = catalogDocs.filter((d) => allowed(d.id));
+
+	if (spaceId !== undefined) return results;
 
 	// Then any Document written directly to the Y.Doc, bypassing the service
 	// layer entirely (and therefore uncataloged) — mirrors listCollections'

@@ -22,9 +22,16 @@ function snippetAround(text: string, needle: string): string {
 	return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
 }
 
+/**
+ * `spaceId` — see listDocuments' identical doc comment in documents.ts:
+ * omitted, unchanged today's behavior (every Document/Collection in the
+ * workspace, catalog plus uncataloged fallback); passed, strictly
+ * catalog-scoped to that Space, skipping the uncataloged fallback entirely.
+ */
 export function searchWorkspace(
 	caller: CallerIdentity,
-	query: string
+	query: string,
+	spaceId?: string
 ): Array<{ recordId: string; snippet: string }> {
 	const { doc, workspaceId } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
@@ -45,7 +52,7 @@ export function searchWorkspace(
 	// already did), since listDocuments(doc) below could never see one that
 	// lives outside the default doc.
 	const catalogDocumentIds = new Set<string>();
-	for (const documentMeta of listCatalogDocuments(workspaceId)) {
+	for (const documentMeta of listCatalogDocuments(workspaceId, spaceId)) {
 		catalogDocumentIds.add(documentMeta.id);
 		if (isAccessToken(caller) && !tokenAllowsParent(caller, documentMeta.id)) continue;
 		const shard = resolveShardForParent(workspaceId, documentMeta.id);
@@ -58,11 +65,14 @@ export function searchWorkspace(
 	// Then any Document written directly to the Y.Doc, bypassing the service
 	// layer entirely (and therefore uncataloged) — only findable via the
 	// default doc directly, matching the Collection loop's identical fallback
-	// below.
-	for (const document of crdtListDocuments(doc)) {
-		if (catalogDocumentIds.has(document.id)) continue;
-		if (isAccessToken(caller) && !tokenAllowsParent(caller, document.id)) continue;
-		searchDocumentRecords(document.id, doc);
+	// below. Skipped entirely once a specific Space was requested — see this
+	// function's own doc comment.
+	if (spaceId === undefined) {
+		for (const document of crdtListDocuments(doc)) {
+			if (catalogDocumentIds.has(document.id)) continue;
+			if (isAccessToken(caller) && !tokenAllowsParent(caller, document.id)) continue;
+			searchDocumentRecords(document.id, doc);
+		}
 	}
 
 	function searchCollectionRows(collectionId: string, collectionDoc: typeof doc): void {
@@ -82,7 +92,7 @@ export function searchWorkspace(
 	// just its rows) can live in a doc other than the default one, which
 	// listCollections(doc) below could never see.
 	const catalogCollectionIds = new Set<string>();
-	for (const collectionMeta of listCatalogCollections(workspaceId)) {
+	for (const collectionMeta of listCatalogCollections(workspaceId, spaceId)) {
 		catalogCollectionIds.add(collectionMeta.id);
 		if (isAccessToken(caller) && !tokenAllowsParent(caller, collectionMeta.id)) continue;
 		const shard = resolveShardForParent(workspaceId, collectionMeta.id);
@@ -95,11 +105,15 @@ export function searchWorkspace(
 	// Then any Collection written directly to the Y.Doc, bypassing the
 	// service layer entirely (and therefore uncataloged) — the catalog loop
 	// above can't see these at all, so they're only findable via the default
-	// doc directly, matching today's completeness for that case.
-	for (const collection of listCollections(doc)) {
-		if (catalogCollectionIds.has(collection.id)) continue;
-		if (isAccessToken(caller) && !tokenAllowsParent(caller, collection.id)) continue;
-		searchCollectionRows(collection.id, doc);
+	// doc directly, matching today's completeness for that case. Skipped
+	// entirely once a specific Space was requested — see this function's own
+	// doc comment.
+	if (spaceId === undefined) {
+		for (const collection of listCollections(doc)) {
+			if (catalogCollectionIds.has(collection.id)) continue;
+			if (isAccessToken(caller) && !tokenAllowsParent(caller, collection.id)) continue;
+			searchCollectionRows(collection.id, doc);
+		}
 	}
 
 	logAudit({

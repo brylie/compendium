@@ -15,7 +15,7 @@ import {
 	listCollections as crdtListCollections,
 	listDocuments as crdtListDocuments
 } from '../data/records.js';
-import type { CollectionMeta, DocumentMeta, ParentKind } from '../data/types.js';
+import type { CollectionMeta, DocumentMeta, ParentKind, SpaceMeta } from '../data/types.js';
 
 // The transaction handle drizzle's better-sqlite3 driver passes into a
 // db.transaction(...) callback — extracted from Db['transaction'] itself
@@ -334,11 +334,24 @@ export function recordCatalogCollectionDeleted(workspaceId: string, id: string):
 	});
 }
 
-export function listCatalogDocuments(workspaceId: string): DocumentMeta[] {
+/**
+ * `spaceId` is optional and additive to the existing (workspaceId-only)
+ * behavior every current caller relies on — omitted, this returns every
+ * Document in the workspace exactly as before Phase 0's single-Space reality
+ * made a filter unnecessary. Passed, it scopes to just that Space — the
+ * mechanism behind #133's isolation proof (docs/specifications/
+ * workspace-sharding.md §9: "UI and MCP operations enforce the same catalog,
+ * Space, and shard scope").
+ */
+export function listCatalogDocuments(workspaceId: string, spaceId?: string): DocumentMeta[] {
 	return getDb()
 		.select()
 		.from(catalogDocuments)
-		.where(eq(catalogDocuments.workspaceId, workspaceId))
+		.where(
+			spaceId !== undefined
+				? and(eq(catalogDocuments.workspaceId, workspaceId), eq(catalogDocuments.spaceId, spaceId))
+				: eq(catalogDocuments.workspaceId, workspaceId)
+		)
 		.all()
 		.map((row) => ({
 			id: row.id,
@@ -350,11 +363,18 @@ export function listCatalogDocuments(workspaceId: string): DocumentMeta[] {
 		.sort((a, b) => a.order.localeCompare(b.order));
 }
 
-export function listCatalogCollections(workspaceId: string): CollectionMeta[] {
+export function listCatalogCollections(workspaceId: string, spaceId?: string): CollectionMeta[] {
 	return getDb()
 		.select()
 		.from(catalogCollections)
-		.where(eq(catalogCollections.workspaceId, workspaceId))
+		.where(
+			spaceId !== undefined
+				? and(
+						eq(catalogCollections.workspaceId, workspaceId),
+						eq(catalogCollections.spaceId, spaceId)
+					)
+				: eq(catalogCollections.workspaceId, workspaceId)
+		)
 		.all()
 		.map((row) => ({
 			id: row.id,
@@ -362,6 +382,27 @@ export function listCatalogCollections(workspaceId: string): CollectionMeta[] {
 			schema: [],
 			recordIds: []
 		}));
+}
+
+/**
+ * Creates an additional Space in this workspace — not exposed through any
+ * MCP tool or UI yet (that's #6's Space-switcher/creation surface), but a
+ * real, durable Space a caller with its id can create content in and query
+ * against. Exists so #133's isolation tests can construct a genuine
+ * multi-Space fixture without waiting on #6's product surface.
+ */
+export function createSpace(workspaceId: string, name: string): SpaceMeta {
+	const id = nanoid();
+	getDb().insert(spaces).values({ id, workspaceId, name, createdAt: Date.now() }).run();
+	return { id, workspaceId, name };
+}
+
+export function listSpaces(workspaceId: string): SpaceMeta[] {
+	return getDb()
+		.select({ id: spaces.id, workspaceId: spaces.workspaceId, name: spaces.name })
+		.from(spaces)
+		.where(eq(spaces.workspaceId, workspaceId))
+		.all();
 }
 
 /**
@@ -378,10 +419,19 @@ export function ensureCatalogBootstrapped(
 	doc: Y.Doc
 ): { defaultSpaceId: string } {
 	const db = getDb();
+	// Ordered by rowid (SQLite's own insertion-order column, present on every
+	// rowid table regardless of its declared primary key) so this always
+	// resolves to the *first* Space ever created for this workspace, even
+	// once createSpace (#133) has added others — a bare `.get()` with no
+	// ORDER BY has no defined row order once more than one match exists, and
+	// would non-deterministically return whichever Space's id happened to
+	// come back first, silently misattributing new content's spaceId.
 	const existing = db
 		.select({ id: spaces.id })
 		.from(spaces)
 		.where(eq(spaces.workspaceId, workspaceId))
+		.orderBy(sql`rowid`)
+		.limit(1)
 		.get();
 	if (existing) return { defaultSpaceId: existing.id };
 

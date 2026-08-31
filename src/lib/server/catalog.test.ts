@@ -14,6 +14,7 @@ import {
 	createCollection as crdtCreateCollection
 } from '$lib/data/records';
 import {
+	createSpace,
 	ensureCatalogBootstrapped,
 	listCatalogCollections,
 	listCatalogDocuments,
@@ -60,6 +61,23 @@ describe('catalog: bootstrap and backfill', () => {
 
 		const rows = getDb().select().from(spaces).where(eq(spaces.workspaceId, WS)).all();
 		expect(rows).toHaveLength(1);
+	});
+
+	it('keeps resolving the original default Space even after another Space is created (#133 regression)', () => {
+		// Guards against a real bug: the original lookup here had no ORDER BY,
+		// so once a second `spaces` row existed for this workspace, a bare
+		// SELECT had no defined row order and could non-deterministically
+		// return either Space's id as "the default" — silently misattributing
+		// every subsequently-created Document/Collection's spaceId depending on
+		// SQLite's query-plan whims, not a real bug repro until #133 actually
+		// exercised a multi-Space workspace.
+		const doc = new Y.Doc();
+		const first = ensureCatalogBootstrapped(WS, SHARD, doc);
+
+		createSpace(WS, 'Second Space');
+
+		const second = ensureCatalogBootstrapped(WS, SHARD, doc);
+		expect(second.defaultSpaceId).toBe(first.defaultSpaceId);
 	});
 
 	it('backfills existing Y.Doc documents and collections into the catalog on first bootstrap', () => {

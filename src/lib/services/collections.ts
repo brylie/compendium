@@ -92,7 +92,12 @@ export function createCollection(
 	return collection;
 }
 
-export function listCollections(caller: CallerIdentity): CollectionMeta[] {
+/**
+ * `spaceId` — see listDocuments' identical doc comment in documents.ts:
+ * omitted, unchanged today's behavior; passed, strictly catalog-scoped to
+ * that Space, skipping the uncataloged fallback entirely.
+ */
+export function listCollections(caller: CallerIdentity, spaceId?: string): CollectionMeta[] {
 	const { workspaceId, doc: defaultDoc } = resolveWorkspaceContext();
 	const allowed = (id: string) => !isAccessToken(caller) || tokenAllowsParent(caller, id);
 
@@ -104,7 +109,7 @@ export function listCollections(caller: CallerIdentity): CollectionMeta[] {
 	// catalog-then-per-shard-fanout.
 	const catalogCollectionIds = new Set<string>();
 	const results: CollectionMeta[] = [];
-	for (const meta of listCatalogCollections(workspaceId)) {
+	for (const meta of listCatalogCollections(workspaceId, spaceId)) {
 		catalogCollectionIds.add(meta.id);
 		if (!allowed(meta.id)) continue;
 		const shard = resolveShardForParent(workspaceId, meta.id);
@@ -113,6 +118,8 @@ export function listCollections(caller: CallerIdentity): CollectionMeta[] {
 			: defaultDoc;
 		results.push(crdtGetCollection(collectionDoc, meta.id) ?? meta);
 	}
+
+	if (spaceId !== undefined) return results;
 
 	// Then any Collection written directly to the Y.Doc, bypassing the
 	// service layer entirely (and therefore uncataloged) — the catalog loop
