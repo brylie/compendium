@@ -22,6 +22,13 @@
       "when": 1788106972389,
       "tag": "0002_lovely_stranger",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1788188078815,
+      "tag": "0003_first_iron_fist",
+      "breakpoints": true
     }
   ]
 }

@@ -21,6 +21,7 @@
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write .",
 		"start": "tsx server.ts",
+		"migrate:workspace": "tsx scripts/migrate-workspace.ts",
 		"db:push": "drizzle-kit push",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
