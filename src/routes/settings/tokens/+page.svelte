@@ -65,7 +65,8 @@
 					<tr class="transition-colors hover:bg-surface/30">
 						<td class="px-3.5 py-2.5 font-medium text-fg">{token.clientLabel}</td>
 						<td class="px-3.5 py-2.5 text-xs text-muted">
-							{token.allowedDocumentIds.length} doc(s), {token.allowedCollectionIds.length} collection(s)
+							{token.allowedDocumentIds.length} doc(s), {token.allowedCollectionIds.length} collection(s){#if token.allowedSpaceIds.length},
+								{token.allowedSpaceIds.length} space(s){/if}
 						</td>
 						<td class="px-3.5 py-2.5 text-xs text-muted">{formatTimestamp(token.createdAt)}</td>
 						<td class="px-3.5 py-2.5">
@@ -126,7 +127,28 @@
 				/>
 			</div>
 
-			<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+			<div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+				<fieldset class="rounded-md border border-border bg-bg/50 p-3">
+					<legend class="px-1 text-xs font-semibold text-muted uppercase">Allowed Spaces</legend>
+					<div class="mt-2 max-h-40 space-y-1.5 overflow-y-auto">
+						{#each data.spaces as space (space.id)}
+							<label
+								class="flex cursor-pointer items-center gap-2 text-sm text-fg hover:text-accent"
+							>
+								<input
+									type="checkbox"
+									name="spaceIds"
+									value={space.id}
+									class="rounded border-border text-accent focus:ring-accent"
+								/>
+								<span class="truncate">{space.name}</span>
+							</label>
+						{:else}
+							<p class="text-xs text-muted italic">No spaces available.</p>
+						{/each}
+					</div>
+				</fieldset>
+
 				<fieldset class="rounded-md border border-border bg-bg/50 p-3">
 					<legend class="px-1 text-xs font-semibold text-muted uppercase">Allowed Documents</legend>
 					<div class="mt-2 max-h-40 space-y-1.5 overflow-y-auto">

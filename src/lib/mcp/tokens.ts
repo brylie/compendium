@@ -8,6 +8,7 @@ export interface AccessToken {
 	clientLabel: string;
 	allowedDocumentIds: string[];
 	allowedCollectionIds: string[];
+	allowedSpaceIds: string[];
 	createdAt: number;
 	revokedAt?: number;
 }
@@ -18,6 +19,7 @@ function rowToToken(row: typeof accessTokens.$inferSelect): AccessToken {
 		clientLabel: row.clientLabel,
 		allowedDocumentIds: row.allowedDocumentIds,
 		allowedCollectionIds: row.allowedCollectionIds,
+		allowedSpaceIds: row.allowedSpaceIds,
 		createdAt: row.createdAt,
 		revokedAt: row.revokedAt ?? undefined
 	};
@@ -32,6 +34,7 @@ export function createToken(input: {
 	clientLabel: string;
 	allowedDocumentIds: string[];
 	allowedCollectionIds: string[];
+	allowedSpaceIds?: string[];
 }): { token: string; record: AccessToken } {
 	const token = `as_${randomBytes(24).toString('base64url')}`;
 	const record: AccessToken = {
@@ -39,6 +42,7 @@ export function createToken(input: {
 		clientLabel: input.clientLabel,
 		allowedDocumentIds: input.allowedDocumentIds,
 		allowedCollectionIds: input.allowedCollectionIds,
+		allowedSpaceIds: input.allowedSpaceIds ?? [],
 		createdAt: Date.now()
 	};
 
@@ -106,8 +110,19 @@ export function grantCollectionAccess(tokenHash: string, collectionId: string): 
 	}
 }
 
-export function tokenAllowsParent(token: AccessToken, parentId: string): boolean {
+/**
+ * True when `token` may access `parentId` — either because it's directly
+ * allowlisted (per-Document/per-Collection grant), or because `spaceId` (the
+ * record's own catalog Space, when the caller has it — see
+ * services/permissions.ts's resolveParentWorkspaceContext) is one of the
+ * token's Space-level grants (#6). Resolved live against the token's current
+ * `allowedSpaceIds`, not backfilled onto individual records, so a Space
+ * grant automatically covers content created in that Space later.
+ */
+export function tokenAllowsParent(token: AccessToken, parentId: string, spaceId?: string): boolean {
 	return (
-		token.allowedDocumentIds.includes(parentId) || token.allowedCollectionIds.includes(parentId)
+		token.allowedDocumentIds.includes(parentId) ||
+		token.allowedCollectionIds.includes(parentId) ||
+		(spaceId !== undefined && token.allowedSpaceIds.includes(spaceId))
 	);
 }

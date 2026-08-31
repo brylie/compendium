@@ -366,10 +366,15 @@ describe('catalog: record/row locator and shard resolution (#120)', () => {
 		reserveDocumentLocator(WS, defaultSpaceId, 'a-document', SHARD);
 		reserveCollectionLocator(WS, defaultSpaceId, 'a-collection', 'other-shard');
 
-		expect(resolveShardForParent(WS, 'a-document')).toEqual({ shardId: SHARD, kind: 'document' });
+		expect(resolveShardForParent(WS, 'a-document')).toEqual({
+			shardId: SHARD,
+			kind: 'document',
+			spaceId: defaultSpaceId
+		});
 		expect(resolveShardForParent(WS, 'a-collection')).toEqual({
 			shardId: 'other-shard',
-			kind: 'collection'
+			kind: 'collection',
+			spaceId: defaultSpaceId
 		});
 	});
 

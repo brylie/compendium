@@ -1,6 +1,7 @@
 import { fail } from '@sveltejs/kit';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { listCollections, listDocuments } from '$lib/data/records';
+import { listSpaces } from '$lib/server/catalog';
 import { createToken, listTokens, revokeToken } from '$lib/mcp/tokens';
 import { logAudit } from '$lib/server/audit';
 import type { Actions, PageServerLoad } from './$types';
@@ -8,11 +9,12 @@ import type { Actions, PageServerLoad } from './$types';
 const CURRENT_USER = { kind: 'human', userId: 'local' } as const;
 
 export const load: PageServerLoad = () => {
-	const { doc } = resolveWorkspaceContext();
+	const { doc, workspaceId } = resolveWorkspaceContext();
 	return {
 		tokens: listTokens(),
 		documents: listDocuments(doc),
-		collections: listCollections(doc)
+		collections: listCollections(doc),
+		spaces: listSpaces(workspaceId)
 	};
 };
 
@@ -24,11 +26,13 @@ export const actions: Actions = {
 
 		const allowedDocumentIds = data.getAll('documentIds').map(String);
 		const allowedCollectionIds = data.getAll('collectionIds').map(String);
+		const allowedSpaceIds = data.getAll('spaceIds').map(String);
 
 		const { token, record } = createToken({
 			clientLabel,
 			allowedDocumentIds,
-			allowedCollectionIds
+			allowedCollectionIds,
+			allowedSpaceIds
 		});
 		logAudit({ actor: CURRENT_USER, action: 'create_token', targetRecordId: record.tokenHash });
 

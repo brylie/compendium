@@ -5,13 +5,14 @@ import {
 	updateRecordContent
 } from '$lib/data/records';
 import { CURRENT_USER } from './current-user';
-import { createDocument, listDocuments } from '../services/documents';
+import { createDocument, getDocument, listDocuments } from '../services/documents';
 import { createCollection, listCollections } from '../services/collections';
 import { searchWorkspace } from '../services/search';
 import { createSpace, recordCatalogDocumentCreated, reserveDocumentLocator } from './catalog';
 import { logAudit, queryAuditLogForSpace } from './audit';
 import { aggregateHolds, clientIdForToken, requestAgentHold } from './holds';
 import { resolveWorkspaceContext } from './workspace-store';
+import { PermissionDeniedError } from '../services/permissions';
 import type { AccessToken } from '$lib/mcp/tokens';
 
 const actor = CURRENT_USER;
@@ -136,6 +137,7 @@ describe('space isolation: searchWorkspace never crosses a Space boundary', () =
 			clientLabel: 'test',
 			allowedDocumentIds: [docA.id],
 			allowedCollectionIds: [],
+			allowedSpaceIds: [],
 			createdAt: Date.now()
 		};
 
@@ -158,6 +160,59 @@ describe('space isolation: audit history', () => {
 		const spaceBEntries = queryAuditLogForSpace(workspaceId, spaceBId);
 		expect(spaceBEntries.some((e) => e.targetRecordId === docB.id)).toBe(true);
 		expect(spaceBEntries.some((e) => e.targetRecordId === docA.id)).toBe(false);
+	});
+});
+
+describe('space isolation: MCP token Space-level allowlists (#6)', () => {
+	function tokenScopedToSpace(spaceId: string): AccessToken {
+		return {
+			tokenHash: 'test-token-space-scoped',
+			clientLabel: 'test',
+			allowedDocumentIds: [],
+			allowedCollectionIds: [],
+			allowedSpaceIds: [spaceId],
+			createdAt: Date.now()
+		};
+	}
+
+	it('a token granted only a Space (no per-Document grant) can read every Document in it', () => {
+		const { spaceAId, docA } = seedTwoSpaces();
+		const token = tokenScopedToSpace(spaceAId);
+
+		expect(getDocument(token, docA.id)?.id).toBe(docA.id);
+	});
+
+	it("a token granted Space A cannot read Space B's Document, even by direct id", () => {
+		const { spaceAId, docB } = seedTwoSpaces();
+		const token = tokenScopedToSpace(spaceAId);
+
+		expect(() => getDocument(token, docB.id)).toThrow(PermissionDeniedError);
+	});
+
+	it('listDocuments (unscoped call, no spaceId filter) still only returns the Space-granted Documents for a Space-scoped token', () => {
+		const { spaceAId, docA, docB } = seedTwoSpaces();
+		const token = tokenScopedToSpace(spaceAId);
+
+		const results = listDocuments(token);
+		expect(results.map((d) => d.id)).toContain(docA.id);
+		expect(results.map((d) => d.id)).not.toContain(docB.id);
+	});
+
+	it('a Space grant does not leak into a different Space even when combined with an explicit per-Document grant elsewhere', () => {
+		const { spaceAId, docA, docB } = seedTwoSpaces();
+		const token: AccessToken = {
+			tokenHash: 'test-token-mixed-grant',
+			clientLabel: 'test',
+			allowedDocumentIds: [docB.id], // direct grant, unrelated to the Space grant
+			allowedCollectionIds: [],
+			allowedSpaceIds: [spaceAId],
+			createdAt: Date.now()
+		};
+
+		// Both grants independently work: Space A via the Space grant, Doc B via
+		// its own direct grant — neither one implies unscoped access.
+		expect(getDocument(token, docA.id)?.id).toBe(docA.id);
+		expect(getDocument(token, docB.id)?.id).toBe(docB.id);
 	});
 });
 

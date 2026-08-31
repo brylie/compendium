@@ -99,7 +99,8 @@ export function createCollection(
  */
 export function listCollections(caller: CallerIdentity, spaceId?: string): CollectionMeta[] {
 	const { workspaceId, doc: defaultDoc } = resolveWorkspaceContext();
-	const allowed = (id: string) => !isAccessToken(caller) || tokenAllowsParent(caller, id);
+	const allowed = (id: string, collectionSpaceId?: string) =>
+		!isAccessToken(caller) || tokenAllowsParent(caller, id, collectionSpaceId);
 
 	// Catalog-listed Collections first — each one's own shard resolved from
 	// the locator, since a sharded Collection's own meta entry (not just its
@@ -111,12 +112,13 @@ export function listCollections(caller: CallerIdentity, spaceId?: string): Colle
 	const results: CollectionMeta[] = [];
 	for (const meta of listCatalogCollections(workspaceId, spaceId)) {
 		catalogCollectionIds.add(meta.id);
-		if (!allowed(meta.id)) continue;
+		if (!allowed(meta.id, meta.spaceId)) continue;
 		const shard = resolveShardForParent(workspaceId, meta.id);
 		const collectionDoc = shard
 			? resolveWorkspaceContext({ workspaceId, shardId: shard.shardId }).doc
 			: defaultDoc;
-		results.push(crdtGetCollection(collectionDoc, meta.id) ?? meta);
+		const fullMeta = crdtGetCollection(collectionDoc, meta.id);
+		results.push(fullMeta ? { ...fullMeta, spaceId: meta.spaceId } : meta);
 	}
 
 	if (spaceId !== undefined) return results;

@@ -49,10 +49,10 @@ function validatePageLinkTarget(caller: CallerIdentity, targetId: string): void 
 	// A page_link's target is always a Document, which has its own real shard
 	// (#120) — resolveParentWorkspaceContext finds it via the catalog locator,
 	// falling back to the default doc for an untracked/legacy target.
-	const { doc } = resolveParentWorkspaceContext(targetId);
+	const { doc, parentSpaceId } = resolveParentWorkspaceContext(targetId);
 	const target = crdtGetDocument(doc, targetId);
 	if (!target) throw new InvalidLinkTargetError(targetId);
-	if (isAccessToken(caller) && !tokenAllowsParent(caller, targetId)) {
+	if (isAccessToken(caller) && !tokenAllowsParent(caller, targetId, parentSpaceId)) {
 		throw new InvalidLinkTargetError(targetId);
 	}
 }

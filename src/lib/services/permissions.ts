@@ -46,7 +46,13 @@ export function requireAccessibleParent(
 	action?: string
 ): void {
 	if (isAccessToken(caller)) {
-		if (!tokenAllowsParent(caller, parentId)) {
+		// Resolved for the token's Space-level grant (#6) — the per-ID
+		// allowlist checks alone can't see a Space-wide grant, so a token
+		// scoped only to a Space (never given this specific id directly)
+		// would otherwise always fail here.
+		const { workspaceId } = resolveWorkspaceContext();
+		const spaceId = resolveShardForParent(workspaceId, parentId)?.spaceId;
+		if (!tokenAllowsParent(caller, parentId, spaceId)) {
 			logDenial(caller, action, parentId);
 			throw new PermissionDeniedError(`Not permitted to access parent ${parentId}`);
 		}
@@ -78,13 +84,13 @@ export function requireAccessibleRecord(
  */
 export function resolveParentWorkspaceContext(
 	parentId: string
-): WorkspaceContext & { parentKind?: 'document' | 'collection' } {
+): WorkspaceContext & { parentKind?: 'document' | 'collection'; parentSpaceId?: string } {
 	const { workspaceId } = resolveWorkspaceContext();
 	const shard = resolveShardForParent(workspaceId, parentId);
 	const ctx = resolveWorkspaceContext(
 		shard ? { workspaceId, shardId: shard.shardId } : { workspaceId }
 	);
-	return { ...ctx, parentKind: shard?.kind };
+	return { ...ctx, parentKind: shard?.kind, parentSpaceId: shard?.spaceId };
 }
 
 /**

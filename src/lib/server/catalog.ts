@@ -163,14 +163,18 @@ export function releaseRecordLocator(workspaceId: string, recordId: string): voi
 export function resolveShardForParent(
 	workspaceId: string,
 	parentId: string
-): { shardId: string; kind: 'document' | 'collection' } | undefined {
+): { shardId: string; kind: 'document' | 'collection'; spaceId: string } | undefined {
 	const row = getDb()
-		.select({ shardId: recordLocator.shardId, kind: recordLocator.kind })
+		.select({
+			shardId: recordLocator.shardId,
+			kind: recordLocator.kind,
+			spaceId: recordLocator.spaceId
+		})
 		.from(recordLocator)
 		.where(and(eq(recordLocator.workspaceId, workspaceId), eq(recordLocator.recordId, parentId)))
 		.get();
 	if (!row || row.kind === 'record') return undefined;
-	return { shardId: row.shardId, kind: row.kind };
+	return { shardId: row.shardId, kind: row.kind, spaceId: row.spaceId };
 }
 
 /** Resolves the shard a single record/row lives in, for callers that only have a bare recordId. */
@@ -384,7 +388,8 @@ export function listCatalogDocuments(workspaceId: string, spaceId?: string): Doc
 			title: row.title,
 			parentDocumentId: row.parentDocumentId ?? undefined,
 			order: row.order,
-			recordIds: []
+			recordIds: [],
+			spaceId: row.spaceId
 		}))
 		.sort((a, b) => a.order.localeCompare(b.order));
 }
@@ -406,7 +411,8 @@ export function listCatalogCollections(workspaceId: string, spaceId?: string): C
 			id: row.id,
 			title: row.title,
 			schema: [],
-			recordIds: []
+			recordIds: [],
+			spaceId: row.spaceId
 		}));
 }
 

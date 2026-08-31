@@ -54,7 +54,8 @@ export function searchWorkspace(
 	const catalogDocumentIds = new Set<string>();
 	for (const documentMeta of listCatalogDocuments(workspaceId, spaceId)) {
 		catalogDocumentIds.add(documentMeta.id);
-		if (isAccessToken(caller) && !tokenAllowsParent(caller, documentMeta.id)) continue;
+		if (isAccessToken(caller) && !tokenAllowsParent(caller, documentMeta.id, documentMeta.spaceId))
+			continue;
 		const shard = resolveShardForParent(workspaceId, documentMeta.id);
 		const documentDoc = shard
 			? resolveWorkspaceContext({ workspaceId, shardId: shard.shardId }).doc
@@ -94,7 +95,11 @@ export function searchWorkspace(
 	const catalogCollectionIds = new Set<string>();
 	for (const collectionMeta of listCatalogCollections(workspaceId, spaceId)) {
 		catalogCollectionIds.add(collectionMeta.id);
-		if (isAccessToken(caller) && !tokenAllowsParent(caller, collectionMeta.id)) continue;
+		if (
+			isAccessToken(caller) &&
+			!tokenAllowsParent(caller, collectionMeta.id, collectionMeta.spaceId)
+		)
+			continue;
 		const shard = resolveShardForParent(workspaceId, collectionMeta.id);
 		const collectionDoc = shard
 			? resolveWorkspaceContext({ workspaceId, shardId: shard.shardId }).doc

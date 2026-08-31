@@ -37,6 +37,18 @@ export const accessTokens = sqliteTable('access_tokens', {
 	allowedCollectionIds: text('allowed_collection_ids', { mode: 'json' })
 		.notNull()
 		.$type<string[]>(),
+	// A Space-level grant (#6) — a token allowed a Space can access every
+	// Document/Collection catalogued in it, resolved live against the
+	// catalog's own spaceId column rather than backfilled/materialized here,
+	// so newly-created content in a granted Space is covered automatically.
+	// A bare JSON array, mirroring the two sibling columns above, not a
+	// composite FK to `spaces` — access_tokens has no workspaceId column at
+	// all yet (Phase 0 is implicitly single-workspace), so a normalized
+	// reference isn't possible without that column too.
+	allowedSpaceIds: text('allowed_space_ids', { mode: 'json' })
+		.notNull()
+		.default('[]')
+		.$type<string[]>(),
 	createdAt: integer('created_at').notNull(),
 	revokedAt: integer('revoked_at')
 });

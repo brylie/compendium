@@ -8,6 +8,7 @@ interface TestToken {
 	clientLabel: string;
 	allowedDocumentIds: string[];
 	allowedCollectionIds: string[];
+	allowedSpaceIds: string[];
 	createdAt: number;
 	revokedAt?: number;
 }
@@ -18,6 +19,7 @@ function token(overrides: Partial<TestToken> = {}): TestToken {
 		clientLabel: 'Claude Desktop',
 		allowedDocumentIds: [],
 		allowedCollectionIds: [],
+		allowedSpaceIds: [],
 		createdAt: Date.UTC(2026, 0, 1),
 		...overrides
 	};
@@ -31,7 +33,7 @@ describe('settings/tokens +page', () => {
 	it('shows an empty-state row when there are no tokens', () => {
 		render(Page, {
 			params: {},
-			data: { tokens: [], documents: [], collections: [] },
+			data: { tokens: [], documents: [], collections: [], spaces: [] },
 			form: null
 		});
 		expect(screen.getByText('No access tokens created yet.')).toBeInTheDocument();
@@ -43,7 +45,8 @@ describe('settings/tokens +page', () => {
 			data: {
 				tokens: [token({ allowedDocumentIds: ['d1', 'd2'], allowedCollectionIds: ['c1'] })],
 				documents: [],
-				collections: []
+				collections: [],
+				spaces: []
 			},
 			form: null
 		});
@@ -55,7 +58,12 @@ describe('settings/tokens +page', () => {
 	it('shows Revoked status and hides the revoke button for a revoked token', () => {
 		render(Page, {
 			params: {},
-			data: { tokens: [token({ revokedAt: Date.now() })], documents: [], collections: [] },
+			data: {
+				tokens: [token({ revokedAt: Date.now() })],
+				documents: [],
+				collections: [],
+				spaces: []
+			},
 			form: null
 		});
 		expect(screen.getByText('Revoked')).toBeInTheDocument();
@@ -65,7 +73,12 @@ describe('settings/tokens +page', () => {
 	it('shows a revoke button submitting the tokenHash for an active token', () => {
 		render(Page, {
 			params: {},
-			data: { tokens: [token({ tokenHash: 'abc123' })], documents: [], collections: [] },
+			data: {
+				tokens: [token({ tokenHash: 'abc123' })],
+				documents: [],
+				collections: [],
+				spaces: []
+			},
 			form: null
 		});
 		const button = screen.getByRole('button', { name: 'Revoke' });
@@ -77,7 +90,7 @@ describe('settings/tokens +page', () => {
 	it('shows the freshly-created token banner once, from action data', () => {
 		render(Page, {
 			params: {},
-			data: { tokens: [], documents: [], collections: [] },
+			data: { tokens: [], documents: [], collections: [], spaces: [] },
 			form: { createdToken: 'secret-token-value', clientLabel: 'Cursor' }
 		});
 		expect(screen.getByText('secret-token-value')).toBeInTheDocument();
@@ -87,7 +100,7 @@ describe('settings/tokens +page', () => {
 	it('does not show the banner when there is no form result', () => {
 		render(Page, {
 			params: {},
-			data: { tokens: [], documents: [], collections: [] },
+			data: { tokens: [], documents: [], collections: [], spaces: [] },
 			form: null
 		});
 		expect(screen.queryByText(/copy it now/)).not.toBeInTheDocument();
@@ -99,7 +112,8 @@ describe('settings/tokens +page', () => {
 			data: {
 				tokens: [],
 				documents: [doc('d1', 'Design Notes')],
-				collections: []
+				collections: [],
+				spaces: []
 			},
 			form: null
 		});
@@ -111,7 +125,7 @@ describe('settings/tokens +page', () => {
 	it('submits the connect-client form to the create action', () => {
 		render(Page, {
 			params: {},
-			data: { tokens: [], documents: [], collections: [] },
+			data: { tokens: [], documents: [], collections: [], spaces: [] },
 			form: null
 		});
 		const form = screen.getByLabelText('Client Label').closest('form')!;

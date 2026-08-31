@@ -19,7 +19,8 @@ import {
 	recordCatalogDocumentDeleted,
 	recordCatalogDocumentMoved,
 	recordCatalogDocumentTitleChanged,
-	reserveDocumentLocator
+	reserveDocumentLocator,
+	resolveShardForParent
 } from '$lib/server/catalog';
 import { grantDocumentAccess, tokenAllowsParent } from '$lib/mcp/tokens';
 import { richTextToMarkdown } from '$lib/mcp/markdown-transcode';
@@ -237,7 +238,7 @@ export function getDocument(
 		markdown: string;
 	}>;
 } | null {
-	const { doc } = resolveParentWorkspaceContext(documentId);
+	const { doc, workspaceId } = resolveParentWorkspaceContext(documentId);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'get_document');
@@ -253,7 +254,11 @@ export function getDocument(
 		const targetInScope =
 			!r.referencedRecordId ||
 			!isAccessToken(caller) ||
-			tokenAllowsParent(caller, r.referencedRecordId);
+			tokenAllowsParent(
+				caller,
+				r.referencedRecordId,
+				resolveShardForParent(workspaceId, r.referencedRecordId)?.spaceId
+			);
 		// The reference target can be a Document (unsharded, always in `doc`)
 		// or a Collection (its own shard, possibly a different doc entirely).
 		// Try `doc` itself first, then fall back to resolving its real shard.
@@ -320,11 +325,12 @@ export function getDocument(
  */
 export function listDocuments(caller: CallerIdentity, spaceId?: string): DocumentMeta[] {
 	const { workspaceId, doc: defaultDoc } = resolveWorkspaceContext();
-	const allowed = (id: string) => !isAccessToken(caller) || tokenAllowsParent(caller, id);
+	const allowed = (id: string, docSpaceId?: string) =>
+		!isAccessToken(caller) || tokenAllowsParent(caller, id, docSpaceId);
 
 	const catalogDocs = listCatalogDocuments(workspaceId, spaceId);
 	const catalogDocumentIds = new Set(catalogDocs.map((d) => d.id));
-	const results = catalogDocs.filter((d) => allowed(d.id));
+	const results = catalogDocs.filter((d) => allowed(d.id, d.spaceId));
 
 	if (spaceId !== undefined) return results;
 

@@ -41,6 +41,7 @@ export interface TestHarness {
 		clientLabel: string;
 		allowedDocumentIds: string[];
 		allowedCollectionIds: string[];
+		allowedSpaceIds?: string[];
 	}) => { token: string; record: AccessToken };
 	getMcpClient: (token: string) => Promise<Client>;
 	getYjsClient: (options?: { disableBc?: boolean; room?: string }) => {
