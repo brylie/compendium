@@ -86,8 +86,9 @@ now transfers **11,154 B**. Before sharding, opening any page meant syncing
 the entire global workspace state — **2,848,008 B**, per the 2026-08-30
 baseline. That's roughly a **99.6% reduction** in what a single client
 actually needs to download to view one page — the exact blast-radius problem
-#112's design set out to fix, now measured against the real implementation
-rather than projected from a same-shape single-document extract.
+Issue #112's design set out to fix, now measured against the real
+implementation rather than projected from a same-shape single-document
+extract.
 
 Process cost improved just as sharply at `large` scale: heap delta dropped
 from 518.9 MB to 124.4 MB, and event-loop p99 from 417.07 ms to 16.06 ms —
@@ -123,7 +124,11 @@ deferred at #112's approval:
   comfortably at measured scale — 2.84 MB aggregate across 128 shards is a
   trivial per-tick write cost split across that many independent contexts, no
   single shard's snapshot is large, and idle-unload (#122) already bounds how
-  many stay resident. No cadence change needed at this scale.
+  many stay resident. No cadence change needed at this scale. This
+  conclusion is based on aggregate snapshot _size_; the benchmark calls
+  `flush()` once, deliberately, to measure it — it does not separately
+  measure the periodic `flushContext` write's own I/O or event-loop cost as
+  the 30s timer fires repeatedly over a long-running process.
 - **Does Document/Collection shard granularity hold at measured scale?**
   **Yes.** Cross-shard isolation held exactly, per-shard state stayed small
   even at `large` scale's heaviest Collection, and process resource cost

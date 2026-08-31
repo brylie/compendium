@@ -361,19 +361,19 @@ Explicitly deferred, not settled by this approval:
   `collection_view` block's `viewConfig` (data-model.md §4) — out of scope
   here because the feature itself isn't built yet; #113 or a follow-up must
   extend §3.1's catalog fields to cover it before that feature lands.
-- Storage-engine changes to `collaboration.md`'s aggregate-Awareness
+- Documentation update to `collaboration.md`'s aggregate-Awareness
   description — `data-model.md` §4 itself was updated once #113/#132 actually
   shipped per-shard `Y.Doc`s (see §11 below); `collaboration.md` still awaits
   its own equivalent pass.
 
 ## 11. Phase E measurement resolution (recorded 2026-08-31)
 
-#123 re-ran §8's required measurements against the real shard-aware
+Issue #123 re-ran §8's required measurements against the real shard-aware
 transport #113/#127/#130/#132 shipped (not the #31 global-workspace
 projection) — see the dated note
 [`crdt-capacity-shard-aware-2026-08-31.md`](../benchmarks/crdt-capacity-shard-aware-2026-08-31.md)
-for full method and results. This resolves the two items §10 deferred to
-real measurement:
+for full method and results. This resolves the measurement items previously
+deferred in the 2026-08-30 approval:
 
 - **Collection row-partition threshold**: not required at measured scale. A
   400-row Collection shard encoded to ~187.7 KB — no partition rule needed;
@@ -383,6 +383,10 @@ real measurement:
   comfortably — 2.84 MB aggregate across 128 sharded snapshots at `large`
   scale is a trivial per-tick cost split across that many independent,
   lazily-loaded (#122) contexts. No cadence change needed at this scale.
+  This is based on aggregate snapshot _size_, not a direct measurement of
+  the periodic `flushContext` write's own I/O or event-loop cost during
+  normal operation — the benchmark measures `flush()` called once, deliberately,
+  not the 30s timer firing repeatedly over a long-running process.
 - **Event-retention window** (`catalog_outbox`): **not fully resolved** —
   genuinely blocked on #121 shipping a real SSE consumer to validate a
   retention policy against; this run's outbox growth-rate data point (128

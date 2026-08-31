@@ -65,7 +65,9 @@ function parseMcpText<T>(result: unknown): T {
 /** First, middle, and last item — a small, deterministic cross-section rather than every shard, so a `large`-scale report stays readable. */
 function sample<T>(items: T[], count: number): T[] {
 	if (items.length <= count) return items;
-	const indices = new Set<number>([0, items.length - 1, Math.floor((items.length - 1) / 2)]);
+	const indices = new Set<number>(
+		[0, items.length - 1, Math.floor((items.length - 1) / 2)].slice(0, count)
+	);
 	let cursor = 1;
 	while (indices.size < count && cursor < items.length - 1) {
 		indices.add(cursor);
@@ -223,8 +225,10 @@ describe('CRDT workspace capacity, real shard-aware transport (issue #123)', () 
 		});
 		const fanoutLatencyMs = performance.now() - fanoutStart;
 		const fanoutSameShardBytes = sameShardPeer.traffic.receivedBytes;
-		// Bounded window for the different-shard peer to (not) receive anything.
-		await harness.waitForCondition(() => true, { timeoutMs: 200 });
+		// Bounded window for the different-shard peer to (not) receive anything —
+		// a real delay, not waitForCondition(() => true), which would return on
+		// its first (already-true) check and prove nothing about the window.
+		await new Promise((resolve) => setTimeout(resolve, 200));
 		const fanoutDifferentShardBytes = differentShardPeer.traffic.receivedBytes;
 
 		// --- MCP write latency, spread across multiple real Document shards —
