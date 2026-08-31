@@ -62,7 +62,11 @@ function clearSelection(): void {
 }
 
 let ydoc: Y.Doc;
-vi.mock('$lib/client/yjs-client', () => ({ getClientDoc: () => ydoc }));
+vi.mock('$lib/client/yjs-client', () => ({
+	getClientDoc: () => ydoc,
+	getShardDoc: () => ydoc,
+	getShardAwareness: () => ({})
+}));
 
 function textOf(recordId: string): string {
 	const ytext = getRecordYText(ydoc, recordId);
@@ -85,13 +89,17 @@ vi.mock('$lib/client/presence', () => ({
 
 // The document itself is created once in beforeEach, before each test body
 // runs — tests create their records against it first, then call this to
-// render, matching how every test in this file is structured.
-function renderDoc() {
-	return render(Page, {
+// render, matching how every test in this file is structured. Async because
+// +page.svelte resolves its real shard via a fetch before connecting (#120)
+// — see table/[id]'s page.svelte.test.ts for the identical technique.
+async function renderDoc() {
+	const result = render(Page, {
 		params: { id: 'doc-1' },
 		form: null,
 		data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
 	});
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	return result;
 }
 
 describe('editing conventions: Enter, Backspace, and toolbar block controls', () => {
@@ -101,15 +109,22 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 		claimBlockPresence.mockClear();
 		releaseBlockPresence.mockClear();
 		subscribeHeldByOthers.mockClear().mockImplementation(() => () => {});
+		// +page.svelte resolves its real shard via a fetch before connecting —
+		// see #120. Stubbed to resolve immediately against the same test doc.
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => ({ json: async () => ({ shardId: 'test-shard' }) }))
+		);
 	});
 
 	afterEach(() => {
 		ydoc.destroy();
+		vi.unstubAllGlobals();
 	});
 
 	describe('Toolbar: insert a new block vs. convert the active one in place', () => {
 		it('inserts a new block when nothing is active', async () => {
-			renderDoc();
+			await renderDoc();
 			const user = userEvent.setup();
 
 			await user.click(screen.getByRole('button', { name: 'Insert Table' }));
@@ -122,7 +137,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 		});
 
 		it('inserts a new block, rather than converting nothing, for a text-bearing control when nothing is active', async () => {
-			renderDoc();
+			await renderDoc();
 			const user = userEvent.setup();
 
 			await user.click(screen.getByRole('button', { name: 'Insert Bulleted list' }));
@@ -137,7 +152,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 			getRecordYText(ydoc, record.id)!.insert(0, 'Buy milk');
 			const user = userEvent.setup();
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			const editor = container.querySelector('[contenteditable]') as HTMLElement;
 			await user.click(editor);
@@ -158,7 +173,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			);
 			getRecordYText(ydoc, record.id)!.insert(0, 'Buy milk');
 			const user = userEvent.setup();
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			const editor = container.querySelector('[contenteditable]') as HTMLElement;
 			await user.click(editor);
@@ -188,7 +203,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 				HUMAN
 			);
 			const user = userEvent.setup();
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			// Two blocks render: the referenced paragraph first, then the synced
 			// block — target the synced block's editor specifically, not
@@ -211,7 +226,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			getRecordYText(ydoc, first.id)!.insert(0, 'First');
 			getRecordYText(ydoc, middle.id)!.insert(0, 'Middle');
 			const user = userEvent.setup();
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			const editors = container.querySelectorAll('[contenteditable]');
 			await user.click(editors[1] as HTMLElement); // the "Middle" block, not the last one
@@ -232,7 +247,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 			getRecordYText(ydoc, record.id)!.insert(0, 'Hello');
 			const user = userEvent.setup();
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			const editor = container.querySelector('[contenteditable]') as HTMLElement;
 			await user.click(editor);
@@ -250,7 +265,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 		it('disables formatting controls once the selection moves outside any block editor', async () => {
 			createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 			const user = userEvent.setup();
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			const editor = container.querySelector('[contenteditable]') as HTMLElement;
 			await user.click(editor);
@@ -281,7 +296,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 		it('splits a plain paragraph at the caret, not just a list item', async () => {
 			const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 			getRecordYText(ydoc, record.id)!.insert(0, 'Hello world');
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			const editor = container.querySelector('[contenteditable]') as HTMLElement;
 			selectRange(editor, 5, 5); // caret right after "Hello"
@@ -305,7 +320,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 				// empty block instead of splitting at the caret.
 				const record = createRecord(ydoc, { parentId: 'doc-1', blockType }, HUMAN);
 				getRecordYText(ydoc, record.id)!.insert(0, 'Hello world');
-				const { container } = renderDoc();
+				const { container } = await renderDoc();
 
 				const editor = container.querySelector('[contenteditable]') as HTMLElement;
 				selectRange(editor, 5, 5); // caret right after "Hello"
@@ -327,7 +342,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 			const ytext = getRecordYText(ydoc, record.id)!;
 			ytext.insert(0, 'Hello world', { bold: true });
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			const editor = container.querySelector('[contenteditable]') as HTMLElement;
 			selectRange(editor, 5, 5);
@@ -358,7 +373,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			async (blockType, text) => {
 				const record = createRecord(ydoc, { parentId: 'doc-1', blockType }, HUMAN);
 				getRecordYText(ydoc, record.id)!.insert(0, text);
-				const { container } = renderDoc();
+				const { container } = await renderDoc();
 
 				const editor = container.querySelector('[contenteditable]') as HTMLElement;
 				selectRange(editor, text.length, text.length); // caret at the end, as after typing
@@ -383,7 +398,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 				HUMAN
 			);
 			getRecordYText(ydoc, record.id)!.insert(0, 'Buy milk and eggs');
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			const editor = container.querySelector('[contenteditable]') as HTMLElement;
 			selectRange(editor, 8, 8); // caret right after "Buy milk"
@@ -404,7 +419,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			'exits a %s on Enter when the current item is empty, converting it to a paragraph in place',
 			async (blockType) => {
 				const record = createRecord(ydoc, { parentId: 'doc-1', blockType }, HUMAN);
-				const { container } = renderDoc();
+				const { container } = await renderDoc();
 
 				const editor = container.querySelector('[contenteditable]') as HTMLElement;
 				editor.dispatchEvent(
@@ -433,7 +448,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 				HUMAN
 			);
 			getRecordYText(ydoc, record.id)!.insert(0, 'Milk');
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			const editor = container.querySelector('[contenteditable]') as HTMLElement;
 			selectRange(editor, 0, 0);
@@ -469,7 +484,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			const first = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 			getRecordYText(ydoc, first.id)!.insert(0, 'First');
 			createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			const editors = container.querySelectorAll('[contenteditable]');
 			const second = editors[1] as HTMLElement;
@@ -480,9 +495,9 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(1);
 		});
 
-		it('does not delete the only remaining block on Backspace', () => {
+		it('does not delete the only remaining block on Backspace', async () => {
 			createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			const editor = container.querySelector('[contenteditable]') as HTMLElement;
 			editor.dispatchEvent(
@@ -497,7 +512,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			getRecordYText(ydoc, first.id)!.insert(0, 'Hello');
 			const second = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 			getRecordYText(ydoc, second.id)!.insert(0, ' world');
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			const editors = container.querySelectorAll('[contenteditable]');
 			selectRange(editors[1] as HTMLElement, 0, 0);
@@ -517,7 +532,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			getRecordYText(ydoc, first.id)!.insert(0, 'Hello', { bold: true });
 			const second = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 			getRecordYText(ydoc, second.id)!.insert(0, ' world', { italic: true });
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			const editors = container.querySelectorAll('[contenteditable]');
 			selectRange(editors[1] as HTMLElement, 0, 0);
@@ -538,7 +553,7 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			createRecord(ydoc, { parentId: 'doc-1', blockType: 'divider' }, HUMAN);
 			const second = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 			getRecordYText(ydoc, second.id)!.insert(0, 'Keep me');
-			const { container } = renderDoc();
+			const { container } = await renderDoc();
 
 			const editor = container.querySelector('[contenteditable]') as HTMLElement;
 			selectRange(editor, 0, 0);

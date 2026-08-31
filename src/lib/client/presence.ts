@@ -1,4 +1,4 @@
-import { getClientAwareness } from './yjs-client';
+import type { Awareness } from 'y-protocols/awareness';
 import { CURRENT_USER } from './actor';
 import type { ActorId } from '$lib/data/types';
 
@@ -8,19 +8,24 @@ import type { ActorId } from '$lib/data/types';
 // just the new block, which both claims it and drops the old one; the
 // server's per-block eviction (src/lib/server/holds.ts) takes care of
 // releasing any agent hold that was sitting on the newly-focused block.
+//
+// `awareness` is the caller's responsibility to resolve — a block's presence
+// belongs to whichever shard's Awareness its own Document is connected to
+// (#120: each Document has its own shard), not a single shared instance.
 
-export function claimBlockPresence(blockId: string): void {
-	getClientAwareness().setLocalState({ actor: CURRENT_USER, heldRecordIds: [blockId] });
+export function claimBlockPresence(awareness: Awareness, blockId: string): void {
+	awareness.setLocalState({ actor: CURRENT_USER, heldRecordIds: [blockId] });
 }
 
-export function releaseBlockPresence(): void {
-	getClientAwareness().setLocalState({ actor: CURRENT_USER, heldRecordIds: [] });
+export function releaseBlockPresence(awareness: Awareness): void {
+	awareness.setLocalState({ actor: CURRENT_USER, heldRecordIds: [] });
 }
 
 /** Records held by anyone other than this browser tab — for placeholder rendering. */
-export function subscribeHeldByOthers(onChange: (held: Map<string, ActorId>) => void): () => void {
-	const awareness = getClientAwareness();
-
+export function subscribeHeldByOthers(
+	awareness: Awareness,
+	onChange: (held: Map<string, ActorId>) => void
+): () => void {
 	const compute = (): void => {
 		const held = new Map<string, ActorId>();
 		awareness.getStates().forEach((state, clientId) => {

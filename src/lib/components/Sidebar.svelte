@@ -4,8 +4,7 @@
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { getClientDoc } from '$lib/client/yjs-client';
-	import { buildDocumentTree, deleteDocument, listDocuments } from '$lib/data/records';
+	import { buildDocumentTree } from '$lib/data/records';
 	import { isDark, toggleTheme } from '$lib/client/theme';
 	import type { CollectionMeta, DocumentMeta, DocumentTreeNode } from '$lib/data/types';
 	import Icon from './Icon.svelte';
@@ -20,11 +19,15 @@
 		initialCollections?: CollectionMeta[];
 	} = $props();
 
-	let clientDocs: DocumentMeta[] = $state([]);
-
-	// Documents prefer live client YDoc data once populated (Documents aren't
-	// sharded — see #120); fallback to initial layout data before it connects.
-	let documents = $derived(clientDocs.length > 0 ? clientDocs : (initialDocuments ?? []));
+	// Documents are catalog-backed (initialDocuments) only, never live — a
+	// sharded Document's own meta entry doesn't live in the shared 'workspace'
+	// doc this component used to observe (#120: every Document now has its
+	// own shard). An explicit, accepted gap until Phase C's SSE feed (#121)
+	// exists: creating/renaming/moving/deleting a Document needs a refresh to
+	// show up in the sidebar, the same tradeoff already accepted for
+	// Collections below. A Document's own content stays fully live once its
+	// own shard connects (see doc/[id]/+page.svelte).
+	let documents = $derived(initialDocuments ?? []);
 	// Collections are catalog-backed (initialCollections) only, never live —
 	// a sharded Collection's own meta entry doesn't live in the shared
 	// 'workspace' doc this component observes, so there's nothing correct to
@@ -38,7 +41,6 @@
 	let darkMode = $state(false);
 	let expandedDocIds: SvelteSet<string> = new SvelteSet();
 
-	let ydoc: ReturnType<typeof getClientDoc> | undefined = $state();
 	let createDialog: 'document' | 'collection' | null = $state(null);
 	let pendingParentId: string | undefined = $state();
 	let pendingDeletion: { kind: 'document' | 'collection'; id: string } | null = $state(null);
@@ -53,11 +55,6 @@
 		currentPath.startsWith('/table/') ? currentPath.slice('/table/'.length).split('/')[0] : null
 	);
 
-	function refresh(): void {
-		if (!ydoc) return;
-		clientDocs = listDocuments(ydoc);
-	}
-
 	onMount(() => {
 		try {
 			collapsed = localStorage.getItem('sidebar_collapsed') === 'true';
@@ -65,24 +62,6 @@
 		} catch {
 			// ignore localStorage errors in non-browser or sandboxed environments
 		}
-
-		const doc = getClientDoc();
-		ydoc = doc;
-		refresh();
-
-		const recordsMap = doc.getMap('records');
-		const documentsMap = doc.getMap('documents');
-
-		const observer = () => refresh();
-		recordsMap.observeDeep(observer);
-		documentsMap.observeDeep(observer);
-		doc.on('update', observer);
-
-		return () => {
-			recordsMap.unobserveDeep(observer);
-			documentsMap.unobserveDeep(observer);
-			doc.off('update', observer);
-		};
 	});
 
 	function toggleCollapse(): void {
@@ -127,7 +106,6 @@
 				if (parentId) {
 					expandedDocIds.add(parentId);
 				}
-				refresh();
 				await invalidateAll();
 				await goto(resolve('/doc/[id]', { id: newDoc.id }));
 			} else {
@@ -155,7 +133,6 @@
 			});
 			if (res.ok) {
 				const newCol = await res.json();
-				refresh();
 				await invalidateAll();
 				await goto(resolve('/table/[id]', { id: newCol.id }));
 			} else {
@@ -185,10 +162,12 @@
 		try {
 			if (deletion.kind === 'document') {
 				const id = deletion.id;
-				if (ydoc) {
-					deleteDocument(ydoc, id);
-					refresh();
-				}
+				// Routed through the service layer, not the raw CRDT primitive
+				// against the shared doc: a Document lives in its own shard
+				// since #120, which this component has no direct connection to
+				// — and deletion needs to cascade the whole descendant subtree
+				// across each of their own shards (see services/documents.ts).
+				await fetch(`/api/documents/${id}`, { method: 'DELETE' });
 				await invalidateAll();
 				if (currentDocId === id) {
 					await goto(resolve('/'));
