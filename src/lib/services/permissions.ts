@@ -73,8 +73,8 @@ export function requireAccessibleRecord(
  * for callers that already have its own id (query_collection's
  * collectionId, create_record's parentId) — see catalog.ts's
  * resolveShardForParent. Falls back to the default context when untracked
- * (content written directly to the Y.Doc, or a Document — Documents aren't
- * sharded yet, so they're never locator-tracked).
+ * (content written directly to the Y.Doc, bypassing the service layer and
+ * therefore the locator).
  */
 export function resolveParentWorkspaceContext(
 	parentId: string
