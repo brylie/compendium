@@ -204,6 +204,7 @@ describe('attachYjsWebSocket: upgrade routing', () => {
 
 		expect(closeSpy).not.toHaveBeenCalled();
 		expect(resolveWorkspaceContext().connections.has(ws)).toBe(true);
+		ws.emit('close');
 		wss.close();
 	});
 

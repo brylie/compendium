@@ -125,7 +125,13 @@ describe('Instance isolation: two configured instances never cross-observe (#111
 		// *resolving* instance's own workspaceId, so docA's shard is unknown
 		// from instance-b's catalog even though the id itself is valid on
 		// instance-a. Still on COMPENDIUM_INSTANCE_ID = 'instance-b' here.
-		const shardClientB = harness.getYjsClient({ room: `shard-${docA.id}` });
+		// disableBc: true so this only proves the server-side rejection, not
+		// an artifact of both clients sharing one JS process/origin —
+		// shardClientA and shardClientB use the same room name, and without
+		// it y-websocket's own cross-tab BroadcastChannel sync could hand
+		// shardClientB instance-a's content regardless of what the server
+		// does with the WebSocket itself.
+		const shardClientB = harness.getYjsClient({ room: `shard-${docA.id}`, disableBc: true });
 		const closeEvent = await new Promise<{ code: number; reason: string }>((resolve, reject) => {
 			const timeout = setTimeout(() => reject(new Error('connection-close not observed')), 2000);
 			shardClientB.provider.on('connection-close', (event: CloseEvent | null) => {
@@ -134,6 +140,7 @@ describe('Instance isolation: two configured instances never cross-observe (#111
 			});
 		});
 		expect(closeEvent.code).toBe(4404);
+		expect(getRecordYText(shardClientB.doc, blockA.recordId)).toBeUndefined();
 		shardClientB.disconnect();
 	});
 });
