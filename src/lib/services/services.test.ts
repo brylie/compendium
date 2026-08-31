@@ -38,6 +38,7 @@ import {
 	listCatalogDocuments,
 	RecordIdConflictError,
 	reserveCollectionLocator,
+	reserveRecordLocator,
 	recordCatalogCollectionCreated,
 	resolveShardForRecord
 } from '$lib/server/catalog';
@@ -231,11 +232,17 @@ describe('service layer: centralized business rules & side effects', () => {
 
 	it('renders a page_link block with rich text but no referencedRecordId via its own content', () => {
 		const docPublic = createDocument(human, { title: 'Public Handbook' });
+		const { workspaceId, defaultSpaceId } = resolveWorkspaceContext({ shardId: docPublic.id });
 		const link = crdtCreateRecord(
-			resolveWorkspaceContext().doc,
+			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
 			{ parentId: docPublic.id, blockType: 'page_link' },
 			human
 		);
+		// A record created directly against the CRDT layer (bypassing the
+		// service layer's createRecord, and therefore its locator reservation)
+		// needs its own locator entry too, mirroring what real content always
+		// has — writeRecord below resolves it by bare recordId alone.
+		reserveRecordLocator(workspaceId, defaultSpaceId, link.id, docPublic.id);
 		writeRecord(human, link.id, { markdown: 'unresolved link text' });
 
 		const result = getDocument(human, docPublic.id);
@@ -247,7 +254,7 @@ describe('service layer: centralized business rules & side effects', () => {
 		const docPublic = createDocument(human, { title: 'Public Handbook' });
 		const docTarget = createDocument(human, { title: 'Will Be Deleted' });
 		const link = crdtCreateRecord(
-			resolveWorkspaceContext().doc,
+			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
 			{ parentId: docPublic.id, blockType: 'page_link', referencedRecordId: docTarget.id },
 			human
 		);
@@ -266,7 +273,7 @@ describe('service layer: centralized business rules & side effects', () => {
 	it('does not mark linkBroken for a page_link with no target set yet', () => {
 		const docPublic = createDocument(human, { title: 'Public Handbook' });
 		const link = crdtCreateRecord(
-			resolveWorkspaceContext().doc,
+			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
 			{ parentId: docPublic.id, blockType: 'page_link' },
 			human
 		);
@@ -283,7 +290,7 @@ describe('service layer: centralized business rules & side effects', () => {
 			schema: [{ key: 'status', label: 'Status', type: 'select' }]
 		});
 		const embed = crdtCreateRecord(
-			resolveWorkspaceContext().doc,
+			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
 			{
 				parentId: docPublic.id,
 				blockType: 'collection_view',
@@ -316,7 +323,7 @@ describe('service layer: centralized business rules & side effects', () => {
 		const docPublic = createDocument(human, { title: 'Team Page' });
 		const collectionTarget = createCollection(human, { title: 'Will Be Deleted', schema: [] });
 		const embed = crdtCreateRecord(
-			resolveWorkspaceContext().doc,
+			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
 			{
 				parentId: docPublic.id,
 				blockType: 'collection_view',
@@ -340,7 +347,7 @@ describe('service layer: centralized business rules & side effects', () => {
 		const docPublic = createDocument(human, { title: 'Team Page' });
 		const docTarget = createDocument(human, { title: 'Not A Collection' });
 		const embed = crdtCreateRecord(
-			resolveWorkspaceContext().doc,
+			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
 			{
 				parentId: docPublic.id,
 				blockType: 'collection_view',
