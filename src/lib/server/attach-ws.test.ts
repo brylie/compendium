@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { attachYjsWebSocket } from './attach-ws';
 import { resetWorkspaceStoreForTests, resolveWorkspaceContext } from './workspace-store';
 import { resetHoldsForTests } from './holds';
+import { createDocument } from '../services/documents';
+import { CURRENT_USER } from './current-user';
 
 // Minimal stand-in for `ws`'s WebSocket, matching the one already used in
 // yjs-ws-server.test.ts — just enough surface for setupWSConnection to run
@@ -126,6 +128,13 @@ describe('attachYjsWebSocket: upgrade routing', () => {
 	});
 
 	it('derives a shardId selector from a "shard-<id>" room, connecting to that shard\'s own context (#120)', () => {
+		// Must be a real, catalog-tracked Document/Collection id — #111/#138
+		// hardened setupWSConnection to reject an unknown/fabricated shard id
+		// (see the rejection test below) rather than lazily creating an empty
+		// doc for it, so a fabricated id like the old 'abc123' no longer
+		// connects at all.
+		const document = createDocument(CURRENT_USER, { title: 'Shard Room Doc' });
+
 		const server = new EventEmitter();
 		const wss = attachYjsWebSocket(
 			server as unknown as Parameters<typeof attachYjsWebSocket>[0],
@@ -136,12 +145,39 @@ describe('attachYjsWebSocket: upgrade routing', () => {
 			cb(ws as never, req);
 		});
 
-		server.emit('upgrade', { url: '/ws/shard-abc123' }, new FakeSocket(), Buffer.alloc(0));
+		server.emit('upgrade', { url: `/ws/shard-${document.id}` }, new FakeSocket(), Buffer.alloc(0));
 
-		const shardContext = resolveWorkspaceContext({ shardId: 'abc123' });
+		const shardContext = resolveWorkspaceContext({ shardId: document.id });
 		expect(shardContext.connections.has(ws)).toBe(true);
 		const defaultContext = resolveWorkspaceContext();
 		expect(defaultContext.connections.has(ws)).toBe(false);
+		wss.close();
+	});
+
+	it('closes the connection for an unknown/fabricated shard id instead of creating an empty doc (#111/#138)', () => {
+		const server = new EventEmitter();
+		const wss = attachYjsWebSocket(
+			server as unknown as Parameters<typeof attachYjsWebSocket>[0],
+			'/ws'
+		);
+		const ws = new MockWebSocket();
+		const closeSpy = vi.spyOn(ws, 'close');
+		vi.spyOn(wss, 'handleUpgrade').mockImplementation((req, _socket, _head, cb) => {
+			cb(ws as never, req);
+		});
+
+		server.emit(
+			'upgrade',
+			{ url: '/ws/shard-never-created-this-id' },
+			new FakeSocket(),
+			Buffer.alloc(0)
+		);
+
+		expect(closeSpy).toHaveBeenCalledWith(4004, 'Unknown shard');
+		// No context was created for the fabricated id — resolving it now
+		// would be a *fresh* resolution, not proof one already existed, but
+		// the connection itself never got wired up (no message listener).
+		expect(ws.listenerCount('message')).toBe(0);
 		wss.close();
 	});
 

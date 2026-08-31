@@ -1,6 +1,5 @@
 import { json } from '@sveltejs/kit';
 import { deleteDocument } from '$lib/services';
-import { CURRENT_USER } from '$lib/server/current-user';
 import type { RequestHandler } from './$types';
 
 // Documents have their own shard since #120 — deleting one via the raw
@@ -9,7 +8,7 @@ import type { RequestHandler } from './$types';
 // Document lives in its own shard. Routing through the service layer
 // deletes its full descendant subtree from each of their real shards and
 // keeps the catalog in sync (see services/documents.ts's deleteDocument).
-export const DELETE: RequestHandler = ({ params }) => {
-	deleteDocument(CURRENT_USER, params.id);
+export const DELETE: RequestHandler = ({ params, locals }) => {
+	deleteDocument(locals.requestContext.caller, params.id);
 	return json({ success: true });
 };

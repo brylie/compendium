@@ -8,6 +8,8 @@ import {
 	resolveWorkspaceContext,
 	type WorkspaceSelector
 } from './workspace-store.js';
+import { getInstanceWorkspaceId } from './instance.js';
+import { resolveShardForParent } from './catalog.js';
 
 // y-websocket's npm package ships the browser client only as of v3 — the
 // server side (formerly bin/utils.js) is reimplemented here against the same
@@ -23,8 +25,27 @@ const PING_INTERVAL_MS = 30_000;
  * the connection's room path — non-authoritative in Phase 0 (see
  * workspace-store.ts), but threaded through here rather than dropped so the
  * boundary that resolves context is this call, not an implicit global.
+ *
+ * A `shardId` selector (a `shard-<id>` room) is verified against the
+ * catalog's own record locator (#111/#138) before anything resolves or
+ * creates a Y.Doc for it: `id` must already be a real Document or
+ * Collection's own shard, not an unknown/fabricated value — otherwise the
+ * connection is closed rather than silently getting a fresh, empty doc. A
+ * bare selector (the shared default room) is exempt: it names the
+ * workspace's own root context, not a single catalog-tracked resource. Safe
+ * against the legitimate "just-created, not-yet-connected" case: locator
+ * reservation happens synchronously during createDocument/createCollection,
+ * before the client ever receives the new id to connect with.
  */
 export function setupWSConnection(ws: WebSocket, selector?: WorkspaceSelector): void {
+	if (selector?.shardId) {
+		const workspaceId = selector.workspaceId ?? getInstanceWorkspaceId();
+		if (!resolveShardForParent(workspaceId, selector.shardId)) {
+			ws.close(4004, 'Unknown shard');
+			return;
+		}
+	}
+
 	const context = resolveWorkspaceContext(selector);
 	const { doc, awareness } = context;
 	const unregisterConnection = registerConnection(context, ws);

@@ -2,19 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { load, actions } from './+page.server';
 import { createDocument } from '$lib/services';
 import { CURRENT_USER } from '$lib/server/current-user';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 function formEvent(fields: Record<string, string>): Parameters<typeof actions.createDocument>[0] {
 	const formData = new FormData();
 	for (const [key, value] of Object.entries(fields)) formData.set(key, value);
-	return { request: { formData: async () => formData } } as Parameters<
-		typeof actions.createDocument
-	>[0];
+	return {
+		request: { formData: async () => formData },
+		locals: { requestContext: resolveRequestContext() }
+	} as unknown as Parameters<typeof actions.createDocument>[0];
 }
 
 describe('routes/+page.server: workspace home', () => {
 	it('load() lists documents and collections for the current user', () => {
 		createDocument(CURRENT_USER, { title: 'Existing Doc' });
-		const result = load(undefined as unknown as Parameters<typeof load>[0]) as unknown as {
+		const result = load({
+			locals: { requestContext: resolveRequestContext() }
+		} as unknown as Parameters<typeof load>[0]) as unknown as {
 			documents: Array<{ title: string }>;
 			collections: unknown[];
 		};

@@ -13,6 +13,7 @@ import {
 } from './catalog-mirror-observer.js';
 import { aggregateHolds, initHoldEviction, resetHoldEvictionForTests } from './holds.js';
 import { ensureCatalogBootstrapped } from './catalog.js';
+import { getInstanceWorkspaceId } from './instance.js';
 
 // This is the one place a {workspaceId, shardId} selector resolves to a live
 // Y.Doc/Awareness/persistence/connection bundle. Every boundary that used to
@@ -37,6 +38,12 @@ import { ensureCatalogBootstrapped } from './catalog.js';
 // process (Vite's own config-loading context vs. the app's SSR module
 // graph), and each graph would otherwise get its own disconnected registry.
 
+// The literal fallback value — kept exported since many call sites and
+// tests already reference it directly. resolveWorkspaceContext() itself no
+// longer defaults to this constant directly; it defaults to
+// getInstanceWorkspaceId() (#111), which falls back to this same literal
+// when no COMPENDIUM_INSTANCE_ID is configured — so every existing test that
+// doesn't set that env var sees identical behavior.
 export const DEFAULT_WORKSPACE_ID = 'default';
 export const DEFAULT_SHARD_ID = 'default';
 
@@ -135,7 +142,7 @@ function createContext(workspaceId: string, shardId: string): InternalContext {
  * entirely (the common case at every current boundary).
  */
 export function resolveWorkspaceContext(selector: WorkspaceSelector = {}): WorkspaceContext {
-	const workspaceId = selector.workspaceId ?? DEFAULT_WORKSPACE_ID;
+	const workspaceId = selector.workspaceId ?? getInstanceWorkspaceId();
 	const shardId = selector.shardId ?? DEFAULT_SHARD_ID;
 	const key = keyFor(workspaceId, shardId);
 	const existing = registry().get(key);

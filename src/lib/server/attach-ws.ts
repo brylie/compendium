@@ -10,14 +10,14 @@ const SHARD_ROOM_PREFIX = 'shard-';
  * Turns the room-name path segment the y-websocket client appended
  * (serverUrl + '/' + roomname) into a WorkspaceSelector. `'workspace'` (or no
  * segment at all) is the existing shared room — Documents, unsharded — and
- * resolves to no selector, exactly as before. `'shard-<id>'` is one
- * Collection's own shard (#120); the client always obtains `<id>` from the
- * server first (GET /api/collections/[id]/shard), never assumes it equals
- * the collectionId, so this is trusted the same bounded way every other
- * Phase-0 boundary already is — no auth exists to independently verify it
- * against, but an unknown/fabricated id just lazily resolves to a fresh,
- * empty, harmless Y.Doc (resolveWorkspaceContext's existing behavior),
- * never someone else's real data.
+ * resolves to no selector, exactly as before. `'shard-<id>'` names one
+ * Document or Collection's own shard; the client always obtains `<id>` from
+ * the server first (GET /api/{documents,collections}/[id]/shard), never
+ * assumes it equals the parent id. This selector is still just a hint, not
+ * authority — but `setupWSConnection` (yjs-ws-server.ts) now verifies `<id>`
+ * against the catalog's own record locator before accepting the connection
+ * (#111/#138), so an unknown/fabricated id gets the connection closed
+ * instead of silently resolving to a fresh, empty Y.Doc.
  */
 function selectorFromRoom(room: string): WorkspaceSelector | undefined {
 	if (room.startsWith(SHARD_ROOM_PREFIX)) {
