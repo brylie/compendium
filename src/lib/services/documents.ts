@@ -326,7 +326,7 @@ export function listDocuments(caller: CallerIdentity, spaceId?: string): Documen
 	const catalogDocumentIds = new Set(catalogDocs.map((d) => d.id));
 	const results = catalogDocs.filter((d) => allowed(d.id));
 
-	if (spaceId) return results;
+	if (spaceId !== undefined) return results;
 
 	// Then any Document written directly to the Y.Doc, bypassing the service
 	// layer entirely (and therefore uncataloged) — mirrors listCollections'

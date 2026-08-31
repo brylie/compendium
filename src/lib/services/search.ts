@@ -67,7 +67,7 @@ export function searchWorkspace(
 	// default doc directly, matching the Collection loop's identical fallback
 	// below. Skipped entirely once a specific Space was requested — see this
 	// function's own doc comment.
-	if (!spaceId) {
+	if (spaceId === undefined) {
 		for (const document of crdtListDocuments(doc)) {
 			if (catalogDocumentIds.has(document.id)) continue;
 			if (isAccessToken(caller) && !tokenAllowsParent(caller, document.id)) continue;
@@ -108,7 +108,7 @@ export function searchWorkspace(
 	// doc directly, matching today's completeness for that case. Skipped
 	// entirely once a specific Space was requested — see this function's own
 	// doc comment.
-	if (!spaceId) {
+	if (spaceId === undefined) {
 		for (const collection of listCollections(doc)) {
 			if (catalogCollectionIds.has(collection.id)) continue;
 			if (isAccessToken(caller) && !tokenAllowsParent(caller, collection.id)) continue;

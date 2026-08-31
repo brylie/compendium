@@ -348,7 +348,7 @@ export function listCatalogDocuments(workspaceId: string, spaceId?: string): Doc
 		.select()
 		.from(catalogDocuments)
 		.where(
-			spaceId
+			spaceId !== undefined
 				? and(eq(catalogDocuments.workspaceId, workspaceId), eq(catalogDocuments.spaceId, spaceId))
 				: eq(catalogDocuments.workspaceId, workspaceId)
 		)
@@ -368,7 +368,7 @@ export function listCatalogCollections(workspaceId: string, spaceId?: string): C
 		.select()
 		.from(catalogCollections)
 		.where(
-			spaceId
+			spaceId !== undefined
 				? and(
 						eq(catalogCollections.workspaceId, workspaceId),
 						eq(catalogCollections.spaceId, spaceId)

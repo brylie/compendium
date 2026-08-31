@@ -68,6 +68,19 @@ describe('space isolation: listDocuments/listCollections (#133, workspace-shardi
 		expect(all.map((d) => d.id)).toContain(docB.id);
 	});
 
+	it('treats an explicitly-passed empty spaceId as a real (non-matching) scope, not "no filter"', () => {
+		// Regression: an empty string is a supplied value, `undefined` is
+		// omission — conflating the two (a truthiness check instead of
+		// `!== undefined`) would silently fall through to unscoped,
+		// workspace-wide results for a caller that *did* pass something.
+		const { docA, docB } = seedTwoSpaces();
+
+		const results = listDocuments(CURRENT_USER, '');
+		expect(results).toEqual([]);
+		expect(results.map((d) => d.id)).not.toContain(docA.id);
+		expect(results.map((d) => d.id)).not.toContain(docB.id);
+	});
+
 	it('scopes Collections to the requested Space the same way', () => {
 		const { spaceAId, spaceBId, collectionA } = seedTwoSpaces();
 

@@ -119,7 +119,7 @@ export function listCollections(caller: CallerIdentity, spaceId?: string): Colle
 		results.push(crdtGetCollection(collectionDoc, meta.id) ?? meta);
 	}
 
-	if (spaceId) return results;
+	if (spaceId !== undefined) return results;
 
 	// Then any Collection written directly to the Y.Doc, bypassing the
 	// service layer entirely (and therefore uncataloged) — the catalog loop
