@@ -4,6 +4,12 @@ import * as Y from 'yjs';
 import { createDocument, deleteDocument, updateDocumentTitle } from '$lib/data/records';
 import BlockEditor from './BlockEditor.svelte';
 
+vi.mock('$app/state', () => ({
+	get page() {
+		return { params: { spaceId: 'space-1' } };
+	}
+}));
+
 function selectRange(el: HTMLElement, start: number, end: number): void {
 	const textNode = document.createTreeWalker(el, NodeFilter.SHOW_TEXT).nextNode() as Text;
 	const range = document.createRange();
@@ -77,7 +83,7 @@ describe('BlockEditor', () => {
 		]);
 		const { container } = render(BlockEditor, { ytext, ...handlers(), linkTargets });
 		const anchor = container.querySelector('a')!;
-		expect(anchor).toHaveAttribute('href', `/doc/${target.id}`);
+		expect(anchor).toHaveAttribute('href', `/space/space-1/doc/${target.id}`);
 		expect(anchor).toHaveTextContent('Q3 Roadmap');
 	});
 
@@ -115,7 +121,7 @@ describe('BlockEditor', () => {
 
 		const anchor = container.querySelector('a')!;
 		expect(anchor).toHaveTextContent('Published');
-		expect(anchor).toHaveAttribute('href', `/doc/${target.id}`);
+		expect(anchor).toHaveAttribute('href', `/space/space-1/doc/${target.id}`);
 	});
 
 	it('escapes HTML special characters in the plain text', () => {

@@ -12,6 +12,12 @@ import {
 import type { ActorId } from '$lib/data/types';
 import Page from './+page.svelte';
 
+vi.mock('$app/state', () => ({
+	get page() {
+		return { params: { spaceId: 'space-1' } };
+	}
+}));
+
 // Enter/Backspace/toolbar block-conversion behavior has its own dedicated
 // suite: editing-conventions.svelte.test.ts. This file covers everything
 // else — rendering each block type, navigation, presence, and the
@@ -85,9 +91,17 @@ describe('doc/[id] +page', () => {
 	it('shows a prompt to start writing when the document has no blocks', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'Empty Doc' });
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'Empty Doc' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'Empty Doc'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByText("Type '/' for commands, or start typing...")).toBeInTheDocument();
@@ -97,9 +111,17 @@ describe('doc/[id] +page', () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'Empty Doc' });
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'Empty Doc' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'Empty Doc'
+			}
 		});
 		await flushShardResolution();
 
@@ -114,9 +136,17 @@ describe('doc/[id] +page', () => {
 	it('renders the SSR title before mount, then the live document title', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'Live Title' });
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'SSR Title' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'SSR Title'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByDisplayValue('Live Title')).toBeInTheDocument();
@@ -126,9 +156,17 @@ describe('doc/[id] +page', () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'Old' });
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'Old' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'Old'
+			}
 		});
 		await flushShardResolution();
 
@@ -143,11 +181,19 @@ describe('doc/[id] +page', () => {
 		const parent = createDocument(ydoc, { id: 'parent', title: 'Parent Doc' });
 		createDocument(ydoc, { id: 'child', title: 'Child Doc', parentDocumentId: 'parent' });
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
 			// documentMetadataById (breadcrumb parent lookup) is catalog-backed
 			// (data.documents), not derived from ydoc (#120).
-			data: { documents: [parent], collections: [], documentId: 'child', title: 'Child Doc' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [parent],
+				collections: [],
+				documentId: 'child',
+				title: 'Child Doc'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByText('Parent Doc')).toBeInTheDocument();
@@ -158,9 +204,17 @@ describe('doc/[id] +page', () => {
 		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 		getRecordYText(ydoc, record.id)!.insert(0, 'Hello block');
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByText('Hello block')).toBeInTheDocument();
@@ -171,9 +225,17 @@ describe('doc/[id] +page', () => {
 		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'to_do' }, HUMAN);
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -190,9 +252,17 @@ describe('doc/[id] +page', () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'divider' }, HUMAN);
 		const { container } = render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 		expect(container.querySelector('.border-t.border-border')).toBeInTheDocument();
@@ -203,9 +273,17 @@ describe('doc/[id] +page', () => {
 		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'callout' }, HUMAN);
 		getRecordYText(ydoc, record.id)!.insert(0, 'Careful!');
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByText('Careful!')).toBeInTheDocument();
@@ -216,9 +294,17 @@ describe('doc/[id] +page', () => {
 		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'toggle' }, HUMAN);
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -234,9 +320,17 @@ describe('doc/[id] +page', () => {
 		getRecordYText(ydoc, h1.id)!.insert(0, 'Section One');
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'table_of_contents' }, HUMAN);
 		const { container } = render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -256,9 +350,17 @@ describe('doc/[id] +page', () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'synced_block' }, HUMAN);
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByText('Set target ID')).toBeInTheDocument();
@@ -271,9 +373,17 @@ describe('doc/[id] +page', () => {
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'synced_block' }, HUMAN);
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -289,11 +399,19 @@ describe('doc/[id] +page', () => {
 		const other = createDocument(ydoc, { id: 'other', title: 'Other Doc' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'page_link' }, HUMAN);
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
 			// The picker's candidate list is catalog-backed (data.documents),
 			// not derived from ydoc (#120).
-			data: { documents: [other], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [other],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByText('Link to page:')).toBeInTheDocument();
@@ -306,9 +424,17 @@ describe('doc/[id] +page', () => {
 		getRecordYText(ydoc, record.id)!.insert(0, 'Visit example');
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -334,14 +460,25 @@ describe('doc/[id] +page', () => {
 			HUMAN
 		);
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
 			// The linked target's title is resolved from data.documents
 			// (catalog-backed), not ydoc (#120).
-			data: { documents: [other], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [other],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
-		expect(screen.getByRole('link', { name: /Other Doc/ })).toHaveAttribute('href', '/doc/other');
+		expect(screen.getByRole('link', { name: /Other Doc/ })).toHaveAttribute(
+			'href',
+			'/space/space-1/doc/other'
+		);
 	});
 
 	it('shows an explicit "deleted" state for a page_link whose target no longer exists, distinct from an unlinked block', async () => {
@@ -354,9 +491,17 @@ describe('doc/[id] +page', () => {
 			HUMAN
 		);
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByText('Linked page was deleted')).toBeInTheDocument();
@@ -368,9 +513,17 @@ describe('doc/[id] +page', () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'collection_view' }, HUMAN);
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByText('Embed a collection view:')).toBeInTheDocument();
@@ -390,11 +543,19 @@ describe('doc/[id] +page', () => {
 			HUMAN
 		);
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
 			// CollectionViewBlock's picker/lookup is catalog-backed (data.collections),
 			// not derived from ydoc (#120) — see CollectionViewBlock.svelte.
-			data: { documents: [], collections: [collection], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [collection],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByText('Sprint Tasks')).toBeInTheDocument();
@@ -406,9 +567,17 @@ describe('doc/[id] +page', () => {
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -422,9 +591,17 @@ describe('doc/[id] +page', () => {
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 		const user = userEvent.setup();
 		const { container } = render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -453,9 +630,17 @@ describe('doc/[id] +page', () => {
 		);
 
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -473,16 +658,32 @@ describe('doc/[id] +page', () => {
 
 		const user = userEvent.setup();
 		const { container, rerender } = render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'First' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'First'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByText('From doc one')).toBeInTheDocument();
 		await user.click(container.querySelector('[contenteditable]') as HTMLElement);
 
 		await rerender({
-			data: { documents: [], collections: [], documentId: 'doc-2', title: 'Second' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-2',
+				title: 'Second'
+			}
 		});
 		await flushShardResolution();
 
@@ -495,9 +696,17 @@ describe('doc/[id] +page', () => {
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 		const user = userEvent.setup();
 		const { container, unmount } = render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -517,9 +726,17 @@ describe('doc/[id] +page', () => {
 		getRecordYText(ydoc, code.id)!.insert(0, 'const x = 1;');
 
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -534,9 +751,17 @@ describe('doc/[id] +page', () => {
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'bulleted_list_item' }, HUMAN);
 
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -548,9 +773,17 @@ describe('doc/[id] +page', () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -566,9 +799,17 @@ describe('doc/[id] +page', () => {
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 		const user = userEvent.setup();
 		const { container } = render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -583,9 +824,17 @@ describe('doc/[id] +page', () => {
 		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'synced_block' }, HUMAN);
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -600,9 +849,17 @@ describe('doc/[id] +page', () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -620,9 +877,17 @@ describe('doc/[id] +page', () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -638,9 +903,17 @@ describe('doc/[id] +page', () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -658,9 +931,17 @@ describe('doc/[id] +page', () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
-			data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
 		});
 		await flushShardResolution();
 
@@ -705,11 +986,14 @@ describe('doc/[id] +page', () => {
 		);
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'doc-1' },
+			params: { spaceId: 'space-1', id: 'doc-1' },
 			form: null,
 			// The linked target and the "Change" dropdown's candidates are both
 			// catalog-backed (data.documents), not derived from ydoc (#120).
 			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
 				documents: [targetA, targetB],
 				collections: [],
 				documentId: 'doc-1',

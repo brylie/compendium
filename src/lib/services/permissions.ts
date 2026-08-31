@@ -78,13 +78,13 @@ export function requireAccessibleRecord(
  */
 export function resolveParentWorkspaceContext(
 	parentId: string
-): WorkspaceContext & { parentKind?: 'document' | 'collection' } {
+): WorkspaceContext & { parentKind?: 'document' | 'collection'; parentSpaceId?: string } {
 	const { workspaceId } = resolveWorkspaceContext();
 	const shard = resolveShardForParent(workspaceId, parentId);
 	const ctx = resolveWorkspaceContext(
 		shard ? { workspaceId, shardId: shard.shardId } : { workspaceId }
 	);
-	return { ...ctx, parentKind: shard?.kind };
+	return { ...ctx, parentKind: shard?.kind, parentSpaceId: shard?.spaceId };
 }
 
 /**

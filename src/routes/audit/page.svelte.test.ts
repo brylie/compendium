@@ -33,7 +33,14 @@ describe('audit +page', () => {
 		render(Page, {
 			params: {},
 			form: null,
-			data: { documents: [], collections: [], entries: [], actorKind: '' }
+			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				entries: [],
+				actorKind: ''
+			}
 		});
 		expect(screen.getByText('No audit entries matching filter.')).toBeInTheDocument();
 	});
@@ -43,6 +50,8 @@ describe('audit +page', () => {
 			params: {},
 			form: null,
 			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
 				documents: [],
 				collections: [],
 				entries: [entry({ id: 1, targetRecordId: 'rec-42' })],
@@ -59,6 +68,8 @@ describe('audit +page', () => {
 			params: {},
 			form: null,
 			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
 				documents: [],
 				collections: [],
 				entries: [entry({ targetRecordId: undefined })],
@@ -73,6 +84,8 @@ describe('audit +page', () => {
 			params: {},
 			form: null,
 			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
 				documents: [],
 				collections: [],
 				entries: [
@@ -93,7 +106,14 @@ describe('audit +page', () => {
 		render(Page, {
 			params: {},
 			form: null,
-			data: { documents: [], collections: [], entries: [], actorKind: 'agent' }
+			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				entries: [],
+				actorKind: 'agent'
+			}
 		});
 		expect(screen.getByRole('combobox')).toHaveValue('agent');
 	});
@@ -104,7 +124,14 @@ describe('audit +page', () => {
 		render(Page, {
 			params: {},
 			form: null,
-			data: { documents: [], collections: [], entries: [], actorKind: '' }
+			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				entries: [],
+				actorKind: ''
+			}
 		});
 
 		await user.selectOptions(screen.getByRole('combobox'), 'human');

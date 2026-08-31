@@ -40,6 +40,7 @@ export interface CreateDocumentInput {
 	parentDocumentId?: string;
 	afterDocumentId?: string;
 	createInitialBlock?: boolean;
+	spaceId?: string;
 }
 
 export function createDocument(caller: CallerIdentity, input: CreateDocumentInput): DocumentMeta {
@@ -50,6 +51,7 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 	const { doc, workspaceId, shardId, defaultSpaceId } = resolveWorkspaceContext({ shardId: id });
 	const { doc: defaultDoc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
+	const targetSpaceId = input.spaceId ?? defaultSpaceId;
 
 	// Decision: In single-tenant Phase 0/1, any authenticated caller is permitted
 	// to create top-level documents; when nested, access to parentDocumentId is verified.
@@ -72,7 +74,7 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 	) {
 		throw new RecordIdConflictError(id);
 	}
-	reserveDocumentLocator(workspaceId, defaultSpaceId, id, shardId);
+	reserveDocumentLocator(workspaceId, targetSpaceId, id, shardId);
 
 	// Sibling order is computed from the catalog, not this doc's own
 	// listDocuments(): true siblings can live in entirely different shards
@@ -91,7 +93,7 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 
 	recordCatalogDocumentCreated({
 		workspaceId,
-		spaceId: defaultSpaceId,
+		spaceId: targetSpaceId,
 		id: document.id,
 		title: document.title,
 		parentDocumentId: document.parentDocumentId,

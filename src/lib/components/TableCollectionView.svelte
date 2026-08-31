@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type * as Y from 'yjs';
+	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { getShardDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
@@ -138,8 +139,12 @@
 		class="rounded-lg border border-dashed border-border bg-surface/50 p-6 text-center text-sm text-muted"
 	>
 		This collection has no properties yet — add one from the
-		<a href={resolve('/table/[id]', { id: collectionId })} class="text-accent hover:underline"
-			>full table</a
+		<a
+			href={resolve('/space/[spaceId]/table/[id]', {
+				spaceId: page.params.spaceId!,
+				id: collectionId
+			})}
+			class="text-accent hover:underline">full table</a
 		>.
 	</p>
 {:else}
@@ -227,7 +232,10 @@
 			<span>Add row</span>
 		</button>
 		<a
-			href={resolve('/table/[id]', { id: collectionId })}
+			href={resolve('/space/[spaceId]/table/[id]', {
+				spaceId: page.params.spaceId!,
+				id: collectionId
+			})}
 			class="text-xs text-muted hover:text-accent hover:underline"
 		>
 			Open full table →

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
+	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { getShardAwareness, getShardDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
@@ -612,7 +613,10 @@
 <div class="mx-auto max-w-3xl px-6 py-10">
 	<!-- Breadcrumb / Hierarchy nav -->
 	<nav class="mb-4 flex items-center gap-1.5 text-xs text-muted">
-		<a href={resolve('/')} class="flex items-center gap-1 transition-colors hover:text-accent">
+		<a
+			href={resolve('/space/[spaceId]', { spaceId: page.params.spaceId! })}
+			class="flex items-center gap-1 transition-colors hover:text-accent"
+		>
 			<span>Workspace</span>
 		</a>
 		{#if parentDocTitle}
@@ -863,7 +867,10 @@
 							{#if linkedDoc}
 								<div class="flex items-center justify-between">
 									<a
-										href={resolve('/doc/[id]', { id: linkedDoc.id })}
+										href={resolve('/space/[spaceId]/doc/[id]', {
+											spaceId: page.params.spaceId!,
+											id: linkedDoc.id
+										})}
 										class="flex items-center gap-2 text-sm font-medium text-fg transition-colors hover:text-accent"
 									>
 										<Icon name="document" size={16} class="flex-shrink-0 text-accent" />

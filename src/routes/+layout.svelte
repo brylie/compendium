@@ -7,7 +7,12 @@
 </script>
 
 <div class="flex h-screen w-screen overflow-hidden bg-bg text-fg">
-	<Sidebar initialDocuments={data.documents} initialCollections={data.collections} />
+	<Sidebar
+		initialDocuments={data.documents}
+		initialCollections={data.collections}
+		spaces={data.spaces}
+		activeSpaceId={data.activeSpaceId}
+	/>
 	<main class="min-w-0 flex-1 overflow-y-auto">
 		{@render children()}
 	</main>

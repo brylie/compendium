@@ -1,10 +1,17 @@
 import { test, expect } from '@playwright/test';
 import { createTestHarness, type TestHarness } from './harness';
 import { createDocument, createRecord } from '$lib/services';
-import { flush } from '$lib/server/workspace-store';
+import { flush, resolveWorkspaceContext } from '$lib/server/workspace-store';
 import type { ActorId } from '$lib/data/types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
+
+// Every Document/Collection in these fixtures is created without an explicit
+// spaceId, so it always lands in the workspace's bootstrap default Space
+// (#6 Phase A route nesting — a Document's URL is /space/[spaceId]/doc/[id]).
+function defaultSpaceId(): string {
+	return resolveWorkspaceContext().defaultSpaceId;
+}
 
 test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 	let harness: TestHarness;
@@ -34,7 +41,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		});
 
 		// 1. Open document in browser
-		await page.goto(`${harness.httpUrl}/doc/${docMeta.id}`);
+		await page.goto(`${harness.httpUrl}/space/${defaultSpaceId()}/doc/${docMeta.id}`);
 		await expect(page.locator('input[placeholder="Untitled document"]')).toHaveValue(
 			'Live Browser Collaboration'
 		);
@@ -85,7 +92,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		});
 
 		// 1. Open workspace home in browser
-		await page.goto(`${harness.httpUrl}/doc/${rootDoc.id}`);
+		await page.goto(`${harness.httpUrl}/space/${defaultSpaceId()}/doc/${rootDoc.id}`);
 		await expect(page.locator('aside')).toContainText('Initial Root Doc');
 
 		// 2. MCP creates a nested child document
@@ -245,7 +252,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		// 3. A human opens Doc A in the browser, then navigates to Doc B purely client-side
 		// (sidebar click, not a full page load) -- each document's editor must show its own
 		// content, not the previously-open document's stale blocks.
-		await page.goto(`${harness.httpUrl}/doc/${docA.id}`);
+		await page.goto(`${harness.httpUrl}/space/${defaultSpaceId()}/doc/${docA.id}`);
 		await expect(page.locator('text=Venue confirmed: The Old Foundry.')).toBeVisible({
 			timeout: 5000
 		});

@@ -33,6 +33,7 @@ export interface CreateCollectionInput {
 	id?: string;
 	title: string;
 	schema?: PropertyDefinition[];
+	spaceId?: string;
 }
 
 export function createCollection(
@@ -46,6 +47,7 @@ export function createCollection(
 	// Collection — see docs/specifications/workspace-sharding.md §1).
 	const { doc, workspaceId, shardId, defaultSpaceId } = resolveWorkspaceContext({ shardId: id });
 	const { doc: defaultDoc } = resolveWorkspaceContext();
+	const targetSpaceId = input.spaceId ?? defaultSpaceId;
 
 	// See documents.ts's createDocument for why this also checks the live
 	// Y.Doc, not just the catalog locator: a caller-supplied id could collide
@@ -65,7 +67,7 @@ export function createCollection(
 	) {
 		throw new RecordIdConflictError(id);
 	}
-	reserveCollectionLocator(workspaceId, defaultSpaceId, id, shardId);
+	reserveCollectionLocator(workspaceId, targetSpaceId, id, shardId);
 
 	const collection = crdtCreateCollection(doc, {
 		id,
@@ -75,7 +77,7 @@ export function createCollection(
 
 	recordCatalogCollectionCreated({
 		workspaceId,
-		spaceId: defaultSpaceId,
+		spaceId: targetSpaceId,
 		id: collection.id,
 		title: collection.title,
 		shardId
@@ -116,7 +118,8 @@ export function listCollections(caller: CallerIdentity, spaceId?: string): Colle
 		const collectionDoc = shard
 			? resolveWorkspaceContext({ workspaceId, shardId: shard.shardId }).doc
 			: defaultDoc;
-		results.push(crdtGetCollection(collectionDoc, meta.id) ?? meta);
+		const fullMeta = crdtGetCollection(collectionDoc, meta.id);
+		results.push(fullMeta ? { ...fullMeta, spaceId: meta.spaceId } : meta);
 	}
 
 	if (spaceId !== undefined) return results;
