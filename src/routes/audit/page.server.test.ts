@@ -5,6 +5,7 @@ import { logAudit } from '$lib/server/audit';
 interface AuditLoadResult {
 	actorKind: string;
 	targetRecordId: string;
+	hasTargetRecordScope: boolean;
 	entries: Array<{ actor: { kind: string }; targetRecordId?: string }>;
 }
 
@@ -50,5 +51,25 @@ describe('routes/audit/+page.server', () => {
 		expect(result.targetRecordId).toBe('block-a');
 		expect(result.entries).toHaveLength(1);
 		expect(result.entries[0]?.targetRecordId).toBe('block-a');
+	});
+
+	it('keeps an empty target record ID as an active filter scope', () => {
+		logAudit({
+			actor: { kind: 'human', userId: 'brylie' },
+			action: 'update_record',
+			targetRecordId: ''
+		});
+		logAudit({
+			actor: { kind: 'human', userId: 'brylie' },
+			action: 'update_record',
+			targetRecordId: 'block-b'
+		});
+
+		const result = load(urlEvent({ targetRecordId: '' })) as unknown as AuditLoadResult;
+
+		expect(result.hasTargetRecordScope).toBe(true);
+		expect(result.targetRecordId).toBe('');
+		expect(result.entries).toHaveLength(1);
+		expect(result.entries[0]?.targetRecordId).toBe('');
 	});
 });

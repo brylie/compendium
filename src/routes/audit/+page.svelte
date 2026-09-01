@@ -23,14 +23,14 @@
 		<div>
 			<h1 class="font-display text-3xl font-semibold tracking-tight text-fg">Audit Log</h1>
 			<p class="mt-1 text-sm text-muted">
-				{data.targetRecordId
+				{data.hasTargetRecordScope
 					? `Audit history for block ${data.targetRecordId}.`
 					: 'Chronological trail of human and agent operations.'}
 			</p>
 		</div>
 
 		<form method="GET" class="flex items-center gap-2">
-			{#if data.targetRecordId}
+			{#if data.hasTargetRecordScope}
 				<input type="hidden" name="targetRecordId" value={data.targetRecordId} />
 			{/if}
 			<label class="flex items-center gap-1.5 text-xs text-muted">
@@ -47,7 +47,7 @@
 					<option value="agent">Agent</option>
 				</select>
 			</label>
-			{#if data.targetRecordId}
+			{#if data.hasTargetRecordScope}
 				<a href={resolve('/audit')} class="text-xs text-muted transition-colors hover:text-accent">
 					All history
 				</a>

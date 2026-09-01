@@ -40,7 +40,8 @@ describe('audit +page', () => {
 				collections: [],
 				entries: [],
 				actorKind: '',
-				targetRecordId: ''
+				targetRecordId: '',
+				hasTargetRecordScope: false
 			}
 		});
 		expect(screen.getByText('No audit entries matching filter.')).toBeInTheDocument();
@@ -57,7 +58,8 @@ describe('audit +page', () => {
 				collections: [],
 				entries: [entry({ id: 1, targetRecordId: 'rec-42' })],
 				actorKind: '',
-				targetRecordId: ''
+				targetRecordId: '',
+				hasTargetRecordScope: false
 			}
 		});
 		expect(screen.getByText('You')).toBeInTheDocument();
@@ -76,7 +78,8 @@ describe('audit +page', () => {
 				collections: [],
 				entries: [entry({ targetRecordId: undefined })],
 				actorKind: '',
-				targetRecordId: ''
+				targetRecordId: '',
+				hasTargetRecordScope: false
 			}
 		});
 		expect(screen.getByText('—')).toBeInTheDocument();
@@ -99,7 +102,8 @@ describe('audit +page', () => {
 					})
 				],
 				actorKind: '',
-				targetRecordId: ''
+				targetRecordId: '',
+				hasTargetRecordScope: false
 			}
 		});
 		expect(screen.getByText('Claude')).toBeInTheDocument();
@@ -117,7 +121,8 @@ describe('audit +page', () => {
 				collections: [],
 				entries: [],
 				actorKind: 'agent',
-				targetRecordId: ''
+				targetRecordId: '',
+				hasTargetRecordScope: false
 			}
 		});
 		expect(screen.getByRole('combobox')).toHaveValue('agent');
@@ -136,7 +141,8 @@ describe('audit +page', () => {
 				collections: [],
 				entries: [],
 				actorKind: '',
-				targetRecordId: ''
+				targetRecordId: '',
+				hasTargetRecordScope: false
 			}
 		});
 
@@ -156,12 +162,34 @@ describe('audit +page', () => {
 				collections: [],
 				entries: [],
 				actorKind: '',
-				targetRecordId: 'block-42'
+				targetRecordId: 'block-42',
+				hasTargetRecordScope: true
 			}
 		});
 
 		expect(screen.getByText('Audit history for block block-42.')).toBeInTheDocument();
 		expect(screen.getByDisplayValue('block-42')).toBeInTheDocument();
 		expect(screen.getByRole('link', { name: 'All history' })).toHaveAttribute('href', '/audit');
+	});
+
+	it('keeps an empty record ID as visible audit context', () => {
+		render(Page, {
+			params: {},
+			form: null,
+			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				entries: [],
+				actorKind: '',
+				targetRecordId: '',
+				hasTargetRecordScope: true
+			}
+		});
+
+		expect(screen.getByText('Audit history for block .')).toBeInTheDocument();
+		expect(screen.getByDisplayValue('')).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: 'All history' })).toBeInTheDocument();
 	});
 });

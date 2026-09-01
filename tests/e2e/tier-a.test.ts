@@ -5,6 +5,7 @@ import {
 	createRecord,
 	getRecord,
 	getRecordYText,
+	touchRecordEditor,
 	updateRecordContent
 } from '$lib/data/records';
 import { queryAuditLog } from '$lib/server/audit';
@@ -864,13 +865,23 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		const ytext = getRecordYText(yjs.doc, block.id);
 		await harness.waitForCondition(() => ytext !== undefined);
 		yjs.doc.transact(() => ytext!.insert(0, 'edited directly by the UI'));
+		// The editor updates the record's provenance projection alongside its
+		// direct Y.Text write, so every client observes the same attribution.
+		touchRecordEditor(yjs.doc, block.id, human);
 
 		// Wait for the SERVER's own doc (not just the local client doc, which
 		// updates instantly) to actually receive the sync before flushing —
 		// otherwise there's nothing pending yet to flush.
 		await harness.waitForCondition(() => {
 			const serverText = getRecordYText(resolveWorkspaceContext().doc, block.id);
-			return serverText !== undefined && plainText(yTextToRichText(serverText)).length > 0;
+			const serverRecord = getRecord(resolveWorkspaceContext().doc, block.id);
+			return (
+				serverText !== undefined &&
+				plainText(yTextToRichText(serverText)).length > 0 &&
+				serverRecord?.lastEditedBy.kind === 'human' &&
+				serverRecord.lastEditedBy.userId === 'brylie' &&
+				serverRecord.lastEditedAt > block.createdAt
+			);
 		});
 		flushPendingAuditEvents();
 		expect(
