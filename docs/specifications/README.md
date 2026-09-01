@@ -10,6 +10,7 @@ Canonical specification for each implemented subsystem, translating [`prd.md`](.
 - [`markdown-transcoding.md`](./markdown-transcoding.md) — the `Y.Text` ⇄ Markdown boundary.
 - [`internal-links.md`](./internal-links.md) — the shared, ID-backed representation behind `page_link` blocks and inline wiki-links, and why a deleted target becomes an explicit broken link rather than a silent one.
 - [`rich-text-toolbar.md`](./rich-text-toolbar.md) — persistent editor toolbar, selected-mark state, block insertion, and its relationship to slash commands.
+- [`block-capability-contract.md`](./block-capability-contract.md) — the checklist every `BlockType` (existing or new) must satisfy: conversion rules, keyboard behavior, Markdown/MCP representation, hold semantics, and accessible rendering.
 - [`undo-redo.md`](./undo-redo.md) — local, per-actor undo/redo via Y.UndoManager, and why it never reverts a collaborator's or agent's edit.
 - [`persistence.md`](./persistence.md) — SQLite via Drizzle: snapshots, audit log, access tokens, and the query read model.
 - [`audit-coverage.md`](./audit-coverage.md) — how direct UI mutations (which bypass the service layer entirely) and denied MCP attempts get an audit trail, and what's deliberately excluded.
