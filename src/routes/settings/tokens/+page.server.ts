@@ -28,6 +28,17 @@ export const actions: Actions = {
 		const allowedCollectionIds = data.getAll('collectionIds').map(String);
 		const allowedSpaceIds = data.getAll('spaceIds').map(String);
 
+		// spaceIds comes directly from the request — validate every submitted id
+		// actually belongs to this workspace before it's persisted onto the
+		// token, since Space membership later authorizes access on its own
+		// (tokenAllowsParent). A crafted request could otherwise grant a token
+		// access to a Space id that merely happens to exist somewhere.
+		const { workspaceId } = resolveWorkspaceContext();
+		const knownSpaceIds = new Set(listSpaces(workspaceId).map((space) => space.id));
+		if (!allowedSpaceIds.every((spaceId) => knownSpaceIds.has(spaceId))) {
+			return fail(400, { error: 'Invalid Space selection' });
+		}
+
 		const { token, record } = createToken({
 			clientLabel,
 			allowedDocumentIds,
