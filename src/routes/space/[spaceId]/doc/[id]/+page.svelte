@@ -53,6 +53,7 @@
 	let slashMenuBlockId: string | null = $state(null);
 	let slashQuery = $state('');
 	let heldByOthers: Map<string, ActorId> = $state(new Map());
+	let holdAnnouncement = $state('');
 	let parentDocTitle: string | null = $state(null);
 	let activeBlockId: string | null = $state(null);
 	let activeMarks: Partial<Record<keyof TextMarks, boolean>> = $state({});
@@ -289,7 +290,23 @@
 			documentsMap.observeDeep(observer);
 			refresh();
 
+			let previousHeldByOthers: Map<string, ActorId> = new Map();
 			const unsubscribePresence = subscribeHeldByOthers(docAwareness, (held) => {
+				const messages: string[] = [];
+				for (const [recordId, actor] of held) {
+					if (!previousHeldByOthers.has(recordId)) {
+						messages.push(`${formatActor(actor)} started editing a block`);
+					}
+				}
+				for (const [recordId, actor] of previousHeldByOthers) {
+					if (!held.has(recordId)) {
+						messages.push(`${formatActor(actor)} finished editing a block`);
+					}
+				}
+				if (messages.length > 0) {
+					holdAnnouncement = messages.join('; ');
+				}
+				previousHeldByOthers = held;
 				heldByOthers = held;
 			});
 
@@ -636,6 +653,9 @@
 		placeholder="Untitled document"
 	/>
 
+	<!-- Screen-reader announcements for collaborative hold state (issue #18) -->
+	<div class="sr-only" role="status" aria-live="polite">{holdAnnouncement}</div>
+
 	<!--
 		Backlinks panel removed (#120): listIncomingLinks builds its reverse
 		index by scanning every Document within one shared Y.Doc, structurally
@@ -727,14 +747,19 @@
 						<div
 							class="flex h-7 items-center gap-2 rounded-md bg-surface/40 px-2 py-1"
 							title="{formatActor(holder)} is editing this block"
+							role="status"
+							aria-label="{formatActor(holder)} is editing this block"
 						>
 							<span
 								class="flex h-4.5 w-4.5 flex-shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-accent-fg"
+								aria-hidden="true"
 							>
 								{formatActor(holder).slice(0, 1).toUpperCase()}
 							</span>
-							<div class="shimmer-bar h-3 flex-1 rounded bg-surface"></div>
-							<span class="text-[11px] font-medium text-muted">{formatActor(holder)} editing…</span>
+							<div class="shimmer-bar h-3 flex-1 rounded bg-surface" aria-hidden="true"></div>
+							<span class="text-[11px] font-medium text-muted" aria-hidden="true"
+								>{formatActor(holder)} editing…</span
+							>
 						</div>
 					{:else if bt === 'divider'}
 						<div class="my-3 border-t border-border"></div>

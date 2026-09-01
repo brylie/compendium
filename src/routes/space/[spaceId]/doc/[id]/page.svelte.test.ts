@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
@@ -645,6 +646,45 @@ describe('doc/[id] +page', () => {
 		await flushShardResolution();
 
 		expect(screen.getByText('Claude editing…')).toBeInTheDocument();
+	});
+
+	it('announces hold state changes to screen readers via a live region', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		let onChange: (held: Map<string, ActorId>) => void = () => {};
+		subscribeHeldByOthers.mockImplementation(
+			(_awareness: unknown, cb: (held: Map<string, ActorId>) => void) => {
+				onChange = cb;
+				onChange(new Map());
+				return () => {};
+			}
+		);
+
+		render(Page, {
+			params: { spaceId: 'space-1', id: 'doc-1' },
+			form: null,
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
+		});
+		await flushShardResolution();
+
+		const liveRegion = screen.getByRole('status');
+		expect(liveRegion).toHaveTextContent('');
+
+		onChange(new Map([[record.id, { kind: 'agent', agentId: 'a1', name: 'Claude' }]]));
+		await tick();
+		expect(liveRegion).toHaveTextContent('Claude started editing a block');
+
+		onChange(new Map());
+		await tick();
+		expect(liveRegion).toHaveTextContent('Claude finished editing a block');
 	});
 
 	it('re-derives blocks when navigating client-side to a different document id', async () => {
