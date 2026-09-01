@@ -25,7 +25,7 @@
 		splitRichTextAt,
 		yTextToRichText
 	} from '$lib/data/richtext';
-	import { formatActor, formatTimestamp } from '$lib/data/format';
+	import { actorKey, formatActor, formatTimestamp } from '$lib/data/format';
 	import {
 		claimBlockPresence,
 		releaseBlockPresence,
@@ -41,6 +41,12 @@
 	import PromptDialog from '$lib/components/PromptDialog.svelte';
 	import type { PageProps } from './$types';
 
+	// Toggled onto holdAnnouncement below to guarantee a screen reader
+	// re-announces it even when two consecutive, distinct transitions
+	// happen to produce identical wording — a live region only re-fires on
+	// an actual text change, and this doesn't affect what's read aloud.
+	const ZERO_WIDTH_SPACE = String.fromCharCode(0x200b);
+
 	let { data }: PageProps = $props();
 
 	let ydoc: ReturnType<typeof getShardDoc> | undefined = $state();
@@ -53,6 +59,7 @@
 	let slashMenuBlockId: string | null = $state(null);
 	let slashQuery = $state('');
 	let heldByOthers: Map<string, ActorId> = $state(new Map());
+	let holdAnnouncement = $state('');
 	let parentDocTitle: string | null = $state(null);
 	let activeBlockId: string | null = $state(null);
 	let activeMarks: Partial<Record<keyof TextMarks, boolean>> = $state({});
@@ -289,7 +296,47 @@
 			documentsMap.observeDeep(observer);
 			refresh();
 
+			// Reset immediately: this component instance is reused across
+			// client-side navigation to a different Document (see the comment
+			// above this $effect), so a stale announcement from the
+			// previously-viewed document must not linger until this
+			// document's first real transition.
+			holdAnnouncement = '';
+			let previousHeldByOthers: Map<string, ActorId> = new Map();
+			// The subscription's first callback reports presence as of connect
+			// time, not a transition — without this, every actor who was
+			// already editing before this client joined gets misreported as
+			// having "just started".
+			let isFirstSnapshot = true;
+			let announceToggle = false;
 			const unsubscribePresence = subscribeHeldByOthers(docAwareness, (held) => {
+				const messages: string[] = [];
+				for (const [recordId, actor] of held) {
+					const previousActor = previousHeldByOthers.get(recordId);
+					if (!previousActor) {
+						if (!isFirstSnapshot) {
+							messages.push(`${formatActor(actor)} started editing a block`);
+						}
+					} else if (actorKey(previousActor) !== actorKey(actor)) {
+						// One actor released this block and another claimed it
+						// in the same update — both halves of that handoff need
+						// announcing, not just a silent no-op because the
+						// record id itself never left the map.
+						messages.push(`${formatActor(previousActor)} finished editing a block`);
+						messages.push(`${formatActor(actor)} started editing a block`);
+					}
+				}
+				for (const [recordId, actor] of previousHeldByOthers) {
+					if (!held.has(recordId)) {
+						messages.push(`${formatActor(actor)} finished editing a block`);
+					}
+				}
+				if (messages.length > 0) {
+					announceToggle = !announceToggle;
+					holdAnnouncement = (announceToggle ? ZERO_WIDTH_SPACE : '') + messages.join('; ');
+				}
+				previousHeldByOthers = held;
+				isFirstSnapshot = false;
 				heldByOthers = held;
 			});
 
@@ -636,6 +683,9 @@
 		placeholder="Untitled document"
 	/>
 
+	<!-- Screen-reader announcements for collaborative hold state (issue #18) -->
+	<div class="sr-only" role="status" aria-live="polite">{holdAnnouncement}</div>
+
 	<!--
 		Backlinks panel removed (#120): listIncomingLinks builds its reverse
 		index by scanning every Document within one shared Y.Doc, structurally
@@ -724,17 +774,30 @@
 				<div class="min-w-0 flex-1">
 					{#if holder}
 						<!-- Held / Placeholder Block (M1 Design System) -->
+						<!--
+							role="group", not role="status": the persistent live
+							region above is the sole announcement source. A
+							role="status" here would be a second, independent
+							live region — every hold's insertion (and each one's
+							text) would announce a second time on top of the
+							region's own announcement.
+						-->
 						<div
 							class="flex h-7 items-center gap-2 rounded-md bg-surface/40 px-2 py-1"
 							title="{formatActor(holder)} is editing this block"
+							role="group"
+							aria-label="{formatActor(holder)} is editing this block"
 						>
 							<span
 								class="flex h-4.5 w-4.5 flex-shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-accent-fg"
+								aria-hidden="true"
 							>
 								{formatActor(holder).slice(0, 1).toUpperCase()}
 							</span>
-							<div class="shimmer-bar h-3 flex-1 rounded bg-surface"></div>
-							<span class="text-[11px] font-medium text-muted">{formatActor(holder)} editing…</span>
+							<div class="shimmer-bar h-3 flex-1 rounded bg-surface" aria-hidden="true"></div>
+							<span class="text-[11px] font-medium text-muted" aria-hidden="true"
+								>{formatActor(holder)} editing…</span
+							>
 						</div>
 					{:else if bt === 'divider'}
 						<div class="my-3 border-t border-border"></div>

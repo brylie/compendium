@@ -28,35 +28,35 @@ A `BlockType`'s implementation issue must fill out all eleven fields before it m
 
 ### Toggle / collapsible (shipped, P0)
 
-| Field | Value |
-| --- | --- |
-| Icon + label | Chevron icon; "Toggle list" |
-| Keywords | `/toggle`, `/collapsible`, `/details` |
-| Content shape | Container-with-children (one summary text run + an ordered list of child blocks) |
-| Conversion | Converts to/from any text-bearing type by acting on its summary text only; converting away from toggle does not delete its children — they're re-parented to the toggle's former position |
+| Field                 | Value                                                                                                                                                                                                             |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Icon + label          | Chevron icon; "Toggle list"                                                                                                                                                                                       |
+| Keywords              | `/toggle`, `/collapsible`, `/details`                                                                                                                                                                             |
+| Content shape         | Container-with-children (one summary text run + an ordered list of child blocks)                                                                                                                                  |
+| Conversion            | Converts to/from any text-bearing type by acting on its summary text only; converting away from toggle does not delete its children — they're re-parented to the toggle's former position                         |
 | Focus/Enter/Backspace | Enter in the summary splits it like any text-bearing block; Enter at the end of the last child creates a new child; Backspace at the start of the first child does nothing special (does not collapse the toggle) |
-| Drag/multi-select | Dragging the toggle moves it and all children as a unit; children are independently selectable/movable within the toggle |
-| Configuration | None beyond expanded/collapsed state (a per-viewer UI state, not CRDT-synced content) |
-| Markdown | `<details><summary>...</summary>...</details>` per `markdown-transcoding.md` |
-| Agent representation | Markdown is sufficient |
-| Hold semantics | Holding a toggle holds only its summary text by default; holding a specific child holds that child alone |
-| Accessible rendering | Native `<details>`/`<summary>` semantics carry keyboard and screen-reader support for free |
+| Drag/multi-select     | Dragging the toggle moves it and all children as a unit; children are independently selectable/movable within the toggle                                                                                          |
+| Configuration         | None beyond expanded/collapsed state (a per-viewer UI state, not CRDT-synced content)                                                                                                                             |
+| Markdown              | `<details><summary>...</summary>...</details>` per `markdown-transcoding.md`                                                                                                                                      |
+| Agent representation  | Markdown is sufficient                                                                                                                                                                                            |
+| Hold semantics        | Holding a toggle holds only its summary text by default; holding a specific child holds that child alone                                                                                                          |
+| Accessible rendering  | Native `<details>`/`<summary>` semantics carry keyboard and screen-reader support for free                                                                                                                        |
 
 ### Diagram / Mermaid (#151, new in 0.4.0)
 
-| Field | Value |
-| --- | --- |
-| Icon + label | Diagram icon; "Diagram (Mermaid)" |
-| Keywords | `/diagram`, `/mermaid` |
-| Content shape | Leaf (a single stored text run — the Mermaid source — with no child blocks) |
-| Conversion | Converts to/from `code` (treated as a structural type per its render behavior, not a text-bearing one — see below) by preserving the raw source text; does not convert to/from prose types like paragraph or heading |
-| Focus/Enter/Backspace | Structural block behavior: Enter/Backspace act on the block as a whole (create/remove), not on inline text, matching `code`'s existing treatment |
-| Drag/multi-select | Standard single-block drag; no children |
-| Configuration | None; render errors (invalid Mermaid syntax) show inline with the raw source, not a blank block |
-| Markdown | Fenced code block with a `mermaid` language tag (` ```mermaid `), matching GitHub/GitLab's own convention |
-| Agent representation | Markdown is sufficient — this is exactly why Mermaid was chosen over a freeform diagram editor: an agent can read and produce valid input deterministically |
-| Hold semantics | Safe to hold/replace/patch as a single leaf value, identical to a `code` block |
-| Accessible rendering | The raw Mermaid source is always available to assistive tech (e.g., as the rendered SVG's accessible description or an adjacent toggle to view source) — the rendered diagram alone is not sufficient |
+| Field                 | Value                                                                                                                                                                                                                |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Icon + label          | Diagram icon; "Diagram (Mermaid)"                                                                                                                                                                                    |
+| Keywords              | `/diagram`, `/mermaid`                                                                                                                                                                                               |
+| Content shape         | Leaf (a single stored text run — the Mermaid source — with no child blocks)                                                                                                                                          |
+| Conversion            | Converts to/from `code` (treated as a structural type per its render behavior, not a text-bearing one — see below) by preserving the raw source text; does not convert to/from prose types like paragraph or heading |
+| Focus/Enter/Backspace | Structural block behavior: Enter/Backspace act on the block as a whole (create/remove), not on inline text, matching `code`'s existing treatment                                                                     |
+| Drag/multi-select     | Standard single-block drag; no children                                                                                                                                                                              |
+| Configuration         | None; render errors (invalid Mermaid syntax) show inline with the raw source, not a blank block                                                                                                                      |
+| Markdown              | Fenced code block with a `mermaid` language tag (` ```mermaid `), matching GitHub/GitLab's own convention                                                                                                            |
+| Agent representation  | Markdown is sufficient — this is exactly why Mermaid was chosen over a freeform diagram editor: an agent can read and produce valid input deterministically                                                          |
+| Hold semantics        | Safe to hold/replace/patch as a single leaf value, identical to a `code` block                                                                                                                                       |
+| Accessible rendering  | The raw Mermaid source is always available to assistive tech (e.g., as the rendered SVG's accessible description or an adjacent toggle to view source) — the rendered diagram alone is not sufficient                |
 
 ## 4. Process
 
