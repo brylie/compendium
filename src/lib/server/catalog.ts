@@ -37,6 +37,13 @@ export class RecordIdConflictError extends Error {
 	}
 }
 
+export class UnknownSpaceError extends Error {
+	constructor(spaceId: string) {
+		super(`Space ${spaceId} does not exist in this workspace`);
+		this.name = 'UnknownSpaceError';
+	}
+}
+
 type CatalogOp = 'create' | 'update' | 'move' | 'delete';
 
 /**
@@ -163,14 +170,18 @@ export function releaseRecordLocator(workspaceId: string, recordId: string): voi
 export function resolveShardForParent(
 	workspaceId: string,
 	parentId: string
-): { shardId: string; kind: 'document' | 'collection' } | undefined {
+): { shardId: string; kind: 'document' | 'collection'; spaceId: string } | undefined {
 	const row = getDb()
-		.select({ shardId: recordLocator.shardId, kind: recordLocator.kind })
+		.select({
+			shardId: recordLocator.shardId,
+			kind: recordLocator.kind,
+			spaceId: recordLocator.spaceId
+		})
 		.from(recordLocator)
 		.where(and(eq(recordLocator.workspaceId, workspaceId), eq(recordLocator.recordId, parentId)))
 		.get();
 	if (!row || row.kind === 'record') return undefined;
-	return { shardId: row.shardId, kind: row.kind };
+	return { shardId: row.shardId, kind: row.kind, spaceId: row.spaceId };
 }
 
 /** Resolves the shard a single record/row lives in, for callers that only have a bare recordId. */
@@ -208,6 +219,20 @@ export function isKnownShard(workspaceId: string, shardId: string): boolean {
 				inArray(recordLocator.kind, ['document', 'collection'])
 			)
 		)
+		.get();
+	return row !== undefined;
+}
+
+/**
+ * True when `spaceId` is a real Space in this workspace (#6) — used to
+ * validate a client-supplied `[spaceId]` route param before trusting it,
+ * the same "verify before use" posture as isKnownShard above.
+ */
+export function isKnownSpace(workspaceId: string, spaceId: string): boolean {
+	const row = getDb()
+		.select({ id: spaces.id })
+		.from(spaces)
+		.where(and(eq(spaces.workspaceId, workspaceId), eq(spaces.id, spaceId)))
 		.get();
 	return row !== undefined;
 }
@@ -384,7 +409,8 @@ export function listCatalogDocuments(workspaceId: string, spaceId?: string): Doc
 			title: row.title,
 			parentDocumentId: row.parentDocumentId ?? undefined,
 			order: row.order,
-			recordIds: []
+			recordIds: [],
+			spaceId: row.spaceId
 		}))
 		.sort((a, b) => a.order.localeCompare(b.order));
 }
@@ -406,7 +432,8 @@ export function listCatalogCollections(workspaceId: string, spaceId?: string): C
 			id: row.id,
 			title: row.title,
 			schema: [],
-			recordIds: []
+			recordIds: [],
+			spaceId: row.spaceId
 		}));
 }
 
@@ -428,6 +455,7 @@ export function listSpaces(workspaceId: string): SpaceMeta[] {
 		.select({ id: spaces.id, workspaceId: spaces.workspaceId, name: spaces.name })
 		.from(spaces)
 		.where(eq(spaces.workspaceId, workspaceId))
+		.orderBy(sql`rowid`)
 		.all();
 }
 

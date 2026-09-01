@@ -14,12 +14,15 @@ import {
 import { logAudit } from '$lib/server/audit';
 import {
 	RecordIdConflictError,
+	UnknownSpaceError,
+	isKnownSpace,
 	listCatalogDocuments,
 	recordCatalogDocumentCreated,
 	recordCatalogDocumentDeleted,
 	recordCatalogDocumentMoved,
 	recordCatalogDocumentTitleChanged,
-	reserveDocumentLocator
+	reserveDocumentLocator,
+	resolveShardForParent
 } from '$lib/server/catalog';
 import { grantDocumentAccess, tokenAllowsParent } from '$lib/mcp/tokens';
 import { richTextToMarkdown } from '$lib/mcp/markdown-transcode';
@@ -34,12 +37,43 @@ import {
 	type CallerIdentity
 } from './permissions';
 
+export class SpaceMismatchError extends Error {
+	constructor(parentDocumentId: string) {
+		super(`Cannot create a Document in a different Space than its parent (${parentDocumentId})`);
+		this.name = 'SpaceMismatchError';
+	}
+}
+
+/**
+ * Resolves the Space a Document effectively belongs to for hierarchy
+ * validation — cataloged content uses its real locator spaceId; a
+ * *legacy/uncataloged* Document (no locator row) that nonetheless exists in
+ * the shared default Y.Doc is classified as `defaultSpaceId`, matching
+ * listDocuments' own definition of "uncataloged content belongs to the
+ * default Space" (#140 CodeRabbit finding — the earlier version of this
+ * check silently exempted uncataloged parents instead, letting a Space B
+ * child be created/moved under a default-Space parent undetected). Returns
+ * undefined only when the id can't be classified at all (doesn't exist in
+ * either place), which stays exempt from the mismatch check.
+ */
+function resolveEffectiveDocumentSpaceId(
+	workspaceId: string,
+	documentId: string,
+	defaultDoc: ReturnType<typeof resolveWorkspaceContext>['doc'],
+	defaultSpaceId: string
+): string | undefined {
+	const cataloged = resolveShardForParent(workspaceId, documentId)?.spaceId;
+	if (cataloged !== undefined) return cataloged;
+	return crdtGetDocument(defaultDoc, documentId) ? defaultSpaceId : undefined;
+}
+
 export interface CreateDocumentInput {
 	id?: string;
 	title: string;
 	parentDocumentId?: string;
 	afterDocumentId?: string;
 	createInitialBlock?: boolean;
+	spaceId?: string;
 }
 
 export function createDocument(caller: CallerIdentity, input: CreateDocumentInput): DocumentMeta {
@@ -50,11 +84,34 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 	const { doc, workspaceId, shardId, defaultSpaceId } = resolveWorkspaceContext({ shardId: id });
 	const { doc: defaultDoc } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
+	const targetSpaceId = input.spaceId ?? defaultSpaceId;
+	// A caller-supplied spaceId must actually exist — otherwise
+	// reserveDocumentLocator's insert below would fail its composite FK
+	// against `spaces` and the raw DB exception would escape this call
+	// uncaught (#140 CodeRabbit finding, same gap as createCollection's).
+	if (input.spaceId !== undefined && !isKnownSpace(workspaceId, input.spaceId)) {
+		throw new UnknownSpaceError(input.spaceId);
+	}
 
 	// Decision: In single-tenant Phase 0/1, any authenticated caller is permitted
 	// to create top-level documents; when nested, access to parentDocumentId is verified.
 	if (input.parentDocumentId) {
 		requireAccessibleParent(caller, input.parentDocumentId, 'create_document');
+		// The parent's effective Space must agree with the target Space —
+		// otherwise a child could be created in one Space while nested under a
+		// parent that belongs to another (#140 CodeRabbit finding). A legacy
+		// parent with no locator row is classified as the default Space (see
+		// resolveEffectiveDocumentSpaceId), not silently exempted — only a
+		// parent that can't be classified at all (doesn't exist anywhere) is.
+		const parentSpaceId = resolveEffectiveDocumentSpaceId(
+			workspaceId,
+			input.parentDocumentId,
+			defaultDoc,
+			defaultSpaceId
+		);
+		if (parentSpaceId !== undefined && parentSpaceId !== targetSpaceId) {
+			throw new SpaceMismatchError(input.parentDocumentId);
+		}
 	}
 
 	// Collision check spans the target shard (a caller-supplied id already
@@ -72,7 +129,7 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 	) {
 		throw new RecordIdConflictError(id);
 	}
-	reserveDocumentLocator(workspaceId, defaultSpaceId, id, shardId);
+	reserveDocumentLocator(workspaceId, targetSpaceId, id, shardId);
 
 	// Sibling order is computed from the catalog, not this doc's own
 	// listDocuments(): true siblings can live in entirely different shards
@@ -91,7 +148,7 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 
 	recordCatalogDocumentCreated({
 		workspaceId,
-		spaceId: defaultSpaceId,
+		spaceId: targetSpaceId,
 		id: document.id,
 		title: document.title,
 		parentDocumentId: document.parentDocumentId,
@@ -121,11 +178,36 @@ export function moveDocument(
 	options: { parentDocumentId?: string; afterDocumentId?: string }
 ): void {
 	const { doc, workspaceId } = resolveParentWorkspaceContext(documentId);
+	const { doc: defaultDoc, defaultSpaceId } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'move_document');
 	if (options.parentDocumentId) {
 		requireAccessibleParent(caller, options.parentDocumentId, 'move_document');
+		// Same Space-consistency rule as createDocument: moving a Document
+		// under a parent in a different Space would silently break the
+		// isolation guarantee this feature exists for. Legacy/uncataloged
+		// content on either side is classified as the default Space (see
+		// resolveEffectiveDocumentSpaceId), not silently exempted.
+		const documentSpaceId = resolveEffectiveDocumentSpaceId(
+			workspaceId,
+			documentId,
+			defaultDoc,
+			defaultSpaceId
+		);
+		const newParentSpaceId = resolveEffectiveDocumentSpaceId(
+			workspaceId,
+			options.parentDocumentId,
+			defaultDoc,
+			defaultSpaceId
+		);
+		if (
+			documentSpaceId !== undefined &&
+			newParentSpaceId !== undefined &&
+			documentSpaceId !== newParentSpaceId
+		) {
+			throw new SpaceMismatchError(options.parentDocumentId);
+		}
 	}
 
 	// Catalog-sourced siblings, not doc's own listDocuments() — see
@@ -311,22 +393,27 @@ export function getDocument(
 /**
  * `spaceId` is optional and additive — omitted, this is exactly today's
  * behavior (every Document in the workspace, catalog plus uncataloged
- * fallback). Passed, results are strictly catalog-scoped to that Space: the
- * uncataloged fallback is skipped entirely, since content not yet in the
- * catalog has no reliably known Space membership to check (see #132's
- * migration, which is what actually gives such content a real spaceId) —
- * silently guessing it belongs to the requested Space would be exactly the
- * kind of leak #133 exists to close.
+ * fallback). Passed a *non-default* Space, results are strictly
+ * catalog-scoped to it: the uncataloged fallback is skipped entirely, since
+ * content not yet in the catalog has no reliably known Space membership to
+ * check (see #132's migration, which is what actually gives such content a
+ * real spaceId) — silently guessing it belongs to the requested Space would
+ * be exactly the kind of leak #133 exists to close. Passed the workspace's
+ * own `defaultSpaceId`, the fallback still runs: uncataloged content is, by
+ * definition, everything that existed before Spaces did, so it belongs
+ * exactly there, not to a genuinely ambiguous Space — treating it as absent
+ * from the default Space's own view would silently drop legacy/direct-Yjs
+ * content from the sidebar (#140 CodeRabbit finding).
  */
 export function listDocuments(caller: CallerIdentity, spaceId?: string): DocumentMeta[] {
-	const { workspaceId, doc: defaultDoc } = resolveWorkspaceContext();
+	const { workspaceId, defaultSpaceId, doc: defaultDoc } = resolveWorkspaceContext();
 	const allowed = (id: string) => !isAccessToken(caller) || tokenAllowsParent(caller, id);
 
 	const catalogDocs = listCatalogDocuments(workspaceId, spaceId);
 	const catalogDocumentIds = new Set(catalogDocs.map((d) => d.id));
 	const results = catalogDocs.filter((d) => allowed(d.id));
 
-	if (spaceId !== undefined) return results;
+	if (spaceId !== undefined && spaceId !== defaultSpaceId) return results;
 
 	// Then any Document written directly to the Y.Doc, bypassing the service
 	// layer entirely (and therefore uncataloged) — mirrors listCollections'

@@ -1,4 +1,6 @@
 import { listDocuments, listCollections } from '$lib/services';
+import { listSpaces } from '$lib/server/catalog';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import type { LayoutServerLoad } from './$types';
 
 // Routed through the service layer, not the bare catalog reads directly:
@@ -7,9 +9,19 @@ import type { LayoutServerLoad } from './$types';
 // (and therefore uncataloged) — a plain listCatalogDocuments/
 // listCatalogCollections call would silently drop that content from the
 // sidebar entirely, since Sidebar.svelte's own list is catalog-only (#120).
-export const load: LayoutServerLoad = ({ locals }) => {
+//
+// Applies to every route, including ones not nested under /space/[spaceId]
+// (settings/tokens, /audit) — Sidebar renders everywhere, so activeSpaceId
+// falls back to the workspace default there rather than requiring a
+// [spaceId] param. No "last active Space" persistence yet (#6 Phase A
+// deferred scope) — those pages always show the default.
+export const load: LayoutServerLoad = ({ params, locals }) => {
+	const { workspaceId, defaultSpaceId } = resolveWorkspaceContext();
+	const activeSpaceId = params.spaceId ?? defaultSpaceId;
 	return {
-		documents: listDocuments(locals.requestContext.caller),
-		collections: listCollections(locals.requestContext.caller)
+		spaces: listSpaces(workspaceId),
+		activeSpaceId,
+		documents: listDocuments(locals.requestContext.caller, activeSpaceId),
+		collections: listCollections(locals.requestContext.caller, activeSpaceId)
 	};
 };

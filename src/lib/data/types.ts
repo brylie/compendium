@@ -134,6 +134,7 @@ export interface DocumentMeta {
 	parentDocumentId?: string;
 	order: string;
 	recordIds: string[]; // ordered — the Document's blocks, in order
+	spaceId?: string; // catalog-only — undefined for uncataloged/legacy content
 }
 
 export interface DocumentTreeNode extends DocumentMeta {
@@ -147,6 +148,7 @@ export interface CollectionMeta {
 	schema: PropertyDefinition[];
 	recordIds: string[]; // membership; row order within a view is a view concern
 	primaryFieldKey?: string; // schema key of the record's title/identity field — see resolvePrimaryField in $lib/data/records
+	spaceId?: string; // catalog-only — undefined for uncataloged/legacy content
 }
 
 export type ParentKind = 'document' | 'collection';

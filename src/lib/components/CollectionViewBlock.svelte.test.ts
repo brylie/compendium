@@ -12,6 +12,12 @@ import {
 } from '$lib/data/records';
 import CollectionViewBlock from './CollectionViewBlock.svelte';
 
+vi.mock('$app/state', () => ({
+	get page() {
+		return { params: { spaceId: 'space-1' } };
+	}
+}));
+
 let ydoc: Y.Doc;
 vi.mock('$lib/client/yjs-client', () => ({
 	getClientDoc: () => ydoc,

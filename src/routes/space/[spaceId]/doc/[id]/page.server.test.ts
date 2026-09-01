@@ -6,9 +6,9 @@ import { CURRENT_USER } from '$lib/server/current-user';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { resolveRequestContext } from '$lib/server/request-context';
 
-function loadEvent(id: string): Parameters<typeof load>[0] {
+function loadEvent(id: string, spaceId?: string): Parameters<typeof load>[0] {
 	return {
-		params: { id },
+		params: { id, spaceId: spaceId ?? resolveWorkspaceContext().defaultSpaceId },
 		locals: { requestContext: resolveRequestContext() }
 	} as unknown as Parameters<typeof load>[0];
 }

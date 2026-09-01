@@ -6,17 +6,22 @@
 	import { resolve } from '$app/paths';
 	import { buildDocumentTree } from '$lib/data/records';
 	import { isDark, toggleTheme } from '$lib/client/theme';
-	import type { CollectionMeta, DocumentMeta, DocumentTreeNode } from '$lib/data/types';
+	import type { CollectionMeta, DocumentMeta, DocumentTreeNode, SpaceMeta } from '$lib/data/types';
 	import Icon from './Icon.svelte';
 	import PromptDialog from './PromptDialog.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
+	import SpaceSwitcher from './SpaceSwitcher.svelte';
 
 	let {
 		initialDocuments = [],
-		initialCollections = []
+		initialCollections = [],
+		spaces = [],
+		activeSpaceId
 	}: {
 		initialDocuments?: DocumentMeta[];
 		initialCollections?: CollectionMeta[];
+		spaces?: SpaceMeta[];
+		activeSpaceId: string;
 	} = $props();
 
 	// Documents are catalog-backed (initialDocuments) only, never live — a
@@ -49,10 +54,10 @@
 	let documentTree = $derived(buildDocumentTree(documents));
 	let currentPath = $derived(page.url.pathname);
 	let currentDocId = $derived(
-		currentPath.startsWith('/doc/') ? currentPath.slice('/doc/'.length).split('/')[0] : null
+		page.params.id && currentPath.includes('/doc/') ? page.params.id : null
 	);
 	let currentTableId = $derived(
-		currentPath.startsWith('/table/') ? currentPath.slice('/table/'.length).split('/')[0] : null
+		page.params.id && currentPath.includes('/table/') ? page.params.id : null
 	);
 
 	onMount(() => {
@@ -99,7 +104,7 @@
 			const res = await fetch('/api/documents', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ title, parentDocumentId: parentId })
+				body: JSON.stringify({ title, parentDocumentId: parentId, spaceId: activeSpaceId })
 			});
 			if (res.ok) {
 				const newDoc = await res.json();
@@ -107,7 +112,7 @@
 					expandedDocIds.add(parentId);
 				}
 				await invalidateAll();
-				await goto(resolve('/doc/[id]', { id: newDoc.id }));
+				await goto(resolve('/space/[spaceId]/doc/[id]', { spaceId: activeSpaceId, id: newDoc.id }));
 			} else {
 				errorMessage = 'Failed to create document.';
 			}
@@ -129,12 +134,14 @@
 			const res = await fetch('/api/collections', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ title })
+				body: JSON.stringify({ title, spaceId: activeSpaceId })
 			});
 			if (res.ok) {
 				const newCol = await res.json();
 				await invalidateAll();
-				await goto(resolve('/table/[id]', { id: newCol.id }));
+				await goto(
+					resolve('/space/[spaceId]/table/[id]', { spaceId: activeSpaceId, id: newCol.id })
+				);
 			} else {
 				errorMessage = 'Failed to create collection.';
 			}
@@ -170,7 +177,7 @@
 				await fetch(`/api/documents/${id}`, { method: 'DELETE' });
 				await invalidateAll();
 				if (currentDocId === id) {
-					await goto(resolve('/'));
+					await goto(resolve('/space/[spaceId]', { spaceId: activeSpaceId }));
 				}
 			} else {
 				const id = deletion.id;
@@ -180,7 +187,7 @@
 				await fetch(`/api/collections/${id}`, { method: 'DELETE' });
 				await invalidateAll();
 				if (currentTableId === id) {
-					await goto(resolve('/'));
+					await goto(resolve('/space/[spaceId]', { spaceId: activeSpaceId }));
 				}
 			}
 			pendingDeletion = null;
@@ -203,7 +210,7 @@
 	>
 		{#if !collapsed}
 			<a
-				href={resolve('/')}
+				href={resolve('/space/[spaceId]', { spaceId: activeSpaceId })}
 				class="flex items-center gap-2 overflow-hidden font-display text-sm font-semibold tracking-tight text-ellipsis whitespace-nowrap text-fg hover:text-accent"
 			>
 				<Icon name="logo" size={18} class="flex-shrink-0 text-accent" />
@@ -230,6 +237,13 @@
 			</button>
 		{/if}
 	</div>
+
+	<!-- Space Switcher -->
+	{#if !collapsed}
+		<div class="border-b border-border px-2 py-2">
+			<SpaceSwitcher {spaces} {activeSpaceId} />
+		</div>
+	{/if}
 
 	<!-- Main Navigation Content -->
 	{#if !collapsed}
@@ -280,7 +294,10 @@
 								{/if}
 
 								<a
-									href={resolve('/doc/[id]', { id: node.id })}
+									href={resolve('/space/[spaceId]/doc/[id]', {
+										spaceId: activeSpaceId,
+										id: node.id
+									})}
 									class="flex flex-1 items-center gap-1.5 truncate py-1 pr-1.5"
 								>
 									<Icon name="document" size={15} class="flex-shrink-0 opacity-75" />
@@ -352,7 +369,10 @@
 						{@const isSelected = currentTableId === collection.id}
 						<div class="group/col flex items-center">
 							<a
-								href={resolve('/table/[id]', { id: collection.id })}
+								href={resolve('/space/[spaceId]/table/[id]', {
+									spaceId: activeSpaceId,
+									id: collection.id
+								})}
 								class="flex flex-1 items-center gap-2 rounded-md px-2 py-1 text-sm transition-colors"
 								class:bg-surface={isSelected}
 								class:text-accent={isSelected}
@@ -382,18 +402,19 @@
 	{:else}
 		<!-- Collapsed Icon Rail Shortcuts -->
 		<div class="flex flex-1 flex-col items-center gap-3 py-3">
+			<SpaceSwitcher {spaces} {activeSpaceId} collapsed />
 			<a
-				href={resolve('/')}
+				href={resolve('/space/[spaceId]', { spaceId: activeSpaceId })}
 				class="rounded p-2 text-muted transition-colors hover:bg-surface hover:text-accent"
-				class:bg-surface={currentPath === '/' || currentDocId !== null}
-				class:text-accent={currentPath === '/' || currentDocId !== null}
+				class:bg-surface={currentTableId === null}
+				class:text-accent={currentTableId === null}
 				title="Documents"
 				aria-label="Documents"
 			>
 				<Icon name="document" size={18} />
 			</a>
 			<a
-				href={resolve('/')}
+				href={resolve('/space/[spaceId]', { spaceId: activeSpaceId })}
 				class="rounded p-2 text-muted transition-colors hover:bg-surface hover:text-accent"
 				class:bg-surface={currentTableId !== null}
 				class:text-accent={currentTableId !== null}

@@ -12,7 +12,7 @@ function textSnippet(text: string) {
 
 vi.mock('$app/state', () => ({
 	get page() {
-		return { url: new URL('http://localhost/') };
+		return { url: new URL('http://localhost/'), params: {} };
 	}
 }));
 vi.mock('$app/navigation', () => ({ goto: vi.fn(), invalidateAll: vi.fn() }));
@@ -33,7 +33,7 @@ describe('+layout', () => {
 	it('renders the sidebar alongside the routed page content', () => {
 		render(Layout, {
 			params: {},
-			data: { documents: [], collections: [] },
+			data: { spaces: [], activeSpaceId: 'space-1', documents: [], collections: [] },
 			children: textSnippet('Routed page content')
 		});
 
@@ -45,6 +45,8 @@ describe('+layout', () => {
 		render(Layout, {
 			params: {},
 			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
 				documents: [{ id: 'd1', title: 'From Layout', order: 'a', recordIds: [] }],
 				collections: []
 			},

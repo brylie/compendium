@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { CURRENT_USER } from '$lib/client/actor';
 	import { setRecordReferencedId, setRecordViewConfig } from '$lib/data/records';
@@ -78,7 +79,13 @@
 		<div class="mb-3 flex items-center justify-between">
 			<div class="flex items-center gap-2 text-sm font-medium text-fg">
 				<Icon name={block.viewConfig?.viewType ?? 'table'} size={16} class="text-accent" />
-				<a href={resolve('/table/[id]', { id: collection!.id })} class="hover:underline">
+				<a
+					href={resolve('/space/[spaceId]/table/[id]', {
+						spaceId: page.params.spaceId!,
+						id: collection!.id
+					})}
+					class="hover:underline"
+				>
 					{collection!.title || 'Untitled Collection'}
 				</a>
 				<span class="text-xs text-muted">· {block.viewConfig?.viewType}</span>
