@@ -38,6 +38,7 @@ export interface AuditQuery {
 	limit?: number;
 }
 
+/** Returns newest-first audit entries matching the supplied projection filters. */
 export function queryAuditLog(query: AuditQuery = {}): AuditEntry[] {
 	const rows = getDb()
 		.select()

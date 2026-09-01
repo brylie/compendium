@@ -69,9 +69,10 @@
 	let linkUrlInput: HTMLInputElement | undefined = $state();
 	let linkDialog: HTMLDivElement | undefined = $state();
 
-	// Older imported documents may predate per-record attribution. Keep this
-	// runtime guard at the rendering boundary so one legacy block cannot make
-	// the live editor display an invalid actor or timestamp.
+	/**
+	 * Older imported documents may predate per-record attribution. This runtime
+	 * guard keeps a legacy block from displaying an invalid actor or timestamp.
+	 */
 	function hasProvenance(block: WorkspaceRecord): boolean {
 		return (
 			block.lastEditedBy !== undefined &&
@@ -510,6 +511,7 @@
 		blockRefs[previous.id]?.focusEditor(joinOffset);
 	}
 
+	/** Updates live provenance for the record whose editable text just changed. */
 	function handleBlockInput(blockId: string, editedRecordId = blockId): void {
 		if (!ydoc) return;
 		touchRecordEditor(ydoc, editedRecordId, CURRENT_USER);
@@ -788,7 +790,7 @@
 									recordId={block.id}
 									{linkTargets}
 									placeholder="Quote…"
-									onInputText={() => handleBlockInput(block.id)}
+									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
@@ -807,7 +809,7 @@
 									{linkTargets}
 									class="font-mono text-[13.5px]"
 									placeholder="Code snippet…"
-									onInputText={() => handleBlockInput(block.id)}
+									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
@@ -864,7 +866,7 @@
 									recordId={block.id}
 									{linkTargets}
 									placeholder="Synced content…"
-									onInputText={() => handleBlockInput(block.id)}
+									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 									onEnter={() => addBlockAfter(block.id)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() =>
@@ -988,7 +990,7 @@
 													? 'font-display text-base font-semibold text-fg'
 													: 'text-base text-fg'}
 									placeholder={index === 0 ? "Type '/' for commands, or start typing..." : ''}
-									onInputText={() => handleBlockInput(block.id)}
+									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
