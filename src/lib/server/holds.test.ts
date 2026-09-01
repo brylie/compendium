@@ -100,6 +100,18 @@ describe('holds: agent hold requests', () => {
 		expect(aggregateHolds(awareness).get('r1')).toEqual(agent);
 	});
 
+	it('aggregateHolds keeps the first holder found for a record two independent peers both claim', () => {
+		// Two distinct local Awareness states both claiming the same record —
+		// only reachable outside the eviction-aware requestAgentHold path (e.g.
+		// two peers' states briefly overlapping mid-sync) — must not overwrite
+		// the first holder found, matching this function's own "first found
+		// wins" contract.
+		awareness.states.set(111, { actor: human, heldRecordIds: ['r1'] });
+		awareness.states.set(222, { actor: agent, heldRecordIds: ['r1'] });
+
+		expect(aggregateHolds(awareness).get('r1')).toEqual(human);
+	});
+
 	it('the same token always maps to the same synthetic clientID', () => {
 		expect(clientIdForToken('token-a')).toBe(clientIdForToken('token-a'));
 		expect(clientIdForToken('token-a')).not.toBe(clientIdForToken('token-b'));

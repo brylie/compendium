@@ -581,6 +581,40 @@ describe('service layer: documents — unfiltered listing, delete, and rename', 
 		expect(docs[0].id).toBe(docAllowed.id);
 	});
 
+	it('listDocuments skips an uncataloged document a token has no grant for', () => {
+		const uncataloged = crdtCreateDocument(resolveWorkspaceContext().doc, {
+			title: 'Uncataloged Doc'
+		});
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'No Access Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+
+		const docs = listDocuments(tokenRecord);
+		expect(docs.some((d) => d.id === uncataloged.id)).toBe(false);
+	});
+
+	it('moveDocument reorders among top-level siblings without a parentDocumentId', () => {
+		const docA = createDocument(human, { title: 'Top A' });
+		const docB = createDocument(human, { title: 'Top B' });
+
+		expect(() => moveDocument(human, docB.id, { afterDocumentId: docA.id })).not.toThrow();
+	});
+
+	it('createDocument does not double-push an id a token was already pre-authorized for', () => {
+		const preassignedId = 'preassigned-document-id';
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Preauthorized Bot',
+			allowedDocumentIds: [preassignedId],
+			allowedCollectionIds: []
+		});
+
+		createDocument(tokenRecord, { id: preassignedId, title: 'Preassigned' });
+
+		expect(tokenRecord.allowedDocumentIds.filter((id) => id === preassignedId)).toHaveLength(1);
+	});
+
 	it('updateDocumentTitle renames a document and logs the change', () => {
 		const doc = createDocument(human, { title: 'Before' });
 		updateDocumentTitle(human, doc.id, 'After');
@@ -668,6 +702,34 @@ describe('service layer: collections — grants, listing, query, delete, rename'
 		// CollectionMeta (schema) from its real shard.
 		const listed = listCollections(human).find((c) => c.id === collection.id);
 		expect(listed?.title).toBe('Sharded');
+	});
+
+	it('createCollection does not double-push an id a token was already pre-authorized for', () => {
+		const preassignedId = 'preassigned-collection-id';
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Preauthorized Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: [preassignedId]
+		});
+
+		createCollection(tokenRecord, { id: preassignedId, title: 'Preassigned', schema: [] });
+
+		expect(tokenRecord.allowedCollectionIds.filter((id) => id === preassignedId)).toHaveLength(1);
+	});
+
+	it('listCollections skips an uncataloged collection a token has no grant for', () => {
+		const uncataloged = crdtCreateCollection(resolveWorkspaceContext().doc, {
+			title: 'Uncataloged Table',
+			schema: []
+		});
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'No Access Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+
+		const results = listCollections(tokenRecord);
+		expect(results.some((c) => c.id === uncataloged.id)).toBe(false);
 	});
 });
 

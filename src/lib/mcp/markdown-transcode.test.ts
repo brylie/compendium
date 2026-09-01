@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { createCollection, createDocument, deleteDocument } from '$lib/data/records';
+import { createDocument as serviceCreateDocument } from '$lib/services';
+import { CURRENT_USER } from '$lib/server/current-user';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { markdownToRichText, richTextToMarkdown } from './markdown-transcode';
 
 describe('markdown transcoding', () => {
@@ -46,6 +49,19 @@ describe('markdown transcoding', () => {
 		expect(richText.runs.map((r) => r.text).join('')).toContain('Nonexistent');
 	});
 
+	it('resolves [[Title]] to a Document only findable via the catalog fan-out (its own shard, #120)', () => {
+		// Every Document created through the service layer lives in its own
+		// shard, not the default doc — so resolving a wiki-link to it from a
+		// different doc entirely must fall back to the catalog fan-out rather
+		// than finding it via the target doc's own local Documents map.
+		const target = serviceCreateDocument(CURRENT_USER, { title: 'Sharded Target Doc' });
+		const { doc } = resolveWorkspaceContext();
+
+		const richText = markdownToRichText(doc, 'see [[Sharded Target Doc]] for details');
+		const linkRun = richText.runs.find((r) => r.marks.link?.startsWith('record:'));
+		expect(linkRun?.marks.link).toBe(`record:${target.id}`);
+	});
+
 	it('resolves [[Title]] to a Collection when no Document matches', () => {
 		const doc = new Y.Doc();
 		const collection = createCollection(doc, { title: 'Sprint Backlog', schema: [] });
@@ -63,6 +79,13 @@ describe('markdown transcoding', () => {
 		const richText = markdownToRichText(doc, 'ping @you please');
 		const mentionRun = richText.runs.find((r) => r.marks.mention);
 		expect(mentionRun?.marks.mention).toBe('local');
+	});
+
+	it('leaves a non-local @mention name as-is', () => {
+		const doc = new Y.Doc();
+		const richText = markdownToRichText(doc, 'ping @research-agent please');
+		const mentionRun = richText.runs.find((r) => r.marks.mention);
+		expect(mentionRun?.marks.mention).toBe('research-agent');
 	});
 
 	it('leaves a plain (non-record) link mark as an ordinary markdown link', () => {

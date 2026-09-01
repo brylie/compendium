@@ -292,6 +292,67 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 			// The reorder alone shouldn't be misattributed to either record.
 			expect(recentActions(a.id).filter((act) => act === 'update_record')).toHaveLength(0);
 		});
+
+		it('does not retain a doc entry that still has another pending timer once one of its timers is pruned', () => {
+			const recordA = crdtCreateRecord(
+				doc,
+				{ parentId: makeDoc(doc), blockType: 'paragraph' },
+				human
+			);
+			const recordB = crdtCreateRecord(
+				doc,
+				{ parentId: makeDoc(doc), blockType: 'paragraph' },
+				human
+			);
+			const contentA = (doc.getMap('records').get(recordA.id) as Y.Map<unknown>).get(
+				'content'
+			) as Y.Text;
+			const contentB = (doc.getMap('records').get(recordB.id) as Y.Map<unknown>).get(
+				'content'
+			) as Y.Text;
+
+			doc.transact(() => contentA.insert(0, 'a'), 'fake-ws-connection');
+			vi.advanceTimersByTime(1_000);
+			doc.transact(() => contentB.insert(0, 'b'), 'fake-ws-connection');
+
+			// A's timer fires first, alone — B's is still pending for this same
+			// doc, so the doc's own entry in pendingUpdateTimers must survive.
+			vi.advanceTimersByTime(2_000);
+			expect(recentActions(recordA.id)).toContain('update_record');
+			expect(pendingTimerDocCountForTests()).toBe(1);
+
+			vi.advanceTimersByTime(1_000);
+			expect(recentActions(recordB.id)).toContain('update_record');
+			expect(pendingTimerDocCountForTests()).toBe(0);
+		});
+	});
+
+	it('deleting a record with no prior pending edit logs delete_record without a spurious flush', () => {
+		const record = crdtCreateRecord(doc, { parentId: makeDoc(doc), blockType: 'paragraph' }, human);
+
+		doc.transact(() => {
+			doc.getMap('records').delete(record.id);
+		}, 'fake-ws-connection');
+
+		expect(recentActions(record.id)).toEqual(['delete_record']);
+	});
+
+	it('deleting a record in the same transaction as a content edit logs only delete_record, no orphaned update', () => {
+		const record = crdtCreateRecord(doc, { parentId: makeDoc(doc), blockType: 'paragraph' }, human);
+		const yrecord = doc.getMap('records').get(record.id) as Y.Map<unknown>;
+		const content = yrecord.get('content') as Y.Text;
+
+		// Editing the content and removing the record's own top-level entry in
+		// one transaction means the content Y.Text's owning entry can no longer
+		// be resolved (its key is already gone from the records map by the time
+		// pass 2 walks the change) — resolveOwningEntry must return undefined
+		// for it rather than throwing or misattributing an update.
+		doc.transact(() => {
+			content.insert(0, 'edited and deleted together');
+			doc.getMap('records').delete(record.id);
+		}, 'fake-ws-connection');
+
+		expect(recentActions(record.id)).toEqual(['delete_record']);
 	});
 });
 

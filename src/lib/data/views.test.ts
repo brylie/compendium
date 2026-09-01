@@ -74,6 +74,23 @@ describe('applyFilters', () => {
 		).toEqual(['a']);
 	});
 
+	it('treats a missing property value as an empty string for "is"/"is_not" comparisons', () => {
+		const records = [record('a', {}), record('b', { status: { type: 'select', value: 'todo' } })];
+		expect(
+			applyFilters(records, [{ propertyKey: 'status', op: 'is', value: '' }]).map((r) => r.id)
+		).toEqual(['a']);
+		expect(
+			applyFilters(records, [{ propertyKey: 'status', op: 'is_not', value: '' }]).map((r) => r.id)
+		).toEqual(['b']);
+	});
+
+	it('treats a missing filter value as an empty string for "is"/"is_not" comparisons', () => {
+		const records = [record('a', {}), record('b', { status: { type: 'select', value: 'todo' } })];
+		expect(applyFilters(records, [{ propertyKey: 'status', op: 'is' }]).map((r) => r.id)).toEqual([
+			'a'
+		]);
+	});
+
 	it('combines multiple filters with AND semantics', () => {
 		const records = [
 			record('a', {
@@ -356,6 +373,17 @@ describe('groupBySelectProperty', () => {
 		const todoColumn = columns.find((c) => c.optionId === 'todo');
 		expect(todoColumn?.records).toEqual([]);
 	});
+
+	it('handles a select property with no configured options — just the catch-all column', () => {
+		const noOptionsProperty: PropertyDefinition = {
+			key: 'status',
+			label: 'Status',
+			type: 'select'
+		};
+		const columns = groupBySelectProperty([record('a', {})], noOptionsProperty);
+		expect(columns.map((c) => c.optionId)).toEqual([null]);
+		expect(columns[0].records.map((r) => r.id)).toEqual(['a']);
+	});
 });
 
 describe('primaryFieldDisplayValue', () => {
@@ -380,6 +408,27 @@ describe('primaryFieldDisplayValue', () => {
 		const relationProperty: PropertyDefinition = { key: 'links', label: 'Links', type: 'relation' };
 		expect(
 			primaryFieldDisplayValue({ type: 'relation', value: ['a', 'b'] }, relationProperty)
+		).toBe('');
+	});
+
+	it('renders a date value directly', () => {
+		const dateProperty: PropertyDefinition = { key: 'due', label: 'Due', type: 'date' };
+		expect(primaryFieldDisplayValue({ type: 'date', value: '2026-09-01' }, dateProperty)).toBe(
+			'2026-09-01'
+		);
+	});
+
+	it('renders a checkbox value as Checked or empty', () => {
+		const checkboxProperty: PropertyDefinition = { key: 'done', label: 'Done', type: 'checkbox' };
+		expect(primaryFieldDisplayValue({ type: 'checkbox', value: true }, checkboxProperty)).toBe(
+			'Checked'
+		);
+		expect(primaryFieldDisplayValue({ type: 'checkbox', value: false }, checkboxProperty)).toBe('');
+	});
+
+	it('returns an empty string for a select value with no matching option', () => {
+		expect(
+			primaryFieldDisplayValue({ type: 'select', value: 'not-a-real-option' }, statusProperty)
 		).toBe('');
 	});
 });

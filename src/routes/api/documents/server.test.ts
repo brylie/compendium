@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { POST } from './+server';
 import { resolveRequestContext } from '$lib/server/request-context';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 
 function jsonRequest(body: unknown): Parameters<typeof POST>[0] {
 	return {
@@ -33,5 +34,18 @@ describe('routes/api/documents', () => {
 		const child = await childRes.json();
 
 		expect(child.parentDocumentId).toBe(parent.id);
+	});
+
+	it('creates a document in the given Space when spaceId is provided', async () => {
+		const { defaultSpaceId } = resolveWorkspaceContext();
+		const response = await POST(jsonRequest({ title: 'Scoped Doc', spaceId: defaultSpaceId }));
+		const data = await response.json();
+		expect(data.title).toBe('Scoped Doc');
+	});
+
+	it('returns a 400 error for an unknown spaceId instead of letting the FK violation escape', async () => {
+		await expect(
+			POST(jsonRequest({ title: 'Doomed Doc', spaceId: 'not-a-real-space' }))
+		).rejects.toMatchObject({ status: 400 });
 	});
 });

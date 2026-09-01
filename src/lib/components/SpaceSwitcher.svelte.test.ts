@@ -87,4 +87,119 @@ describe('SpaceSwitcher', () => {
 		expect(trigger).toHaveAttribute('title', 'Default');
 		expect(trigger).not.toHaveTextContent('Default');
 	});
+
+	it('toggles the menu open and closed via the expanded trigger', async () => {
+		const user = userEvent.setup();
+		render(SpaceSwitcher, { spaces: SPACES, activeSpaceId: 'space-a' });
+
+		const trigger = screen.getByRole('button', { name: 'Switch space' });
+		await user.click(trigger);
+		expect(screen.getByRole('menu')).toBeInTheDocument();
+
+		await user.click(trigger);
+		expect(screen.queryByRole('menu')).toBeNull();
+	});
+
+	it('toggles the menu open and closed via the collapsed trigger', async () => {
+		const user = userEvent.setup();
+		render(SpaceSwitcher, { spaces: SPACES, activeSpaceId: 'space-a', collapsed: true });
+
+		const trigger = screen.getByRole('button', { name: 'Switch space (current: Default)' });
+		await user.click(trigger);
+		expect(screen.getByRole('menu')).toBeInTheDocument();
+
+		await user.click(trigger);
+		expect(screen.queryByRole('menu')).toBeNull();
+	});
+
+	it('closes without navigating when the already-active space is clicked', async () => {
+		const user = userEvent.setup();
+		render(SpaceSwitcher, { spaces: SPACES, activeSpaceId: 'space-a' });
+
+		await user.click(screen.getByRole('button', { name: 'Switch space' }));
+		await user.click(screen.getByRole('menuitem', { name: /Default/ }));
+
+		expect(goto).not.toHaveBeenCalled();
+		expect(screen.queryByRole('menu')).toBeNull();
+	});
+
+	it('defaults a blank space name to "Untitled Space"', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'new-space-id' }) })
+		);
+		const user = userEvent.setup();
+		render(SpaceSwitcher, { spaces: SPACES, activeSpaceId: 'space-a' });
+
+		await user.click(screen.getByRole('button', { name: 'Switch space' }));
+		await user.click(screen.getByRole('menuitem', { name: 'New space' }));
+		await user.click(screen.getByRole('button', { name: 'Create' }));
+
+		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/space/new-space-id'));
+		expect(globalThis.fetch).toHaveBeenCalledWith(
+			'/api/spaces',
+			expect.objectContaining({ body: JSON.stringify({ name: 'Untitled Space' }) })
+		);
+	});
+
+	it('closes the menu on an outside click, and stays open on an inside click', async () => {
+		const user = userEvent.setup();
+		render(SpaceSwitcher, { spaces: SPACES, activeSpaceId: 'space-a' });
+
+		await user.click(screen.getByRole('button', { name: 'Switch space' }));
+		expect(screen.getByRole('menu')).toBeInTheDocument();
+
+		// Inside click — on the menu's own border divider, not an item — must
+		// not close the menu.
+		await user.click(document.querySelector('[role="menu"] > div')!);
+		expect(screen.getByRole('menu')).toBeInTheDocument();
+
+		await user.click(document.body);
+		expect(screen.queryByRole('menu')).toBeNull();
+	});
+
+	describe('keyboard navigation in the open menu', () => {
+		it('closes the menu on Escape and returns focus to the trigger', async () => {
+			const user = userEvent.setup();
+			render(SpaceSwitcher, { spaces: SPACES, activeSpaceId: 'space-a' });
+
+			const trigger = screen.getByRole('button', { name: 'Switch space' });
+			await user.click(trigger);
+			await vi.waitFor(() =>
+				expect(document.activeElement).toBe(screen.getAllByRole('menuitem')[0])
+			);
+			await user.keyboard('{Escape}');
+
+			expect(screen.queryByRole('menu')).toBeNull();
+			expect(document.activeElement).toBe(trigger);
+		});
+
+		it('moves focus forward with ArrowDown and wraps at the end', async () => {
+			const user = userEvent.setup();
+			render(SpaceSwitcher, { spaces: SPACES, activeSpaceId: 'space-a' });
+
+			await user.click(screen.getByRole('button', { name: 'Switch space' }));
+			const items = screen.getAllByRole('menuitem');
+			await vi.waitFor(() => expect(document.activeElement).toBe(items[0]));
+
+			await user.keyboard('{ArrowDown}');
+			expect(document.activeElement).toBe(items[1]);
+			await user.keyboard('{ArrowDown}');
+			expect(document.activeElement).toBe(items[2]);
+			await user.keyboard('{ArrowDown}');
+			expect(document.activeElement).toBe(items[0]);
+		});
+
+		it('moves focus backward with ArrowUp and wraps at the start', async () => {
+			const user = userEvent.setup();
+			render(SpaceSwitcher, { spaces: SPACES, activeSpaceId: 'space-a' });
+
+			await user.click(screen.getByRole('button', { name: 'Switch space' }));
+			const items = screen.getAllByRole('menuitem');
+			await vi.waitFor(() => expect(document.activeElement).toBe(items[0]));
+
+			await user.keyboard('{ArrowUp}');
+			expect(document.activeElement).toBe(items[items.length - 1]);
+		});
+	});
 });

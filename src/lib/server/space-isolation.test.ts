@@ -128,6 +128,23 @@ describe('space isolation: listDocuments/listCollections (#133, workspace-shardi
 		const inSpaceB = listDocuments(CURRENT_USER, spaceB.id);
 		expect(inSpaceB).toEqual([]);
 	});
+
+	it('listCollections with no spaceId filter lists a cataloged collection exactly once, plus any uncataloged one', () => {
+		const cataloged = createCollection(CURRENT_USER, { title: 'Cataloged Table', schema: [] });
+		const uncataloged = crdtCreateCollection(resolveWorkspaceContext().doc, {
+			title: 'Legacy Direct-Written Table',
+			schema: []
+		});
+
+		// listCollections() dedupes against its own catalog fan-out before
+		// falling back to a raw Y.Doc scan — without that dedupe, `cataloged`
+		// would appear twice (once from the catalog loop, once again from the
+		// uncataloged-fallback loop, since every collection also lives in the
+		// underlying Y.Doc regardless of how it was created).
+		const results = listCollections(CURRENT_USER);
+		expect(results.filter((c) => c.id === cataloged.id)).toHaveLength(1);
+		expect(results.some((c) => c.id === uncataloged.id)).toBe(true);
+	});
 });
 
 describe('createDocument/createCollection: Space validation (#140 CodeRabbit)', () => {
@@ -237,6 +254,25 @@ describe('createDocument/createCollection: Space validation (#140 CodeRabbit)', 
 		expect(() =>
 			moveDocument(CURRENT_USER, legacyDoc.id, { parentDocumentId: parentInSpaceB.id })
 		).toThrow(SpaceMismatchError);
+	});
+
+	it('createDocument does not throw SpaceMismatchError for a parentDocumentId that does not exist anywhere (unclassifiable, exempt)', () => {
+		// Unlike the legacy/uncataloged case above — which still exists in the
+		// default Y.Doc and is classified as the default Space —
+		// resolveEffectiveDocumentSpaceId returns undefined for an id that
+		// can't be found in the catalog *or* the default doc at all, and that
+		// case stays exempt from the mismatch check rather than blocking the
+		// create outright.
+		const { workspaceId } = resolveWorkspaceContext();
+		const spaceB = createSpace(workspaceId, 'Space B');
+
+		expect(() =>
+			createDocument(CURRENT_USER, {
+				title: 'Child of nowhere',
+				parentDocumentId: 'not-a-real-parent-id',
+				spaceId: spaceB.id
+			})
+		).not.toThrow(SpaceMismatchError);
 	});
 });
 
