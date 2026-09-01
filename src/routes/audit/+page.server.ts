@@ -1,11 +1,21 @@
-import { queryAuditLog } from '$lib/server/audit';
+import { listAuditHistory } from '$lib/services';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = ({ url }) => {
 	const actorKind = url.searchParams.get('actorKind') ?? undefined;
-	const entries = queryAuditLog({
+	const hasTargetRecordScope = url.searchParams.has('targetRecordId');
+	const targetRecordId = hasTargetRecordScope
+		? (url.searchParams.get('targetRecordId') ?? '')
+		: undefined;
+	const entries = listAuditHistory({
 		actorFilter: actorKind ? (actor) => actor.kind === actorKind : undefined,
+		targetRecordId,
 		limit: 200
 	});
-	return { entries, actorKind: actorKind ?? '' };
+	return {
+		entries,
+		actorKind: actorKind ?? '',
+		targetRecordId: targetRecordId ?? '',
+		hasTargetRecordScope
+	};
 };

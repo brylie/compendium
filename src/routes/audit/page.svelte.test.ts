@@ -39,7 +39,9 @@ describe('audit +page', () => {
 				documents: [],
 				collections: [],
 				entries: [],
-				actorKind: ''
+				actorKind: '',
+				targetRecordId: '',
+				hasTargetRecordScope: false
 			}
 		});
 		expect(screen.getByText('No audit entries matching filter.')).toBeInTheDocument();
@@ -55,7 +57,9 @@ describe('audit +page', () => {
 				documents: [],
 				collections: [],
 				entries: [entry({ id: 1, targetRecordId: 'rec-42' })],
-				actorKind: ''
+				actorKind: '',
+				targetRecordId: '',
+				hasTargetRecordScope: false
 			}
 		});
 		expect(screen.getByText('You')).toBeInTheDocument();
@@ -73,7 +77,9 @@ describe('audit +page', () => {
 				documents: [],
 				collections: [],
 				entries: [entry({ targetRecordId: undefined })],
-				actorKind: ''
+				actorKind: '',
+				targetRecordId: '',
+				hasTargetRecordScope: false
 			}
 		});
 		expect(screen.getByText('—')).toBeInTheDocument();
@@ -95,7 +101,9 @@ describe('audit +page', () => {
 						actor: { kind: 'human-via-client', userId: 'brylie', client: 'Claude Desktop' }
 					})
 				],
-				actorKind: ''
+				actorKind: '',
+				targetRecordId: '',
+				hasTargetRecordScope: false
 			}
 		});
 		expect(screen.getByText('Claude')).toBeInTheDocument();
@@ -112,7 +120,9 @@ describe('audit +page', () => {
 				documents: [],
 				collections: [],
 				entries: [],
-				actorKind: 'agent'
+				actorKind: 'agent',
+				targetRecordId: '',
+				hasTargetRecordScope: false
 			}
 		});
 		expect(screen.getByRole('combobox')).toHaveValue('agent');
@@ -130,12 +140,56 @@ describe('audit +page', () => {
 				documents: [],
 				collections: [],
 				entries: [],
-				actorKind: ''
+				actorKind: '',
+				targetRecordId: '',
+				hasTargetRecordScope: false
 			}
 		});
 
 		await user.selectOptions(screen.getByRole('combobox'), 'human');
 
 		expect(submitSpy).toHaveBeenCalledOnce();
+	});
+
+	it('identifies and preserves a filtered block context', () => {
+		render(Page, {
+			params: {},
+			form: null,
+			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				entries: [],
+				actorKind: '',
+				targetRecordId: 'block-42',
+				hasTargetRecordScope: true
+			}
+		});
+
+		expect(screen.getByText('Audit history for block block-42.')).toBeInTheDocument();
+		expect(screen.getByDisplayValue('block-42')).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: 'All history' })).toHaveAttribute('href', '/audit');
+	});
+
+	it('keeps an empty record ID as visible audit context', () => {
+		render(Page, {
+			params: {},
+			form: null,
+			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				entries: [],
+				actorKind: '',
+				targetRecordId: '',
+				hasTargetRecordScope: true
+			}
+		});
+
+		expect(screen.getByText('Audit history for block .')).toBeInTheDocument();
+		expect(screen.getByDisplayValue('')).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: 'All history' })).toBeInTheDocument();
 	});
 });

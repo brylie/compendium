@@ -346,6 +346,15 @@ describe('space isolation: audit history', () => {
 		expect(spaceBEntries.some((e) => e.targetRecordId === docB.id)).toBe(true);
 		expect(spaceBEntries.some((e) => e.targetRecordId === docA.id)).toBe(false);
 	});
+
+	it('honors a record target filter within the requested Space', () => {
+		const { workspaceId, spaceAId, docA, docB } = seedTwoSpaces();
+		const entries = queryAuditLogForSpace(workspaceId, spaceAId, { targetRecordId: docA.id });
+
+		expect(entries).not.toHaveLength(0);
+		expect(entries.every((entry) => entry.targetRecordId === docA.id)).toBe(true);
+		expect(entries.some((entry) => entry.targetRecordId === docB.id)).toBe(false);
+	});
 });
 
 describe('space isolation: MCP token Space-level allowlists (#6)', () => {

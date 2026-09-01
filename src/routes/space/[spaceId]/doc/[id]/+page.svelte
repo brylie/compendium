@@ -9,12 +9,14 @@
 		createRecord,
 		deleteRecord,
 		getDocument,
+		getRecord,
 		getRecordYText,
 		listRecordsForParent,
 		setBlockType,
 		setRecordChecked,
 		setRecordCollapsed,
 		setRecordReferencedId,
+		touchRecordEditor,
 		updateDocumentTitle
 	} from '$lib/data/records';
 	import { RECORD_LINK_SCHEME, type InternalLinkTarget } from '$lib/data/links';
@@ -73,6 +75,20 @@
 	let linkSelection: { start: number; end: number } | null = $state(null);
 	let linkUrlInput: HTMLInputElement | undefined = $state();
 	let linkDialog: HTMLDivElement | undefined = $state();
+	let provenanceAnnouncement = $state('');
+	let provenanceAnnouncementTimer: ReturnType<typeof setTimeout> | undefined;
+
+	/**
+	 * Older imported documents may predate per-record attribution. This runtime
+	 * guard keeps a legacy block from displaying an invalid actor or timestamp.
+	 */
+	function hasProvenance(block: WorkspaceRecord): boolean {
+		return (
+			block.lastEditedBy !== undefined &&
+			typeof block.lastEditedAt === 'number' &&
+			Number.isFinite(block.lastEditedAt)
+		);
+	}
 
 	// Catalog-backed (data.documents), not derived from ydoc: a sharded
 	// Document's own meta entry doesn't live in *this* Document's doc at all
@@ -544,9 +560,19 @@
 		blockRefs[previous.id]?.focusEditor(joinOffset);
 	}
 
-	function handleBlockInput(blockId: string): void {
-		if (slashMenuBlockId !== blockId || !ydoc) return;
-		const ytext = getRecordYText(ydoc, blockId);
+	/** Updates live provenance for the record whose editable text just changed. */
+	function handleBlockInput(blockId: string, editedRecordId = blockId): void {
+		if (!ydoc) return;
+		touchRecordEditor(ydoc, editedRecordId, CURRENT_USER);
+		clearTimeout(provenanceAnnouncementTimer);
+		provenanceAnnouncementTimer = setTimeout(() => {
+			const record = getRecord(ydoc!, editedRecordId);
+			if (record && hasProvenance(record)) {
+				provenanceAnnouncement = `Last edited by ${formatActor(record.lastEditedBy)} at ${formatTimestamp(record.lastEditedAt)}.`;
+			}
+		}, 800);
+		if (slashMenuBlockId !== blockId) return;
+		const ytext = getRecordYText(ydoc, editedRecordId);
 		const text = ytext ? plainText(yTextToRichText(ytext)) : '';
 		if (!text.startsWith('/')) {
 			slashMenuBlockId = null;
@@ -729,6 +755,11 @@
 					? block.referencedRecordId
 					: block.id
 			)}
+			{@const provenanceRecordId =
+				block.blockType === 'synced_block' && block.referencedRecordId
+					? block.referencedRecordId
+					: block.id}
+			{@const provenance = ydoc ? (getRecord(ydoc, provenanceRecordId) ?? block) : block}
 			{@const bt = block.blockType ?? 'paragraph'}
 
 			<div class="group relative flex items-start py-0.5" id="block-{block.id}">
@@ -812,7 +843,7 @@
 										recordId={block.id}
 										{linkTargets}
 										placeholder="Callout note…"
-										onInputText={() => handleBlockInput(block.id)}
+										onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 										onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 										onBackspaceAtStart={() => handleBackspace(block, index)}
 										onFocusBlock={() => handleFocusBlock(block.id)}
@@ -831,11 +862,11 @@
 									recordId={block.id}
 									{linkTargets}
 									placeholder="Quote…"
-									onInputText={() => handleBlockInput(block.id)}
+									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
-									onSlashKey={() => openSlashMenu(block.id)}
+									onSlashKey={() => {}}
 									onLinkShortcut={() => openLinkComposer(block.id)}
 								/>
 							{/if}
@@ -850,7 +881,7 @@
 									{linkTargets}
 									class="font-mono text-[13.5px]"
 									placeholder="Code snippet…"
-									onInputText={() => handleBlockInput(block.id)}
+									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
@@ -907,12 +938,12 @@
 									recordId={block.id}
 									{linkTargets}
 									placeholder="Synced content…"
-									onInputText={() => handleBlockInput(block.id)}
+									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 									onEnter={() => addBlockAfter(block.id)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() =>
 										handleFocusBlock(block.id, block.referencedRecordId || block.id)}
-									onSlashKey={() => openSlashMenu(block.id)}
+									onSlashKey={() => {}}
 									onLinkShortcut={() => openLinkComposer(block.id)}
 								/>
 							{:else}
@@ -1031,7 +1062,7 @@
 													? 'font-display text-base font-semibold text-fg'
 													: 'text-base text-fg'}
 									placeholder={index === 0 ? "Type '/' for commands, or start typing..." : ''}
-									onInputText={() => handleBlockInput(block.id)}
+									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
@@ -1052,18 +1083,27 @@
 					{/if}
 				</div>
 
-				<!-- Right Attribution Tag (Visible on hover) -->
-				<span
-					class="ml-3 hidden flex-shrink-0 self-center text-[11px] text-muted/70 group-hover:inline-block"
-					title="Edited by {formatActor(block.lastEditedBy)} at {formatTimestamp(
-						block.lastEditedAt
-					)}"
-				>
-					{formatActor(block.lastEditedBy)}
-				</span>
+				<!-- Provenance comes from the record's live CRDT projection; the link
+					 opens the corresponding rows in the shared audit history. -->
+				{#if hasProvenance(provenance)}
+					<a
+						href="{resolve('/audit')}?targetRecordId={encodeURIComponent(provenance.id)}"
+						class="ml-3 flex-shrink-0 self-center text-[11px] text-muted/70 underline-offset-2 hover:text-accent hover:underline focus-visible:text-accent focus-visible:underline"
+						aria-label="Last edited by {formatActor(provenance.lastEditedBy)} at {formatTimestamp(
+							provenance.lastEditedAt
+						)}. Open audit history for this block."
+					>
+						{formatActor(provenance.lastEditedBy)} · {formatTimestamp(provenance.lastEditedAt)}
+					</a>
+				{:else}
+					<span class="ml-3 flex-shrink-0 self-center text-[11px] text-muted/70">
+						Editing history unavailable
+					</span>
+				{/if}
 			</div>
 		{/each}
 	</div>
+	<span class="sr-only" aria-live="polite" aria-atomic="true">{provenanceAnnouncement}</span>
 
 	<!-- Add Block Button -->
 	<div class="mt-6 flex items-center gap-2">
