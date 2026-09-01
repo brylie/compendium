@@ -2,14 +2,18 @@ import { describe, expect, it } from 'vitest';
 import {
 	applyFilters,
 	applySort,
+	computeFieldSummary,
 	dateKeyForRecord,
+	fieldSummaryLabel,
 	groupBySelectProperty,
 	primaryFieldDisplayValue,
 	projectRecords,
+	summaryOptionsForType,
+	viewConfigsEqual,
 	visibleProperties,
 	type ViewConfig
 } from './views';
-import type { ActorId, PropertyDefinition, WorkspaceRecord } from './types';
+import type { ActorId, FieldSummaryType, PropertyDefinition, WorkspaceRecord } from './types';
 
 const actor: ActorId = { kind: 'human', userId: 'local' };
 
@@ -454,5 +458,188 @@ describe('dateKeyForRecord', () => {
 	it('returns undefined when the record has a value of the wrong property type', () => {
 		const r = record('a', { due: { type: 'text', value: 'not a date' } });
 		expect(dateKeyForRecord(r, dueProperty)).toBeUndefined();
+	});
+});
+
+describe('viewConfigsEqual', () => {
+	it('treats two empty configs as equal', () => {
+		expect(viewConfigsEqual({}, {})).toBe(true);
+	});
+
+	it('detects a filter difference', () => {
+		const a: ViewConfig = { filters: [{ propertyKey: 'status', op: 'is', value: 'done' }] };
+		const b: ViewConfig = { filters: [{ propertyKey: 'status', op: 'is', value: 'todo' }] };
+		expect(viewConfigsEqual(a, a)).toBe(true);
+		expect(viewConfigsEqual(a, b)).toBe(false);
+		expect(viewConfigsEqual(a, {})).toBe(false);
+	});
+
+	it('detects a sort difference, treating undefined and manual-mode-with-no-key as distinct only when the shape actually differs', () => {
+		expect(viewConfigsEqual({ sort: { mode: 'manual' } }, { sort: { mode: 'manual' } })).toBe(true);
+		expect(
+			viewConfigsEqual(
+				{ sort: { mode: 'property', propertyKey: 'title', direction: 'asc' } },
+				{ sort: { mode: 'property', propertyKey: 'title', direction: 'desc' } }
+			)
+		).toBe(false);
+		expect(viewConfigsEqual({ sort: { mode: 'manual' } }, {})).toBe(false);
+	});
+
+	it('treats visibleProperties as a set — order doesn’t matter', () => {
+		expect(
+			viewConfigsEqual({ visibleProperties: ['a', 'b'] }, { visibleProperties: ['b', 'a'] })
+		).toBe(true);
+		expect(viewConfigsEqual({ visibleProperties: ['a', 'b'] }, { visibleProperties: ['a'] })).toBe(
+			false
+		);
+	});
+
+	it('detects a groupBy difference', () => {
+		expect(viewConfigsEqual({ groupBy: 'status' }, { groupBy: 'priority' })).toBe(false);
+		expect(viewConfigsEqual({ groupBy: 'status' }, { groupBy: 'status' })).toBe(true);
+	});
+
+	it('detects a summaries difference, ignoring key order', () => {
+		expect(
+			viewConfigsEqual(
+				{ summaries: { a: 'sum', b: 'count_all' } },
+				{ summaries: { b: 'count_all', a: 'sum' } }
+			)
+		).toBe(true);
+		expect(viewConfigsEqual({ summaries: { a: 'sum' } }, { summaries: { a: 'average' } })).toBe(
+			false
+		);
+		expect(viewConfigsEqual({ summaries: { a: 'sum' } }, {})).toBe(false);
+	});
+});
+
+describe('summaryOptionsForType', () => {
+	it('offers numeric aggregations for number properties', () => {
+		expect(summaryOptionsForType('number')).toEqual([
+			'none',
+			'count_all',
+			'count_values',
+			'count_empty',
+			'sum',
+			'average',
+			'min',
+			'max'
+		]);
+	});
+
+	it('offers earliest/latest for date properties, not sum/average', () => {
+		const options = summaryOptionsForType('date');
+		expect(options).toContain('earliest');
+		expect(options).toContain('latest');
+		expect(options).not.toContain('sum');
+	});
+
+	it('offers checked/unchecked for checkbox properties', () => {
+		expect(summaryOptionsForType('checkbox')).toEqual([
+			'none',
+			'count_all',
+			'checked',
+			'unchecked'
+		]);
+	});
+
+	it('offers only generic count aggregations for text/select/relation properties', () => {
+		const generic: FieldSummaryType[] = ['none', 'count_all', 'count_values', 'count_empty'];
+		expect(summaryOptionsForType('text')).toEqual(generic);
+		expect(summaryOptionsForType('select')).toEqual(generic);
+		expect(summaryOptionsForType('relation')).toEqual(generic);
+	});
+});
+
+describe('fieldSummaryLabel', () => {
+	it('has a human label for every FieldSummaryType', () => {
+		const allTypes: FieldSummaryType[] = [
+			'none',
+			'count_all',
+			'count_values',
+			'count_empty',
+			'sum',
+			'average',
+			'min',
+			'max',
+			'earliest',
+			'latest',
+			'checked',
+			'unchecked'
+		];
+		for (const type of allTypes) {
+			expect(fieldSummaryLabel(type)).toMatch(/\S/);
+		}
+	});
+});
+
+describe('computeFieldSummary', () => {
+	const qtyProperty: PropertyDefinition = { key: 'qty', label: 'Qty', type: 'number' };
+	const doneProperty: PropertyDefinition = { key: 'done', label: 'Done', type: 'checkbox' };
+
+	it('returns an empty string for "none"', () => {
+		expect(computeFieldSummary([record('a', {})], titleProperty, 'none')).toBe('');
+	});
+
+	it('counts all records, records with a value, and empty records', () => {
+		const records = [
+			record('a', { title: { type: 'text', value: 'x' } }),
+			record('b', {}),
+			record('c', { title: { type: 'text', value: 'y' } })
+		];
+		expect(computeFieldSummary(records, titleProperty, 'count_all')).toBe('3');
+		expect(computeFieldSummary(records, titleProperty, 'count_values')).toBe('2');
+		expect(computeFieldSummary(records, titleProperty, 'count_empty')).toBe('1');
+	});
+
+	it('sums, averages, mins, and maxes a number property, ignoring empty rows', () => {
+		const records = [
+			record('a', { qty: { type: 'number', value: 3 } }),
+			record('b', {}),
+			record('c', { qty: { type: 'number', value: 5 } }),
+			record('d', { qty: { type: 'number', value: 10 } })
+		];
+		expect(computeFieldSummary(records, qtyProperty, 'sum')).toBe('18');
+		expect(computeFieldSummary(records, qtyProperty, 'average')).toBe('6');
+		expect(computeFieldSummary(records, qtyProperty, 'min')).toBe('3');
+		expect(computeFieldSummary(records, qtyProperty, 'max')).toBe('10');
+	});
+
+	it('rounds average to 2 decimal places', () => {
+		const records = [
+			record('a', { qty: { type: 'number', value: 1 } }),
+			record('b', { qty: { type: 'number', value: 2 } }),
+			record('c', { qty: { type: 'number', value: 2 } })
+		];
+		expect(computeFieldSummary(records, qtyProperty, 'average')).toBe('1.67');
+	});
+
+	it('returns an empty string for sum/average/min/max when every row is empty', () => {
+		const records = [record('a', {})];
+		expect(computeFieldSummary(records, qtyProperty, 'sum')).toBe('0');
+		expect(computeFieldSummary(records, qtyProperty, 'average')).toBe('');
+		expect(computeFieldSummary(records, qtyProperty, 'min')).toBe('');
+		expect(computeFieldSummary(records, qtyProperty, 'max')).toBe('');
+	});
+
+	it('finds earliest and latest date values, ignoring empty rows', () => {
+		const records = [
+			record('a', { due: { type: 'date', value: '2026-03-15' } }),
+			record('b', {}),
+			record('c', { due: { type: 'date', value: '2026-01-01' } }),
+			record('d', { due: { type: 'date', value: '2026-06-01' } })
+		];
+		expect(computeFieldSummary(records, dueProperty, 'earliest')).toBe('2026-01-01');
+		expect(computeFieldSummary(records, dueProperty, 'latest')).toBe('2026-06-01');
+	});
+
+	it('counts checked and unchecked checkboxes, treating an unset value as unchecked', () => {
+		const records = [
+			record('a', { done: { type: 'checkbox', value: true } }),
+			record('b', { done: { type: 'checkbox', value: false } }),
+			record('c', {})
+		];
+		expect(computeFieldSummary(records, doneProperty, 'checked')).toBe('1');
+		expect(computeFieldSummary(records, doneProperty, 'unchecked')).toBe('2');
 	});
 });
