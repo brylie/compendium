@@ -425,7 +425,12 @@ export function listDocuments(caller: CallerIdentity, spaceId?: string): Documen
 	// identical catalog-then-uncataloged-fallback union pattern.
 	for (const document of crdtListDocuments(defaultDoc)) {
 		if (catalogDocumentIds.has(document.id)) continue;
-		if (!allowed(document.id)) continue;
+		// Uncataloged content is classified as belonging to defaultSpaceId (see
+		// this function's own doc comment) — passing it here too, not just
+		// omitting it, so a token whose only grant is a Space-level allowlist
+		// for the default Space (no per-Document grant) can actually see it
+		// (CodeRabbit finding on #141's merge with #140).
+		if (!allowed(document.id, defaultSpaceId)) continue;
 		results.push(document);
 	}
 

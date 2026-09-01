@@ -141,7 +141,12 @@ export function listCollections(caller: CallerIdentity, spaceId?: string): Colle
 	// above can't see these; they're only findable in the default doc.
 	for (const collection of crdtListCollections(defaultDoc)) {
 		if (catalogCollectionIds.has(collection.id)) continue;
-		if (!allowed(collection.id)) continue;
+		// Uncataloged content is classified as belonging to defaultSpaceId (see
+		// this function's own doc comment) — passing it here too, not just
+		// omitting it, so a token whose only grant is a Space-level allowlist
+		// for the default Space (no per-Collection grant) can actually see it
+		// (CodeRabbit finding on #141's merge with #140).
+		if (!allowed(collection.id, defaultSpaceId)) continue;
 		results.push(collection);
 	}
 
