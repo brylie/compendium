@@ -27,6 +27,8 @@ function handlers() {
 		onBackspaceAtStart: vi.fn(),
 		onFocusBlock: vi.fn(),
 		onSlashKey: vi.fn(),
+		onArrowUpAtStart: vi.fn(() => true),
+		onArrowDownAtEnd: vi.fn(() => true),
 		linkTargets: new Map()
 	};
 }
@@ -222,6 +224,97 @@ describe('BlockEditor', () => {
 
 		await fireEvent.keyDown(el, { key: 'Backspace' });
 		expect(hs.onBackspaceAtStart).not.toHaveBeenCalled();
+	});
+
+	it('calls onArrowUpAtStart when ArrowUp is pressed and this is not the first block', async () => {
+		const ytext = doc.getText('a');
+		const hs = handlers();
+		const { container } = render(BlockEditor, { ytext, ...hs, isFirstBlock: false });
+		const el = container.querySelector('[contenteditable]') as HTMLElement;
+
+		const event = await fireEvent.keyDown(el, { key: 'ArrowUp' });
+		expect(hs.onArrowUpAtStart).toHaveBeenCalledOnce();
+		expect(event).toBe(false); // fireEvent returns false when preventDefault() was called
+	});
+
+	it('does not call onArrowUpAtStart when this is the first block', async () => {
+		const ytext = doc.getText('a');
+		const hs = handlers();
+		const { container } = render(BlockEditor, { ytext, ...hs, isFirstBlock: true });
+		const el = container.querySelector('[contenteditable]') as HTMLElement;
+
+		const event = await fireEvent.keyDown(el, { key: 'ArrowUp' });
+		expect(hs.onArrowUpAtStart).not.toHaveBeenCalled();
+		expect(event).toBe(true); // native caret movement is left alone
+	});
+
+	it('does not call onArrowUpAtStart when a modifier key is held (e.g. extending a selection)', async () => {
+		const ytext = doc.getText('a');
+		const hs = handlers();
+		const { container } = render(BlockEditor, { ytext, ...hs, isFirstBlock: false });
+		const el = container.querySelector('[contenteditable]') as HTMLElement;
+
+		await fireEvent.keyDown(el, { key: 'ArrowUp', shiftKey: true });
+		expect(hs.onArrowUpAtStart).not.toHaveBeenCalled();
+	});
+
+	it('calls onArrowDownAtEnd when ArrowDown is pressed and this is not the last block', async () => {
+		const ytext = doc.getText('a');
+		const hs = handlers();
+		const { container } = render(BlockEditor, { ytext, ...hs, isLastBlock: false });
+		const el = container.querySelector('[contenteditable]') as HTMLElement;
+
+		const event = await fireEvent.keyDown(el, { key: 'ArrowDown' });
+		expect(hs.onArrowDownAtEnd).toHaveBeenCalledOnce();
+		expect(event).toBe(false);
+	});
+
+	it('does not call onArrowDownAtEnd when this is the last block', async () => {
+		const ytext = doc.getText('a');
+		const hs = handlers();
+		const { container } = render(BlockEditor, { ytext, ...hs, isLastBlock: true });
+		const el = container.querySelector('[contenteditable]') as HTMLElement;
+
+		const event = await fireEvent.keyDown(el, { key: 'ArrowDown' });
+		expect(hs.onArrowDownAtEnd).not.toHaveBeenCalled();
+		expect(event).toBe(true);
+	});
+
+	it('does not treat an active (non-collapsed) selection as being at the edge', async () => {
+		const ytext = doc.getText('a');
+		ytext.insert(0, 'hello world');
+		const hs = handlers();
+		const { container } = render(BlockEditor, {
+			ytext,
+			...hs,
+			isFirstBlock: false,
+			isLastBlock: false
+		});
+		const el = container.querySelector('[contenteditable]') as HTMLElement;
+		selectRange(el, 0, 5);
+
+		// Unmodified ArrowUp/ArrowDown with an active selection must leave the
+		// browser's native collapse-to-one-end behavior alone, not treat the
+		// selection as "at the edge" and jump to another block.
+		const upEvent = await fireEvent.keyDown(el, { key: 'ArrowUp' });
+		expect(hs.onArrowUpAtStart).not.toHaveBeenCalled();
+		expect(upEvent).toBe(true);
+
+		const downEvent = await fireEvent.keyDown(el, { key: 'ArrowDown' });
+		expect(hs.onArrowDownAtEnd).not.toHaveBeenCalled();
+		expect(downEvent).toBe(true);
+	});
+
+	it('does not preventDefault when the navigation callback reports no reachable block', async () => {
+		const ytext = doc.getText('a');
+		const hs = handlers();
+		hs.onArrowUpAtStart = vi.fn(() => false);
+		const { container } = render(BlockEditor, { ytext, ...hs, isFirstBlock: false });
+		const el = container.querySelector('[contenteditable]') as HTMLElement;
+
+		const event = await fireEvent.keyDown(el, { key: 'ArrowUp' });
+		expect(hs.onArrowUpAtStart).toHaveBeenCalledOnce();
+		expect(event).toBe(true); // native caret movement is left alone
 	});
 
 	it('calls onFocusBlock when the element is focused', async () => {

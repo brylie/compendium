@@ -3,7 +3,15 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { diffPlainText } from '$lib/client/text-diff';
-	import { getCaretOffset, getSelectionOffsets, setCaretOffset } from '$lib/client/caret';
+	import {
+		getCaretClientX,
+		getCaretOffset,
+		getSelectionOffsets,
+		isCaretAtFirstLine,
+		isCaretAtLastLine,
+		setCaretNearClientX,
+		setCaretOffset
+	} from '$lib/client/caret';
 	import { plainText, yTextToRichText } from '$lib/data/richtext';
 	import { RECORD_LINK_SCHEME, type InternalLinkTarget } from '$lib/data/links';
 	import type { TextMarks } from '$lib/data/types';
@@ -19,7 +27,11 @@
 		onBackspaceAtStart,
 		onFocusBlock,
 		onSlashKey,
-		onLinkShortcut = () => {}
+		onLinkShortcut = () => {},
+		isFirstBlock = false,
+		isLastBlock = false,
+		onArrowUpAtStart = () => false,
+		onArrowDownAtEnd = () => false
 	}: {
 		ytext: Y.Text;
 		recordId?: string;
@@ -37,6 +49,19 @@
 		onFocusBlock: () => void;
 		onSlashKey: () => void;
 		onLinkShortcut?: () => void;
+		// Cheap short-circuit for the very first/last block in the document —
+		// decided by the parent (it owns block order), not derivable from
+		// this component alone. Not sufficient on its own to know whether a
+		// move will actually succeed: the immediately-adjacent block can be
+		// a held placeholder or another non-editor block type, so the
+		// callbacks report back (returning true/false) whether they found a
+		// reachable block to focus. Only a true return preventDefault()s —
+		// otherwise native caret behavior is left alone, e.g. at the
+		// effective start/end of the document.
+		isFirstBlock?: boolean;
+		isLastBlock?: boolean;
+		onArrowUpAtStart?: (clientX: number | null) => boolean;
+		onArrowDownAtEnd?: (clientX: number | null) => boolean;
 	} = $props();
 
 	let el: HTMLDivElement | undefined = $state();
@@ -203,6 +228,15 @@
 			event.preventDefault();
 			onLinkShortcut();
 		}
+		const noModifiers = !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey;
+		if (event.key === 'ArrowUp' && el && !isFirstBlock && noModifiers && isCaretAtFirstLine(el)) {
+			if (onArrowUpAtStart(getCaretClientX(el))) event.preventDefault();
+			return;
+		}
+		if (event.key === 'ArrowDown' && el && !isLastBlock && noModifiers && isCaretAtLastLine(el)) {
+			if (onArrowDownAtEnd(getCaretClientX(el))) event.preventDefault();
+			return;
+		}
 	}
 
 	export function getSelectionRange(): { start: number; end: number } | null {
@@ -275,6 +309,15 @@
 		if (!el) return;
 		const offset = typeof position === 'number' ? position : position ? 0 : lastPlainText.length;
 		setCaretOffset(el, offset);
+	}
+
+	// Column-preserving landing spot for a block-to-block ArrowUp/ArrowDown
+	// move — lands on this editor's first/last visual line, as close as
+	// possible to clientX (the caret's horizontal position in the block the
+	// user moved out of).
+	export function focusEditorAtLine(edge: 'first' | 'last', clientX: number | null): void {
+		if (!el) return;
+		setCaretNearClientX(el, clientX, edge);
 	}
 
 	$effect(() => {
