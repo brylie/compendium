@@ -29,6 +29,9 @@ describe('service layer: createSpace', () => {
 
 		const space = createSpace(tokenRecord, 'Agent Space');
 
+		const { workspaceId } = resolveWorkspaceContext();
+		expect(isKnownSpace(workspaceId, space.id)).toBe(true);
+
 		const audits = queryAuditLog();
 		const entry = audits.find((a) => a.action === 'create_space' && a.targetRecordId === space.id);
 		expect(entry).toBeDefined();
