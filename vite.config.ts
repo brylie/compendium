@@ -45,6 +45,12 @@ export default defineConfig({
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
 			adapter: adapter(),
+			// Root-absolute, not route-depth-relative: %sveltekit.assets% links in
+			// app.html (favicon) are static head elements the client router never
+			// re-renders on SPA navigation, so a depth-relative href computed for
+			// one route silently 404s after navigating to a route nested deeper
+			// under /space/[spaceId]/... (e.g. doc/table pages vs. the Space root).
+			paths: { relative: false },
 			typescript: {
 				config: (config) => {
 					config.include.push('../drizzle.config.ts');

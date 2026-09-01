@@ -6,6 +6,13 @@ import {
 	searchWorkspace,
 	writeRecord
 } from './index';
+import {
+	createCollection as crdtCreateCollection,
+	createDocument as crdtCreateDocument,
+	createRecord as crdtCreateRecord
+} from '$lib/data/records';
+import { createToken } from '$lib/mcp/tokens';
+import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import type { ActorId } from '$lib/data/types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
@@ -81,5 +88,104 @@ describe('searchWorkspace: collection row properties', () => {
 
 		const results = searchWorkspace(human, '42');
 		expect(results.some((r) => r.recordId === row.id)).toBe(false);
+	});
+});
+
+describe('searchWorkspace: token scoping', () => {
+	it('skips a catalog-listed collection a token has no grant for', () => {
+		const collection = createCollection(human, {
+			title: 'Token Denied Catalog',
+			schema: [{ key: 'summary', label: 'Summary', type: 'text' }]
+		});
+		const row = createRecord(human, {
+			parentId: collection.id,
+			properties: { summary: { type: 'text', value: 'gamma keyword' } }
+		});
+		const { record: token } = createToken({
+			clientLabel: 'Search Test Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+
+		const results = searchWorkspace(token, 'gamma');
+		expect(results.some((r) => r.recordId === row.id)).toBe(false);
+	});
+
+	it('finds a row in a catalog-listed collection the token is granted', () => {
+		const collection = createCollection(human, {
+			title: 'Token Granted Catalog',
+			schema: [{ key: 'summary', label: 'Summary', type: 'text' }]
+		});
+		const row = createRecord(human, {
+			parentId: collection.id,
+			properties: { summary: { type: 'text', value: 'delta keyword' } }
+		});
+		const { record: token } = createToken({
+			clientLabel: 'Search Test Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: [collection.id]
+		});
+
+		const results = searchWorkspace(token, 'delta');
+		expect(results.some((r) => r.recordId === row.id)).toBe(true);
+	});
+
+	it('skips an uncataloged collection a token has no grant for', () => {
+		const { doc } = resolveWorkspaceContext();
+		const uncataloged = crdtCreateCollection(doc, {
+			title: 'Uncataloged',
+			schema: [{ key: 'summary', label: 'Summary', type: 'text' }]
+		});
+		const row = createRecord(human, {
+			parentId: uncataloged.id,
+			properties: { summary: { type: 'text', value: 'epsilon keyword' } }
+		});
+		const { record: token } = createToken({
+			clientLabel: 'Search Test Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+
+		const results = searchWorkspace(token, 'epsilon');
+		expect(results.some((r) => r.recordId === row.id)).toBe(false);
+	});
+
+	it('skips an uncataloged document a token has no grant for', () => {
+		const { doc } = resolveWorkspaceContext();
+		const uncatalogedDoc = crdtCreateDocument(doc, { title: 'Uncataloged Doc' });
+		const block = crdtCreateRecord(
+			doc,
+			{ parentId: uncatalogedDoc.id, blockType: 'paragraph' },
+			human
+		);
+		writeRecord(human, block.id, { markdown: 'eta keyword' });
+		const { record: token } = createToken({
+			clientLabel: 'Search Test Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+
+		const results = searchWorkspace(token, 'eta');
+		expect(results.some((r) => r.recordId === block.id)).toBe(false);
+	});
+
+	it('finds a row in an uncataloged collection the token is granted', () => {
+		const { doc } = resolveWorkspaceContext();
+		const uncataloged = crdtCreateCollection(doc, {
+			title: 'Uncataloged Granted',
+			schema: [{ key: 'summary', label: 'Summary', type: 'text' }]
+		});
+		const row = createRecord(human, {
+			parentId: uncataloged.id,
+			properties: { summary: { type: 'text', value: 'zeta keyword' } }
+		});
+		const { record: token } = createToken({
+			clientLabel: 'Search Test Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: [uncataloged.id]
+		});
+
+		const results = searchWorkspace(token, 'zeta');
+		expect(results.some((r) => r.recordId === row.id)).toBe(true);
 	});
 });

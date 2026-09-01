@@ -63,6 +63,45 @@ describe('yjs-client: browser', () => {
 		const mod = await import('./yjs-client');
 		expect(mod.getClientAwareness()).toEqual({ fake: true });
 	});
+
+	it('uses wss when the page itself is loaded over https', async () => {
+		const originalLocation = window.location;
+		Object.defineProperty(window, 'location', {
+			value: { ...originalLocation, protocol: 'https:', host: originalLocation.host },
+			writable: true,
+			configurable: true
+		});
+		try {
+			const mod = await import('./yjs-client');
+			mod.getClientDoc();
+			expect(providerInstances[0].url).toMatch(/^wss:\/\//);
+		} finally {
+			Object.defineProperty(window, 'location', {
+				value: originalLocation,
+				writable: true,
+				configurable: true
+			});
+		}
+	});
+
+	it('lazily creates a shard Y.Doc and WebsocketProvider per shardId, reusing it on subsequent calls', async () => {
+		const mod = await import('./yjs-client');
+		const docA1 = mod.getShardDoc('shard-a');
+		const docA2 = mod.getShardDoc('shard-a');
+		expect(docA1).toBe(docA2);
+		expect(providerInstances).toHaveLength(1);
+		expect(providerInstances[0].room).toBe('shard-shard-a');
+
+		const docB = mod.getShardDoc('shard-b');
+		expect(docB).not.toBe(docA1);
+		expect(providerInstances).toHaveLength(2);
+	});
+
+	it('getShardAwareness exposes the matching shard provider awareness', async () => {
+		const mod = await import('./yjs-client');
+		mod.getShardDoc('shard-c');
+		expect(mod.getShardAwareness('shard-c')).toEqual({ fake: true });
+	});
 });
 
 describe('yjs-client: outside the browser', () => {
@@ -78,5 +117,10 @@ describe('yjs-client: outside the browser', () => {
 	it('throws instead of connecting during SSR', async () => {
 		const mod = await import('./yjs-client');
 		expect(() => mod.getClientDoc()).toThrow('getClientDoc() is browser-only');
+	});
+
+	it('getShardDoc also throws instead of connecting during SSR', async () => {
+		const mod = await import('./yjs-client');
+		expect(() => mod.getShardDoc('shard-a')).toThrow('getShardDoc() is browser-only');
 	});
 });

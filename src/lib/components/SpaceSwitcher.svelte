@@ -156,7 +156,7 @@
 			class="rounded p-2 text-muted transition-colors hover:bg-surface hover:text-accent"
 			aria-haspopup="menu"
 			aria-expanded={open}
-			aria-label="Switch space"
+			aria-label={activeSpace ? `Switch space (current: ${activeSpace.name})` : 'Switch space'}
 			title={activeSpace?.name ?? 'Switch space'}
 		>
 			<Icon name="logo" size={18} />

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
-import type { DocumentMeta } from '$lib/data/types';
+import type { CollectionMeta, DocumentMeta } from '$lib/data/types';
 import Page from './+page.svelte';
 
 interface TestToken {
@@ -27,6 +27,10 @@ function token(overrides: Partial<TestToken> = {}): TestToken {
 
 function doc(id: string, title: string): DocumentMeta {
 	return { id, title, order: 'a', recordIds: [] };
+}
+
+function collection(id: string, title: string): CollectionMeta {
+	return { id, title, schema: [], recordIds: [] };
 }
 
 describe('settings/tokens +page', () => {
@@ -124,6 +128,53 @@ describe('settings/tokens +page', () => {
 		const checkbox = screen.getByText('Design Notes').closest('label')!.querySelector('input')!;
 		expect(checkbox).toHaveAttribute('name', 'documentIds');
 		expect(checkbox).toHaveAttribute('value', 'd1');
+	});
+
+	it('includes the space count in the scope summary when a token has Space grants', () => {
+		render(Page, {
+			params: {},
+			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
+				tokens: [token({ allowedSpaceIds: ['space-a', 'space-b'] })],
+				documents: [],
+				collections: []
+			},
+			form: null
+		});
+		expect(screen.getByText('0 doc(s), 0 collection(s), 2 space(s)')).toBeInTheDocument();
+	});
+
+	it('lists selectable collections for scoping a new token', () => {
+		render(Page, {
+			params: {},
+			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
+				tokens: [],
+				documents: [],
+				collections: [collection('c1', 'Sprint Tasks')]
+			},
+			form: null
+		});
+		const checkbox = screen.getByText('Sprint Tasks').closest('label')!.querySelector('input')!;
+		expect(checkbox).toHaveAttribute('name', 'collectionIds');
+		expect(checkbox).toHaveAttribute('value', 'c1');
+	});
+
+	it('falls back to "Untitled" for a document or collection with a blank title', () => {
+		render(Page, {
+			params: {},
+			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
+				tokens: [],
+				documents: [doc('d1', '')],
+				collections: [collection('c1', '')]
+			},
+			form: null
+		});
+		expect(screen.getAllByText('Untitled')).toHaveLength(2);
 	});
 
 	it('lists selectable spaces for scoping a new token', () => {

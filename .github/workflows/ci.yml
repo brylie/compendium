@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -27,13 +34,25 @@ jobs:
 
       - name: Unit tests with coverage
         run: |
+          # pipefail so this step's exit code is test:coverage's, not tee's —
+          # without it, a real coverage-threshold failure still exits 0
+          # (tee's own status), and the step reports green regardless (#97).
+          # set +e/capture/set -e around it: bash -e would otherwise abort at
+          # the failing pipeline before the summary block below ever runs,
+          # hiding the coverage numbers exactly when they're most needed to
+          # explain the failure.
+          set +e
+          set -o pipefail
           npm run test:coverage 2>&1 | tee coverage-run.log
+          status=$?
+          set -e
           {
             echo '### Coverage'
             echo '```'
             grep -A 6 'Coverage summary' coverage-run.log || echo 'summary not found, see full log'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
       - uses: actions/upload-artifact@v4
         if: always()

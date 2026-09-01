@@ -167,6 +167,20 @@ describe('catalog-mirror-observer: mirroring direct UI title/hierarchy edits int
 		expect(() => vi.advanceTimersByTime(3_000)).not.toThrow();
 	});
 
+	it('is a no-op when a Collection was deleted before its debounce window elapsed', () => {
+		const collection = seedCollection(doc, spaceId);
+
+		doc.transact(
+			() => crdtUpdateCollectionTitle(doc, collection.id, 'Renamed'),
+			'fake-ws-connection'
+		);
+		doc.transact(() => {
+			doc.getMap('collections').delete(collection.id);
+		}, 'fake-ws-connection');
+
+		expect(() => vi.advanceTimersByTime(3_000)).not.toThrow();
+	});
+
 	it("debounces a same-id entry independently per Y.Doc, so one workspace does not clobber another's pending mirror", () => {
 		// A document id is only unique within its own workspace (catalog_documents'
 		// primary key is (workspace_id, id) — see db/schema.ts), so two different

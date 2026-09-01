@@ -272,4 +272,30 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		});
 		await expect(page.locator('text=Catering confirmed: Thistle and Thyme.')).not.toBeVisible();
 	});
+
+	test('favicon stays resolvable after client-side navigation into a deeper Space route', async ({
+		page
+	}) => {
+		// Regression test: SvelteKit's default paths.relative computes the
+		// favicon <link> href once, at the initial full page load, based on
+		// that page's route depth. Those static app.html head elements are
+		// never re-rendered by the client router on SPA navigation, so a page
+		// that first loads shallow (/space/[spaceId]) and then navigates
+		// client-side into a deeper route (doc/[id]) used to keep the shallow
+		// page's depth-relative href — resolving to a 404 under the deeper
+		// URL. paths.relative: false (vite.config.ts) fixes it by making the
+		// href root-absolute regardless of route depth or navigation history.
+		const docMeta = createDocument(human, { title: 'Favicon Regression Doc' });
+		flush();
+
+		await page.goto(`${harness.httpUrl}/space/${defaultSpaceId()}`);
+		await page.locator('aside').getByText('Favicon Regression Doc').click();
+		await page.waitForURL(new RegExp(`/doc/${docMeta.id}`));
+
+		const faviconHref = await page.locator('link[rel="alternate icon"]').getAttribute('href');
+		expect(faviconHref).toMatch(/^\//);
+
+		const response = await page.request.get(new URL(faviconHref!, page.url()).toString());
+		expect(response.status()).toBe(200);
+	});
 });
