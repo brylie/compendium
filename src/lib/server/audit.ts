@@ -32,6 +32,7 @@ export function logAudit(input: {
 
 export interface AuditQuery {
 	actorFilter?: (actor: ActorId) => boolean;
+	targetRecordId?: string;
 	since?: number;
 	until?: number;
 	limit?: number;
@@ -43,6 +44,7 @@ export function queryAuditLog(query: AuditQuery = {}): AuditEntry[] {
 		.from(auditLog)
 		.where(
 			and(
+				query.targetRecordId ? eq(auditLog.targetRecordId, query.targetRecordId) : undefined,
 				gte(auditLog.timestamp, query.since ?? 0),
 				lte(auditLog.timestamp, query.until ?? Number.MAX_SAFE_INTEGER)
 			)

@@ -39,7 +39,8 @@ describe('audit +page', () => {
 				documents: [],
 				collections: [],
 				entries: [],
-				actorKind: ''
+				actorKind: '',
+				targetRecordId: ''
 			}
 		});
 		expect(screen.getByText('No audit entries matching filter.')).toBeInTheDocument();
@@ -55,7 +56,8 @@ describe('audit +page', () => {
 				documents: [],
 				collections: [],
 				entries: [entry({ id: 1, targetRecordId: 'rec-42' })],
-				actorKind: ''
+				actorKind: '',
+				targetRecordId: ''
 			}
 		});
 		expect(screen.getByText('You')).toBeInTheDocument();
@@ -73,7 +75,8 @@ describe('audit +page', () => {
 				documents: [],
 				collections: [],
 				entries: [entry({ targetRecordId: undefined })],
-				actorKind: ''
+				actorKind: '',
+				targetRecordId: ''
 			}
 		});
 		expect(screen.getByText('—')).toBeInTheDocument();
@@ -95,7 +98,8 @@ describe('audit +page', () => {
 						actor: { kind: 'human-via-client', userId: 'brylie', client: 'Claude Desktop' }
 					})
 				],
-				actorKind: ''
+				actorKind: '',
+				targetRecordId: ''
 			}
 		});
 		expect(screen.getByText('Claude')).toBeInTheDocument();
@@ -112,7 +116,8 @@ describe('audit +page', () => {
 				documents: [],
 				collections: [],
 				entries: [],
-				actorKind: 'agent'
+				actorKind: 'agent',
+				targetRecordId: ''
 			}
 		});
 		expect(screen.getByRole('combobox')).toHaveValue('agent');
@@ -130,12 +135,33 @@ describe('audit +page', () => {
 				documents: [],
 				collections: [],
 				entries: [],
-				actorKind: ''
+				actorKind: '',
+				targetRecordId: ''
 			}
 		});
 
 		await user.selectOptions(screen.getByRole('combobox'), 'human');
 
 		expect(submitSpy).toHaveBeenCalledOnce();
+	});
+
+	it('identifies and preserves a filtered block context', () => {
+		render(Page, {
+			params: {},
+			form: null,
+			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				entries: [],
+				actorKind: '',
+				targetRecordId: 'block-42'
+			}
+		});
+
+		expect(screen.getByText('Audit history for block block-42.')).toBeInTheDocument();
+		expect(screen.getByDisplayValue('block-42')).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: 'All history' })).toHaveAttribute('href', '/audit');
 	});
 });

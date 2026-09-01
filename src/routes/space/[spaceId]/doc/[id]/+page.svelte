@@ -67,6 +67,17 @@
 	let linkUrlInput: HTMLInputElement | undefined = $state();
 	let linkDialog: HTMLDivElement | undefined = $state();
 
+	// Older imported documents may predate per-record attribution. Keep this
+	// runtime guard at the rendering boundary so one legacy block cannot make
+	// the live editor display an invalid actor or timestamp.
+	function hasProvenance(block: WorkspaceRecord): boolean {
+		return (
+			block.lastEditedBy !== undefined &&
+			typeof block.lastEditedAt === 'number' &&
+			Number.isFinite(block.lastEditedAt)
+		);
+	}
+
 	// Catalog-backed (data.documents), not derived from ydoc: a sharded
 	// Document's own meta entry doesn't live in *this* Document's doc at all
 	// (#120) — only its own shard does, which this page has no connection to.
@@ -989,15 +1000,23 @@
 					{/if}
 				</div>
 
-				<!-- Right Attribution Tag (Visible on hover) -->
-				<span
-					class="ml-3 hidden flex-shrink-0 self-center text-[11px] text-muted/70 group-hover:inline-block"
-					title="Edited by {formatActor(block.lastEditedBy)} at {formatTimestamp(
-						block.lastEditedAt
-					)}"
-				>
-					{formatActor(block.lastEditedBy)}
-				</span>
+				<!-- Provenance comes from the record's live CRDT projection; the link
+					 opens the corresponding rows in the shared audit history. -->
+				{#if hasProvenance(block)}
+					<a
+						href="{resolve('/audit')}?targetRecordId={encodeURIComponent(block.id)}"
+						class="ml-3 flex-shrink-0 self-center text-[11px] text-muted/70 underline-offset-2 hover:text-accent hover:underline focus-visible:text-accent focus-visible:underline"
+						aria-label="Last edited by {formatActor(block.lastEditedBy)} at {formatTimestamp(
+							block.lastEditedAt
+						)}. Open audit history for this block."
+					>
+						{formatActor(block.lastEditedBy)} · {formatTimestamp(block.lastEditedAt)}
+					</a>
+				{:else}
+					<span class="ml-3 flex-shrink-0 self-center text-[11px] text-muted/70">
+						Editing history unavailable
+					</span>
+				{/if}
 			</div>
 		{/each}
 	</div>
