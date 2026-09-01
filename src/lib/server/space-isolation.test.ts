@@ -266,13 +266,15 @@ describe('createDocument/createCollection: Space validation (#140 CodeRabbit)', 
 		const { workspaceId } = resolveWorkspaceContext();
 		const spaceB = createSpace(workspaceId, 'Space B');
 
-		expect(() =>
-			createDocument(CURRENT_USER, {
-				title: 'Child of nowhere',
-				parentDocumentId: 'not-a-real-parent-id',
-				spaceId: spaceB.id
-			})
-		).not.toThrow(SpaceMismatchError);
+		// Asserts successful creation directly (not just the absence of one
+		// specific error type) — `.not.toThrow(SpaceMismatchError)` alone would
+		// still pass if this threw some other, unexpected error instead.
+		const child = createDocument(CURRENT_USER, {
+			title: 'Child of nowhere',
+			parentDocumentId: 'not-a-real-parent-id',
+			spaceId: spaceB.id
+		});
+		expect(child.parentDocumentId).toBe('not-a-real-parent-id');
 	});
 });
 
