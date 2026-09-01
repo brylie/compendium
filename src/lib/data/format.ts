@@ -1,5 +1,6 @@
 import type { ActorId } from './types';
 
+/** Human-readable display text for an actor — "You" for the local human user, otherwise their name/id (with client, for a human acting through a non-primary client). */
 export function formatActor(actor: ActorId): string {
 	switch (actor.kind) {
 		case 'human':
@@ -23,6 +24,7 @@ export function actorKey(actor: ActorId): string {
 	}
 }
 
+/** Formats a millisecond epoch timestamp using the viewer's locale-aware date/time format. */
 export function formatTimestamp(ms: number): string {
 	return new Date(ms).toLocaleString();
 }

@@ -51,10 +51,12 @@ function getManager(doc: Y.Doc): Y.UndoManager {
 	return manager;
 }
 
+/** Undoes the most recent locally-originated edit on `doc`, using (and lazily creating) that doc's own per-document undo stack. */
 export function undo(doc: Y.Doc): void {
 	getManager(doc).undo();
 }
 
+/** Redoes the most recently undone locally-originated edit on `doc`, using (and lazily creating) that doc's own per-document undo stack. */
 export function redo(doc: Y.Doc): void {
 	getManager(doc).redo();
 }

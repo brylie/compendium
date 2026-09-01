@@ -108,7 +108,10 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		// 3. Sidebar's document list is catalog-backed only since #120 (each
 		// Document has its own shard, so there's no single shared doc left to
 		// observe for a live tree) — the new document is absent until the SSR
-		// snapshot refreshes, not reflected instantly.
+		// snapshot refreshes, not reflected instantly. This assertion is about
+		// *absence* after a delay, so there's no positive observable condition
+		// to poll for instead — the fixed wait is the point, not a workaround.
+		// eslint-disable-next-line sonarjs/no-fixed-wait-in-tests
 		await page.waitForTimeout(500);
 		await expect(page.locator('aside')).not.toContainText('Realtime Child Doc');
 

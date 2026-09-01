@@ -132,6 +132,6 @@ describe('tokenAllowsParent (#6): per-ID grants compose with Space-level grants'
 			allowedCollectionIds: [],
 			allowedSpaceIds: ['space-a']
 		});
-		expect(tokenAllowsParent(record, 'doc-1', undefined)).toBe(false);
+		expect(tokenAllowsParent(record, 'doc-1')).toBe(false);
 	});
 });

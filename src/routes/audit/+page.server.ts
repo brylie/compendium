@@ -1,6 +1,7 @@
 import { listAuditHistory } from '$lib/services';
 import type { PageServerLoad } from './$types';
 
+/** Loads audit log entries, optionally scoped by the `actorKind`/`targetRecordId` query params, for the /audit page. */
 export const load: PageServerLoad = ({ url }) => {
 	const actorKind = url.searchParams.get('actorKind') ?? undefined;
 	const hasTargetRecordScope = url.searchParams.has('targetRecordId');

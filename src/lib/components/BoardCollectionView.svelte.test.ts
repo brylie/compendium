@@ -201,8 +201,8 @@ describe('BoardCollectionView', () => {
 
 		const { fireEvent } = await import('@testing-library/dom');
 		const dataTransfer = { setData: vi.fn(), getData: vi.fn() };
-		await fireEvent.dragStart(card, { dataTransfer });
-		await fireEvent.drop(doneColumn, { dataTransfer });
+		fireEvent.dragStart(card, { dataTransfer });
+		fireEvent.drop(doneColumn, { dataTransfer });
 
 		expect(getRecord(ydoc, record.id)?.properties?.status).toEqual({
 			type: 'select',

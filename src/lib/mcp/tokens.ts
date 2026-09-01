@@ -25,6 +25,7 @@ function rowToToken(row: typeof accessTokens.$inferSelect): AccessToken {
 	};
 }
 
+/** Derives the stored lookup/comparison key for a bearer token — only this hash is ever persisted, never the raw token. */
 export function hashToken(token: string): string {
 	return createHash('sha256').update(token).digest('hex');
 }
@@ -62,6 +63,7 @@ export function verifyToken(token: string): AccessToken | null {
 	return rowToToken(row);
 }
 
+/** Lists all access tokens (including revoked ones), newest first, for the token-management UI. */
 export function listTokens(): AccessToken[] {
 	const rows = getDb().select().from(accessTokens).orderBy(desc(accessTokens.createdAt)).all();
 	return rows.map(rowToToken);

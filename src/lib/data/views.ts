@@ -52,9 +52,11 @@ export interface CollectionView {
 	records: WorkspaceRecord[];
 }
 
-// The one Collection query/projection path Table, Board, Calendar, and any
-// collection_view embed all call — issue #9's "reuse one Collection
-// query/projection path" requirement.
+/**
+ * The one Collection query/projection path Table, Board, Calendar, and any
+ * collection_view embed all call — issue #9's "reuse one Collection
+ * query/projection path" requirement.
+ */
 export function getCollectionView(doc: Y.Doc, collectionId: string): CollectionView {
 	return {
 		collection: getCollection(doc, collectionId),
@@ -64,6 +66,12 @@ export function getCollectionView(doc: Y.Doc, collectionId: string): CollectionV
 
 type Comparable = string | number | boolean | undefined;
 
+// Both this and sortComparableValue below deliberately return Comparable's
+// full union — extracting a type-appropriate comparable primitive out of a
+// PropertyValue is the whole point (a number property compares as a number,
+// a checkbox as a boolean, etc.), not something to collapse into one
+// return type without losing that.
+// eslint-disable-next-line sonarjs/function-return-type
 function comparableValue(value: PropertyValue | undefined): Comparable {
 	if (!value) return undefined;
 	switch (value.type) {
@@ -84,6 +92,7 @@ function isEmptyComparable(value: Comparable): boolean {
 	return value === undefined || value === '';
 }
 
+/** Keeps only the records matching every filter in a view's filter list; returns `records` unchanged when there are none. */
 export function applyFilters(
 	records: WorkspaceRecord[],
 	filters: ViewFilter[] | undefined
@@ -129,6 +138,7 @@ function selectOptionRank(
 // order (e.g. "Backlog → In progress → Done") the field's options define.
 // Every other type keeps comparableValue's existing type-appropriate
 // comparison unchanged.
+// eslint-disable-next-line sonarjs/function-return-type -- see comparableValue above
 function sortComparableValue(
 	value: PropertyValue | undefined,
 	property: PropertyDefinition | undefined
@@ -137,6 +147,7 @@ function sortComparableValue(
 	return comparableValue(value);
 }
 
+/** Sorts records by a view's configured property sort, always pushing empty values to the end regardless of direction. */
 export function applySort(
 	records: WorkspaceRecord[],
 	schema: PropertyDefinition[],
@@ -160,6 +171,7 @@ export function applySort(
 	});
 }
 
+/** Applies a view's full projection — filters, then sort — to a Collection's records. */
 export function projectRecords(
 	records: WorkspaceRecord[],
 	schema: PropertyDefinition[],
@@ -168,6 +180,7 @@ export function projectRecords(
 	return applySort(applyFilters(records, config.filters), schema, config.sort);
 }
 
+/** Narrows a Collection's schema down to the properties a view is configured to show, or the full schema when no visibility list is set. */
 export function visibleProperties(
 	schema: PropertyDefinition[],
 	config: ViewConfig
@@ -184,11 +197,13 @@ export interface BoardColumn {
 	records: WorkspaceRecord[];
 }
 
-// Groups by a `select` property's own defined options, in schema order, so
-// an option with zero current records still renders as an empty column
-// (issue #9: "preserve empty groups ... do not create placeholder records").
-// A trailing catch-all column holds records with no value set for this
-// property; it is never created for an option itself, only for "no value".
+/**
+ * Groups by a `select` property's own defined options, in schema order, so
+ * an option with zero current records still renders as an empty column
+ * (issue #9: "preserve empty groups ... do not create placeholder records").
+ * A trailing catch-all column holds records with no value set for this
+ * property; it is never created for an option itself, only for "no value".
+ */
 export function groupBySelectProperty(
 	records: WorkspaceRecord[],
 	property: PropertyDefinition
@@ -204,7 +219,12 @@ export function groupBySelectProperty(
 
 	for (const record of records) {
 		const value = record.properties?.[property.key];
-		const optionId = value?.type === 'select' ? value.value : undefined;
+		// null, not undefined, to match BoardColumn.optionId's own type —
+		// `columns` here never actually contains a null entry (only the
+		// separate `unassigned` column below does), so this doesn't change
+		// which column a record lands in; it just keeps both sides of the
+		// comparison the same nullable type.
+		const optionId = value?.type === 'select' ? value.value : null;
 		const column = columns.find((c) => c.optionId === optionId);
 		(column ?? unassigned).records.push(record);
 	}
@@ -212,13 +232,15 @@ export function groupBySelectProperty(
 	return [...columns, unassigned];
 }
 
-// A plain-text rendering of a record's value for the resolved primary field
-// (see resolvePrimaryField in $lib/data/records) — used wherever a record
-// needs a single display string outside its own editable cell (Board/
-// Calendar's card-title aria-labels, the "Move to column" <select> label).
-// Not used for the primary field's own editable rendering, which stays a
-// full PropertyValueCell so every eligible type (not just text) stays
-// directly editable inline.
+/**
+ * A plain-text rendering of a record's value for the resolved primary field
+ * (see resolvePrimaryField in $lib/data/records) — used wherever a record
+ * needs a single display string outside its own editable cell (Board/
+ * Calendar's card-title aria-labels, the "Move to column" <select> label).
+ * Not used for the primary field's own editable rendering, which stays a
+ * full PropertyValueCell so every eligible type (not just text) stays
+ * directly editable inline.
+ */
 export function primaryFieldDisplayValue(
 	value: PropertyValue | undefined,
 	property: PropertyDefinition | undefined
@@ -240,9 +262,11 @@ export function primaryFieldDisplayValue(
 	}
 }
 
-// YYYY-MM-DD portion of a record's date property value, or undefined if the
-// property isn't set — used by Calendar to bucket records by day without
-// caring about time-of-day precision.
+/**
+ * YYYY-MM-DD portion of a record's date property value, or undefined if the
+ * property isn't set — used by Calendar to bucket records by day without
+ * caring about time-of-day precision.
+ */
 export function dateKeyForRecord(
 	record: WorkspaceRecord,
 	property: PropertyDefinition
@@ -294,6 +318,7 @@ function summariesEqual(
 	return ae.length === be.length && ae.every(([k, v]) => (b ?? {})[k] === v);
 }
 
+/** Structural equality over a ViewConfig's fields — the dirty/draft-vs-saved check CollectionViewBlock uses to tell whether a viewer's local edits actually differ from what's persisted. */
 export function viewConfigsEqual(a: ViewConfig, b: ViewConfig): boolean {
 	return (
 		filtersEqual(a.filters, b.filters) &&
@@ -328,6 +353,7 @@ const DATE_SUMMARIES: FieldSummaryType[] = [
 const CHECKBOX_SUMMARIES: FieldSummaryType[] = ['none', 'count_all', 'checked', 'unchecked'];
 const GENERIC_SUMMARIES: FieldSummaryType[] = ['none', 'count_all', 'count_values', 'count_empty'];
 
+/** Which summary aggregations are offered for a property's type in Table's per-column footer picker. */
 export function summaryOptionsForType(type: PropertyType): FieldSummaryType[] {
 	switch (type) {
 		case 'number':
@@ -343,6 +369,7 @@ export function summaryOptionsForType(type: PropertyType): FieldSummaryType[] {
 	}
 }
 
+/** Human-readable label for a field summary type, for display in the footer's summary picker. */
 export function fieldSummaryLabel(type: FieldSummaryType): string {
 	switch (type) {
 		case 'none':
@@ -372,9 +399,11 @@ export function fieldSummaryLabel(type: FieldSummaryType): string {
 	}
 }
 
-// Computed over whatever record set the caller passes — Table passes its
-// already-filtered/sorted projection, so a summary reflects what's actually
-// visible, the same convention Notion/Airtable use for a footer aggregation.
+/**
+ * Computed over whatever record set the caller passes — Table passes its
+ * already-filtered/sorted projection, so a summary reflects what's actually
+ * visible, the same convention Notion/Airtable use for a footer aggregation.
+ */
 export function computeFieldSummary(
 	records: WorkspaceRecord[],
 	property: PropertyDefinition,
@@ -410,17 +439,22 @@ export function computeFieldSummary(
 			return nums.length ? String(Math.max(...nums)) : '';
 		}
 		case 'earliest': {
+			// ISO 8601 date strings sort chronologically under plain lexical
+			// order (zero-padded YYYY-MM-DD), so localeCompare here produces
+			// the identical result a bare .sort() already did — spelled out
+			// explicitly rather than relying on the default comparator, which
+			// is only lexically-safe for this specific string format.
 			const dates = present
 				.filter((v) => v?.type === 'date')
 				.map((v) => v!.value as string)
-				.sort();
+				.sort((a, b) => a.localeCompare(b));
 			return dates[0] ?? '';
 		}
 		case 'latest': {
 			const dates = present
 				.filter((v) => v?.type === 'date')
 				.map((v) => v!.value as string)
-				.sort();
+				.sort((a, b) => a.localeCompare(b));
 			return dates[dates.length - 1] ?? '';
 		}
 		case 'checked': {

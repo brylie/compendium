@@ -67,6 +67,16 @@
 			(p) => p.key !== config.groupBy && p.key !== titleProperty?.key
 		)
 	);
+	// Narrowed via a null check rather than `optionDialogPropertyKey ===
+	// groupProperty?.key` directly: that form compares a `string | null`
+	// against a `string | undefined`, which — while correct at runtime
+	// (null !== undefined, so "no dialog open" and "no group property" never
+	// falsely match) — reads as a type mismatch to static analysis. This is
+	// the same check with the same result, just without that ambiguity, and
+	// computed once instead of three times in the template below.
+	const optionDialogTargetsGroupColumn = $derived(
+		groupProperty != null && optionDialogPropertyKey === groupProperty.key
+	);
 
 	// Auto-picking a default groupBy is attempted at most once per
 	// collectionId, not on every refresh — refresh() re-runs on every Yjs
@@ -122,7 +132,13 @@
 				recordsMap.unobserveDeep(observer);
 				collectionsMap.unobserveDeep(observer);
 			};
-		})();
+			// A rejection here (network failure, bad response) previously
+			// vanished as a silent unhandled rejection — this at least
+			// surfaces it, without inventing a toast/error-UI system this
+			// lint pass isn't scoped to add.
+		})().catch((err: unknown) => {
+			console.error(`Failed to resolve shard for collection ${id}:`, err);
+		});
 
 		return () => {
 			cancelled = true;
@@ -407,9 +423,9 @@
 
 <PromptDialog
 	open={optionDialogPropertyKey !== null}
-	title={optionDialogPropertyKey === groupProperty?.key ? 'New column' : 'New option'}
-	label={optionDialogPropertyKey === groupProperty?.key ? 'Column name' : 'Option name'}
-	placeholder={optionDialogPropertyKey === groupProperty?.key ? 'Column name' : 'Option name'}
+	title={optionDialogTargetsGroupColumn ? 'New column' : 'New option'}
+	label={optionDialogTargetsGroupColumn ? 'Column name' : 'Option name'}
+	placeholder={optionDialogTargetsGroupColumn ? 'Column name' : 'Option name'}
 	submitLabel="Add"
 	errorMessage={optionDialogError}
 	onSubmit={(value) => {

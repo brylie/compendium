@@ -12,13 +12,17 @@ import {
 	type CallerIdentity
 } from './permissions';
 
-// A hold_records/release_records call can legitimately span more than one
-// shard (a cross-document agent batch is a stated acceptance criterion —
-// see docs/specifications/collaboration.md) — recordIds are grouped by
-// their resolved shard, and requestAgentHold/releaseAgentHold run once per
-// shard's own Awareness, merging results. In production every group
-// resolves to the same default shard today (#120 hasn't cut over shard
-// assignment yet), so this is a no-op split until it does.
+/**
+ * Grants a hold on each of `recordIds` for `caller` — permission-checking a token caller's
+ * grant per record (or record existence/accessibility for a human caller) — and audits the
+ * result. Never all-or-nothing: some ids may be granted while others are denied.
+ *
+ * A single call can legitimately span more than one shard (a cross-document agent batch is
+ * a stated acceptance criterion — see docs/specifications/collaboration.md), so recordIds
+ * are grouped by their resolved shard and requestAgentHold runs once per shard's own
+ * Awareness, merging results. In production every group resolves to the same default shard
+ * today (#120 hasn't cut over shard assignment yet), so this is a no-op split until it does.
+ */
 export function holdRecords(
 	caller: CallerIdentity,
 	recordIds: string[]
@@ -63,6 +67,11 @@ export function holdRecords(
 	return result;
 }
 
+/**
+ * Releases any holds a token caller holds on `recordIds` (grouped by resolved shard, one
+ * `releaseAgentHold` call per shard's Awareness) and audits the release. No-ops the actual
+ * release for human callers, who never hold via this mechanism, but still audits the call.
+ */
 export function releaseRecords(caller: CallerIdentity, recordIds: string[]): void {
 	const actor = actorForCaller(caller);
 

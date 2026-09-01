@@ -278,7 +278,7 @@ describe('CRDT workspace capacity, real shard-aware transport (issue #123)', () 
 		// --- Snapshot + restart, per shard (nothing eagerly reloads every shard
 		// anymore — #122's lazy-load design — so restart cost is now "reopening
 		// a few documents," not "reloading everything").
-		await flush();
+		flush();
 		let totalSnapshotBytes = 0;
 		for (const id of [...documentIds, ...collectionIds]) {
 			const snap = getSnapshotStore('default', id).loadLatest();
@@ -355,8 +355,8 @@ describe('CRDT workspace capacity, real shard-aware transport (issue #123)', () 
 		// exactly zero bytes for an edit it was never subscribed to.
 		expect(fanoutDifferentShardBytes).toBe(0);
 		expect(fanoutSameShardBytes).toBeGreaterThan(0);
-		expect(catalogDocRows.length).toBe(profile.documents);
-		expect(catalogCollectionRows.length).toBe(profile.collections);
+		expect(catalogDocRows).toHaveLength(profile.documents);
+		expect(catalogCollectionRows).toHaveLength(profile.collections);
 
 		// Conservative daily-workspace guardrails, set from a real measured run
 		// (see docs/benchmarks/ for the dated note) — not guessed blind. Larger

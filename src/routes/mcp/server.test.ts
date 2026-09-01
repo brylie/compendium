@@ -45,12 +45,14 @@ describe('routes/mcp: HTTP transport wiring and bearer-token extraction', () => 
 		server = createServer((req: IncomingMessage, res: ServerResponse) => {
 			void (async () => {
 				const request = await nodeRequestToWebRequest(req, 'http://localhost');
-				const response =
-					req.method === 'POST'
-						? await POST({ request } as Parameters<typeof POST>[0])
-						: req.method === 'DELETE'
-							? await DELETE({ request } as Parameters<typeof DELETE>[0])
-							: await GET({ request } as Parameters<typeof GET>[0]);
+				let response: Response;
+				if (req.method === 'POST') {
+					response = await POST({ request } as Parameters<typeof POST>[0]);
+				} else if (req.method === 'DELETE') {
+					response = await DELETE({ request } as Parameters<typeof DELETE>[0]);
+				} else {
+					response = await GET({ request } as Parameters<typeof GET>[0]);
+				}
 
 				res.statusCode = response.status;
 				response.headers.forEach((value, key) => res.setHeader(key, value));

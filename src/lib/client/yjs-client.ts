@@ -24,6 +24,12 @@ function wsUrl(): string {
 	return `${proto}://${window.location.host}/ws`;
 }
 
+/**
+ * Returns the shared 'workspace' room's Y.Doc, connecting a WebsocketProvider
+ * to it on first call and memoizing both for the tab's lifetime. This is the
+ * client-side half of the same shared doc that MCP tool handlers read/write
+ * server-side, so anything read off it here is live with agent writes.
+ */
 export function getClientDoc(): Y.Doc {
 	if (!browser) throw new Error('getClientDoc() is browser-only');
 	if (doc) return doc;
@@ -32,15 +38,23 @@ export function getClientDoc(): Y.Doc {
 	return doc;
 }
 
+/** The WebsocketProvider backing the shared workspace doc, creating the connection via {@link getClientDoc} if it doesn't exist yet. */
 export function getClientProvider(): WebsocketProvider {
 	getClientDoc();
 	return provider!;
 }
 
+/** Awareness instance for the shared workspace connection — the source of truth for presence/holds on Documents. */
 export function getClientAwareness(): Awareness {
 	return getClientProvider().awareness;
 }
 
+/**
+ * Returns the Y.Doc for a given Collection shard, connecting a WebsocketProvider
+ * to its own `shard-<shardId>` room on first call and memoizing per shardId for
+ * the tab's lifetime. Distinct from {@link getClientDoc}'s single shared doc —
+ * every Collection lives in its own shard (#120).
+ */
 export function getShardDoc(shardId: string): Y.Doc {
 	if (!browser) throw new Error('getShardDoc() is browser-only');
 	const existing = shardDocs.get(shardId);
@@ -51,6 +65,7 @@ export function getShardDoc(shardId: string): Y.Doc {
 	return shardDoc;
 }
 
+/** Awareness instance for the given shard's connection, creating it via {@link getShardDoc} if it doesn't exist yet. */
 export function getShardAwareness(shardId: string): Awareness {
 	getShardDoc(shardId);
 	return shardDocs.get(shardId)!.provider.awareness;

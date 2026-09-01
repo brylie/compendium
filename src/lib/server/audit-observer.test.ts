@@ -214,7 +214,7 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 				vi.advanceTimersByTime(3_000);
 				// Both docs' pending updates must have fired on their own schedule —
 				// neither cleared the other's timer.
-				expect(recentActions(sharedId).filter((a) => a === 'update_record').length).toBe(2);
+				expect(recentActions(sharedId).filter((a) => a === 'update_record')).toHaveLength(2);
 			} finally {
 				docB.destroy();
 			}

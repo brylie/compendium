@@ -10,6 +10,7 @@ export function getCaretOffset(root: HTMLElement): number {
 	return preRange.toString().length;
 }
 
+/** Character offsets (within root's text content) of the current selection's start and end, or null if there's no selection inside root. */
 export function getSelectionOffsets(root: HTMLElement): { start: number; end: number } | null {
 	const selection = window.getSelection();
 	if (!selection || selection.rangeCount === 0) return null;
@@ -27,6 +28,7 @@ export function getSelectionOffsets(root: HTMLElement): { start: number; end: nu
 	return { start: preStart.toString().length, end: preEnd.toString().length };
 }
 
+/** Collapses the selection to a caret at the given character offset within root's text content. */
 export function setCaretOffset(root: HTMLElement, offset: number): void {
 	const selection = window.getSelection();
 	if (!selection) return;

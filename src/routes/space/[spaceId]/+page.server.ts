@@ -9,10 +9,14 @@ import {
 } from '$lib/services';
 import type { Actions, PageServerLoad } from './$types';
 
-// Routed through the service layer, not the bare catalog reads directly —
-// see +layout.server.ts's identical comment for why (uncataloged content
-// would otherwise silently vanish from these cards). params.spaceId is
-// already validated by the parent +layout.server.ts.
+/**
+ * Loads the active Space's Documents and Collections for its card grid.
+ *
+ * Routed through the service layer, not the bare catalog reads directly —
+ * see +layout.server.ts's identical comment for why (uncataloged content
+ * would otherwise silently vanish from these cards). params.spaceId is
+ * already validated by the parent +layout.server.ts.
+ */
 export const load: PageServerLoad = ({ params, locals }) => {
 	return {
 		documents: listDocuments(locals.requestContext.caller, params.spaceId),

@@ -250,7 +250,7 @@ describe('documents: title, parent, and delete edge cases', () => {
 
 	it('updateDocumentParent throws NotFoundError for a nonexistent document', () => {
 		const doc = new Y.Doc();
-		expect(() => updateDocumentParent(doc, 'missing', undefined)).toThrow(NotFoundError);
+		expect(() => updateDocumentParent(doc, 'missing')).toThrow(NotFoundError);
 	});
 
 	it('updateDocumentParent inserts between two existing siblings via afterDocumentId', () => {
@@ -281,7 +281,7 @@ describe('documents: title, parent, and delete edge cases', () => {
 		updateDocumentParent(doc, child.id, folder.id);
 		expect(getDocument(doc, child.id)?.parentDocumentId).toBe(folder.id);
 
-		updateDocumentParent(doc, child.id, undefined);
+		updateDocumentParent(doc, child.id);
 		expect(getDocument(doc, child.id)?.parentDocumentId).toBeUndefined();
 	});
 

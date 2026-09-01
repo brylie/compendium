@@ -33,8 +33,8 @@ const PING_INTERVAL_MS = 30_000;
  * or Collection was actually assigned to (`catalog.ts`'s `isKnownShard`,
  * checked by `recordLocator.shardId` — not by treating `id` as a record id
  * to look up, since a pre-migration Document/Collection's own shard id is
- * `DEFAULT_SHARD_ID`, not its own id; see GET /api/{documents,collections}/
- * [id]/shard). `DEFAULT_SHARD_ID` itself is always exempt from this check —
+ * `DEFAULT_SHARD_ID`, not its own id; see GET /api/documents/[id]/shard or
+ * /api/collections/[id]/shard). `DEFAULT_SHARD_ID` itself is always exempt from this check —
  * it's the workspace's own shared/legacy shard, not a single catalog-tracked
  * resource, the same way a bare (no `shardId`) selector already is. An
  * unknown/fabricated id gets the connection closed rather than silently

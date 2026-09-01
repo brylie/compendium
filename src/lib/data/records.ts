@@ -38,14 +38,18 @@ function recordsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
 	return doc.getMap(RECORDS);
 }
 
+/** Thrown when a requested Document, Collection, record, property, or select option doesn't exist. */
 export class NotFoundError extends Error {}
+/** Thrown when an actor attempts a mutation they aren't permitted to make. */
 export class PermissionError extends Error {}
+/** Thrown when an input value fails a domain rule (e.g. a blank/duplicate select-option label, a field type that can't be the primary field). */
 export class ValidationError extends Error {}
 
 // ---------------------------------------------------------------------------
 // Documents
 // ---------------------------------------------------------------------------
 
+/** All Documents in the workspace, sorted into sibling order by their fractional-index `order` field. */
 export function listDocuments(doc: Y.Doc): DocumentMeta[] {
 	const out: DocumentMeta[] = [];
 	documentsMap(doc).forEach((ymeta, id) => {
@@ -54,6 +58,7 @@ export function listDocuments(doc: Y.Doc): DocumentMeta[] {
 	return out.sort((a, b) => a.order.localeCompare(b.order));
 }
 
+/** Looks up one Document's metadata by id, or undefined if it doesn't exist. */
 export function getDocument(doc: Y.Doc, id: string): DocumentMeta | undefined {
 	const ymeta = documentsMap(doc).get(id) as Y.Map<unknown> | undefined;
 	return ymeta ? readDocumentMeta(id, ymeta) : undefined;
@@ -95,6 +100,7 @@ export function computeSiblingOrder(siblings: DocumentMeta[], afterDocumentId?: 
 	return generateKeyBetween(before, after);
 }
 
+/** Creates a new Document, inserting it into its parent's sibling order (at the end, or after `afterDocumentId`) via a fresh fractional-index `order`. */
 export function createDocument(
 	doc: Y.Doc,
 	input: {
@@ -141,6 +147,7 @@ export function createDocument(
 	});
 }
 
+/** Renames a Document. Throws NotFoundError if it doesn't exist. */
 export function updateDocumentTitle(doc: Y.Doc, id: string, title: string): void {
 	const ymeta = documentsMap(doc).get(id) as Y.Map<unknown> | undefined;
 	if (!ymeta) throw new NotFoundError(`Document ${id} not found`);
@@ -181,12 +188,14 @@ export function updateDocumentParent(
 	});
 }
 
+/** Renames a Collection. Throws NotFoundError if it doesn't exist. */
 export function updateCollectionTitle(doc: Y.Doc, id: string, title: string): void {
 	const ymeta = collectionsMap(doc).get(id) as Y.Map<unknown> | undefined;
 	if (!ymeta) throw new NotFoundError(`Collection ${id} not found`);
 	ymeta.set('title', title);
 }
 
+/** Deletes a Document, its records, and every descendant Document (recursively) with their own records. */
 export function deleteDocument(doc: Y.Doc, id: string): void {
 	doc.transact(() => {
 		const meta = getDocument(doc, id);
@@ -206,6 +215,7 @@ export function deleteDocument(doc: Y.Doc, id: string): void {
 	});
 }
 
+/** Assembles a flat list of Documents into a parent/child tree (sidebar nesting), computing each node's depth level. */
 export function buildDocumentTree(documents: DocumentMeta[]): DocumentTreeNode[] {
 	const sorted = [...documents].sort((a, b) => a.order.localeCompare(b.order));
 	const map = new Map<string, DocumentTreeNode>();
@@ -248,6 +258,7 @@ export function buildDocumentTree(documents: DocumentMeta[]): DocumentTreeNode[]
 // Collections
 // ---------------------------------------------------------------------------
 
+/** All Collections in the workspace. */
 export function listCollections(doc: Y.Doc): CollectionMeta[] {
 	const out: CollectionMeta[] = [];
 	collectionsMap(doc).forEach((ymeta, id) => {
@@ -256,6 +267,7 @@ export function listCollections(doc: Y.Doc): CollectionMeta[] {
 	return out;
 }
 
+/** Looks up one Collection's metadata by id, or undefined if it doesn't exist. */
 export function getCollection(doc: Y.Doc, id: string): CollectionMeta | undefined {
 	const ymeta = collectionsMap(doc).get(id) as Y.Map<unknown> | undefined;
 	return ymeta ? readCollectionMeta(id, ymeta) : undefined;
@@ -272,6 +284,7 @@ function readCollectionMeta(id: string, ymeta: Y.Map<unknown>): CollectionMeta {
 	};
 }
 
+/** Creates a new Collection with the given schema and no records. */
 export function createCollection(
 	doc: Y.Doc,
 	input: { id?: string; title: string; schema: PropertyDefinition[] }
@@ -287,6 +300,7 @@ export function createCollection(
 	return { id, title: input.title, schema: input.schema, recordIds: [] };
 }
 
+/** Replaces a Collection's entire schema wholesale, with no per-field migration of existing record values — use updateCollectionProperty for a single-field rename/retype that needs that. */
 export function updateCollectionSchema(doc: Y.Doc, id: string, schema: PropertyDefinition[]): void {
 	const ymeta = collectionsMap(doc).get(id) as Y.Map<unknown> | undefined;
 	if (!ymeta) throw new NotFoundError(`Collection ${id} not found`);
@@ -359,6 +373,28 @@ export function setPrimaryField(
  * value" rather than leaving a value whose `type` no longer matches the
  * field's schema type.
  */
+function coerceToText(value: PropertyValue): PropertyValue | undefined {
+	if (value.type === 'number') return { type: 'text', value: String(value.value) };
+	if (value.type === 'date') return { type: 'text', value: value.value };
+	if (value.type === 'checkbox') return { type: 'text', value: value.value ? 'true' : 'false' };
+	return undefined;
+}
+
+function coerceToNumber(value: PropertyValue): PropertyValue | undefined {
+	if (value.type !== 'text' || value.value.trim() === '') return undefined;
+	const n = Number(value.value);
+	return Number.isFinite(n) ? { type: 'number', value: n } : undefined;
+}
+
+function coerceToCheckbox(value: PropertyValue): PropertyValue | undefined {
+	if (value.type !== 'text') return undefined;
+	const v = value.value.trim().toLowerCase();
+	if (v === 'true') return { type: 'checkbox', value: true };
+	if (v === 'false') return { type: 'checkbox', value: false };
+	return undefined;
+}
+
+/** Best-effort conversion of a property value to a new type (e.g. number to text); returns undefined when there's no lossless-enough conversion, signaling the caller to clear the value instead. */
 export function coercePropertyValue(
 	value: PropertyValue,
 	toType: PropertyType
@@ -366,22 +402,11 @@ export function coercePropertyValue(
 	if (value.type === toType) return value;
 	switch (toType) {
 		case 'text':
-			if (value.type === 'number') return { type: 'text', value: String(value.value) };
-			if (value.type === 'date') return { type: 'text', value: value.value };
-			if (value.type === 'checkbox') return { type: 'text', value: value.value ? 'true' : 'false' };
-			return undefined;
-		case 'number': {
-			if (value.type !== 'text' || value.value.trim() === '') return undefined;
-			const n = Number(value.value);
-			return Number.isFinite(n) ? { type: 'number', value: n } : undefined;
-		}
-		case 'checkbox': {
-			if (value.type !== 'text') return undefined;
-			const v = value.value.trim().toLowerCase();
-			if (v === 'true') return { type: 'checkbox', value: true };
-			if (v === 'false') return { type: 'checkbox', value: false };
-			return undefined;
-		}
+			return coerceToText(value);
+		case 'number':
+			return coerceToNumber(value);
+		case 'checkbox':
+			return coerceToCheckbox(value);
 		default:
 			return undefined; // date, select, relation: no safe generic coercion
 	}
@@ -405,6 +430,32 @@ export function previewCollectionPropertyTypeChange(
 	return { affected, total };
 }
 
+// Coerces (or clears) every record's existing value for propertyKey to
+// match a real type change, and clears a stale primaryFieldKey pointing at
+// a field that can no longer represent a record's identity (e.g. text ->
+// relation) — resolvePrimaryField's fallback takes over instead of silently
+// keeping a now-invalid explicit choice. Only called when patch.type is set
+// and actually differs from the field's current type.
+function migrateRecordsForPropertyRetype(
+	doc: Y.Doc,
+	collectionId: string,
+	ymeta: Y.Map<unknown>,
+	propertyKey: string,
+	toType: PropertyType
+): void {
+	for (const record of listRecordsForParent(doc, collectionId)) {
+		const value = record.properties?.[propertyKey];
+		if (value === undefined) continue;
+		const yrecord = recordsMap(doc).get(record.id) as Y.Map<unknown> | undefined;
+		const coerced = coercePropertyValue(value, toType);
+		if (coerced) yrecord?.set(PROP_PREFIX + propertyKey, coerced);
+		else yrecord?.delete(PROP_PREFIX + propertyKey);
+	}
+	if (ymeta.get('primaryFieldKey') === propertyKey && !isEligiblePrimaryFieldType(toType)) {
+		ymeta.delete('primaryFieldKey');
+	}
+}
+
 /** Renames and/or retypes one field in a Collection's schema, migrating (or clearing, per `coercePropertyValue`) every record's existing value when `patch.type` changes. */
 export function updateCollectionProperty(
 	doc: Y.Doc,
@@ -420,34 +471,26 @@ export function updateCollectionProperty(
 		if (index === -1) throw new NotFoundError(`Property ${propertyKey} not found`);
 		const current = schema[index];
 		const nextType = patch.type ?? current.type;
+		// Retyping into 'select' keeps existing options if it was already a
+		// 'select' (options stay meaningful), otherwise starts empty; retyping
+		// away from 'select' drops options entirely (not meaningful for any
+		// other type).
+		let nextOptions: PropertyDefinition['options'];
+		if (nextType === 'select') {
+			nextOptions = current.type === 'select' ? current.options : [];
+		}
 		const next: PropertyDefinition = {
 			...current,
 			label: patch.label !== undefined ? patch.label : current.label,
 			type: nextType,
-			options:
-				nextType === 'select' ? (current.type === 'select' ? current.options : []) : undefined
+			options: nextOptions
 		};
 		const nextSchema = [...schema];
 		nextSchema[index] = next;
 		ymeta.set('schema', nextSchema);
 
 		if (patch.type && patch.type !== current.type) {
-			for (const record of listRecordsForParent(doc, collectionId)) {
-				const value = record.properties?.[propertyKey];
-				if (value === undefined) continue;
-				const yrecord = recordsMap(doc).get(record.id) as Y.Map<unknown> | undefined;
-				const coerced = coercePropertyValue(value, patch.type);
-				if (coerced) yrecord?.set(PROP_PREFIX + propertyKey, coerced);
-				else yrecord?.delete(PROP_PREFIX + propertyKey);
-			}
-			// A retype away from an eligible primary-field type would otherwise
-			// leave `primaryFieldKey` pointing at a field that can no longer
-			// represent a record's identity (e.g. text -> relation) — clear it so
-			// resolvePrimaryField's fallback takes over instead of silently
-			// keeping a now-invalid explicit choice.
-			if (ymeta.get('primaryFieldKey') === propertyKey && !isEligiblePrimaryFieldType(patch.type)) {
-				ymeta.delete('primaryFieldKey');
-			}
+			migrateRecordsForPropertyRetype(doc, collectionId, ymeta, propertyKey, patch.type);
 		}
 	});
 }
@@ -779,6 +822,7 @@ export function deleteSelectOption(
 		repairEmbeddedViewsAfterOptionRemoval(documentsDoc, collectionId, propertyKey, optionId);
 }
 
+/** Deletes a Collection and all of its records. */
 export function deleteCollection(doc: Y.Doc, id: string): void {
 	doc.transact(() => {
 		const meta = getCollection(doc, id);
@@ -816,6 +860,7 @@ export function getRecordYText(doc: Y.Doc, id: string): Y.Text | undefined {
 	return yrecord?.get('content') as Y.Text | undefined;
 }
 
+/** Stamps lastEditedBy/lastEditedAt without touching content — for the UI's live keystroke binding, which writes straight to the record's Y.Text (via getRecordYText) and so needs attribution updated separately. */
 export function touchRecordEditor(doc: Y.Doc, id: string, actor: ActorId): void {
 	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
 	if (!yrecord) return;
@@ -825,6 +870,7 @@ export function touchRecordEditor(doc: Y.Doc, id: string, actor: ActorId): void 
 	});
 }
 
+/** Looks up one record (block or Collection row) by id, or undefined if it doesn't exist. */
 export function getRecord(doc: Y.Doc, id: string): WorkspaceRecord | undefined {
 	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
 	return yrecord ? readRecord(yrecord) : undefined;
@@ -870,6 +916,7 @@ export interface CreateRecordInput {
 	viewConfig?: EmbeddedViewConfig; // for collection_view blocks
 }
 
+/** Creates a new record (a block if the parent is a Document, a row if the parent is a Collection) and inserts it into the parent's sibling order via a fresh fractional-index `order`. */
 export function createRecord(
 	doc: Y.Doc,
 	input: CreateRecordInput,
@@ -925,6 +972,7 @@ function recordOrder(doc: Y.Doc, id: string): string | null {
 	return (yrecord?.get('order') as string) ?? null;
 }
 
+/** Replaces a block record's rich-text content wholesale — for a single finished write (e.g. from MCP), as opposed to the UI's live keystroke binding which writes to the Y.Text directly. Throws if the record has no block content (i.e. it's a Collection row). */
 export function updateRecordContent(
 	doc: Y.Doc,
 	id: string,
@@ -944,6 +992,7 @@ export function updateRecordContent(
 	return readRecord(yrecord);
 }
 
+/** Merges the given key/value pairs into a Collection row's properties (per-key LWW via Y.Map), leaving properties not named in `properties` untouched. */
 export function updateRecordProperties(
 	doc: Y.Doc,
 	id: string,
@@ -963,6 +1012,7 @@ export function updateRecordProperties(
 	return readRecord(yrecord);
 }
 
+/** Changes a Document block's type (e.g. paragraph to heading) in place, without touching its content. */
 export function setBlockType(doc: Y.Doc, id: string, blockType: BlockType, actor: ActorId): void {
 	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
@@ -973,6 +1023,7 @@ export function setBlockType(doc: Y.Doc, id: string, blockType: BlockType, actor
 	});
 }
 
+/** Sets a to-do block's checked state. */
 export function setRecordChecked(doc: Y.Doc, id: string, checked: boolean, actor: ActorId): void {
 	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
@@ -983,6 +1034,7 @@ export function setRecordChecked(doc: Y.Doc, id: string, checked: boolean, actor
 	});
 }
 
+/** Sets a toggleable block's (e.g. toggle list, heading) collapsed/expanded state. */
 export function setRecordCollapsed(
 	doc: Y.Doc,
 	id: string,
@@ -998,6 +1050,7 @@ export function setRecordCollapsed(
 	});
 }
 
+/** Sets the record/Collection id a reference-style block (e.g. a page_link or collection_view embed) points at. */
 export function setRecordReferencedId(
 	doc: Y.Doc,
 	id: string,
@@ -1013,12 +1066,14 @@ export function setRecordReferencedId(
 	});
 }
 
-// A collection_view block's view type + filters/sort/visible-properties/
-// grouping-property choice — whole-value LWW, same pattern as
-// setRecordReferencedId. One person is expected to be editing a given
-// embed's config at a time, so field-level merge granularity (splitting
-// into prop:-style sub-keys, like Collection row properties do) isn't
-// needed here.
+/**
+ * Sets a collection_view block's view type + filters/sort/visible-properties/
+ * grouping-property choice — whole-value LWW, same pattern as
+ * setRecordReferencedId. One person is expected to be editing a given
+ * embed's config at a time, so field-level merge granularity (splitting
+ * into prop:-style sub-keys, like Collection row properties do) isn't
+ * needed here.
+ */
 export function setRecordViewConfig(
 	doc: Y.Doc,
 	id: string,
@@ -1034,6 +1089,7 @@ export function setRecordViewConfig(
 	});
 }
 
+/** Deletes a record and removes its id from its parent's sibling order. */
 export function deleteRecord(doc: Y.Doc, id: string): void {
 	doc.transact(() => {
 		const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
@@ -1049,6 +1105,7 @@ export function deleteRecord(doc: Y.Doc, id: string): void {
 	});
 }
 
+/** All records belonging to a Document or Collection, in sibling order; empty array if `parentId` isn't a known Document or Collection. */
 export function listRecordsForParent(doc: Y.Doc, parentId: string): WorkspaceRecord[] {
 	const kind = parentKindOf(doc, parentId);
 	if (!kind) return [];
@@ -1066,6 +1123,7 @@ export function listRecordsForParent(doc: Y.Doc, parentId: string): WorkspaceRec
 // attribution) — nothing here is derived or recomputed.
 // ---------------------------------------------------------------------------
 
+/** Copies a Document and all of its records into `targetDoc` exactly as they exist in `sourceDoc`, recursing into records via copyRecordVerbatim. For sharding migrations, not for creating a fresh Document — see the section comment above. */
 export function copyDocumentVerbatim(sourceDoc: Y.Doc, targetDoc: Y.Doc, id: string): void {
 	const meta = getDocument(sourceDoc, id);
 	if (!meta) throw new NotFoundError(`Document ${id} not found in source doc`);
@@ -1087,6 +1145,7 @@ export function copyDocumentVerbatim(sourceDoc: Y.Doc, targetDoc: Y.Doc, id: str
 	});
 }
 
+/** Copies a Collection and all of its records into `targetDoc` exactly as they exist in `sourceDoc`, recursing into records via copyRecordVerbatim. For sharding migrations, not for creating a fresh Collection — see the section comment above. */
 export function copyCollectionVerbatim(sourceDoc: Y.Doc, targetDoc: Y.Doc, id: string): void {
 	const meta = getCollection(sourceDoc, id);
 	if (!meta) throw new NotFoundError(`Collection ${id} not found in source doc`);

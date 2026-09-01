@@ -39,8 +39,12 @@ describe('Sidebar', () => {
 				const store = new Map<string, string>();
 				return {
 					getItem: (k: string) => store.get(k) ?? null,
-					setItem: (k: string, v: string) => void store.set(k, v),
-					removeItem: (k: string) => void store.delete(k),
+					setItem: (k: string, v: string) => {
+						store.set(k, v);
+					},
+					removeItem: (k: string) => {
+						store.delete(k);
+					},
 					clear: () => store.clear()
 				};
 			})()

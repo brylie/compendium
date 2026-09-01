@@ -30,6 +30,7 @@ type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 // under src/lib/server/, not src/lib/services/, so it is never picked up by
 // src/lib/services/manifest.ts's MCP tool-surface registration.
 
+/** Thrown by `reserveLocator` when the requested record id already exists in this workspace. */
 export class RecordIdConflictError extends Error {
 	constructor(recordId: string) {
 		super(`Record id ${recordId} already exists in this workspace`);
@@ -37,6 +38,7 @@ export class RecordIdConflictError extends Error {
 	}
 }
 
+/** Thrown when a given spaceId doesn't correspond to a real Space in this workspace. */
 export class UnknownSpaceError extends Error {
 	constructor(spaceId: string) {
 		super(`Space ${spaceId} does not exist in this workspace`);
@@ -116,6 +118,7 @@ function reserveLocator(
 	}
 }
 
+/** Reserves a locator entry for a new Document id, guarding against duplicate ids across the workspace. */
 export function reserveDocumentLocator(
 	workspaceId: string,
 	spaceId: string,
@@ -125,6 +128,7 @@ export function reserveDocumentLocator(
 	reserveLocator(workspaceId, spaceId, id, 'document', shardId);
 }
 
+/** Reserves a locator entry for a new Collection id, guarding against duplicate ids across the workspace. */
 export function reserveCollectionLocator(
 	workspaceId: string,
 	spaceId: string,
@@ -153,6 +157,7 @@ export function reserveRecordLocator(
 	reserveLocator(workspaceId, spaceId, recordId, 'record', shardId);
 }
 
+/** Removes a record/row's locator entry, the counterpart to `reserveRecordLocator` (e.g. on delete). */
 export function releaseRecordLocator(workspaceId: string, recordId: string): void {
 	getDb()
 		.delete(recordLocator)
@@ -202,8 +207,8 @@ export function resolveShardForRecord(
  * *some* row in the locator was actually assigned there (#111/#138's
  * WebSocket shard-room validation). Deliberately keyed by
  * `recordLocator.shardId`, not `recordId`: a caller here only has the
- * server-issued shard id (from GET /api/{documents,collections}/[id]/shard),
- * which is **not** always equal to the resource's own id — a pre-migration
+ * server-issued shard id (from GET /api/documents/[id]/shard or
+ * /api/collections/[id]/shard), which is **not** always equal to the resource's own id — a pre-migration
  * Document/Collection still resolves to the shared default shard (see that
  * endpoint's own comment), so checking `recordId = shardId` would wrongly
  * reject every legitimate connection to un-migrated content.
@@ -237,6 +242,7 @@ export function isKnownSpace(workspaceId: string, spaceId: string): boolean {
 	return row !== undefined;
 }
 
+/** Dual-writes a newly created Document into the catalog and bumps the workspace's catalog revision. */
 export function recordCatalogDocumentCreated(input: {
 	workspaceId: string;
 	spaceId: string;
@@ -265,6 +271,7 @@ export function recordCatalogDocumentCreated(input: {
 	});
 }
 
+/** Mirrors a Document's title change into the catalog and bumps the workspace's catalog revision. */
 export function recordCatalogDocumentTitleChanged(
 	workspaceId: string,
 	id: string,
@@ -279,6 +286,7 @@ export function recordCatalogDocumentTitleChanged(
 	});
 }
 
+/** Mirrors a Document's reparent/reorder into the catalog and bumps the workspace's catalog revision. */
 export function recordCatalogDocumentMoved(
 	workspaceId: string,
 	id: string,
@@ -335,6 +343,7 @@ export function recordCatalogDocumentDeleted(workspaceId: string, id: string): v
 	});
 }
 
+/** Dual-writes a newly created Collection into the catalog and bumps the workspace's catalog revision. */
 export function recordCatalogCollectionCreated(input: {
 	workspaceId: string;
 	spaceId: string;
@@ -359,6 +368,7 @@ export function recordCatalogCollectionCreated(input: {
 	});
 }
 
+/** Mirrors a Collection's title change into the catalog and bumps the workspace's catalog revision. */
 export function recordCatalogCollectionTitleChanged(
 	workspaceId: string,
 	id: string,
@@ -373,6 +383,7 @@ export function recordCatalogCollectionTitleChanged(
 	});
 }
 
+/** Removes a Collection's catalog row and locator entry, and bumps the workspace's catalog revision. */
 export function recordCatalogCollectionDeleted(workspaceId: string, id: string): void {
 	getDb().transaction((tx) => {
 		tx.delete(recordLocator)
@@ -415,6 +426,7 @@ export function listCatalogDocuments(workspaceId: string, spaceId?: string): Doc
 		.sort((a, b) => a.order.localeCompare(b.order));
 }
 
+/** Lists Collections from the catalog, optionally scoped to a single Space (see `listCatalogDocuments`). */
 export function listCatalogCollections(workspaceId: string, spaceId?: string): CollectionMeta[] {
 	return getDb()
 		.select()
@@ -450,6 +462,7 @@ export function createSpace(workspaceId: string, name: string): SpaceMeta {
 	return { id, workspaceId, name };
 }
 
+/** Lists every Space in a workspace, ordered by creation. */
 export function listSpaces(workspaceId: string): SpaceMeta[] {
 	return getDb()
 		.select({ id: spaces.id, workspaceId: spaces.workspaceId, name: spaces.name })

@@ -54,6 +54,7 @@ export function appendRichTextToYText(ytext: Y.Text, richText: RichText): void {
 	}
 }
 
+/** Concatenates a RichText's runs into a single plain string, discarding all marks. */
 export function plainText(richText: RichText): string {
 	return richText.runs.map((r) => r.text).join('');
 }

@@ -1,3 +1,4 @@
+import type * as Y from 'yjs';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import {
 	listCollections,
@@ -14,6 +15,8 @@ import { tokenAllowsParent } from '$lib/mcp/tokens';
 import { richTextToMarkdown } from '$lib/mcp/markdown-transcode';
 import { actorForCaller, isAccessToken, type CallerIdentity } from './permissions';
 
+type SearchHit = { recordId: string; snippet: string };
+
 function snippetAround(text: string, needle: string): string {
 	const index = text.toLowerCase().indexOf(needle);
 	if (index === -1) return text.slice(0, 80);
@@ -22,35 +25,33 @@ function snippetAround(text: string, needle: string): string {
 	return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
 }
 
-/**
- * `spaceId` — see listDocuments' identical doc comment in documents.ts:
- * omitted, unchanged today's behavior (every Document/Collection in the
- * workspace, catalog plus uncataloged fallback); passed, strictly
- * catalog-scoped to that Space, skipping the uncataloged fallback entirely.
- */
-export function searchWorkspace(
-	caller: CallerIdentity,
-	query: string,
-	spaceId?: string
-): Array<{ recordId: string; snippet: string }> {
-	const { doc, workspaceId } = resolveWorkspaceContext();
-	const actor = actorForCaller(caller);
-	const needle = query.toLowerCase();
-	const results: Array<{ recordId: string; snippet: string }> = [];
-
-	function searchDocumentRecords(documentId: string, documentDoc: typeof doc): void {
-		for (const record of listRecordsForParent(documentDoc, documentId)) {
-			const text = record.content ? richTextToMarkdown(documentDoc, record.content) : '';
-			if (text.toLowerCase().includes(needle)) {
-				results.push({ recordId: record.id, snippet: snippetAround(text, needle) });
-			}
+function searchDocumentRecords(
+	documentDoc: Y.Doc,
+	documentId: string,
+	needle: string,
+	results: SearchHit[]
+): void {
+	for (const record of listRecordsForParent(documentDoc, documentId)) {
+		const text = record.content ? richTextToMarkdown(documentDoc, record.content) : '';
+		if (text.toLowerCase().includes(needle)) {
+			results.push({ recordId: record.id, snippet: snippetAround(text, needle) });
 		}
 	}
+}
 
-	// Catalog-listed Documents first — resolving each one's own shard from the
-	// locator (#120: each Document now has its own shard, same as Collections
-	// already did), since listDocuments(doc) below could never see one that
-	// lives outside the default doc.
+// Catalog-listed Documents first — resolving each one's own shard from the
+// locator (#120: each Document now has its own shard, same as Collections
+// already did), since crdtListDocuments(doc) below could never see one that
+// lives outside the default doc. Returns the catalog ids visited, so the
+// uncataloged fallback below can skip them.
+function searchCatalogDocuments(
+	caller: CallerIdentity,
+	doc: Y.Doc,
+	workspaceId: string,
+	spaceId: string | undefined,
+	needle: string,
+	results: SearchHit[]
+): Set<string> {
 	const catalogDocumentIds = new Set<string>();
 	for (const documentMeta of listCatalogDocuments(workspaceId, spaceId)) {
 		catalogDocumentIds.add(documentMeta.id);
@@ -60,38 +61,61 @@ export function searchWorkspace(
 		const documentDoc = shard
 			? resolveWorkspaceContext({ workspaceId, shardId: shard.shardId }).doc
 			: doc;
-		searchDocumentRecords(documentMeta.id, documentDoc);
+		searchDocumentRecords(documentDoc, documentMeta.id, needle, results);
 	}
+	return catalogDocumentIds;
+}
 
-	// Then any Document written directly to the Y.Doc, bypassing the service
-	// layer entirely (and therefore uncataloged) — only findable via the
-	// default doc directly, matching the Collection loop's identical fallback
-	// below. Skipped entirely once a specific Space was requested — see this
-	// function's own doc comment.
-	if (spaceId === undefined) {
-		for (const document of crdtListDocuments(doc)) {
-			if (catalogDocumentIds.has(document.id)) continue;
-			if (isAccessToken(caller) && !tokenAllowsParent(caller, document.id)) continue;
-			searchDocumentRecords(document.id, doc);
-		}
+// Any Document written directly to the Y.Doc, bypassing the service layer
+// entirely (and therefore uncataloged) — only findable via the default doc
+// directly, matching searchCatalogCollections's identical fallback below.
+// Skipped entirely once a specific Space was requested — see
+// searchWorkspace's own doc comment.
+function searchUncatalogedDocuments(
+	caller: CallerIdentity,
+	doc: Y.Doc,
+	spaceId: string | undefined,
+	catalogDocumentIds: Set<string>,
+	needle: string,
+	results: SearchHit[]
+): void {
+	if (spaceId !== undefined) return;
+	for (const document of crdtListDocuments(doc)) {
+		if (catalogDocumentIds.has(document.id)) continue;
+		if (isAccessToken(caller) && !tokenAllowsParent(caller, document.id)) continue;
+		searchDocumentRecords(doc, document.id, needle, results);
 	}
+}
 
-	function searchCollectionRows(collectionId: string, collectionDoc: typeof doc): void {
-		for (const row of listRecordsForParent(collectionDoc, collectionId)) {
-			for (const value of Object.values(row.properties ?? {})) {
-				const text = value.type === 'text' || value.type === 'select' ? value.value : '';
-				if (text.toLowerCase().includes(needle)) {
-					results.push({ recordId: row.id, snippet: snippetAround(text, needle) });
-					break;
-				}
+function searchCollectionRows(
+	collectionDoc: Y.Doc,
+	collectionId: string,
+	needle: string,
+	results: SearchHit[]
+): void {
+	for (const row of listRecordsForParent(collectionDoc, collectionId)) {
+		for (const value of Object.values(row.properties ?? {})) {
+			const text = value.type === 'text' || value.type === 'select' ? value.value : '';
+			if (text.toLowerCase().includes(needle)) {
+				results.push({ recordId: row.id, snippet: snippetAround(text, needle) });
+				break;
 			}
 		}
 	}
+}
 
-	// Catalog-listed Collections first — resolving each one's own shard from
-	// the locator, since a fully-sharded Collection's own meta entry (not
-	// just its rows) can live in a doc other than the default one, which
-	// listCollections(doc) below could never see.
+// Catalog-listed Collections first — resolving each one's own shard from the
+// locator, since a fully-sharded Collection's own meta entry (not just its
+// rows) can live in a doc other than the default one, which
+// listCollections(doc) below could never see.
+function searchCatalogCollections(
+	caller: CallerIdentity,
+	doc: Y.Doc,
+	workspaceId: string,
+	spaceId: string | undefined,
+	needle: string,
+	results: SearchHit[]
+): Set<string> {
 	const catalogCollectionIds = new Set<string>();
 	for (const collectionMeta of listCatalogCollections(workspaceId, spaceId)) {
 		catalogCollectionIds.add(collectionMeta.id);
@@ -104,22 +128,67 @@ export function searchWorkspace(
 		const collectionDoc = shard
 			? resolveWorkspaceContext({ workspaceId, shardId: shard.shardId }).doc
 			: doc;
-		searchCollectionRows(collectionMeta.id, collectionDoc);
+		searchCollectionRows(collectionDoc, collectionMeta.id, needle, results);
 	}
+	return catalogCollectionIds;
+}
 
-	// Then any Collection written directly to the Y.Doc, bypassing the
-	// service layer entirely (and therefore uncataloged) — the catalog loop
-	// above can't see these at all, so they're only findable via the default
-	// doc directly, matching today's completeness for that case. Skipped
-	// entirely once a specific Space was requested — see this function's own
-	// doc comment.
-	if (spaceId === undefined) {
-		for (const collection of listCollections(doc)) {
-			if (catalogCollectionIds.has(collection.id)) continue;
-			if (isAccessToken(caller) && !tokenAllowsParent(caller, collection.id)) continue;
-			searchCollectionRows(collection.id, doc);
-		}
+// Any Collection written directly to the Y.Doc, bypassing the service layer
+// entirely (and therefore uncataloged) — the catalog loop above can't see
+// these at all, so they're only findable via the default doc directly,
+// matching today's completeness for that case. Skipped entirely once a
+// specific Space was requested — see searchWorkspace's own doc comment.
+function searchUncatalogedCollections(
+	caller: CallerIdentity,
+	doc: Y.Doc,
+	spaceId: string | undefined,
+	catalogCollectionIds: Set<string>,
+	needle: string,
+	results: SearchHit[]
+): void {
+	if (spaceId !== undefined) return;
+	for (const collection of listCollections(doc)) {
+		if (catalogCollectionIds.has(collection.id)) continue;
+		if (isAccessToken(caller) && !tokenAllowsParent(caller, collection.id)) continue;
+		searchCollectionRows(doc, collection.id, needle, results);
 	}
+}
+
+/**
+ * `spaceId` — see listDocuments' identical doc comment in documents.ts:
+ * omitted, unchanged today's behavior (every Document/Collection in the
+ * workspace, catalog plus uncataloged fallback); passed, strictly
+ * catalog-scoped to that Space, skipping the uncataloged fallback entirely.
+ */
+export function searchWorkspace(
+	caller: CallerIdentity,
+	query: string,
+	spaceId?: string
+): SearchHit[] {
+	const { doc, workspaceId } = resolveWorkspaceContext();
+	const actor = actorForCaller(caller);
+	const needle = query.toLowerCase();
+	const results: SearchHit[] = [];
+
+	const catalogDocumentIds = searchCatalogDocuments(
+		caller,
+		doc,
+		workspaceId,
+		spaceId,
+		needle,
+		results
+	);
+	searchUncatalogedDocuments(caller, doc, spaceId, catalogDocumentIds, needle, results);
+
+	const catalogCollectionIds = searchCatalogCollections(
+		caller,
+		doc,
+		workspaceId,
+		spaceId,
+		needle,
+		results
+	);
+	searchUncatalogedCollections(caller, doc, spaceId, catalogCollectionIds, needle, results);
 
 	logAudit({
 		actor,

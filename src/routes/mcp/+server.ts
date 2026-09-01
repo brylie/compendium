@@ -23,6 +23,11 @@ async function handle(request: Request): Promise<Response> {
 	});
 }
 
+/** Handles HTTP POST — the MCP Streamable HTTP transport's channel for JSON-RPC requests (tool calls, initialize, etc.). */
 export const POST: RequestHandler = ({ request }) => handle(request);
+
+/** Handles HTTP GET — the transport's channel for opening a server-initiated notification stream. */
 export const GET: RequestHandler = ({ request }) => handle(request);
+
+/** Handles HTTP DELETE — the transport's session-teardown method; a no-op here since this deployment is stateless (see above). */
 export const DELETE: RequestHandler = ({ request }) => handle(request);

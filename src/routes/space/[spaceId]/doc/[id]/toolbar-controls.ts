@@ -137,13 +137,18 @@ export const TOOLBAR_CONTROLS: readonly ToolbarControl[] = [
 	{ id: 'embed', group: 'insert', label: 'Embed', icon: PanelsTopLeft, blockType: 'embed' }
 ];
 
-// The insert group's every-button-is-28px-with-a-4px-gap layout (Tailwind
-// `size-7`/`gap-1`) is fixed and known ahead of time, so — unlike text —
-// exactly how many fit in a given width is deterministic arithmetic, not
-// something that needs a real layout engine to answer. Toolbar.svelte calls
-// this with its measured container width; it's a plain function (rather than
-// inlined in the component) so the overflow math has direct unit-test
-// coverage without needing a real browser to measure real pixels.
+/**
+ * Computes how many insert-group toolbar buttons fit in a given container
+ * width before the rest must overflow into the "more blocks" trigger.
+ *
+ * The insert group's every-button-is-28px-with-a-4px-gap layout (Tailwind
+ * `size-7`/`gap-1`) is fixed and known ahead of time, so — unlike text —
+ * exactly how many fit in a given width is deterministic arithmetic, not
+ * something that needs a real layout engine to answer. Toolbar.svelte calls
+ * this with its measured container width; it's a plain function (rather than
+ * inlined in the component) so the overflow math has direct unit-test
+ * coverage without needing a real browser to measure real pixels.
+ */
 export function computeVisibleInsertCount(
 	total: number,
 	containerWidth: number,

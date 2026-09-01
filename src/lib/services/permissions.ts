@@ -7,6 +7,7 @@ import { resolveShardForParent, resolveShardForRecord } from '$lib/server/catalo
 
 export type CallerIdentity = AccessToken | ActorId;
 
+/** Thrown by the `require*` guards below when a caller isn't permitted to access a parent or record. */
 export class PermissionDeniedError extends Error {
 	constructor(message: string) {
 		super(message);
@@ -14,10 +15,19 @@ export class PermissionDeniedError extends Error {
 	}
 }
 
+/** Type guard distinguishing an MCP access-token caller from a local human `ActorId` caller. */
 export function isAccessToken(caller: CallerIdentity): caller is AccessToken {
+	// CallerIdentity's own type never includes null, so sonarjs sees this as
+	// an always-true comparison — but this guard runs at the MCP trust
+	// boundary (see permissions.ts's role in service-layer.md), where a
+	// caller can violate its declared type at runtime. `typeof null ===
+	// 'object'` is true in JS, so this null check is load-bearing, not dead
+	// code: keep it.
+	// eslint-disable-next-line sonarjs/different-types-comparison
 	return typeof caller === 'object' && caller !== null && 'tokenHash' in caller;
 }
 
+/** Normalizes a `CallerIdentity` to the `ActorId` used for audit attribution, mapping an access-token caller to a synthetic human-via-client actor. */
 export function actorForCaller(caller: CallerIdentity): ActorId {
 	if (isAccessToken(caller)) {
 		return { kind: 'human-via-client', userId: 'local', client: caller.clientLabel };
@@ -40,6 +50,11 @@ function logDenial(
 	logAudit({ actor: actorForCaller(caller), action: `${action}_denied`, targetRecordId });
 }
 
+/**
+ * Throws `PermissionDeniedError` (and logs a denial for token callers) unless `caller`'s
+ * access token allows `parentId`, resolving through any Space-level grant in addition to
+ * the per-ID allowlist. No-ops for the single-tenant UI's own local-user caller.
+ */
 export function requireAccessibleParent(
 	caller: CallerIdentity,
 	parentId: string,
@@ -59,6 +74,10 @@ export function requireAccessibleParent(
 	}
 }
 
+/**
+ * Looks up `recordId` and throws `PermissionDeniedError` (logging a denial) if it doesn't
+ * exist or its parent isn't accessible to `caller`; otherwise returns the record.
+ */
 export function requireAccessibleRecord(
 	caller: CallerIdentity,
 	recordId: string,

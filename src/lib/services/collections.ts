@@ -38,6 +38,12 @@ export interface CreateCollectionInput {
 	spaceId?: string;
 }
 
+/**
+ * Creates a new Collection in its own shard, granting the calling token access to it and
+ * auditing the creation. Guards against an id collision with anything already reachable
+ * under that id — in the target shard, or written directly to the default Y.Doc bypassing
+ * the service layer (and therefore the catalog locator) entirely.
+ */
 export function createCollection(
 	caller: CallerIdentity,
 	input: CreateCollectionInput
@@ -153,6 +159,7 @@ export function listCollections(caller: CallerIdentity, spaceId?: string): Colle
 	return results;
 }
 
+/** Returns a Collection's metadata and all its rows, after checking `caller` may access it. */
 export function queryCollection(
 	caller: CallerIdentity,
 	collectionId: string
@@ -171,6 +178,7 @@ export function queryCollection(
 	return { collection, records };
 }
 
+/** Deletes a Collection (after a permission check), removing it from both the Y.Doc and the catalog, and audits the deletion. */
 export function deleteCollection(caller: CallerIdentity, collectionId: string): void {
 	const { doc, workspaceId } = resolveParentWorkspaceContext(collectionId);
 	const actor = actorForCaller(caller);
@@ -181,6 +189,7 @@ export function deleteCollection(caller: CallerIdentity, collectionId: string): 
 	logAudit({ actor, action: 'delete_collection', targetRecordId: collectionId });
 }
 
+/** Renames a Collection (after a permission check), updating both the Y.Doc and the catalog, and audits the change. */
 export function updateCollectionTitle(
 	caller: CallerIdentity,
 	collectionId: string,

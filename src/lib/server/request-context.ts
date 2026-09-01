@@ -31,6 +31,7 @@ export interface RequestContext {
 	allowedSpaceIds: ReadonlySet<string>;
 }
 
+/** Resolves the trusted {@link RequestContext} for one boundary call, defaulting to Phase 0's single local user. */
 export function resolveRequestContext(caller: Caller = CURRENT_USER): RequestContext {
 	const workspaceId = getInstanceWorkspaceId();
 	// Guarantees the catalog/default-Space bootstrap has run for this
