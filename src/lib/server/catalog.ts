@@ -37,6 +37,13 @@ export class RecordIdConflictError extends Error {
 	}
 }
 
+export class UnknownSpaceError extends Error {
+	constructor(spaceId: string) {
+		super(`Space ${spaceId} does not exist in this workspace`);
+		this.name = 'UnknownSpaceError';
+	}
+}
+
 type CatalogOp = 'create' | 'update' | 'move' | 'delete';
 
 /**
@@ -212,6 +219,20 @@ export function isKnownShard(workspaceId: string, shardId: string): boolean {
 				inArray(recordLocator.kind, ['document', 'collection'])
 			)
 		)
+		.get();
+	return row !== undefined;
+}
+
+/**
+ * True when `spaceId` is a real Space in this workspace (#6) — used to
+ * validate a client-supplied `[spaceId]` route param before trusting it,
+ * the same "verify before use" posture as isKnownShard above.
+ */
+export function isKnownSpace(workspaceId: string, spaceId: string): boolean {
+	const row = getDb()
+		.select({ id: spaces.id })
+		.from(spaces)
+		.where(and(eq(spaces.workspaceId, workspaceId), eq(spaces.id, spaceId)))
 		.get();
 	return row !== undefined;
 }
@@ -434,6 +455,7 @@ export function listSpaces(workspaceId: string): SpaceMeta[] {
 		.select({ id: spaces.id, workspaceId: spaces.workspaceId, name: spaces.name })
 		.from(spaces)
 		.where(eq(spaces.workspaceId, workspaceId))
+		.orderBy(sql`rowid`)
 		.all();
 }
 

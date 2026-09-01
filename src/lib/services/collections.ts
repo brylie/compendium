@@ -11,6 +11,8 @@ import {
 import { logAudit } from '$lib/server/audit';
 import {
 	RecordIdConflictError,
+	UnknownSpaceError,
+	isKnownSpace,
 	listCatalogCollections,
 	recordCatalogCollectionCreated,
 	recordCatalogCollectionDeleted,
@@ -33,6 +35,7 @@ export interface CreateCollectionInput {
 	id?: string;
 	title: string;
 	schema?: PropertyDefinition[];
+	spaceId?: string;
 }
 
 export function createCollection(
@@ -46,6 +49,14 @@ export function createCollection(
 	// Collection — see docs/specifications/workspace-sharding.md §1).
 	const { doc, workspaceId, shardId, defaultSpaceId } = resolveWorkspaceContext({ shardId: id });
 	const { doc: defaultDoc } = resolveWorkspaceContext();
+	const targetSpaceId = input.spaceId ?? defaultSpaceId;
+	// A caller-supplied spaceId must actually exist — otherwise
+	// reserveCollectionLocator's insert below would fail its composite FK
+	// against `spaces` and the raw DB exception would escape this call
+	// uncaught (#140 CodeRabbit finding).
+	if (input.spaceId !== undefined && !isKnownSpace(workspaceId, input.spaceId)) {
+		throw new UnknownSpaceError(input.spaceId);
+	}
 
 	// See documents.ts's createDocument for why this also checks the live
 	// Y.Doc, not just the catalog locator: a caller-supplied id could collide
@@ -65,7 +76,7 @@ export function createCollection(
 	) {
 		throw new RecordIdConflictError(id);
 	}
-	reserveCollectionLocator(workspaceId, defaultSpaceId, id, shardId);
+	reserveCollectionLocator(workspaceId, targetSpaceId, id, shardId);
 
 	const collection = crdtCreateCollection(doc, {
 		id,
@@ -75,7 +86,7 @@ export function createCollection(
 
 	recordCatalogCollectionCreated({
 		workspaceId,
-		spaceId: defaultSpaceId,
+		spaceId: targetSpaceId,
 		id: collection.id,
 		title: collection.title,
 		shardId
@@ -94,11 +105,13 @@ export function createCollection(
 
 /**
  * `spaceId` — see listDocuments' identical doc comment in documents.ts:
- * omitted, unchanged today's behavior; passed, strictly catalog-scoped to
- * that Space, skipping the uncataloged fallback entirely.
+ * omitted, unchanged today's behavior; passed a non-default Space, strictly
+ * catalog-scoped to it, skipping the uncataloged fallback; passed the
+ * workspace's own defaultSpaceId, the fallback still runs, since uncataloged
+ * content belongs there by definition (#140 CodeRabbit finding).
  */
 export function listCollections(caller: CallerIdentity, spaceId?: string): CollectionMeta[] {
-	const { workspaceId, doc: defaultDoc } = resolveWorkspaceContext();
+	const { workspaceId, defaultSpaceId, doc: defaultDoc } = resolveWorkspaceContext();
 	const allowed = (id: string, collectionSpaceId?: string) =>
 		!isAccessToken(caller) || tokenAllowsParent(caller, id, collectionSpaceId);
 
@@ -121,7 +134,7 @@ export function listCollections(caller: CallerIdentity, spaceId?: string): Colle
 		results.push(fullMeta ? { ...fullMeta, spaceId: meta.spaceId } : meta);
 	}
 
-	if (spaceId !== undefined) return results;
+	if (spaceId !== undefined && spaceId !== defaultSpaceId) return results;
 
 	// Then any Collection written directly to the Y.Doc, bypassing the
 	// service layer entirely (and therefore uncataloged) — the catalog loop

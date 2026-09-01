@@ -33,7 +33,7 @@ describe('settings/tokens +page', () => {
 	it('shows an empty-state row when there are no tokens', () => {
 		render(Page, {
 			params: {},
-			data: { tokens: [], documents: [], collections: [], spaces: [] },
+			data: { spaces: [], activeSpaceId: 'space-1', tokens: [], documents: [], collections: [] },
 			form: null
 		});
 		expect(screen.getByText('No access tokens created yet.')).toBeInTheDocument();
@@ -43,10 +43,11 @@ describe('settings/tokens +page', () => {
 		render(Page, {
 			params: {},
 			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
 				tokens: [token({ allowedDocumentIds: ['d1', 'd2'], allowedCollectionIds: ['c1'] })],
 				documents: [],
-				collections: [],
-				spaces: []
+				collections: []
 			},
 			form: null
 		});
@@ -59,10 +60,11 @@ describe('settings/tokens +page', () => {
 		render(Page, {
 			params: {},
 			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
 				tokens: [token({ revokedAt: Date.now() })],
 				documents: [],
-				collections: [],
-				spaces: []
+				collections: []
 			},
 			form: null
 		});
@@ -74,10 +76,11 @@ describe('settings/tokens +page', () => {
 		render(Page, {
 			params: {},
 			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
 				tokens: [token({ tokenHash: 'abc123' })],
 				documents: [],
-				collections: [],
-				spaces: []
+				collections: []
 			},
 			form: null
 		});
@@ -90,7 +93,7 @@ describe('settings/tokens +page', () => {
 	it('shows the freshly-created token banner once, from action data', () => {
 		render(Page, {
 			params: {},
-			data: { tokens: [], documents: [], collections: [], spaces: [] },
+			data: { spaces: [], activeSpaceId: 'space-1', tokens: [], documents: [], collections: [] },
 			form: { createdToken: 'secret-token-value', clientLabel: 'Cursor' }
 		});
 		expect(screen.getByText('secret-token-value')).toBeInTheDocument();
@@ -100,7 +103,7 @@ describe('settings/tokens +page', () => {
 	it('does not show the banner when there is no form result', () => {
 		render(Page, {
 			params: {},
-			data: { tokens: [], documents: [], collections: [], spaces: [] },
+			data: { spaces: [], activeSpaceId: 'space-1', tokens: [], documents: [], collections: [] },
 			form: null
 		});
 		expect(screen.queryByText(/copy it now/)).not.toBeInTheDocument();
@@ -110,10 +113,11 @@ describe('settings/tokens +page', () => {
 		render(Page, {
 			params: {},
 			data: {
+				spaces: [],
+				activeSpaceId: 'space-1',
 				tokens: [],
 				documents: [doc('d1', 'Design Notes')],
-				collections: [],
-				spaces: []
+				collections: []
 			},
 			form: null
 		});
@@ -122,10 +126,27 @@ describe('settings/tokens +page', () => {
 		expect(checkbox).toHaveAttribute('value', 'd1');
 	});
 
+	it('lists selectable spaces for scoping a new token', () => {
+		render(Page, {
+			params: {},
+			data: {
+				spaces: [{ id: 'space-a', workspaceId: 'default', name: 'Marketing' }],
+				activeSpaceId: 'space-1',
+				tokens: [],
+				documents: [],
+				collections: []
+			},
+			form: null
+		});
+		const checkbox = screen.getByText('Marketing').closest('label')!.querySelector('input')!;
+		expect(checkbox).toHaveAttribute('name', 'spaceIds');
+		expect(checkbox).toHaveAttribute('value', 'space-a');
+	});
+
 	it('submits the connect-client form to the create action', () => {
 		render(Page, {
 			params: {},
-			data: { tokens: [], documents: [], collections: [], spaces: [] },
+			data: { spaces: [], activeSpaceId: 'space-1', tokens: [], documents: [], collections: [] },
 			form: null
 		});
 		const form = screen.getByLabelText('Client Label').closest('form')!;

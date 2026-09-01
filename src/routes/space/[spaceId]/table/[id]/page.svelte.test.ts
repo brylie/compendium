@@ -44,9 +44,17 @@ describe('table/[id] +page', () => {
 	it('shows the SSR title before the Y.Doc mounts, then the live title once it has', async () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Live Title', schema: [] });
 		render(Page, {
-			params: { id: 'col-1' },
+			params: { spaceId: 'space-1', id: 'col-1' },
 			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'SSR Title' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				collectionId: 'col-1',
+				title: 'SSR Title'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByPlaceholderText('Untitled Collection')).toHaveValue('Live Title');
@@ -55,9 +63,17 @@ describe('table/[id] +page', () => {
 	it('updates the displayed title when the collection is renamed from outside the component', async () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Original Title', schema: [] });
 		render(Page, {
-			params: { id: 'col-1' },
+			params: { spaceId: 'space-1', id: 'col-1' },
 			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Original Title' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				collectionId: 'col-1',
+				title: 'Original Title'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByPlaceholderText('Untitled Collection')).toHaveValue('Original Title');
@@ -99,18 +115,34 @@ describe('table/[id] +page', () => {
 		);
 
 		const { rerender } = render(Page, {
-			params: { id: 'col-1' },
+			params: { spaceId: 'space-1', id: 'col-1' },
 			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'First' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				collectionId: 'col-1',
+				title: 'First'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByPlaceholderText('Untitled Collection')).toHaveValue('First');
 		expect(screen.getByDisplayValue('From collection one')).toBeInTheDocument();
 
 		await rerender({
-			params: { id: 'col-2' },
+			params: { spaceId: 'space-1', id: 'col-2' },
 			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-2', title: 'Second' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				collectionId: 'col-2',
+				title: 'Second'
+			}
 		});
 		await flushShardResolution();
 
@@ -122,9 +154,17 @@ describe('table/[id] +page', () => {
 	it('shows an empty-state row when the collection has no rows', async () => {
 		createCollection(ydoc, { id: 'col-1', title: 'Empty', schema: [] });
 		render(Page, {
-			params: { id: 'col-1' },
+			params: { spaceId: 'space-1', id: 'col-1' },
 			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'Empty' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				collectionId: 'col-1',
+				title: 'Empty'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByText('No rows in this collection.')).toBeInTheDocument();
@@ -142,9 +182,17 @@ describe('table/[id] +page', () => {
 			{ kind: 'human', userId: 'local' }
 		);
 		render(Page, {
-			params: { id: 'col-1' },
+			params: { spaceId: 'space-1', id: 'col-1' },
 			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				collectionId: 'col-1',
+				title: 'T'
+			}
 		});
 		await flushShardResolution();
 		expect(screen.getByDisplayValue('Alice')).toBeInTheDocument();
@@ -154,9 +202,17 @@ describe('table/[id] +page', () => {
 		createCollection(ydoc, { id: 'col-1', title: 'T', schema: [] });
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'col-1' },
+			params: { spaceId: 'space-1', id: 'col-1' },
 			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				collectionId: 'col-1',
+				title: 'T'
+			}
 		});
 		await flushShardResolution();
 
@@ -179,9 +235,17 @@ describe('table/[id] +page', () => {
 		createRecord(ydoc, { parentId: 'col-1', properties: {} }, { kind: 'human', userId: 'local' });
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'col-1' },
+			params: { spaceId: 'space-1', id: 'col-1' },
 			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				collectionId: 'col-1',
+				title: 'T'
+			}
 		});
 		await flushShardResolution();
 
@@ -201,9 +265,17 @@ describe('table/[id] +page', () => {
 		});
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'col-1' },
+			params: { spaceId: 'space-1', id: 'col-1' },
 			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				collectionId: 'col-1',
+				title: 'T'
+			}
 		});
 		await flushShardResolution();
 
@@ -228,9 +300,17 @@ describe('table/[id] +page', () => {
 		);
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'col-1' },
+			params: { spaceId: 'space-1', id: 'col-1' },
 			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				collectionId: 'col-1',
+				title: 'T'
+			}
 		});
 		await flushShardResolution();
 
@@ -248,9 +328,17 @@ describe('table/[id] +page', () => {
 		});
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'col-1' },
+			params: { spaceId: 'space-1', id: 'col-1' },
 			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				collectionId: 'col-1',
+				title: 'T'
+			}
 		});
 		await flushShardResolution();
 
@@ -273,9 +361,17 @@ describe('table/[id] +page', () => {
 		createRecord(ydoc, { parentId: 'col-1', properties: {} }, { kind: 'human', userId: 'local' });
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'col-1' },
+			params: { spaceId: 'space-1', id: 'col-1' },
 			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				collectionId: 'col-1',
+				title: 'T'
+			}
 		});
 		await flushShardResolution();
 
@@ -293,9 +389,17 @@ describe('table/[id] +page', () => {
 		createCollection(ydoc, { id: 'col-1', title: 'T', schema: [] });
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'col-1' },
+			params: { spaceId: 'space-1', id: 'col-1' },
 			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				collectionId: 'col-1',
+				title: 'T'
+			}
 		});
 		await flushShardResolution();
 
@@ -339,9 +443,17 @@ describe('table/[id] +page', () => {
 		);
 		const user = userEvent.setup();
 		render(Page, {
-			params: { id: 'col-1' },
+			params: { spaceId: 'space-1', id: 'col-1' },
 			form: null,
-			data: { documents: [], collections: [], collectionId: 'col-1', title: 'T' }
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				collectionId: 'col-1',
+				title: 'T'
+			}
 		});
 		await flushShardResolution();
 

@@ -18,6 +18,12 @@ import { plainText, yTextToRichText } from '$lib/data/richtext';
 import type { ActorId } from '$lib/data/types';
 import Page from './+page.svelte';
 
+vi.mock('$app/state', () => ({
+	get page() {
+		return { params: { spaceId: 'space-1' } };
+	}
+}));
+
 const HUMAN: ActorId = { kind: 'human', userId: 'local' };
 
 function selectRange(el: HTMLElement, start: number, end: number): void {
@@ -94,9 +100,17 @@ vi.mock('$lib/client/presence', () => ({
 // — see table/[id]'s page.svelte.test.ts for the identical technique.
 async function renderDoc() {
 	const result = render(Page, {
-		params: { id: 'doc-1' },
+		params: { spaceId: 'space-1', id: 'doc-1' },
 		form: null,
-		data: { documents: [], collections: [], documentId: 'doc-1', title: 'D' }
+		data: {
+			spaces: [],
+			spaceId: 'space-1',
+			activeSpaceId: 'space-1',
+			documents: [],
+			collections: [],
+			documentId: 'doc-1',
+			title: 'D'
+		}
 	});
 	await new Promise((resolve) => setTimeout(resolve, 0));
 	return result;

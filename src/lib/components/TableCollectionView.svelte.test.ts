@@ -5,6 +5,12 @@ import * as Y from 'yjs';
 import { createCollection, createRecord, getRecord, setPrimaryField } from '$lib/data/records';
 import TableCollectionViewHarness from './TableCollectionViewHarness.svelte';
 
+vi.mock('$app/state', () => ({
+	get page() {
+		return { params: { spaceId: 'space-1' } };
+	}
+}));
+
 let ydoc: Y.Doc;
 vi.mock('$lib/client/yjs-client', () => ({
 	getClientDoc: () => ydoc,
@@ -42,7 +48,7 @@ describe('TableCollectionView', () => {
 		renderTable('col-1');
 		expect(screen.getByRole('link', { name: 'full table' })).toHaveAttribute(
 			'href',
-			'/table/col-1'
+			'/space/space-1/table/col-1'
 		);
 	});
 

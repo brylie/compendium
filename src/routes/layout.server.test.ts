@@ -10,6 +10,7 @@ describe('routes/+layout.server: sidebar navigation data', () => {
 		createCollection(CURRENT_USER, { title: 'Sidebar Table' });
 
 		const result = load({
+			params: {},
 			locals: { requestContext: resolveRequestContext() }
 		} as unknown as Parameters<typeof load>[0]) as unknown as {
 			documents: Array<{ title: string }>;

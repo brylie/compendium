@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type * as Y from 'yjs';
+	import { page } from '$app/state';
+	import { resolve } from '$app/paths';
 	import { diffPlainText } from '$lib/client/text-diff';
 	import { getCaretOffset, getSelectionOffsets, setCaretOffset } from '$lib/client/caret';
 	import { plainText, yTextToRichText } from '$lib/data/richtext';
@@ -83,7 +85,11 @@
 		if (marks.strikethrough) html = `<s class="line-through text-muted">${html}</s>`;
 		if (marks.link?.startsWith(RECORD_LINK_SCHEME)) {
 			if (target) {
-				const href = target.kind === 'collection' ? `/table/${target.id}` : `/doc/${target.id}`;
+				const spaceId = page.params.spaceId!;
+				const href =
+					target.kind === 'collection'
+						? resolve('/space/[spaceId]/table/[id]', { spaceId, id: target.id })
+						: resolve('/space/[spaceId]/doc/[id]', { spaceId, id: target.id });
 				html = `<a href="${escapeHtml(href)}" class="text-accent underline underline-offset-2">${html}</a>`;
 			} else {
 				html = `<span class="text-muted italic line-through decoration-dotted" title="Linked page was deleted">${html}</span>`;
