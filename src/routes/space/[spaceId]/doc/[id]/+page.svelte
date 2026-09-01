@@ -9,12 +9,14 @@
 		createRecord,
 		deleteRecord,
 		getDocument,
+		getRecord,
 		getRecordYText,
 		listRecordsForParent,
 		setBlockType,
 		setRecordChecked,
 		setRecordCollapsed,
 		setRecordReferencedId,
+		touchRecordEditor,
 		updateDocumentTitle
 	} from '$lib/data/records';
 	import { RECORD_LINK_SCHEME, type InternalLinkTarget } from '$lib/data/links';
@@ -25,7 +27,7 @@
 		splitRichTextAt,
 		yTextToRichText
 	} from '$lib/data/richtext';
-	import { formatActor, formatTimestamp } from '$lib/data/format';
+	import { actorKey, formatActor, formatTimestamp } from '$lib/data/format';
 	import {
 		claimBlockPresence,
 		releaseBlockPresence,
@@ -41,6 +43,12 @@
 	import PromptDialog from '$lib/components/PromptDialog.svelte';
 	import type { PageProps } from './$types';
 
+	// Toggled onto holdAnnouncement below to guarantee a screen reader
+	// re-announces it even when two consecutive, distinct transitions
+	// happen to produce identical wording — a live region only re-fires on
+	// an actual text change, and this doesn't affect what's read aloud.
+	const ZERO_WIDTH_SPACE = String.fromCharCode(0x200b);
+
 	let { data }: PageProps = $props();
 
 	let ydoc: ReturnType<typeof getShardDoc> | undefined = $state();
@@ -53,6 +61,7 @@
 	let slashMenuBlockId: string | null = $state(null);
 	let slashQuery = $state('');
 	let heldByOthers: Map<string, ActorId> = $state(new Map());
+	let holdAnnouncement = $state('');
 	let parentDocTitle: string | null = $state(null);
 	let activeBlockId: string | null = $state(null);
 	let activeMarks: Partial<Record<keyof TextMarks, boolean>> = $state({});
@@ -66,6 +75,20 @@
 	let linkSelection: { start: number; end: number } | null = $state(null);
 	let linkUrlInput: HTMLInputElement | undefined = $state();
 	let linkDialog: HTMLDivElement | undefined = $state();
+	let provenanceAnnouncement = $state('');
+	let provenanceAnnouncementTimer: ReturnType<typeof setTimeout> | undefined;
+
+	/**
+	 * Older imported documents may predate per-record attribution. This runtime
+	 * guard keeps a legacy block from displaying an invalid actor or timestamp.
+	 */
+	function hasProvenance(block: WorkspaceRecord): boolean {
+		return (
+			block.lastEditedBy !== undefined &&
+			typeof block.lastEditedAt === 'number' &&
+			Number.isFinite(block.lastEditedAt)
+		);
+	}
 
 	// Catalog-backed (data.documents), not derived from ydoc: a sharded
 	// Document's own meta entry doesn't live in *this* Document's doc at all
@@ -290,7 +313,47 @@
 			documentsMap.observeDeep(observer);
 			refresh();
 
+			// Reset immediately: this component instance is reused across
+			// client-side navigation to a different Document (see the comment
+			// above this $effect), so a stale announcement from the
+			// previously-viewed document must not linger until this
+			// document's first real transition.
+			holdAnnouncement = '';
+			let previousHeldByOthers: Map<string, ActorId> = new Map();
+			// The subscription's first callback reports presence as of connect
+			// time, not a transition — without this, every actor who was
+			// already editing before this client joined gets misreported as
+			// having "just started".
+			let isFirstSnapshot = true;
+			let announceToggle = false;
 			const unsubscribePresence = subscribeHeldByOthers(docAwareness, (held) => {
+				const messages: string[] = [];
+				for (const [recordId, actor] of held) {
+					const previousActor = previousHeldByOthers.get(recordId);
+					if (!previousActor) {
+						if (!isFirstSnapshot) {
+							messages.push(`${formatActor(actor)} started editing a block`);
+						}
+					} else if (actorKey(previousActor) !== actorKey(actor)) {
+						// One actor released this block and another claimed it
+						// in the same update — both halves of that handoff need
+						// announcing, not just a silent no-op because the
+						// record id itself never left the map.
+						messages.push(`${formatActor(previousActor)} finished editing a block`);
+						messages.push(`${formatActor(actor)} started editing a block`);
+					}
+				}
+				for (const [recordId, actor] of previousHeldByOthers) {
+					if (!held.has(recordId)) {
+						messages.push(`${formatActor(actor)} finished editing a block`);
+					}
+				}
+				if (messages.length > 0) {
+					announceToggle = !announceToggle;
+					holdAnnouncement = (announceToggle ? ZERO_WIDTH_SPACE : '') + messages.join('; ');
+				}
+				previousHeldByOthers = held;
+				isFirstSnapshot = false;
 				heldByOthers = held;
 			});
 
@@ -524,9 +587,19 @@
 		return false;
 	}
 
-	function handleBlockInput(blockId: string): void {
-		if (slashMenuBlockId !== blockId || !ydoc) return;
-		const ytext = getRecordYText(ydoc, blockId);
+	/** Updates live provenance for the record whose editable text just changed. */
+	function handleBlockInput(blockId: string, editedRecordId = blockId): void {
+		if (!ydoc) return;
+		touchRecordEditor(ydoc, editedRecordId, CURRENT_USER);
+		clearTimeout(provenanceAnnouncementTimer);
+		provenanceAnnouncementTimer = setTimeout(() => {
+			const record = getRecord(ydoc!, editedRecordId);
+			if (record && hasProvenance(record)) {
+				provenanceAnnouncement = `Last edited by ${formatActor(record.lastEditedBy)} at ${formatTimestamp(record.lastEditedAt)}.`;
+			}
+		}, 800);
+		if (slashMenuBlockId !== blockId) return;
+		const ytext = getRecordYText(ydoc, editedRecordId);
 		const text = ytext ? plainText(yTextToRichText(ytext)) : '';
 		if (!text.startsWith('/')) {
 			slashMenuBlockId = null;
@@ -663,6 +736,9 @@
 		placeholder="Untitled document"
 	/>
 
+	<!-- Screen-reader announcements for collaborative hold state (issue #18) -->
+	<div class="sr-only" role="status" aria-live="polite">{holdAnnouncement}</div>
+
 	<!--
 		Backlinks panel removed (#120): listIncomingLinks builds its reverse
 		index by scanning every Document within one shared Y.Doc, structurally
@@ -706,6 +782,11 @@
 					? block.referencedRecordId
 					: block.id
 			)}
+			{@const provenanceRecordId =
+				block.blockType === 'synced_block' && block.referencedRecordId
+					? block.referencedRecordId
+					: block.id}
+			{@const provenance = ydoc ? (getRecord(ydoc, provenanceRecordId) ?? block) : block}
 			{@const bt = block.blockType ?? 'paragraph'}
 
 			<div class="group relative flex items-start py-0.5" id="block-{block.id}">
@@ -751,17 +832,30 @@
 				<div class="min-w-0 flex-1">
 					{#if holder}
 						<!-- Held / Placeholder Block (M1 Design System) -->
+						<!--
+							role="group", not role="status": the persistent live
+							region above is the sole announcement source. A
+							role="status" here would be a second, independent
+							live region — every hold's insertion (and each one's
+							text) would announce a second time on top of the
+							region's own announcement.
+						-->
 						<div
 							class="flex h-7 items-center gap-2 rounded-md bg-surface/40 px-2 py-1"
 							title="{formatActor(holder)} is editing this block"
+							role="group"
+							aria-label="{formatActor(holder)} is editing this block"
 						>
 							<span
 								class="flex h-4.5 w-4.5 flex-shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-accent-fg"
+								aria-hidden="true"
 							>
 								{formatActor(holder).slice(0, 1).toUpperCase()}
 							</span>
-							<div class="shimmer-bar h-3 flex-1 rounded bg-surface"></div>
-							<span class="text-[11px] font-medium text-muted">{formatActor(holder)} editing…</span>
+							<div class="shimmer-bar h-3 flex-1 rounded bg-surface" aria-hidden="true"></div>
+							<span class="text-[11px] font-medium text-muted" aria-hidden="true"
+								>{formatActor(holder)} editing…</span
+							>
 						</div>
 					{:else if bt === 'divider'}
 						<div class="my-3 border-t border-border"></div>
@@ -776,7 +870,7 @@
 										recordId={block.id}
 										{linkTargets}
 										placeholder="Callout note…"
-										onInputText={() => handleBlockInput(block.id)}
+										onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 										onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 										onBackspaceAtStart={() => handleBackspace(block, index)}
 										onFocusBlock={() => handleFocusBlock(block.id)}
@@ -799,11 +893,11 @@
 									recordId={block.id}
 									{linkTargets}
 									placeholder="Quote…"
-									onInputText={() => handleBlockInput(block.id)}
+									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
-									onSlashKey={() => openSlashMenu(block.id)}
+									onSlashKey={() => {}}
 									onLinkShortcut={() => openLinkComposer(block.id)}
 									isFirstBlock={index === 0}
 									isLastBlock={index === blocks.length - 1}
@@ -822,7 +916,7 @@
 									{linkTargets}
 									class="font-mono text-[13.5px]"
 									placeholder="Code snippet…"
-									onInputText={() => handleBlockInput(block.id)}
+									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
@@ -883,12 +977,12 @@
 									recordId={block.id}
 									{linkTargets}
 									placeholder="Synced content…"
-									onInputText={() => handleBlockInput(block.id)}
+									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 									onEnter={() => addBlockAfter(block.id)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() =>
 										handleFocusBlock(block.id, block.referencedRecordId || block.id)}
-									onSlashKey={() => openSlashMenu(block.id)}
+									onSlashKey={() => {}}
 									onLinkShortcut={() => openLinkComposer(block.id)}
 									isFirstBlock={index === 0}
 									isLastBlock={index === blocks.length - 1}
@@ -1011,7 +1105,7 @@
 													? 'font-display text-base font-semibold text-fg'
 													: 'text-base text-fg'}
 									placeholder={index === 0 ? "Type '/' for commands, or start typing..." : ''}
-									onInputText={() => handleBlockInput(block.id)}
+									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
@@ -1036,18 +1130,27 @@
 					{/if}
 				</div>
 
-				<!-- Right Attribution Tag (Visible on hover) -->
-				<span
-					class="ml-3 hidden flex-shrink-0 self-center text-[11px] text-muted/70 group-hover:inline-block"
-					title="Edited by {formatActor(block.lastEditedBy)} at {formatTimestamp(
-						block.lastEditedAt
-					)}"
-				>
-					{formatActor(block.lastEditedBy)}
-				</span>
+				<!-- Provenance comes from the record's live CRDT projection; the link
+					 opens the corresponding rows in the shared audit history. -->
+				{#if hasProvenance(provenance)}
+					<a
+						href="{resolve('/audit')}?targetRecordId={encodeURIComponent(provenance.id)}"
+						class="ml-3 flex-shrink-0 self-center text-[11px] text-muted/70 underline-offset-2 hover:text-accent hover:underline focus-visible:text-accent focus-visible:underline"
+						aria-label="Last edited by {formatActor(provenance.lastEditedBy)} at {formatTimestamp(
+							provenance.lastEditedAt
+						)}. Open audit history for this block."
+					>
+						{formatActor(provenance.lastEditedBy)} · {formatTimestamp(provenance.lastEditedAt)}
+					</a>
+				{:else}
+					<span class="ml-3 flex-shrink-0 self-center text-[11px] text-muted/70">
+						Editing history unavailable
+					</span>
+				{/if}
 			</div>
 		{/each}
 	</div>
+	<span class="sr-only" aria-live="polite" aria-atomic="true">{provenanceAnnouncement}</span>
 
 	<!-- Add Block Button -->
 	<div class="mt-6 flex items-center gap-2">

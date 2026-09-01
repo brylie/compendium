@@ -8,7 +8,8 @@ import {
 	createRecord,
 	deleteCollection,
 	getRecord,
-	listCollections
+	listCollections,
+	setRecordViewConfig
 } from '$lib/data/records';
 import CollectionViewBlock from './CollectionViewBlock.svelte';
 
@@ -249,5 +250,143 @@ describe('CollectionViewBlock', () => {
 
 		expect(screen.getByText('Sprint Tasks')).toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+	});
+
+	// Issue #32: a viewer's filter/sort/grouping/visible-property edits must
+	// stay local until an explicit Save — otherwise two collaborators viewing
+	// the same embed would see each other's in-progress edits live.
+	describe('draft view state', () => {
+		function setUpTableEmbed() {
+			const doc = createDocument(ydoc, { title: 'Team Page' });
+			const collection = createCollection(ydoc, {
+				title: 'Tasks',
+				schema: [{ key: 'title', label: 'Title', type: 'text' }]
+			});
+			const block = createRecord(
+				ydoc,
+				{
+					parentId: doc.id,
+					blockType: 'collection_view',
+					referencedRecordId: collection.id,
+					viewConfig: { viewType: 'table' }
+				},
+				actor
+			);
+			return { block: getRecord(ydoc, block.id)!, collection };
+		}
+
+		it('does not persist a filter edit until Save view is clicked', async () => {
+			const { block } = setUpTableEmbed();
+			const user = userEvent.setup();
+			render(CollectionViewBlock, { block, ydoc, collections: listCollections(ydoc) });
+
+			await user.click(await screen.findByRole('button', { name: /Filter/ }));
+			await user.click(screen.getByRole('button', { name: '+ Add filter' }));
+
+			expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+			expect(getRecord(ydoc, block.id)?.viewConfig?.filters).toBeUndefined();
+
+			await user.click(screen.getByRole('button', { name: 'Save view' }));
+
+			expect(getRecord(ydoc, block.id)?.viewConfig?.filters).toHaveLength(1);
+			expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+		});
+
+		it('discards a local edit without ever touching the shared record', async () => {
+			const { block } = setUpTableEmbed();
+			const user = userEvent.setup();
+			render(CollectionViewBlock, { block, ydoc, collections: listCollections(ydoc) });
+
+			await user.click(await screen.findByRole('button', { name: /Filter/ }));
+			await user.click(screen.getByRole('button', { name: '+ Add filter' }));
+			expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+
+			await user.click(screen.getByRole('button', { name: 'Discard' }));
+
+			expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+			expect(getRecord(ydoc, block.id)?.viewConfig?.filters).toBeUndefined();
+		});
+
+		it('picks up an external Save (no local edits) but never clobbers this viewer’s own unsaved draft', async () => {
+			const { block } = setUpTableEmbed();
+			const user = userEvent.setup();
+			const { rerender } = render(CollectionViewBlock, {
+				block,
+				ydoc,
+				collections: listCollections(ydoc)
+			});
+			await screen.findByRole('button', { name: /Filter/ });
+
+			// Simulate a second collaborator saving a visible-properties change
+			// on the same block from their own connection.
+			setRecordViewConfig(
+				ydoc,
+				block.id,
+				{ viewType: 'table', visibleProperties: ['title'] },
+				actor
+			);
+			await rerender({
+				block: getRecord(ydoc, block.id)!,
+				ydoc,
+				collections: listCollections(ydoc)
+			});
+
+			// No local edits of our own — the external save is reflected, not
+			// flagged as unsaved.
+			expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+
+			// Now make our own local (unsaved) edit...
+			await user.click(screen.getByRole('button', { name: /Filter/ }));
+			await user.click(screen.getByRole('button', { name: '+ Add filter' }));
+			expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+
+			// ...and have a third collaborator save something else concurrently.
+			setRecordViewConfig(
+				ydoc,
+				block.id,
+				{ viewType: 'table', visibleProperties: ['title'], groupBy: undefined, sort: undefined },
+				actor
+			);
+			await rerender({
+				block: getRecord(ydoc, block.id)!,
+				ydoc,
+				collections: listCollections(ydoc)
+			});
+
+			// Our own unsaved local filter edit must survive, not be silently
+			// overwritten by the other collaborator's concurrent save.
+			expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+			expect(screen.getByText(/Filter \(1\)/)).toBeInTheDocument();
+		});
+
+		it('resets the draft when retargeted to a different collection', async () => {
+			const { block, collection } = setUpTableEmbed();
+			createCollection(ydoc, { title: 'Other', schema: [] });
+			const user = userEvent.setup();
+
+			const { rerender } = render(CollectionViewBlock, {
+				block,
+				ydoc,
+				collections: listCollections(ydoc)
+			});
+			await user.click(await screen.findByRole('button', { name: /Filter/ }));
+			await user.click(screen.getByRole('button', { name: '+ Add filter' }));
+			expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+
+			await user.click(screen.getByRole('button', { name: 'Change' }));
+			const selects = screen.getAllByRole('combobox');
+			await user.selectOptions(selects[1], 'Other');
+			await user.click(screen.getByRole('button', { name: 'Insert' }));
+			// Mirrors production: the parent re-passes a fresh `block` once its
+			// own Yjs observer picks up insert()'s write.
+			await rerender({
+				block: getRecord(ydoc, block.id)!,
+				ydoc,
+				collections: listCollections(ydoc)
+			});
+
+			expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+			expect(getRecord(ydoc, block.id)?.referencedRecordId).not.toBe(collection.id);
+		});
 	});
 });

@@ -12,9 +12,21 @@
 		updateRecordProperties,
 		ValidationError
 	} from '$lib/data/records';
-	import { getCollectionView, projectRecords, visibleProperties } from '$lib/data/views';
+	import {
+		computeFieldSummary,
+		fieldSummaryLabel,
+		getCollectionView,
+		projectRecords,
+		summaryOptionsForType,
+		visibleProperties
+	} from '$lib/data/views';
 	import type { ViewConfig } from '$lib/data/views';
-	import type { PropertyDefinition, PropertyValue, WorkspaceRecord } from '$lib/data/types';
+	import type {
+		FieldSummaryType,
+		PropertyDefinition,
+		PropertyValue,
+		WorkspaceRecord
+	} from '$lib/data/types';
 	import Icon from './Icon.svelte';
 	import PropertyValueCell from './PropertyValueCell.svelte';
 	import ViewToolbar from './ViewToolbar.svelte';
@@ -132,6 +144,16 @@
 		const current = config.visibleProperties ?? schema.map((p) => p.key);
 		onConfigChange({ ...config, visibleProperties: current.filter((k) => k !== propertyKey) });
 	}
+
+	function setSummary(propertyKey: string, type: FieldSummaryType): void {
+		const next = { ...(config.summaries ?? {}) };
+		if (type === 'none') delete next[propertyKey];
+		else next[propertyKey] = type;
+		onConfigChange({
+			...config,
+			summaries: Object.keys(next).length > 0 ? next : undefined
+		});
+	}
 </script>
 
 {#if schema.length === 0}
@@ -219,6 +241,40 @@
 					</tr>
 				{/each}
 			</tbody>
+			<tfoot>
+				<tr class="border-t border-border bg-surface/60 text-xs text-muted">
+					{#each columns as property (property.key)}
+						{@const summaryType = config.summaries?.[property.key] ?? 'none'}
+						<td class="border-r border-border/60 px-3.5 py-2">
+							<div class="flex items-center gap-1.5">
+								<label class="sr-only" for="summary-{collectionId}-{property.key}"
+									>{property.label} summary</label
+								>
+								<select
+									id="summary-{collectionId}-{property.key}"
+									value={summaryType}
+									onchange={(e) =>
+										setSummary(
+											property.key,
+											(e.target as HTMLSelectElement).value as FieldSummaryType
+										)}
+									class="rounded border border-border bg-bg px-1 py-0.5 text-[11px] text-muted"
+								>
+									{#each summaryOptionsForType(property.type) as opt (opt)}
+										<option value={opt}>{fieldSummaryLabel(opt)}</option>
+									{/each}
+								</select>
+								{#if summaryType !== 'none'}
+									<span class="font-medium text-fg"
+										>{computeFieldSummary(projected, property, summaryType)}</span
+									>
+								{/if}
+							</div>
+						</td>
+					{/each}
+					<td></td>
+				</tr>
+			</tfoot>
 		</table>
 	</div>
 

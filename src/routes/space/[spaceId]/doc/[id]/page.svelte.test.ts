@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tick } from 'svelte';
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
@@ -731,6 +732,228 @@ describe('doc/[id] +page', () => {
 		await flushShardResolution();
 
 		expect(screen.getByText('Claude editing…')).toBeInTheDocument();
+	});
+
+	it('announces hold state changes to screen readers via a live region', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		let onChange: (held: Map<string, ActorId>) => void = () => {};
+		subscribeHeldByOthers.mockImplementation(
+			(_awareness: unknown, cb: (held: Map<string, ActorId>) => void) => {
+				onChange = cb;
+				onChange(new Map());
+				return () => {};
+			}
+		);
+
+		render(Page, {
+			params: { spaceId: 'space-1', id: 'doc-1' },
+			form: null,
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
+		});
+		await flushShardResolution();
+
+		const liveRegion = screen.getByRole('status');
+		expect(liveRegion).toHaveTextContent('');
+
+		onChange(new Map([[record.id, { kind: 'agent', agentId: 'a1', name: 'Claude' }]]));
+		await tick();
+		expect(liveRegion).toHaveTextContent('Claude started editing a block');
+
+		onChange(new Map());
+		await tick();
+		expect(liveRegion).toHaveTextContent('Claude finished editing a block');
+	});
+
+	it('does not announce holds already in place when the subscription starts, only later transitions', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		const otherRecord = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		let onChange: (held: Map<string, ActorId>) => void = () => {};
+		subscribeHeldByOthers.mockImplementation(
+			(_awareness: unknown, cb: (held: Map<string, ActorId>) => void) => {
+				onChange = cb;
+				// An actor already editing before this client connected — not a
+				// transition this client observed, so it must not be announced
+				// as having "just started".
+				onChange(new Map([[record.id, { kind: 'agent', agentId: 'a1', name: 'Claude' }]]));
+				return () => {};
+			}
+		);
+
+		render(Page, {
+			params: { spaceId: 'space-1', id: 'doc-1' },
+			form: null,
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
+		});
+		await flushShardResolution();
+
+		const liveRegion = screen.getByRole('status');
+		expect(liveRegion.textContent).toBe('');
+
+		onChange(
+			new Map([
+				[record.id, { kind: 'agent', agentId: 'a1', name: 'Claude' }],
+				[otherRecord.id, { kind: 'agent', agentId: 'a2', name: 'Codex' }]
+			])
+		);
+		await tick();
+		expect(liveRegion).toHaveTextContent('Codex started editing a block');
+		expect(liveRegion).not.toHaveTextContent('Claude started editing a block');
+	});
+
+	it('announces a handoff when one actor releases a block and another takes it over', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		let onChange: (held: Map<string, ActorId>) => void = () => {};
+		subscribeHeldByOthers.mockImplementation(
+			(_awareness: unknown, cb: (held: Map<string, ActorId>) => void) => {
+				onChange = cb;
+				onChange(new Map());
+				return () => {};
+			}
+		);
+
+		render(Page, {
+			params: { spaceId: 'space-1', id: 'doc-1' },
+			form: null,
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
+		});
+		await flushShardResolution();
+		const liveRegion = screen.getByRole('status');
+
+		onChange(new Map([[record.id, { kind: 'agent', agentId: 'a1', name: 'Claude' }]]));
+		await tick();
+		expect(liveRegion).toHaveTextContent('Claude started editing a block');
+
+		// Same record id, different actor: a silent handoff, not a no-op —
+		// both halves must be announced.
+		onChange(new Map([[record.id, { kind: 'agent', agentId: 'a2', name: 'Codex' }]]));
+		await tick();
+		expect(liveRegion).toHaveTextContent('Claude finished editing a block');
+		expect(liveRegion).toHaveTextContent('Codex started editing a block');
+	});
+
+	it('changes the live region text even when two consecutive announcements share identical wording', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const recordA = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		const recordB = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		const claude = { kind: 'agent' as const, agentId: 'a1', name: 'Claude' };
+		let onChange: (held: Map<string, ActorId>) => void = () => {};
+		subscribeHeldByOthers.mockImplementation(
+			(_awareness: unknown, cb: (held: Map<string, ActorId>) => void) => {
+				onChange = cb;
+				onChange(
+					new Map([
+						[recordA.id, claude],
+						[recordB.id, claude]
+					])
+				);
+				return () => {};
+			}
+		);
+
+		render(Page, {
+			params: { spaceId: 'space-1', id: 'doc-1' },
+			form: null,
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
+		});
+		await flushShardResolution();
+		const liveRegion = screen.getByRole('status');
+
+		onChange(new Map([[recordB.id, claude]])); // Claude finishes block A
+		await tick();
+		const firstText = liveRegion.textContent;
+		expect(firstText).toContain('Claude finished editing a block');
+
+		onChange(new Map()); // Claude finishes block B — identical wording
+		await tick();
+		const secondText = liveRegion.textContent;
+		expect(secondText).toContain('Claude finished editing a block');
+		// A screen reader only re-announces a live region whose text content
+		// actually changed — same wording twice, no DOM change, would go silent.
+		expect(secondText).not.toBe(firstText);
+	});
+
+	it('clears a stale announcement when navigating client-side to a different document', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'First' });
+		createDocument(ydoc, { id: 'doc-2', title: 'Second' });
+		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+
+		const callbacks: Array<(held: Map<string, ActorId>) => void> = [];
+		subscribeHeldByOthers.mockImplementation(
+			(_awareness: unknown, cb: (held: Map<string, ActorId>) => void) => {
+				callbacks.push(cb);
+				cb(new Map());
+				return () => {};
+			}
+		);
+
+		const { rerender } = render(Page, {
+			params: { spaceId: 'space-1', id: 'doc-1' },
+			form: null,
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'First'
+			}
+		});
+		await flushShardResolution();
+
+		callbacks[0](new Map([[record.id, { kind: 'agent', agentId: 'a1', name: 'Claude' }]]));
+		await tick();
+		expect(screen.getByRole('status')).toHaveTextContent('Claude started editing a block');
+
+		await rerender({
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-2',
+				title: 'Second'
+			}
+		});
+		await flushShardResolution();
+
+		expect(screen.getByRole('status').textContent).toBe('');
 	});
 
 	it('re-derives blocks when navigating client-side to a different document id', async () => {

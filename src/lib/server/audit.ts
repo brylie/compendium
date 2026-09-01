@@ -32,17 +32,22 @@ export function logAudit(input: {
 
 export interface AuditQuery {
 	actorFilter?: (actor: ActorId) => boolean;
+	targetRecordId?: string;
 	since?: number;
 	until?: number;
 	limit?: number;
 }
 
+/** Returns newest-first audit entries matching the supplied projection filters. */
 export function queryAuditLog(query: AuditQuery = {}): AuditEntry[] {
 	const rows = getDb()
 		.select()
 		.from(auditLog)
 		.where(
 			and(
+				query.targetRecordId !== undefined
+					? eq(auditLog.targetRecordId, query.targetRecordId)
+					: undefined,
 				gte(auditLog.timestamp, query.since ?? 0),
 				lte(auditLog.timestamp, query.until ?? Number.MAX_SAFE_INTEGER)
 			)
@@ -100,6 +105,9 @@ export function queryAuditLogForSpace(
 		.where(
 			and(
 				eq(recordLocator.spaceId, spaceId),
+				query.targetRecordId !== undefined
+					? eq(auditLog.targetRecordId, query.targetRecordId)
+					: undefined,
 				gte(auditLog.timestamp, query.since ?? 0),
 				lte(auditLog.timestamp, query.until ?? Number.MAX_SAFE_INTEGER)
 			)

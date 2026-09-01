@@ -1,10 +1,15 @@
 // Shared Collection view-projection semantics — the "smallest shared view
 // configuration" issue #9 asks for, scoped to what Table/Board/Calendar
 // actually need. This is deliberately a minimal slice of #32's full
-// ambition (no saved-view persistence, no server-side/read-model filtering
-// for MCP's query_collection): pure functions over an already-loaded
-// records array, so Table, Board, and Calendar all project the same live
-// Yjs-observed data through one path instead of three divergent ones.
+// ambition (no named/shareable saved-view artifact, no server-side/
+// read-model filtering for MCP's query_collection — see collection-views.md
+// §8): pure functions over an already-loaded records array, so Table,
+// Board, and Calendar all project the same live Yjs-observed data through
+// one path instead of three divergent ones. CollectionViewBlock owns the
+// draft-vs-saved distinction (an explicit isDirty flag, with viewConfigsEqual
+// below used only to skip a redundant re-sync when nothing actually
+// changed); this module stays purely about computing a projection from a
+// config, not about who has the authority to persist one.
 //
 // Per docs/specifications/data-model.md §2, a view "may have configuration
 // such as filters, sorts, grouping, visible properties, and a layout-specific
@@ -17,7 +22,9 @@ import type * as Y from 'yjs';
 import { getCollection, listRecordsForParent } from './records';
 import type {
 	CollectionMeta,
+	FieldSummaryType,
 	PropertyDefinition,
+	PropertyType,
 	PropertyValue,
 	ViewConfig,
 	ViewFilter,
@@ -31,6 +38,7 @@ import type {
 // collection_view block's persisted config needs them too.
 export type {
 	EmbeddedViewConfig,
+	FieldSummaryType,
 	SortDirection,
 	ViewConfig,
 	ViewFilter,
@@ -242,4 +250,186 @@ export function dateKeyForRecord(
 	const value = record.properties?.[property.key];
 	if (value?.type !== 'date' || !value.value) return undefined;
 	return value.value.slice(0, 10);
+}
+
+// Structural equality over ViewConfig's own fields (order-insensitive where
+// order isn't semantically meaningful) — the dirty/draft-vs-saved check
+// CollectionViewBlock uses to decide whether a viewer's local edits differ
+// from what's actually persisted (see collection-views.md's draft-view-state
+// section). Deliberately not a generic deep-equal: a plain JSON.stringify
+// compare would be sensitive to incidental key-insertion-order differences
+// between a Yjs-round-tripped object and a freshly-constructed one.
+function filtersEqual(a: ViewFilter[] | undefined, b: ViewFilter[] | undefined): boolean {
+	const ax = a ?? [];
+	const bx = b ?? [];
+	return (
+		ax.length === bx.length &&
+		ax.every(
+			(f, i) => f.propertyKey === bx[i].propertyKey && f.op === bx[i].op && f.value === bx[i].value
+		)
+	);
+}
+
+function sortEqual(a: ViewSort | undefined, b: ViewSort | undefined): boolean {
+	if (!a && !b) return true;
+	if (!a || !b) return false;
+	return a.mode === b.mode && a.propertyKey === b.propertyKey && a.direction === b.direction;
+}
+
+// visibleProperties/summaries are consumed as sets/maps (visibleProperties
+// via visibleProperties() above, summaries by key), not ordered lists — so
+// equality here is set/map equality, not array-order equality.
+function stringSetEqual(a: string[] | undefined, b: string[] | undefined): boolean {
+	const as = new Set(a ?? []);
+	const bs = new Set(b ?? []);
+	return as.size === bs.size && [...as].every((v) => bs.has(v));
+}
+
+function summariesEqual(
+	a: Record<string, FieldSummaryType> | undefined,
+	b: Record<string, FieldSummaryType> | undefined
+): boolean {
+	const ae = Object.entries(a ?? {});
+	const be = Object.entries(b ?? {});
+	return ae.length === be.length && ae.every(([k, v]) => (b ?? {})[k] === v);
+}
+
+export function viewConfigsEqual(a: ViewConfig, b: ViewConfig): boolean {
+	return (
+		filtersEqual(a.filters, b.filters) &&
+		sortEqual(a.sort, b.sort) &&
+		stringSetEqual(a.visibleProperties, b.visibleProperties) &&
+		a.groupBy === b.groupBy &&
+		summariesEqual(a.summaries, b.summaries)
+	);
+}
+
+// Which aggregations a property's type offers in Table's per-column footer
+// (issue #32's "type-appropriate field summaries") — mirrors Notion/Airtable's
+// footer-summary picker, scoped to the property types this schema has.
+const NUMERIC_SUMMARIES: FieldSummaryType[] = [
+	'none',
+	'count_all',
+	'count_values',
+	'count_empty',
+	'sum',
+	'average',
+	'min',
+	'max'
+];
+const DATE_SUMMARIES: FieldSummaryType[] = [
+	'none',
+	'count_all',
+	'count_values',
+	'count_empty',
+	'earliest',
+	'latest'
+];
+const CHECKBOX_SUMMARIES: FieldSummaryType[] = ['none', 'count_all', 'checked', 'unchecked'];
+const GENERIC_SUMMARIES: FieldSummaryType[] = ['none', 'count_all', 'count_values', 'count_empty'];
+
+export function summaryOptionsForType(type: PropertyType): FieldSummaryType[] {
+	switch (type) {
+		case 'number':
+			return NUMERIC_SUMMARIES;
+		case 'date':
+			return DATE_SUMMARIES;
+		case 'checkbox':
+			return CHECKBOX_SUMMARIES;
+		case 'text':
+		case 'select':
+		case 'relation':
+			return GENERIC_SUMMARIES;
+	}
+}
+
+export function fieldSummaryLabel(type: FieldSummaryType): string {
+	switch (type) {
+		case 'none':
+			return 'None';
+		case 'count_all':
+			return 'Count all';
+		case 'count_values':
+			return 'Count values';
+		case 'count_empty':
+			return 'Count empty';
+		case 'sum':
+			return 'Sum';
+		case 'average':
+			return 'Average';
+		case 'min':
+			return 'Min';
+		case 'max':
+			return 'Max';
+		case 'earliest':
+			return 'Earliest';
+		case 'latest':
+			return 'Latest';
+		case 'checked':
+			return 'Checked';
+		case 'unchecked':
+			return 'Unchecked';
+	}
+}
+
+// Computed over whatever record set the caller passes — Table passes its
+// already-filtered/sorted projection, so a summary reflects what's actually
+// visible, the same convention Notion/Airtable use for a footer aggregation.
+export function computeFieldSummary(
+	records: WorkspaceRecord[],
+	property: PropertyDefinition,
+	type: FieldSummaryType
+): string {
+	if (type === 'none') return '';
+	const values = records.map((r) => r.properties?.[property.key]);
+	const present = values.filter((v) => !isEmptyComparable(comparableValue(v)));
+
+	switch (type) {
+		case 'count_all':
+			return String(records.length);
+		case 'count_values':
+			return String(present.length);
+		case 'count_empty':
+			return String(records.length - present.length);
+		case 'sum': {
+			const nums = present.filter((v) => v?.type === 'number').map((v) => v!.value as number);
+			return String(nums.reduce((a, b) => a + b, 0));
+		}
+		case 'average': {
+			const nums = present.filter((v) => v?.type === 'number').map((v) => v!.value as number);
+			if (nums.length === 0) return '';
+			const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
+			return String(Math.round(avg * 100) / 100);
+		}
+		case 'min': {
+			const nums = present.filter((v) => v?.type === 'number').map((v) => v!.value as number);
+			return nums.length ? String(Math.min(...nums)) : '';
+		}
+		case 'max': {
+			const nums = present.filter((v) => v?.type === 'number').map((v) => v!.value as number);
+			return nums.length ? String(Math.max(...nums)) : '';
+		}
+		case 'earliest': {
+			const dates = present
+				.filter((v) => v?.type === 'date')
+				.map((v) => v!.value as string)
+				.sort();
+			return dates[0] ?? '';
+		}
+		case 'latest': {
+			const dates = present
+				.filter((v) => v?.type === 'date')
+				.map((v) => v!.value as string)
+				.sort();
+			return dates[dates.length - 1] ?? '';
+		}
+		case 'checked': {
+			const checked = values.filter((v) => v?.type === 'checkbox' && v.value).length;
+			return String(checked);
+		}
+		case 'unchecked': {
+			const checked = values.filter((v) => v?.type === 'checkbox' && v.value).length;
+			return String(records.length - checked);
+		}
+	}
 }

@@ -819,8 +819,10 @@ export function getRecordYText(doc: Y.Doc, id: string): Y.Text | undefined {
 export function touchRecordEditor(doc: Y.Doc, id: string, actor: ActorId): void {
 	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
 	if (!yrecord) return;
-	yrecord.set('lastEditedBy', actor);
-	yrecord.set('lastEditedAt', Date.now());
+	doc.transact(() => {
+		yrecord.set('lastEditedBy', actor);
+		yrecord.set('lastEditedAt', Date.now());
+	});
 }
 
 export function getRecord(doc: Y.Doc, id: string): WorkspaceRecord | undefined {
