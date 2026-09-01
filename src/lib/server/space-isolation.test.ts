@@ -5,10 +5,20 @@ import {
 	updateRecordContent
 } from '$lib/data/records';
 import { CURRENT_USER } from './current-user';
-import { createDocument, listDocuments } from '../services/documents';
+import {
+	createDocument,
+	listDocuments,
+	moveDocument,
+	SpaceMismatchError
+} from '../services/documents';
 import { createCollection, listCollections } from '../services/collections';
 import { searchWorkspace } from '../services/search';
-import { createSpace, recordCatalogDocumentCreated, reserveDocumentLocator } from './catalog';
+import {
+	createSpace,
+	recordCatalogDocumentCreated,
+	reserveDocumentLocator,
+	UnknownSpaceError
+} from './catalog';
 import { logAudit, queryAuditLogForSpace } from './audit';
 import { aggregateHolds, clientIdForToken, requestAgentHold } from './holds';
 import { resolveWorkspaceContext } from './workspace-store';
@@ -89,6 +99,95 @@ describe('space isolation: listDocuments/listCollections (#133, workspace-shardi
 
 		const inSpaceB = listCollections(CURRENT_USER, spaceBId);
 		expect(inSpaceB.map((c) => c.id)).not.toContain(collectionA.id);
+	});
+
+	it("scoping to the workspace's own default Space still includes uncataloged content (#140 CodeRabbit regression)", () => {
+		// Written directly via the CRDT primitive, bypassing the service layer
+		// entirely — never gets a catalog/locator row. Before #140's fix, an
+		// explicit spaceId filter (even the default Space's own id) skipped the
+		// uncataloged fallback unconditionally, silently dropping this content
+		// from the sidebar even though it's the workspace's original,
+		// pre-multi-Space content and unambiguously belongs to the default Space.
+		const { defaultSpaceId } = resolveWorkspaceContext();
+		const uncatalogedDoc = crdtCreateDocument(resolveWorkspaceContext().doc, {
+			title: 'Legacy Direct-Written Doc'
+		});
+
+		const inDefaultSpace = listDocuments(CURRENT_USER, defaultSpaceId);
+		expect(inDefaultSpace.map((d) => d.id)).toContain(uncatalogedDoc.id);
+	});
+
+	it('scoping to a non-default Space never includes uncataloged content (no regression the other way)', () => {
+		const { workspaceId } = resolveWorkspaceContext();
+		const spaceB = createSpace(workspaceId, 'Space B');
+		crdtCreateDocument(resolveWorkspaceContext().doc, { title: 'Legacy Direct-Written Doc' });
+
+		const inSpaceB = listDocuments(CURRENT_USER, spaceB.id);
+		expect(inSpaceB).toEqual([]);
+	});
+});
+
+describe('createDocument/createCollection: Space validation (#140 CodeRabbit)', () => {
+	it('createDocument rejects an unknown spaceId instead of letting the FK violation escape', () => {
+		expect(() => createDocument(CURRENT_USER, { title: 'X', spaceId: 'not-a-real-space' })).toThrow(
+			UnknownSpaceError
+		);
+	});
+
+	it('createCollection rejects an unknown spaceId the same way', () => {
+		expect(() =>
+			createCollection(CURRENT_USER, { title: 'X', schema: [], spaceId: 'not-a-real-space' })
+		).toThrow(UnknownSpaceError);
+	});
+
+	it('createDocument rejects nesting a child under a parent from a different Space', () => {
+		const { workspaceId } = resolveWorkspaceContext();
+		const spaceB = createSpace(workspaceId, 'Space B');
+		const parentInSpaceA = createDocument(CURRENT_USER, { title: 'Parent in A' });
+
+		expect(() =>
+			createDocument(CURRENT_USER, {
+				title: 'Child in B',
+				parentDocumentId: parentInSpaceA.id,
+				spaceId: spaceB.id
+			})
+		).toThrow(SpaceMismatchError);
+	});
+
+	it('createDocument allows nesting when the child and parent share the same explicit Space', () => {
+		const { defaultSpaceId } = resolveWorkspaceContext();
+		const parent = createDocument(CURRENT_USER, { title: 'Parent', spaceId: defaultSpaceId });
+
+		expect(() =>
+			createDocument(CURRENT_USER, {
+				title: 'Child',
+				parentDocumentId: parent.id,
+				spaceId: defaultSpaceId
+			})
+		).not.toThrow();
+	});
+
+	it('moveDocument rejects moving a Document under a parent from a different Space', () => {
+		const { workspaceId } = resolveWorkspaceContext();
+		const spaceB = createSpace(workspaceId, 'Space B');
+		const docInSpaceA = createDocument(CURRENT_USER, { title: 'Doc in A' });
+		const parentInSpaceB = createDocument(CURRENT_USER, {
+			title: 'Parent in B',
+			spaceId: spaceB.id
+		});
+
+		expect(() =>
+			moveDocument(CURRENT_USER, docInSpaceA.id, { parentDocumentId: parentInSpaceB.id })
+		).toThrow(SpaceMismatchError);
+	});
+
+	it('moveDocument allows moving within the same Space', () => {
+		const newParent = createDocument(CURRENT_USER, { title: 'New Parent' });
+		const doc = createDocument(CURRENT_USER, { title: 'Doc' });
+
+		expect(() =>
+			moveDocument(CURRENT_USER, doc.id, { parentDocumentId: newParent.id })
+		).not.toThrow();
 	});
 });
 

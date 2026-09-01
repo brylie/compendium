@@ -37,6 +37,13 @@ export class RecordIdConflictError extends Error {
 	}
 }
 
+export class UnknownSpaceError extends Error {
+	constructor(spaceId: string) {
+		super(`Space ${spaceId} does not exist in this workspace`);
+		this.name = 'UnknownSpaceError';
+	}
+}
+
 type CatalogOp = 'create' | 'update' | 'move' | 'delete';
 
 /**

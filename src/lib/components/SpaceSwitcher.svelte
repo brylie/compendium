@@ -85,7 +85,11 @@
 
 	async function createSpace(rawName: string): Promise<void> {
 		const name = rawName.trim() || 'Untitled Space';
-		creating = false;
+		// The dialog stays open (and its own errorMessage prop shows the
+		// failure inline) until the request actually succeeds — closing it
+		// optimistically first would make a failure's error message land in
+		// the dropdown panel, which is already closed by then and never
+		// rendered (#140 CodeRabbit finding).
 		try {
 			const res = await fetch('/api/spaces', {
 				method: 'POST',
@@ -94,6 +98,8 @@
 			});
 			if (res.ok) {
 				const space = await res.json();
+				creating = false;
+				errorMessage = '';
 				await goto(resolve('/space/[spaceId]', { spaceId: space.id }));
 			} else {
 				errorMessage = 'Failed to create space.';
@@ -208,11 +214,6 @@
 				<Icon name="plus" size={14} />
 				<span>New space</span>
 			</button>
-			{#if errorMessage}
-				<p class="border-t border-border px-2 py-1.5 text-xs text-red-600" role="alert">
-					{errorMessage}
-				</p>
-			{/if}
 		</div>
 	{/if}
 </div>
@@ -223,6 +224,10 @@
 	label="Space name"
 	placeholder="Untitled Space"
 	submitLabel="Create"
+	{errorMessage}
 	onSubmit={(value) => void createSpace(value)}
-	onCancel={() => (creating = false)}
+	onCancel={() => {
+		creating = false;
+		errorMessage = '';
+	}}
 />
