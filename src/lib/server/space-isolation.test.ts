@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	createCollection as crdtCreateCollection,
 	createDocument as crdtCreateDocument,
 	createRecord as crdtCreateRecord,
 	updateRecordContent
@@ -359,6 +360,35 @@ describe('space isolation: MCP token Space-level allowlists (#6)', () => {
 		// its own direct grant — neither one implies unscoped access.
 		expect(getDocument(token, docA.id)?.id).toBe(docA.id);
 		expect(getDocument(token, docB.id)?.id).toBe(docB.id);
+	});
+
+	it('a token granted only the default Space can list legacy/uncataloged content via listDocuments (#141 merge-with-#140 CodeRabbit finding)', () => {
+		// Written directly via the CRDT primitive, bypassing the service layer
+		// — no locator row, but classified as belonging to defaultSpaceId (see
+		// listDocuments' own doc comment). A token with only a Space-level
+		// grant for the default Space (no per-Document grant) must still see
+		// it — the uncataloged-fallback loop needs to pass defaultSpaceId into
+		// tokenAllowsParent, not omit the Space entirely.
+		const { defaultSpaceId } = resolveWorkspaceContext();
+		const legacyDoc = crdtCreateDocument(resolveWorkspaceContext().doc, {
+			title: 'Legacy Default-Space Doc'
+		});
+		const token = tokenScopedToSpace(defaultSpaceId);
+
+		const results = listDocuments(token);
+		expect(results.map((d) => d.id)).toContain(legacyDoc.id);
+	});
+
+	it('a token granted only the default Space can list legacy/uncataloged Collections via listCollections', () => {
+		const { defaultSpaceId } = resolveWorkspaceContext();
+		const legacyCollection = crdtCreateCollection(resolveWorkspaceContext().doc, {
+			title: 'Legacy Default-Space Collection',
+			schema: []
+		});
+		const token = tokenScopedToSpace(defaultSpaceId);
+
+		const results = listCollections(token);
+		expect(results.map((c) => c.id)).toContain(legacyCollection.id);
 	});
 });
 
