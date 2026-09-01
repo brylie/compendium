@@ -4,9 +4,16 @@ import userEvent from '@testing-library/user-event';
 import SlashMenu from './SlashMenu.svelte';
 
 describe('SlashMenu', () => {
-	it('lists every basic block command when the query is empty', () => {
+	it('lists every supported block command when the query is empty', () => {
 		render(SlashMenu, { query: '', onSelect: vi.fn() });
-		expect(screen.getAllByRole('option')).toHaveLength(17);
+		expect(screen.getAllByRole('option')).toHaveLength(19);
+	});
+
+	it('groups commands into the editor categories', () => {
+		render(SlashMenu, { query: '', onSelect: vi.fn() });
+		for (const category of ['Writing', 'Structure', 'Media', 'Data', 'Reuse']) {
+			expect(screen.getByText(category)).toBeInTheDocument();
+		}
 	});
 
 	it('filters commands by label', () => {
@@ -19,6 +26,20 @@ describe('SlashMenu', () => {
 	it('filters commands by keyword even when the keyword is not in the label', () => {
 		render(SlashMenu, { query: 'ul', onSelect: vi.fn() });
 		expect(screen.getByText('Bulleted list')).toBeInTheDocument();
+	});
+
+	it('filters commands by a conventional alias', () => {
+		render(SlashMenu, { query: 'collapsible', onSelect: vi.fn() });
+		const options = screen.getAllByRole('option');
+		expect(options).toHaveLength(1);
+		expect(options[0]).toHaveTextContent('Toggle list');
+	});
+
+	it('shows a one-line description for every command', () => {
+		render(SlashMenu, { query: '', onSelect: vi.fn() });
+		for (const option of screen.getAllByRole('option')) {
+			expect(option.querySelector('.text-xs')).not.toBeNull();
+		}
 	});
 
 	it('shows a "no matching commands" message when nothing matches', () => {

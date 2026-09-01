@@ -88,7 +88,13 @@ This only applies when the previous block can hold free-form text (excludes the 
 
 New control categories require an explicit interaction contract before implementation (for example, confirmation, audit attribution, and permissions for an agent-triggered action). They should not be smuggled into a text-format or block-insert registration merely to reuse the UI.
 
-## 7. Relationship to slash commands and collaboration
+## 7. Slash-command menu
+
+Slash commands remain the keyboard-first block conversion/insertion flow. The menu is organized into **Writing**, **Structure**, **Media**, **Data**, and **Reuse** sections rather than a single flat list. Each supported command belongs to exactly one section, has a short one-line description, and declares searchable aliases alongside its label (for example, `toggle`, `collapsible`, and `details` all select Toggle list). Filtering searches both labels and aliases, shows only sections that contain matches, and preserves the filtered command order for arrow-key navigation.
+
+The slash-menu catalog covers every currently supported `BlockType`; adding a block requires its category, aliases, and description in addition to the block-capability contract's icon and label. This keeps the slash menu and persistent toolbar aligned as the block vocabulary expands.
+
+## 8. Relationship to slash commands and collaboration
 
 Slash commands remain keyboard-first block conversion/insertion. The toolbar is the persistent, discoverable alternative; neither replaces the other. Both create the same block records and must expose the same supported block vocabulary.
 
