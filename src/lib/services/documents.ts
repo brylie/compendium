@@ -44,6 +44,29 @@ export class SpaceMismatchError extends Error {
 	}
 }
 
+/**
+ * Resolves the Space a Document effectively belongs to for hierarchy
+ * validation — cataloged content uses its real locator spaceId; a
+ * *legacy/uncataloged* Document (no locator row) that nonetheless exists in
+ * the shared default Y.Doc is classified as `defaultSpaceId`, matching
+ * listDocuments' own definition of "uncataloged content belongs to the
+ * default Space" (#140 CodeRabbit finding — the earlier version of this
+ * check silently exempted uncataloged parents instead, letting a Space B
+ * child be created/moved under a default-Space parent undetected). Returns
+ * undefined only when the id can't be classified at all (doesn't exist in
+ * either place), which stays exempt from the mismatch check.
+ */
+function resolveEffectiveDocumentSpaceId(
+	workspaceId: string,
+	documentId: string,
+	defaultDoc: ReturnType<typeof resolveWorkspaceContext>['doc'],
+	defaultSpaceId: string
+): string | undefined {
+	const cataloged = resolveShardForParent(workspaceId, documentId)?.spaceId;
+	if (cataloged !== undefined) return cataloged;
+	return crdtGetDocument(defaultDoc, documentId) ? defaultSpaceId : undefined;
+}
+
 export interface CreateDocumentInput {
 	id?: string;
 	title: string;
@@ -74,12 +97,18 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 	// to create top-level documents; when nested, access to parentDocumentId is verified.
 	if (input.parentDocumentId) {
 		requireAccessibleParent(caller, input.parentDocumentId, 'create_document');
-		// A cataloged parent's own Space must agree with the target Space —
+		// The parent's effective Space must agree with the target Space —
 		// otherwise a child could be created in one Space while nested under a
-		// parent that belongs to another (#140 CodeRabbit finding). A parent
-		// with no locator row (uncataloged/legacy content) has no known Space
-		// to compare against, so it's exempt rather than rejected outright.
-		const parentSpaceId = resolveShardForParent(workspaceId, input.parentDocumentId)?.spaceId;
+		// parent that belongs to another (#140 CodeRabbit finding). A legacy
+		// parent with no locator row is classified as the default Space (see
+		// resolveEffectiveDocumentSpaceId), not silently exempted — only a
+		// parent that can't be classified at all (doesn't exist anywhere) is.
+		const parentSpaceId = resolveEffectiveDocumentSpaceId(
+			workspaceId,
+			input.parentDocumentId,
+			defaultDoc,
+			defaultSpaceId
+		);
 		if (parentSpaceId !== undefined && parentSpaceId !== targetSpaceId) {
 			throw new SpaceMismatchError(input.parentDocumentId);
 		}
@@ -148,11 +177,8 @@ export function moveDocument(
 	documentId: string,
 	options: { parentDocumentId?: string; afterDocumentId?: string }
 ): void {
-	const {
-		doc,
-		workspaceId,
-		parentSpaceId: documentSpaceId
-	} = resolveParentWorkspaceContext(documentId);
+	const { doc, workspaceId } = resolveParentWorkspaceContext(documentId);
+	const { doc: defaultDoc, defaultSpaceId } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'move_document');
@@ -160,9 +186,21 @@ export function moveDocument(
 		requireAccessibleParent(caller, options.parentDocumentId, 'move_document');
 		// Same Space-consistency rule as createDocument: moving a Document
 		// under a parent in a different Space would silently break the
-		// isolation guarantee this feature exists for. Either side missing a
-		// known Space (uncataloged/legacy content) is exempt, not rejected.
-		const newParentSpaceId = resolveShardForParent(workspaceId, options.parentDocumentId)?.spaceId;
+		// isolation guarantee this feature exists for. Legacy/uncataloged
+		// content on either side is classified as the default Space (see
+		// resolveEffectiveDocumentSpaceId), not silently exempted.
+		const documentSpaceId = resolveEffectiveDocumentSpaceId(
+			workspaceId,
+			documentId,
+			defaultDoc,
+			defaultSpaceId
+		);
+		const newParentSpaceId = resolveEffectiveDocumentSpaceId(
+			workspaceId,
+			options.parentDocumentId,
+			defaultDoc,
+			defaultSpaceId
+		);
 		if (
 			documentSpaceId !== undefined &&
 			newParentSpaceId !== undefined &&

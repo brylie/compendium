@@ -189,6 +189,52 @@ describe('createDocument/createCollection: Space validation (#140 CodeRabbit)', 
 			moveDocument(CURRENT_USER, doc.id, { parentDocumentId: newParent.id })
 		).not.toThrow();
 	});
+
+	it('createDocument rejects a Space B child nested under a legacy/uncataloged parent (classified as the default Space, not exempt) (#140 CodeRabbit follow-up)', () => {
+		// Written directly via the CRDT primitive, bypassing the service layer
+		// — no locator row, but it exists in the shared default Y.Doc, so
+		// resolveEffectiveDocumentSpaceId classifies it as the default Space,
+		// matching listDocuments' own definition of uncataloged content.
+		const { workspaceId, defaultSpaceId } = resolveWorkspaceContext();
+		const spaceB = createSpace(workspaceId, 'Space B');
+		const legacyParent = crdtCreateDocument(resolveWorkspaceContext().doc, {
+			title: 'Legacy Default-Space Parent'
+		});
+
+		expect(() =>
+			createDocument(CURRENT_USER, {
+				title: 'Child in B',
+				parentDocumentId: legacyParent.id,
+				spaceId: spaceB.id
+			})
+		).toThrow(SpaceMismatchError);
+
+		// The same nesting succeeds when explicitly targeting the default Space
+		// the legacy parent actually belongs to.
+		expect(() =>
+			createDocument(CURRENT_USER, {
+				title: 'Child in Default',
+				parentDocumentId: legacyParent.id,
+				spaceId: defaultSpaceId
+			})
+		).not.toThrow();
+	});
+
+	it('moveDocument rejects moving a legacy/uncataloged default-Space Document under a Space B parent (#140 CodeRabbit follow-up)', () => {
+		const { workspaceId } = resolveWorkspaceContext();
+		const spaceB = createSpace(workspaceId, 'Space B');
+		const legacyDoc = crdtCreateDocument(resolveWorkspaceContext().doc, {
+			title: 'Legacy Default-Space Doc'
+		});
+		const parentInSpaceB = createDocument(CURRENT_USER, {
+			title: 'Parent in B',
+			spaceId: spaceB.id
+		});
+
+		expect(() =>
+			moveDocument(CURRENT_USER, legacyDoc.id, { parentDocumentId: parentInSpaceB.id })
+		).toThrow(SpaceMismatchError);
+	});
 });
 
 describe('space isolation: searchWorkspace never crosses a Space boundary', () => {
