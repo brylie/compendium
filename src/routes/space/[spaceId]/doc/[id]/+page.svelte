@@ -25,7 +25,7 @@
 		splitRichTextAt,
 		yTextToRichText
 	} from '$lib/data/richtext';
-	import { formatActor, formatTimestamp } from '$lib/data/format';
+	import { actorKey, formatActor, formatTimestamp } from '$lib/data/format';
 	import {
 		claimBlockPresence,
 		releaseBlockPresence,
@@ -40,6 +40,12 @@
 	import CollectionViewBlock from '$lib/components/CollectionViewBlock.svelte';
 	import PromptDialog from '$lib/components/PromptDialog.svelte';
 	import type { PageProps } from './$types';
+
+	// Toggled onto holdAnnouncement below to guarantee a screen reader
+	// re-announces it even when two consecutive, distinct transitions
+	// happen to produce identical wording — a live region only re-fires on
+	// an actual text change, and this doesn't affect what's read aloud.
+	const ZERO_WIDTH_SPACE = String.fromCharCode(0x200b);
 
 	let { data }: PageProps = $props();
 
@@ -290,11 +296,33 @@
 			documentsMap.observeDeep(observer);
 			refresh();
 
+			// Reset immediately: this component instance is reused across
+			// client-side navigation to a different Document (see the comment
+			// above this $effect), so a stale announcement from the
+			// previously-viewed document must not linger until this
+			// document's first real transition.
+			holdAnnouncement = '';
 			let previousHeldByOthers: Map<string, ActorId> = new Map();
+			// The subscription's first callback reports presence as of connect
+			// time, not a transition — without this, every actor who was
+			// already editing before this client joined gets misreported as
+			// having "just started".
+			let isFirstSnapshot = true;
+			let announceToggle = false;
 			const unsubscribePresence = subscribeHeldByOthers(docAwareness, (held) => {
 				const messages: string[] = [];
 				for (const [recordId, actor] of held) {
-					if (!previousHeldByOthers.has(recordId)) {
+					const previousActor = previousHeldByOthers.get(recordId);
+					if (!previousActor) {
+						if (!isFirstSnapshot) {
+							messages.push(`${formatActor(actor)} started editing a block`);
+						}
+					} else if (actorKey(previousActor) !== actorKey(actor)) {
+						// One actor released this block and another claimed it
+						// in the same update — both halves of that handoff need
+						// announcing, not just a silent no-op because the
+						// record id itself never left the map.
+						messages.push(`${formatActor(previousActor)} finished editing a block`);
 						messages.push(`${formatActor(actor)} started editing a block`);
 					}
 				}
@@ -304,9 +332,11 @@
 					}
 				}
 				if (messages.length > 0) {
-					holdAnnouncement = messages.join('; ');
+					announceToggle = !announceToggle;
+					holdAnnouncement = (announceToggle ? ZERO_WIDTH_SPACE : '') + messages.join('; ');
 				}
 				previousHeldByOthers = held;
+				isFirstSnapshot = false;
 				heldByOthers = held;
 			});
 
@@ -744,10 +774,18 @@
 				<div class="min-w-0 flex-1">
 					{#if holder}
 						<!-- Held / Placeholder Block (M1 Design System) -->
+						<!--
+							role="group", not role="status": the persistent live
+							region above is the sole announcement source. A
+							role="status" here would be a second, independent
+							live region — every hold's insertion (and each one's
+							text) would announce a second time on top of the
+							region's own announcement.
+						-->
 						<div
 							class="flex h-7 items-center gap-2 rounded-md bg-surface/40 px-2 py-1"
 							title="{formatActor(holder)} is editing this block"
-							role="status"
+							role="group"
 							aria-label="{formatActor(holder)} is editing this block"
 						>
 							<span
