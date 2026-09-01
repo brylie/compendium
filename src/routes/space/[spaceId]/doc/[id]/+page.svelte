@@ -104,6 +104,7 @@
 		getSelectionRange: () => { start: number; end: number } | null;
 		getFormatState: () => Partial<Record<keyof TextMarks, boolean>>;
 		focusEditor: (position?: boolean | number) => void;
+		focusEditorAtLine: (edge: 'first' | 'last', clientX: number | null) => void;
 	}
 
 	let blockRefs: Record<string, BlockEditorHandle | undefined> = $state({});
@@ -497,6 +498,30 @@
 		blockRefs[previous.id]?.focusEditor(joinOffset);
 	}
 
+	// Held blocks (another actor editing) render a placeholder instead of a
+	// BlockEditor (see the {#if holder} branch below), so blockRefs has no
+	// entry for them — skip past any such gap to the next block that does
+	// have a real editor, rather than stalling ArrowUp/ArrowDown at the edge.
+	function handleArrowUpAtStart(index: number, clientX: number | null): void {
+		for (let i = index - 1; i >= 0; i--) {
+			const editor = blockRefs[blocks[i].id];
+			if (editor) {
+				editor.focusEditorAtLine('last', clientX);
+				return;
+			}
+		}
+	}
+
+	function handleArrowDownAtEnd(index: number, clientX: number | null): void {
+		for (let i = index + 1; i < blocks.length; i++) {
+			const editor = blockRefs[blocks[i].id];
+			if (editor) {
+				editor.focusEditorAtLine('first', clientX);
+				return;
+			}
+		}
+	}
+
 	function handleBlockInput(blockId: string): void {
 		if (slashMenuBlockId !== blockId || !ydoc) return;
 		const ytext = getRecordYText(ydoc, blockId);
@@ -755,6 +780,10 @@
 										onFocusBlock={() => handleFocusBlock(block.id)}
 										onSlashKey={() => openSlashMenu(block.id)}
 										onLinkShortcut={() => openLinkComposer(block.id)}
+										isFirstBlock={index === 0}
+										isLastBlock={index === blocks.length - 1}
+										onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
+										onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
 									/>
 								{/if}
 							</div>
@@ -774,6 +803,10 @@
 									onFocusBlock={() => handleFocusBlock(block.id)}
 									onSlashKey={() => openSlashMenu(block.id)}
 									onLinkShortcut={() => openLinkComposer(block.id)}
+									isFirstBlock={index === 0}
+									isLastBlock={index === blocks.length - 1}
+									onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
+									onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
 								/>
 							{/if}
 						</div>
@@ -793,6 +826,10 @@
 									onFocusBlock={() => handleFocusBlock(block.id)}
 									onSlashKey={() => openSlashMenu(block.id)}
 									onLinkShortcut={() => openLinkComposer(block.id)}
+									isFirstBlock={index === 0}
+									isLastBlock={index === blocks.length - 1}
+									onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
+									onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
 								/>
 							{/if}
 						</div>
@@ -851,6 +888,10 @@
 										handleFocusBlock(block.id, block.referencedRecordId || block.id)}
 									onSlashKey={() => openSlashMenu(block.id)}
 									onLinkShortcut={() => openLinkComposer(block.id)}
+									isFirstBlock={index === 0}
+									isLastBlock={index === blocks.length - 1}
+									onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
+									onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
 								/>
 							{:else}
 								<p class="text-xs text-muted italic">
@@ -974,6 +1015,10 @@
 									onFocusBlock={() => handleFocusBlock(block.id)}
 									onSlashKey={() => openSlashMenu(block.id)}
 									onLinkShortcut={() => openLinkComposer(block.id)}
+									isFirstBlock={index === 0}
+									isLastBlock={index === blocks.length - 1}
+									onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
+									onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
 								/>
 							</div>
 						{/if}

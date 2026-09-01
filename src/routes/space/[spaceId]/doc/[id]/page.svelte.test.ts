@@ -220,6 +220,48 @@ describe('doc/[id] +page', () => {
 		expect(screen.getByText('Hello block')).toBeInTheDocument();
 	});
 
+	it('moves focus to the previous/next block on ArrowUp/ArrowDown at a line boundary', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const first = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		getRecordYText(ydoc, first.id)!.insert(0, 'First block');
+		const second = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		getRecordYText(ydoc, second.id)!.insert(0, 'Second block');
+		const { container } = render(Page, {
+			params: { spaceId: 'space-1', id: 'doc-1' },
+			form: null,
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
+		});
+		await flushShardResolution();
+
+		const firstEditor = container.querySelector(
+			`[data-block-editor-id="${first.id}"]`
+		) as HTMLElement;
+		const secondEditor = container.querySelector(
+			`[data-block-editor-id="${second.id}"]`
+		) as HTMLElement;
+
+		secondEditor.focus();
+		await fireEvent.keyDown(secondEditor, { key: 'ArrowUp' });
+		expect(document.activeElement).toBe(firstEditor);
+
+		await fireEvent.keyDown(firstEditor, { key: 'ArrowDown' });
+		expect(document.activeElement).toBe(secondEditor);
+
+		// At the document's own edges there's no adjacent block to escape
+		// into, so the key is left to its native (no-op here, in jsdom) effect.
+		firstEditor.focus();
+		await fireEvent.keyDown(firstEditor, { key: 'ArrowUp' });
+		expect(document.activeElement).toBe(firstEditor);
+	});
+
 	it('renders a to_do block with a checkbox toggle reflecting checked state', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'to_do' }, HUMAN);
