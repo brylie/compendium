@@ -82,6 +82,14 @@ Pressing Backspace with a collapsed caret at the very start of a block's text �
 
 This only applies when the previous block can hold free-form text (excludes the same structural types listed in §5). Backspace at the start of a non-empty block whose previous sibling is structural does nothing, rather than deleting the current block's content with nowhere to put it.
 
+### 5.4 ArrowUp/ArrowDown cross block boundaries
+
+Pressing ArrowUp with the caret on a block's visually topmost wrapped line, or ArrowDown on its bottommost line, moves focus into the adjacent block instead of the browser's default no-op at that edge — the keyboard-navigation counterpart to §5.2/§5.3's Enter/Backspace behavior, and part of the accessibility bar tracked by issue #18. The caret lands on the target block's first/last line, at the closest horizontal position to where it left the source block (best-effort column preservation via `caretRangeFromPoint`/`caretPositionFromPoint`; falls back to the target block's very start/end where point-based hit-testing isn't available).
+
+This only intercepts an unmodified arrow key with a **collapsed** caret — a non-collapsed (ranged) selection keeps the browser's native ArrowUp/ArrowDown behavior (collapsing the selection to one end) untouched, and any modifier key (Shift, to extend a selection; Cmd/Ctrl/Alt, for OS-level shortcuts) is left alone entirely.
+
+A held block (another actor's placeholder — `collaboration.md`) has no mounted editor to focus, so navigation skips past it to the next block that does. At the document's effective start/end — including when every block on the remaining side is held — the key is left to whatever native behavior applies, rather than being silently swallowed.
+
 ## 6. Extension point
 
 [`toolbar-controls.ts`](../../src/routes/doc/[id]/toolbar-controls.ts) is the sole registration list for the current toolbar. A registration declares a stable ID, group, accessible label, compact label, and either a `TextMarks` key (`format`) or `BlockType` (`insert`). `Toolbar.svelte` renders controls generically from that list; adding a button within either category does not require changing the toolbar layout or branching its markup.
