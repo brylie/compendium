@@ -81,7 +81,13 @@ function isCaretAtEdge(root: HTMLElement, edge: 'first' | 'last'): boolean {
 	if (!selection || selection.rangeCount === 0 || !root.contains(selection.anchorNode)) {
 		return true;
 	}
-	const range = selection.getRangeAt(0).cloneRange();
+	const original = selection.getRangeAt(0);
+	// A ranged (non-collapsed) selection must keep the browser's native
+	// Arrow-key behavior (collapse to one end) — treating it as "at the
+	// edge" here would replace the user's selection with a caret in an
+	// adjacent block instead.
+	if (!original.collapsed) return false;
+	const range = original.cloneRange();
 	range.collapse(true);
 	const caretRect = getCollapsedRangeRect(range);
 	if (!caretRect || caretRect.height === 0) return true;
@@ -111,13 +117,8 @@ export function setCaretNearClientX(
 	edge: 'first' | 'last'
 ): void {
 	root.focus();
-	if (clientX !== null) {
-		const rect = root.getBoundingClientRect();
-		const lineFraction = 0.1;
-		const y =
-			edge === 'first'
-				? rect.top + rect.height * lineFraction
-				: rect.bottom - rect.height * lineFraction;
+	const y = clientX !== null ? getEdgeLineY(root, edge) : null;
+	if (clientX !== null && y !== null) {
 		const doc = root.ownerDocument;
 		let range: Range | null = null;
 		if (typeof doc.caretRangeFromPoint === 'function') {
@@ -138,6 +139,23 @@ export function setCaretNearClientX(
 		}
 	}
 	setCaretOffset(root, edge === 'first' ? 0 : (root.textContent?.length ?? 0));
+}
+
+// The vertical center of root's actual first/last visual line, measured from
+// the real text node at that edge — not guessed as a fraction of the block's
+// total height, which lands on an interior line for any block wrapped across
+// more than a couple of lines. Returns null when there's no text to measure
+// (empty block) or no usable geometry (e.g. jsdom).
+function getEdgeLineY(root: HTMLElement, edge: 'first' | 'last'): number | null {
+	const length = root.textContent?.length ?? 0;
+	const { node, offset } = findNodeAtOffset(root, edge === 'first' ? 0 : length);
+	if (!node) return null;
+	const range = document.createRange();
+	range.setStart(node, offset);
+	range.collapse(true);
+	const rect = getCollapsedRangeRect(range);
+	if (!rect || rect.height === 0) return null;
+	return rect.top + rect.height / 2;
 }
 
 function findNodeAtOffset(root: Node, offset: number): { node: Node | null; offset: number } {

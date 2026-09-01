@@ -502,24 +502,26 @@
 	// BlockEditor (see the {#if holder} branch below), so blockRefs has no
 	// entry for them — skip past any such gap to the next block that does
 	// have a real editor, rather than stalling ArrowUp/ArrowDown at the edge.
-	function handleArrowUpAtStart(index: number, clientX: number | null): void {
+	function handleArrowUpAtStart(index: number, clientX: number | null): boolean {
 		for (let i = index - 1; i >= 0; i--) {
 			const editor = blockRefs[blocks[i].id];
 			if (editor) {
 				editor.focusEditorAtLine('last', clientX);
-				return;
+				return true;
 			}
 		}
+		return false;
 	}
 
-	function handleArrowDownAtEnd(index: number, clientX: number | null): void {
+	function handleArrowDownAtEnd(index: number, clientX: number | null): boolean {
 		for (let i = index + 1; i < blocks.length; i++) {
 			const editor = blockRefs[blocks[i].id];
 			if (editor) {
 				editor.focusEditorAtLine('first', clientX);
-				return;
+				return true;
 			}
 		}
+		return false;
 	}
 
 	function handleBlockInput(blockId: string): void {

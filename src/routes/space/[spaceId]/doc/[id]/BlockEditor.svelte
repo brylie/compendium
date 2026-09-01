@@ -30,8 +30,8 @@
 		onLinkShortcut = () => {},
 		isFirstBlock = false,
 		isLastBlock = false,
-		onArrowUpAtStart = () => {},
-		onArrowDownAtEnd = () => {}
+		onArrowUpAtStart = () => false,
+		onArrowDownAtEnd = () => false
 	}: {
 		ytext: Y.Text;
 		recordId?: string;
@@ -49,14 +49,19 @@
 		onFocusBlock: () => void;
 		onSlashKey: () => void;
 		onLinkShortcut?: () => void;
-		// Whether there's an adjacent block to escape into — decided by the
-		// parent (it owns block order), not derivable from this component
-		// alone. Skipped entirely (no keydown interception, so native caret
-		// behavior applies) at either end of the document.
+		// Cheap short-circuit for the very first/last block in the document —
+		// decided by the parent (it owns block order), not derivable from
+		// this component alone. Not sufficient on its own to know whether a
+		// move will actually succeed: the immediately-adjacent block can be
+		// a held placeholder or another non-editor block type, so the
+		// callbacks report back (returning true/false) whether they found a
+		// reachable block to focus. Only a true return preventDefault()s —
+		// otherwise native caret behavior is left alone, e.g. at the
+		// effective start/end of the document.
 		isFirstBlock?: boolean;
 		isLastBlock?: boolean;
-		onArrowUpAtStart?: (clientX: number | null) => void;
-		onArrowDownAtEnd?: (clientX: number | null) => void;
+		onArrowUpAtStart?: (clientX: number | null) => boolean;
+		onArrowDownAtEnd?: (clientX: number | null) => boolean;
 	} = $props();
 
 	let el: HTMLDivElement | undefined = $state();
@@ -225,13 +230,11 @@
 		}
 		const noModifiers = !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey;
 		if (event.key === 'ArrowUp' && el && !isFirstBlock && noModifiers && isCaretAtFirstLine(el)) {
-			event.preventDefault();
-			onArrowUpAtStart(getCaretClientX(el));
+			if (onArrowUpAtStart(getCaretClientX(el))) event.preventDefault();
 			return;
 		}
 		if (event.key === 'ArrowDown' && el && !isLastBlock && noModifiers && isCaretAtLastLine(el)) {
-			event.preventDefault();
-			onArrowDownAtEnd(getCaretClientX(el));
+			if (onArrowDownAtEnd(getCaretClientX(el))) event.preventDefault();
 			return;
 		}
 	}

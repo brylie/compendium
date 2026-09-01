@@ -262,6 +262,50 @@ describe('doc/[id] +page', () => {
 		expect(document.activeElement).toBe(firstEditor);
 	});
 
+	it('leaves ArrowUp/ArrowDown to native behavior when the only reachable neighbor is a held placeholder', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const held = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		getRecordYText(ydoc, held.id)!.insert(0, 'Held by someone else');
+		const editable = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		getRecordYText(ydoc, editable.id)!.insert(0, 'Editable block');
+
+		subscribeHeldByOthers.mockImplementation(
+			(_awareness: unknown, onChange: (held: Map<string, ActorId>) => void) => {
+				onChange(new Map([[held.id, { kind: 'agent', agentId: 'a1', name: 'Claude' }]]));
+				return () => {};
+			}
+		);
+
+		const { container } = render(Page, {
+			params: { spaceId: 'space-1', id: 'doc-1' },
+			form: null,
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'D'
+			}
+		});
+		await flushShardResolution();
+
+		// The first block (index 0) is held — no BlockEditor is mounted for
+		// it — so the second block, despite not being the array's first
+		// element, has no reachable editor above it. isFirstBlock is still
+		// `false` for it (nothing else knows about the hold at that layer),
+		// but the navigation callback must still report failure so the key
+		// isn't swallowed.
+		const editableEditor = container.querySelector(
+			`[data-block-editor-id="${editable.id}"]`
+		) as HTMLElement;
+		editableEditor.focus();
+		const event = await fireEvent.keyDown(editableEditor, { key: 'ArrowUp' });
+		expect(document.activeElement).toBe(editableEditor);
+		expect(event).toBe(true); // not prevented — native behavior applies
+	});
+
 	it('renders a to_do block with a checkbox toggle reflecting checked state', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'to_do' }, HUMAN);
