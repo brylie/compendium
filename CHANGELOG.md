@@ -5,6 +5,46 @@ All notable changes to Compendium will be documented in this file.
 The project follows [Semantic Versioning](https://semver.org/). Git release
 tags use the `vX.Y.Z` convention.
 
+## [0.3.0] - 2026-09-01
+
+Compendium moves from a single implicit workspace to explicit, isolated
+Spaces: a server-owned instance identity anchors trust, a workspace catalog
+and per-record CRDT shard boundary replace the single global document, and
+existing content migrates across losslessly. People get a Space switcher and
+space-nested routing in the UI; MCP agents get Space-scoped access tokens.
+
+### Added
+
+- Server-owned instance identity and a trusted request context, closing the
+  gap where a client-supplied value could otherwise be mistaken for an
+  authoritative workspace selector.
+- A workspace catalog (Documents/Collections index) backing a per-record Y.Doc
+  shard model, replacing the single global in-memory document — validated
+  against a measured CRDT capacity baseline before cutover.
+- Lossless migration of existing single-workspace content into the new
+  catalog/shard model, with documented rollback and backup expectations.
+- A Space switcher in the sidebar with full keyboard navigation (roving
+  focus, wrap-around, Escape, focus return) and space-nested routing
+  (`/space/[spaceId]/...`), including self-healing redirects away from
+  unknown or cross-space URLs instead of leaking content.
+- MCP access tokens can now be scoped to an allowlist of Spaces, in addition
+  to their existing per-Document/Collection allowlist.
+
+### Fixed
+
+- Favicon links 404'd after navigating into a nested Space route (e.g.
+  `doc/[id]`, `table/[id]`); `app.html`'s static asset links are no longer
+  computed relative to route depth.
+- The collapsed sidebar Space switcher had no discoverable accessible name
+  for screen readers beyond a generic label; it now announces the active
+  Space's name.
+- CI's branch-coverage gate was silently non-functional (a missing
+  `pipefail` let it report green regardless of the actual coverage result);
+  the gate now genuinely enforces, and the underlying coverage shortfall
+  (76.77% → 80.1% branches) has been closed with targeted tests.
+
+[0.3.0]: https://github.com/brylie/compendium/releases/tag/v0.3.0
+
 ## [0.2.0] - 2026-08-30
 
 Collection schema management grows up: fields and Select options now have a
