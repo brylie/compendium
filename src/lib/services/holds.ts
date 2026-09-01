@@ -3,6 +3,7 @@ import { clientIdForToken, releaseAgentHold, requestAgentHold } from '$lib/serve
 import { getRecord } from '$lib/data/records';
 import { logAudit } from '$lib/server/audit';
 import { tokenAllowsParent } from '$lib/mcp/tokens';
+import { resolveShardForParent } from '$lib/server/catalog';
 import {
 	actorForCaller,
 	groupRecordIdsByShard,
@@ -35,7 +36,9 @@ export function holdRecords(
 			const { doc, awareness } = resolveWorkspaceContext({ workspaceId, shardId });
 			const groupResult = requestAgentHold(awareness, clientId, actor, ids, (id) => {
 				const record = getRecord(doc, id);
-				return record ? tokenAllowsParent(caller, record.parentId) : false;
+				if (!record) return false;
+				const spaceId = resolveShardForParent(workspaceId, record.parentId)?.spaceId;
+				return tokenAllowsParent(caller, record.parentId, spaceId);
 			});
 			granted.push(...groupResult.granted);
 			denied.push(...groupResult.denied);

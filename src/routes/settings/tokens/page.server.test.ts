@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { load, actions } from './+page.server';
 import { createDocument } from '$lib/data/records';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import { createSpace } from '$lib/server/catalog';
 import { listTokens } from '$lib/mcp/tokens';
 
 function formEvent(
@@ -45,6 +46,27 @@ describe('routes/settings/tokens/+page.server', () => {
 		expect(result.createdToken).toMatch(/^as_/);
 		expect(result.clientLabel).toBe('Test Client');
 		expect(listTokens().some((t) => t.clientLabel === 'Test Client')).toBe(true);
+	});
+
+	it('create action rejects a spaceId that does not belong to this workspace (#141 CodeRabbit)', async () => {
+		const result = await actions.create(
+			formEvent({ clientLabel: 'Space Spoofer', spaceIds: ['not-a-real-space-id'] })
+		);
+		expect(result).toEqual({ status: 400, data: { error: 'Invalid Space selection' } });
+		expect(listTokens().some((t) => t.clientLabel === 'Space Spoofer')).toBe(false);
+	});
+
+	it('create action mints a token scoped to a real Space', async () => {
+		const { workspaceId } = resolveWorkspaceContext();
+		const space = createSpace(workspaceId, 'Real Space');
+
+		const result = (await actions.create(
+			formEvent({ clientLabel: 'Space Grant Client', spaceIds: [space.id] })
+		)) as unknown as { createdToken: string };
+
+		expect(result.createdToken).toMatch(/^as_/);
+		const record = listTokens().find((t) => t.clientLabel === 'Space Grant Client');
+		expect(record?.allowedSpaceIds).toEqual([space.id]);
 	});
 
 	it('revoke action fails without a tokenHash', async () => {

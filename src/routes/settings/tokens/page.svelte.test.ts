@@ -8,6 +8,7 @@ interface TestToken {
 	clientLabel: string;
 	allowedDocumentIds: string[];
 	allowedCollectionIds: string[];
+	allowedSpaceIds: string[];
 	createdAt: number;
 	revokedAt?: number;
 }
@@ -18,6 +19,7 @@ function token(overrides: Partial<TestToken> = {}): TestToken {
 		clientLabel: 'Claude Desktop',
 		allowedDocumentIds: [],
 		allowedCollectionIds: [],
+		allowedSpaceIds: [],
 		createdAt: Date.UTC(2026, 0, 1),
 		...overrides
 	};
@@ -122,6 +124,23 @@ describe('settings/tokens +page', () => {
 		const checkbox = screen.getByText('Design Notes').closest('label')!.querySelector('input')!;
 		expect(checkbox).toHaveAttribute('name', 'documentIds');
 		expect(checkbox).toHaveAttribute('value', 'd1');
+	});
+
+	it('lists selectable spaces for scoping a new token', () => {
+		render(Page, {
+			params: {},
+			data: {
+				spaces: [{ id: 'space-a', workspaceId: 'default', name: 'Marketing' }],
+				activeSpaceId: 'space-1',
+				tokens: [],
+				documents: [],
+				collections: []
+			},
+			form: null
+		});
+		const checkbox = screen.getByText('Marketing').closest('label')!.querySelector('input')!;
+		expect(checkbox).toHaveAttribute('name', 'spaceIds');
+		expect(checkbox).toHaveAttribute('value', 'space-a');
 	});
 
 	it('submits the connect-client form to the create action', () => {

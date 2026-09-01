@@ -332,6 +332,65 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		expect(scopedResults.map((r) => r.recordId)).not.toContain(recordB.id);
 	});
 
+	it('3d. A token granted only a Space (#6) reads any Document created directly in it, over the real MCP transport, and is denied a different Space', async () => {
+		const { workspaceId, defaultSpaceId: spaceAId } = resolveWorkspaceContext();
+		const spaceB = createSpace(workspaceId, 'Space B');
+
+		// A Document created directly in Space A — never individually granted to
+		// any token, and never touched by create_document (which would have
+		// auto-granted it) — the only way this token can reach it is the
+		// Space-level allowlist itself.
+		const docAShard = resolveWorkspaceContext({ workspaceId, shardId: 'tier-a-3d-space-a-doc' });
+		const docA = createDocument(docAShard.doc, {
+			id: 'tier-a-3d-space-a-doc',
+			title: 'Space A Doc (Space-granted only)'
+		});
+		reserveDocumentLocator(workspaceId, spaceAId, docA.id, docAShard.shardId);
+		recordCatalogDocumentCreated({
+			workspaceId,
+			spaceId: spaceAId,
+			id: docA.id,
+			title: docA.title,
+			order: docA.order,
+			shardId: docAShard.shardId
+		});
+
+		const docBShard = resolveWorkspaceContext({ workspaceId, shardId: 'tier-a-3d-space-b-doc' });
+		const docB = createDocument(docBShard.doc, {
+			id: 'tier-a-3d-space-b-doc',
+			title: 'Space B Doc'
+		});
+		reserveDocumentLocator(workspaceId, spaceB.id, docB.id, docBShard.shardId);
+		recordCatalogDocumentCreated({
+			workspaceId,
+			spaceId: spaceB.id,
+			id: docB.id,
+			title: docB.title,
+			order: docB.order,
+			shardId: docBShard.shardId
+		});
+
+		const { token } = harness.createToken({
+			clientLabel: 'Space-Scoped Agent',
+			allowedDocumentIds: [],
+			allowedCollectionIds: [],
+			allowedSpaceIds: [spaceAId]
+		});
+		const mcp = await harness.getMcpClient(token);
+
+		const getA = await mcp.callTool({ name: 'get_document', arguments: { documentId: docA.id } });
+		expect(parseMcpText<{ id: string }>(getA).id).toBe(docA.id);
+
+		const getB = await mcp.callTool({ name: 'get_document', arguments: { documentId: docB.id } });
+		expect((getB as { isError?: boolean }).isError).toBe(true);
+
+		// list_documents (unscoped, no space_id filter) reflects the same grant.
+		const listRes = await mcp.callTool({ name: 'list_documents', arguments: {} });
+		const list = parseMcpText<Array<{ id: string }>>(listRes);
+		expect(list.map((d) => d.id)).toContain(docA.id);
+		expect(list.map((d) => d.id)).not.toContain(docB.id);
+	});
+
 	it('4. MCP hold_records on block where human cursor is -> denied for that block, granted for others', async () => {
 		const yjs = harness.getYjsClient();
 		const docMeta = createDocument(yjs.doc, { title: 'Shared Doc' });

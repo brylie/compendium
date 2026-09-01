@@ -1,0 +1,1 @@
+ALTER TABLE `access_tokens` ADD `allowed_space_ids` text DEFAULT '[]' NOT NULL;
