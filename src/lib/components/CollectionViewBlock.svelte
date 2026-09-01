@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { CURRENT_USER } from '$lib/client/actor';
 	import { setRecordReferencedId, setRecordViewConfig } from '$lib/data/records';
+	import { viewConfigsEqual } from '$lib/data/views';
 	import type {
 		CollectionMeta,
 		EmbeddedViewConfig,
@@ -54,17 +55,75 @@
 		changing = false;
 	}
 
-	function config(): EmbeddedViewConfig {
-		return block.viewConfig ?? { viewType: pickerViewType };
+	// The persisted, shared config — every collaborator connected to this
+	// embed sees this the instant anyone Saves (see below).
+	const persistedConfig = $derived<EmbeddedViewConfig>(
+		block.viewConfig ?? { viewType: pickerViewType }
+	);
+
+	// Draft view state (issue #32): a viewer's filter/sort/grouping/visible-
+	// property/summary edits stay local to this component until an explicit
+	// Save promotes them to persistedConfig — mirroring the codebase's
+	// existing precedent for Board's manual card order (session-local,
+	// promoted only by deliberate action). Without this, ViewToolbar's
+	// onConfigChange used to write straight to the shared Yjs record on
+	// every keystroke, so two collaborators viewing the same embed would
+	// see each other's in-progress filter edits live — see
+	// collection-views.md's draft-view-state section.
+	//
+	// isDirty is deliberately its own explicit flag rather than a live
+	// comparison of draftConfig against persistedConfig: a comparison would
+	// depend on the parent re-passing an updated `block` prop once its own
+	// Yjs observer round-trips this viewer's own Save, which is real but not
+	// synchronous — this viewer's own Save/Discard should clear "unsaved"
+	// immediately, not wait on that loop.
+	//
+	// draftConfig re-syncs to persistedConfig automatically whenever the
+	// referenced Collection changes (a brand new embed target) or whenever
+	// persistedConfig changes elsewhere *and this viewer has no local edits
+	// to lose* (isDirty is false) — an explicit Save from another connection
+	// is picked up, but this viewer's own unsaved draft is never silently
+	// overwritten.
+	// Seeded with a placeholder rather than reading persistedConfig/block
+	// directly here — the $effect below (a tracked context) does the real
+	// initial sync on its first run, so this never observes a stale snapshot.
+	let draftConfig: EmbeddedViewConfig = $state({ viewType: 'table' });
+	let isDirty = $state(false);
+	let lastTargetId: string | undefined;
+	let initialized = false;
+
+	$effect(() => {
+		const targetId = block.referencedRecordId;
+		const current = persistedConfig;
+		if (!initialized || targetId !== lastTargetId) {
+			initialized = true;
+			lastTargetId = targetId;
+			draftConfig = current;
+			isDirty = false;
+			return;
+		}
+		// viewConfigsEqual, not a reference check — persistedConfig recomputes
+		// (a new object) on every unrelated Yjs change to this block, so a
+		// plain reassignment here would needlessly re-render every nested
+		// renderer on every external edit, not just an actual config change.
+		if (!isDirty && !viewConfigsEqual(draftConfig, current)) {
+			draftConfig = current;
+		}
+	});
+
+	function onDraftChange(next: import('$lib/data/views').ViewConfig): void {
+		draftConfig = { ...next, viewType: draftConfig.viewType };
+		isDirty = true;
 	}
 
-	function onConfigChange(next: import('$lib/data/views').ViewConfig): void {
-		setRecordViewConfig(
-			ydoc,
-			block.id,
-			{ ...next, viewType: block.viewConfig?.viewType ?? pickerViewType },
-			CURRENT_USER
-		);
+	function saveView(): void {
+		setRecordViewConfig(ydoc, block.id, draftConfig, CURRENT_USER);
+		isDirty = false;
+	}
+
+	function discardDraft(): void {
+		draftConfig = persistedConfig;
+		isDirty = false;
 	}
 
 	function startChange(): void {
@@ -90,21 +149,52 @@
 				</a>
 				<span class="text-xs text-muted">· {block.viewConfig?.viewType}</span>
 			</div>
-			<button
-				type="button"
-				onclick={startChange}
-				class="rounded px-2 py-0.5 text-xs text-muted hover:text-accent"
-			>
-				Change
-			</button>
+			<div class="flex items-center gap-2">
+				{#if isDirty}
+					<span class="text-xs text-muted italic">Unsaved changes</span>
+					<button
+						type="button"
+						onclick={discardDraft}
+						class="rounded px-2 py-0.5 text-xs text-muted hover:text-fg"
+					>
+						Discard
+					</button>
+					<button
+						type="button"
+						onclick={saveView}
+						class="rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg transition-opacity hover:opacity-90"
+					>
+						Save view
+					</button>
+				{/if}
+				<button
+					type="button"
+					onclick={startChange}
+					class="rounded px-2 py-0.5 text-xs text-muted hover:text-accent"
+				>
+					Change
+				</button>
+			</div>
 		</div>
 
 		{#if block.viewConfig?.viewType === 'table'}
-			<TableCollectionView collectionId={collection!.id} config={config()} {onConfigChange} />
+			<TableCollectionView
+				collectionId={collection!.id}
+				config={draftConfig}
+				onConfigChange={onDraftChange}
+			/>
 		{:else if block.viewConfig?.viewType === 'board'}
-			<BoardCollectionView collectionId={collection!.id} config={config()} {onConfigChange} />
+			<BoardCollectionView
+				collectionId={collection!.id}
+				config={draftConfig}
+				onConfigChange={onDraftChange}
+			/>
 		{:else if block.viewConfig?.viewType === 'calendar'}
-			<CalendarCollectionView collectionId={collection!.id} config={config()} {onConfigChange} />
+			<CalendarCollectionView
+				collectionId={collection!.id}
+				config={draftConfig}
+				onConfigChange={onDraftChange}
+			/>
 		{/if}
 	{:else if isBroken && !changing}
 		<div class="flex items-center justify-between" role="alert">

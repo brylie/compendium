@@ -21,9 +21,10 @@ const actor = { kind: 'human' as const, userId: 'local' };
 
 function renderTable(
 	collectionId: string,
-	initialConfig: import('$lib/data/views').ViewConfig = {}
+	initialConfig: import('$lib/data/views').ViewConfig = {},
+	onConfigChange?: (config: import('$lib/data/views').ViewConfig) => void
 ) {
-	return render(TableCollectionViewHarness, { collectionId, initialConfig });
+	return render(TableCollectionViewHarness, { collectionId, initialConfig, onConfigChange });
 }
 
 describe('TableCollectionView', () => {
@@ -137,7 +138,10 @@ describe('TableCollectionView', () => {
 			within(screen.getByRole('dialog')).getByRole('button', { name: 'Add option' })
 		);
 
-		const select = within(screen.getByRole('table')).getByRole('combobox');
+		// Scoped to <tbody> — the footer's per-column summary picker (a
+		// combobox too) would otherwise make this ambiguous.
+		const tbody = screen.getByRole('table').querySelector('tbody')!;
+		const select = within(tbody).getByRole('combobox');
 		expect(within(select).getByText('Done')).toBeInTheDocument();
 	});
 
@@ -252,9 +256,81 @@ describe('TableCollectionView', () => {
 
 		renderTable('col-1', { sort: { mode: 'property', propertyKey: 'status' } });
 
-		await screen.findByRole('table');
-		const rows = screen.getAllByRole('row').slice(1); // drop the header row
+		const table = await screen.findByRole('table');
+		// Scoped to <tbody> specifically — <thead>'s header row and <tfoot>'s
+		// field-summary row are both role="row" too, and neither is a data row.
+		const tbody = table.querySelector('tbody')!;
+		const rows = within(tbody).getAllByRole('row');
 		const names = rows.map((row) => (within(row).getByRole('textbox') as HTMLInputElement).value);
 		expect(names).toEqual(['Draft it', 'Build it', 'Ship it']);
+	});
+
+	describe('field summaries (issue #32)', () => {
+		it('defaults every column footer picker to "None" with no computed value shown', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'T',
+				schema: [{ key: 'qty', label: 'Qty', type: 'number' }]
+			});
+			createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { qty: { type: 'number', value: 5 } } },
+				actor
+			);
+			renderTable('col-1');
+
+			const picker = await screen.findByLabelText('Qty summary');
+			expect(picker).toHaveValue('none');
+			const table = screen.getByRole('table');
+			expect(within(table.querySelector('tfoot')!).queryByText('5')).not.toBeInTheDocument();
+		});
+
+		it('computes and shows a chosen summary, persisting the choice through onConfigChange', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'T',
+				schema: [{ key: 'qty', label: 'Qty', type: 'number' }]
+			});
+			createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { qty: { type: 'number', value: 4 } } },
+				actor
+			);
+			createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { qty: { type: 'number', value: 6 } } },
+				actor
+			);
+			const onConfigChange = vi.fn();
+			renderTable('col-1', {}, onConfigChange);
+
+			const picker = await screen.findByLabelText('Qty summary');
+			const user = userEvent.setup();
+			await user.selectOptions(picker, 'sum');
+
+			expect(onConfigChange).toHaveBeenLastCalledWith(
+				expect.objectContaining({ summaries: { qty: 'sum' } })
+			);
+			const table = screen.getByRole('table');
+			expect(within(table.querySelector('tfoot')!).getByText('10')).toBeInTheDocument();
+		});
+
+		it('offers only type-appropriate summaries per column', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'T',
+				schema: [
+					{ key: 'name', label: 'Name', type: 'text' },
+					{ key: 'due', label: 'Due', type: 'date' }
+				]
+			});
+			renderTable('col-1');
+
+			const namePicker = await screen.findByLabelText('Name summary');
+			const duePicker = screen.getByLabelText('Due summary');
+			expect(within(namePicker).queryByText('Sum')).not.toBeInTheDocument();
+			expect(within(duePicker).getByText('Earliest')).toBeInTheDocument();
+			expect(within(namePicker).queryByText('Earliest')).not.toBeInTheDocument();
+		});
 	});
 });

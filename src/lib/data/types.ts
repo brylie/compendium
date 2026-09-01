@@ -67,11 +67,29 @@ export interface ViewSort {
 	direction?: SortDirection; // defaults to 'asc'
 }
 
+// Type-appropriate per-column aggregation shown in Table's footer (issue
+// #32) — which summaries are offered for a given property depends on its
+// PropertyType, see summaryOptionsForType in $lib/data/views.
+export type FieldSummaryType =
+	| 'none'
+	| 'count_all'
+	| 'count_values'
+	| 'count_empty'
+	| 'sum'
+	| 'average'
+	| 'min'
+	| 'max'
+	| 'earliest'
+	| 'latest'
+	| 'checked'
+	| 'unchecked';
+
 export interface ViewConfig {
 	filters?: ViewFilter[];
 	sort?: ViewSort;
 	visibleProperties?: string[]; // property keys; undefined = all visible
 	groupBy?: string; // property key driving the layout: select for Board, date for Calendar
+	summaries?: Record<string, FieldSummaryType>; // property key -> footer aggregation (Table only)
 }
 
 // The full persisted configuration of a collection_view block: which
