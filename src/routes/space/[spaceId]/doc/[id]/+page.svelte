@@ -68,6 +68,8 @@
 	let linkSelection: { start: number; end: number } | null = $state(null);
 	let linkUrlInput: HTMLInputElement | undefined = $state();
 	let linkDialog: HTMLDivElement | undefined = $state();
+	let provenanceAnnouncement = $state('');
+	let provenanceAnnouncementTimer: ReturnType<typeof setTimeout> | undefined;
 
 	/**
 	 * Older imported documents may predate per-record attribution. This runtime
@@ -515,6 +517,13 @@
 	function handleBlockInput(blockId: string, editedRecordId = blockId): void {
 		if (!ydoc) return;
 		touchRecordEditor(ydoc, editedRecordId, CURRENT_USER);
+		clearTimeout(provenanceAnnouncementTimer);
+		provenanceAnnouncementTimer = setTimeout(() => {
+			const record = getRecord(ydoc!, editedRecordId);
+			if (record && hasProvenance(record)) {
+				provenanceAnnouncement = `Last edited by ${formatActor(record.lastEditedBy)} at ${formatTimestamp(record.lastEditedAt)}.`;
+			}
+		}, 800);
 		if (slashMenuBlockId !== blockId) return;
 		const ytext = getRecordYText(ydoc, editedRecordId);
 		const text = ytext ? plainText(yTextToRichText(ytext)) : '';
@@ -794,7 +803,7 @@
 									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() => handleFocusBlock(block.id)}
-									onSlashKey={() => openSlashMenu(block.id)}
+									onSlashKey={() => {}}
 									onLinkShortcut={() => openLinkComposer(block.id)}
 								/>
 							{/if}
@@ -871,7 +880,7 @@
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() =>
 										handleFocusBlock(block.id, block.referencedRecordId || block.id)}
-									onSlashKey={() => openSlashMenu(block.id)}
+									onSlashKey={() => {}}
 									onLinkShortcut={() => openLinkComposer(block.id)}
 								/>
 							{:else}
@@ -1015,10 +1024,8 @@
 					 opens the corresponding rows in the shared audit history. -->
 				{#if hasProvenance(provenance)}
 					<a
-						href="{resolve('/audit')}?targetRecordId={encodeURIComponent(provenanceRecordId)}"
+						href="{resolve('/audit')}?targetRecordId={encodeURIComponent(provenance.id)}"
 						class="ml-3 flex-shrink-0 self-center text-[11px] text-muted/70 underline-offset-2 hover:text-accent hover:underline focus-visible:text-accent focus-visible:underline"
-						aria-live="polite"
-						aria-atomic="true"
 						aria-label="Last edited by {formatActor(provenance.lastEditedBy)} at {formatTimestamp(
 							provenance.lastEditedAt
 						)}. Open audit history for this block."
@@ -1026,17 +1033,14 @@
 						{formatActor(provenance.lastEditedBy)} · {formatTimestamp(provenance.lastEditedAt)}
 					</a>
 				{:else}
-					<span
-						class="ml-3 flex-shrink-0 self-center text-[11px] text-muted/70"
-						aria-live="polite"
-						aria-atomic="true"
-					>
+					<span class="ml-3 flex-shrink-0 self-center text-[11px] text-muted/70">
 						Editing history unavailable
 					</span>
 				{/if}
 			</div>
 		{/each}
 	</div>
+	<span class="sr-only" aria-live="polite" aria-atomic="true">{provenanceAnnouncement}</span>
 
 	<!-- Add Block Button -->
 	<div class="mt-6 flex items-center gap-2">
