@@ -79,7 +79,11 @@ describe('SpaceSwitcher', () => {
 
 	it('renders a compact icon-only trigger when collapsed', () => {
 		render(SpaceSwitcher, { spaces: SPACES, activeSpaceId: 'space-a', collapsed: true });
-		const trigger = screen.getByRole('button', { name: 'Switch space' });
+		// Accessible name must include the active Space, not just the generic
+		// "Switch space" label — aria-label wins over `title` in accessible-name
+		// computation, so a screen reader would otherwise never announce which
+		// Space is currently active on this icon-only trigger.
+		const trigger = screen.getByRole('button', { name: 'Switch space (current: Default)' });
 		expect(trigger).toHaveAttribute('title', 'Default');
 		expect(trigger).not.toHaveTextContent('Default');
 	});

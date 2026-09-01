@@ -27,6 +27,7 @@ jobs:
 
       - name: Unit tests with coverage
         run: |
+          set -o pipefail
           npm run test:coverage 2>&1 | tee coverage-run.log
           {
             echo '### Coverage'
