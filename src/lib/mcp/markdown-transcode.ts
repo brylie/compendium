@@ -15,16 +15,25 @@ import type { RichText, TextMarks } from '$lib/data/types';
 // `record:` scheme, so the rich-text model doesn't need a dedicated mark
 // type for it.
 
-// The wiki-link body is bounded to 500 chars (far beyond any real
-// Document/Collection title) rather than left unbounded ([^\]]+): an
+// The wiki-link body is bounded rather than left unbounded ([^\]]+): an
 // unbounded body means every unclosed "[[" in the input — e.g. pasted text
 // containing many "[[" sequences with no matching "]]" — forces the engine
 // to scan to the end of the string and backtrack one character at a time
 // before giving up, for every single one of those starting positions. That's
 // quadratic in input length, not linear, on content this function has to
 // run over untrusted document/MCP-write text. Bounding the body caps the
-// worst case per position to a constant instead.
-const SPECIAL_TOKEN = /(@[\w-]+)|(\[\[[^\]]{1,500}\]\])/g;
+// worst case per position to a constant instead. 2000 chars, not the
+// smaller bound this started at: there's no enforced Document/Collection
+// title length limit anywhere in this codebase (nothing validates
+// createDocument/createCollection/updateDocumentTitle/updateCollectionTitle
+// input length), so a tighter bound risked a real, if rare, title silently
+// failing to round-trip as a live wiki-link — this is generous enough that
+// no realistic title hits it, while still keeping the adversarial-input
+// cost bounded (confirmed: ~500ms, not 14s+, against a 100k-char
+// pathological input of unclosed "[[" sequences). A title actually longer
+// than 2000 chars remains a known, deliberately-unhandled edge case, not a
+// silent one.
+const SPECIAL_TOKEN = /(@[\w-]+)|(\[\[[^\]]{1,2000}\]\])/g;
 
 // Rendered in place of the target's title when a wiki-link's target ID no
 // longer resolves to any Document/Collection (see docs/specifications/
