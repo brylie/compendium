@@ -170,7 +170,13 @@ export function createDocument(
 	}
 ): DocumentMeta {
 	const id = input.id ?? nanoid();
-	const parentDocumentId = input.parentDocumentId ?? undefined;
+	// `||`, not `??`: a caller (e.g. an MCP client's `parentDocumentId:
+	// z.string().optional()`) can pass `''` instead of omitting the field —
+	// `??` would leave it as a truthy-but-invalid id, computing sibling
+	// order among documents with parentDocumentId === '' (none) instead of
+	// among the real root siblings.
+	// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+	const parentDocumentId = input.parentDocumentId || undefined;
 
 	return doc.transact(() => {
 		const order =
@@ -223,12 +229,17 @@ export function updateDocumentParent(
 	if (!ymeta) throw new NotFoundError(`Document ${id} not found`);
 
 	doc.transact(() => {
+		// Same `||` reasoning as createDocument above: a caller-supplied `''`
+		// must match real root siblings (parentDocumentId === undefined), not
+		// filter down to nothing.
+		// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+		const normalizedParentDocumentId = parentDocumentId || undefined;
 		const resolvedOrder =
 			order ??
 			computeSiblingOrder(
 				listDocuments(doc)
 					.filter((d) => d.id !== id)
-					.filter((d) => d.parentDocumentId === (parentDocumentId ?? undefined)),
+					.filter((d) => d.parentDocumentId === normalizedParentDocumentId),
 				afterDocumentId
 			);
 

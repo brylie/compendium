@@ -1207,8 +1207,7 @@
 									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 									onEnter={() => addBlockAfter(block.id)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
-									onFocusBlock={() =>
-										handleFocusBlock(block.id, block.referencedRecordId ?? block.id)}
+									onFocusBlock={() => handleFocusBlock(block.id, provenanceRecordId)}
 									onSlashKey={() => {}}
 									onLinkShortcut={() => openLinkComposer(block.id)}
 									isFirstBlock={index === 0}
