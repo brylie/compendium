@@ -82,6 +82,7 @@ These describe the _pattern_, not a copy-paste implementation — translate each
 - **Callout.** `bg-surface`, subtle border, rounded (10px), icon in `accent` + body text. One icon style throughout (see §4) — don't mix callout "severity" icons (info/warning/etc.) without deciding that's a real need first.
 - **Slash-command menu.** Floating panel, `bg-bg` (not `surface`, so it reads as "above" the page) with a soft shadow, icon+label rows, active/hovered row gets a `surface` background wash.
 - **To-do checkbox.** Rounded-square box, `border` outline; checked state fills `accent` with a white check icon (`accent-fg`), and the label gets `muted` + strikethrough.
+- **Block move handle.** A `grip` icon button in every block's gutter, `text-muted`, hidden (`opacity-0`) until the block row is hovered or the handle itself receives keyboard focus (`group-hover`/`focus-visible`), so it never competes visually with the text. Dragging it (pointer events, not native HTML5 drag-and-drop — see `src/routes/space/[spaceId]/doc/[id]/+page.svelte`) shows a thin `accent`-colored `.drop-indicator` line between the two rows the block would land between; releasing over it reorders, Escape cancels. Focused via Tab, the same handle is operable with `ArrowUp`/`ArrowDown` (swap with the previous/next sibling) and `Home`/`End` (move to the very start/end); each move re-announces the block's new 1-based position via a polite live region, and focus stays on the handle so repeated keystrokes keep working.
 
 ## 4. Icons
 

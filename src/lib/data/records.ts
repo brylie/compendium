@@ -1098,8 +1098,13 @@ export function deleteRecord(doc: Y.Doc, id: string): void {
 		const kind = parentKindOf(doc, parentId);
 		if (kind) {
 			const siblingIds = parentRecordIds(doc, parentId, kind);
-			const idx = siblingIds.toArray().indexOf(id);
-			if (idx !== -1) siblingIds.delete(idx, 1);
+			// Removes every occurrence, not just the first: a concurrent
+			// reorderRecord move of this same id (see below) can leave more
+			// than one entry for it in the array, and deleting the record must
+			// not leave an orphaned duplicate behind.
+			for (let i = siblingIds.length - 1; i >= 0; i--) {
+				if (siblingIds.get(i) === id) siblingIds.delete(i, 1);
+			}
 		}
 		recordsMap(doc).delete(id);
 	});
@@ -1110,7 +1115,78 @@ export function listRecordsForParent(doc: Y.Doc, parentId: string): WorkspaceRec
 	const kind = parentKindOf(doc, parentId);
 	if (!kind) return [];
 	const ids = parentRecordIds(doc, parentId, kind).toArray();
-	return ids.map((id) => getRecord(doc, id)).filter((r): r is WorkspaceRecord => r !== undefined);
+	// Deduped by id, keeping the first occurrence: a concurrent reorderRecord
+	// move of the same block by two actors can each independently insert
+	// their own array entry for it (Y.Array has no atomic "move" primitive —
+	// see reorderRecord's doc comment), which would otherwise render the same
+	// block twice until the duplicate is cleaned up by a later delete.
+	const seen = new Set<string>();
+	const records: WorkspaceRecord[] = [];
+	for (const id of ids) {
+		if (seen.has(id)) continue;
+		seen.add(id);
+		const record = getRecord(doc, id);
+		if (record) records.push(record);
+	}
+	return records;
+}
+
+/**
+ * Repositions a Document block among its siblings by moving its id within
+ * the parent's `recordIds` Y.Array (delete + insert in one transaction) —
+ * the same structural mutation createRecord/deleteRecord already make, so
+ * the server's generic audit observer attributes it to the *document*
+ * (`update_document`), not the moved record, per
+ * docs/specifications/audit-coverage.md §2 — nothing on the record's own
+ * Y.Map (content, blockType, provenance) is touched. `afterRecordId`
+ * omitted moves the block to the very start; passing the last sibling's id
+ * moves it to the end.
+ *
+ * Two actors concurrently moving the *same* block can each independently
+ * insert their own new array entry for its id, since Y.Array has no atomic
+ * "move" primitive — delete-then-insert is the standard pattern for
+ * reordering a Yjs list, and a concurrent delete of the same (already
+ * deleted) entry is a safe no-op, but concurrent inserts are two distinct
+ * list items even though they carry the same string value. That can't lose
+ * either actor's edit (this never touches record content) and can't
+ * duplicate the block on screen (listRecordsForParent dedupes by id above),
+ * but it can leave a harmless extra array entry until the record is
+ * eventually deleted (deleteRecord above removes every occurrence).
+ */
+export function reorderRecord(doc: Y.Doc, id: string, afterRecordId?: string): void {
+	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
+	if (afterRecordId === id) {
+		throw new ValidationError('Cannot move a block after itself');
+	}
+	const parentId = yrecord.get('parentId') as string;
+	const kind = parentKindOf(doc, parentId);
+	if (kind !== 'document') {
+		throw new ValidationError('reorderRecord only supports blocks within a Document');
+	}
+
+	doc.transact(() => {
+		const siblingIds = parentRecordIds(doc, parentId, kind);
+		const ids = siblingIds.toArray();
+		if (ids.indexOf(id) === -1) throw new NotFoundError(`Record ${id} not found among siblings`);
+
+		const remaining = ids.filter((siblingId) => siblingId !== id);
+		const insertAt = afterRecordId ? remaining.indexOf(afterRecordId) + 1 : 0;
+		if (afterRecordId && insertAt === 0) {
+			throw new NotFoundError(`Record ${afterRecordId} not found among siblings`);
+		}
+
+		// Removes every occurrence of `id`, not just the first, so the live
+		// array matches `remaining` (insertAt's basis) exactly before the
+		// insert below — a stale duplicate left by an earlier concurrent move
+		// (see this function's doc comment) would otherwise still sit ahead of
+		// the freshly-inserted entry, and listRecordsForParent's keep-first
+		// dedupe would then make this move produce no visible effect at all.
+		for (let i = siblingIds.length - 1; i >= 0; i--) {
+			if (siblingIds.get(i) === id) siblingIds.delete(i, 1);
+		}
+		siblingIds.insert(insertAt, [id]);
+	});
 }
 
 // ---------------------------------------------------------------------------

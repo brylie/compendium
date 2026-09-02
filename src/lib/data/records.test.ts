@@ -27,6 +27,7 @@ import {
 	moveSelectOption,
 	NotFoundError,
 	previewCollectionPropertyTypeChange,
+	reorderRecord,
 	resolvePrimaryField,
 	setBlockType,
 	setPrimaryField,
@@ -1131,6 +1132,155 @@ describe('records: creation ordering, mutation, and not-found edge cases', () =>
 	it('listRecordsForParent returns an empty list for an unknown parent', () => {
 		const doc = new Y.Doc();
 		expect(listRecordsForParent(doc, 'missing')).toEqual([]);
+	});
+});
+
+describe('reorderRecord: block drag-and-drop repositioning (#40)', () => {
+	function setup() {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const a = createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+		const b = createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+		const c = createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+		const d = createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+		return { doc, document, a, b, c, d };
+	}
+
+	function ids(doc: Y.Doc, parentId: string): string[] {
+		return listRecordsForParent(doc, parentId).map((r) => r.id);
+	}
+
+	it('moves a block to the very start when afterRecordId is omitted', () => {
+		const { doc, document, a, b, c, d } = setup();
+		reorderRecord(doc, d.id);
+		expect(ids(doc, document.id)).toEqual([d.id, a.id, b.id, c.id]);
+	});
+
+	it('moves a block to the middle via afterRecordId', () => {
+		const { doc, document, a, b, c, d } = setup();
+		reorderRecord(doc, a.id, b.id);
+		expect(ids(doc, document.id)).toEqual([b.id, a.id, c.id, d.id]);
+	});
+
+	it('moves a block to the very end via the last sibling as afterRecordId', () => {
+		const { doc, document, a, b, c, d } = setup();
+		reorderRecord(doc, a.id, d.id);
+		expect(ids(doc, document.id)).toEqual([b.id, c.id, d.id, a.id]);
+	});
+
+	it('changes only position — content, blockType, and provenance are untouched', () => {
+		const { doc, a, b } = setup();
+		const ytext = getRecordYText(doc, a.id)!;
+		doc.transact(() => ytext.insert(0, 'hello'));
+		const before = getRecord(doc, a.id)!;
+
+		reorderRecord(doc, a.id, b.id);
+
+		const after = getRecord(doc, a.id)!;
+		expect(after.blockType).toBe(before.blockType);
+		expect(yTextToRichText(getRecordYText(doc, a.id)!)).toEqual(yTextToRichText(ytext));
+		expect(after.createdBy).toEqual(before.createdBy);
+		expect(after.lastEditedBy).toEqual(before.lastEditedBy);
+		expect(after.lastEditedAt).toEqual(before.lastEditedAt);
+	});
+
+	it('throws NotFoundError for an unknown record id', () => {
+		const { doc } = setup();
+		expect(() => reorderRecord(doc, 'missing')).toThrow(NotFoundError);
+	});
+
+	it('throws NotFoundError when afterRecordId is not an existing sibling', () => {
+		const { doc, a } = setup();
+		expect(() => reorderRecord(doc, a.id, 'missing')).toThrow(NotFoundError);
+	});
+
+	it('throws ValidationError when afterRecordId is the record itself', () => {
+		const { doc, a } = setup();
+		expect(() => reorderRecord(doc, a.id, a.id)).toThrow(ValidationError);
+	});
+
+	it('throws ValidationError for a Collection row (only Document blocks are reorderable)', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, { title: 'Tasks', schema: [] });
+		const row = createRecord(doc, { parentId: collection.id, properties: {} }, human);
+		expect(() => reorderRecord(doc, row.id)).toThrow(ValidationError);
+	});
+
+	it('deleteRecord removes every occurrence of an id, cleaning up a leftover duplicate from a concurrent move', () => {
+		const { doc, document, a, b, c, d } = setup();
+		// Simulate the leftover a concurrent reorderRecord move of the same
+		// block by two actors can produce (see reorderRecord's doc comment):
+		// two entries for `a` in the same recordIds array.
+		const ymeta = doc.getMap('documents').get(document.id) as Y.Map<unknown>;
+		const recordIds = ymeta.get('recordIds') as Y.Array<string>;
+		doc.transact(() => recordIds.push([a.id]));
+		expect(recordIds.toArray().filter((id) => id === a.id)).toHaveLength(2);
+
+		deleteRecord(doc, a.id);
+
+		expect(recordIds.toArray()).not.toContain(a.id);
+		expect(ids(doc, document.id)).toEqual([b.id, c.id, d.id]);
+	});
+
+	it('reorderRecord cleans up a pre-existing duplicate and still produces a visible move (not just deleteRecord)', () => {
+		const { doc, document, a, b, c, d } = setup();
+		// Same leftover-duplicate state as the concurrent-move scenario above,
+		// but this time a *second* reorderRecord call comes in before anything
+		// cleans it up — the array still holds two entries for `a` when this
+		// move is requested.
+		const ymeta = doc.getMap('documents').get(document.id) as Y.Map<unknown>;
+		const recordIds = ymeta.get('recordIds') as Y.Array<string>;
+		doc.transact(() => recordIds.insert(2, [a.id])); // ids: a, b, a, c, d
+		expect(recordIds.toArray().filter((id) => id === a.id)).toHaveLength(2);
+
+		reorderRecord(doc, a.id, d.id); // move `a` to the very end
+
+		expect(recordIds.toArray().filter((id) => id === a.id)).toHaveLength(1);
+		expect(ids(doc, document.id)).toEqual([b.id, c.id, d.id, a.id]);
+	});
+
+	it('listRecordsForParent dedupes a duplicate id, keeping the first occurrence', () => {
+		const { doc, document, a, b } = setup();
+		const ymeta = doc.getMap('documents').get(document.id) as Y.Map<unknown>;
+		const recordIds = ymeta.get('recordIds') as Y.Array<string>;
+		doc.transact(() => recordIds.insert(1, [a.id])); // duplicate `a` right after its own slot
+
+		const result = ids(doc, document.id);
+		expect(result.filter((id) => id === a.id)).toHaveLength(1);
+		expect(result.indexOf(a.id)).toBeLessThan(result.indexOf(b.id));
+	});
+
+	it('two replicas concurrently moving the same block converge to a single, deduped position with no content loss', () => {
+		const { doc: docA, document, a, b, c, d } = setup();
+		const docB = new Y.Doc();
+		Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+
+		const ytextOnA = getRecordYText(docA, a.id)!;
+		docA.transact(() => ytextOnA.insert(0, 'from A'));
+
+		// Both replicas independently move the same block (`a`) to a different
+		// position before either has seen the other's change.
+		reorderRecord(docA, a.id, b.id); // A wants: b, a, c, d
+		reorderRecord(docB, a.id, c.id); // B wants: b, c, a, d
+
+		const updateFromA = Y.encodeStateAsUpdate(docA);
+		const updateFromB = Y.encodeStateAsUpdate(docB);
+		Y.applyUpdate(docB, updateFromA);
+		Y.applyUpdate(docA, updateFromB);
+
+		const resultA = ids(docA, document.id);
+		const resultB = ids(docB, document.id);
+		// Deterministic convergence: whatever position wins, both replicas agree.
+		expect(resultA).toEqual(resultB);
+		// No duplication and no lost siblings.
+		expect(resultA.filter((id) => id === a.id)).toHaveLength(1);
+		expect(new Set(resultA)).toEqual(new Set([a.id, b.id, c.id, d.id]));
+		// Neither actor's content edit was lost.
+		expect(
+			yTextToRichText(getRecordYText(docA, a.id)!)
+				.runs.map((r) => r.text)
+				.join('')
+		).toBe('from A');
 	});
 });
 
