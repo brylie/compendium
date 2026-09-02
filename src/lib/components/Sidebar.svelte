@@ -57,7 +57,7 @@
 
 	let documentTree = $derived(buildDocumentTree(documents));
 	let currentPath = $derived(page.url.pathname);
-	let previousPath = $state('');
+	let previousPath = $state<string | null>(null);
 	let currentDocId = $derived(
 		page.params.id && currentPath.includes('/doc/') ? page.params.id : null
 	);
@@ -67,13 +67,14 @@
 	let expanded = $derived(!collapsed || isMobile);
 
 	onMount(() => {
-		const mediaQuery = window.matchMedia('(max-width: 767px)');
+		const mediaQuery =
+			typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 767px)') : null;
 		const updateViewport = () => {
-			isMobile = mediaQuery.matches;
+			isMobile = mediaQuery?.matches ?? false;
 			if (!isMobile) mobileOpen = false;
 		};
 		updateViewport();
-		mediaQuery.addEventListener('change', updateViewport);
+		mediaQuery?.addEventListener('change', updateViewport);
 
 		try {
 			collapsed = localStorage.getItem('sidebar_collapsed') === 'true';
@@ -82,14 +83,13 @@
 			// ignore localStorage errors in non-browser or sandboxed environments
 		}
 
-		return () => mediaQuery.removeEventListener('change', updateViewport);
+		return () => mediaQuery?.removeEventListener('change', updateViewport);
 	});
 
 	$effect(() => {
-		if (currentPath !== previousPath) {
-			mobileOpen = false;
-			previousPath = currentPath;
-		}
+		const routeChanged = previousPath !== null && currentPath !== previousPath;
+		previousPath = currentPath;
+		if (routeChanged && mobileOpen) void closeMobileNavigation();
 	});
 
 	function toggleCollapse(): void {
@@ -101,18 +101,21 @@
 		}
 	}
 
+	/** Opens the mobile navigation drawer and moves focus into it. */
 	async function openMobileNavigation(): Promise<void> {
 		mobileOpen = true;
 		await tick();
 		sidebarElement.querySelector<HTMLElement>('a, button')?.focus();
 	}
 
+	/** Closes the mobile navigation drawer and restores focus to its trigger. */
 	async function closeMobileNavigation(): Promise<void> {
 		mobileOpen = false;
 		await tick();
 		menuButton?.focus();
 	}
 
+	/** Handles drawer dismissal and keeps keyboard focus within the mobile drawer. */
 	function handleSidebarKeydown(event: KeyboardEvent): void {
 		if (!isMobile || !mobileOpen) return;
 		if (event.key === 'Escape') {
