@@ -5,6 +5,7 @@
 
 	interface Command {
 		blockType: BlockType;
+		category: CommandCategory;
 		label: string;
 		description: string;
 		icon:
@@ -25,128 +26,165 @@
 			| 'sync'
 			| 'link'
 			| 'table';
-		keywords: string;
+		aliases: string[];
 	}
+
+	type CommandCategory = 'Writing' | 'Structure' | 'Media' | 'Data' | 'Reuse';
+
+	const CATEGORY_ORDER: CommandCategory[] = ['Writing', 'Structure', 'Media', 'Data', 'Reuse'];
 
 	const COMMANDS: Command[] = [
 		{
 			blockType: 'paragraph',
+			category: 'Writing',
 			label: 'Text',
 			description: 'Just start writing with plain text.',
 			icon: 'document',
-			keywords: 'paragraph text plain'
+			aliases: ['paragraph', 'text', 'plain', 'p']
 		},
 		{
 			blockType: 'heading_1',
+			category: 'Writing',
 			label: 'Heading 1',
 			description: 'Large section heading.',
 			icon: 'heading-1',
-			keywords: 'heading 1 title h1 large'
+			aliases: ['heading 1', 'title', 'h1', 'large']
 		},
 		{
 			blockType: 'heading_2',
+			category: 'Writing',
 			label: 'Heading 2',
 			description: 'Medium section heading.',
 			icon: 'heading-2',
-			keywords: 'heading 2 section h2 medium'
+			aliases: ['heading 2', 'section', 'h2', 'medium']
 		},
 		{
 			blockType: 'heading_3',
+			category: 'Writing',
 			label: 'Heading 3',
 			description: 'Small section heading.',
 			icon: 'heading-3',
-			keywords: 'heading 3 subhead h3 small'
+			aliases: ['heading 3', 'subhead', 'h3', 'small']
 		},
 		{
 			blockType: 'heading_4',
+			category: 'Writing',
 			label: 'Heading 4',
 			description: 'Sub-heading.',
 			icon: 'heading-4',
-			keywords: 'heading 4 h4'
+			aliases: ['heading 4', 'h4', 'subheading']
 		},
 		{
 			blockType: 'bulleted_list_item',
+			category: 'Writing',
 			label: 'Bulleted list',
 			description: 'Create a simple bulleted list.',
 			icon: 'list-bullet',
-			keywords: 'bulleted list bullet item ul'
+			aliases: ['bulleted list', 'bullet', 'item', 'ul', 'unordered list']
 		},
 		{
 			blockType: 'numbered_list_item',
+			category: 'Writing',
 			label: 'Numbered list',
 			description: 'Create an ordered numbered list.',
 			icon: 'list-number',
-			keywords: 'numbered list number ordered item ol'
+			aliases: ['numbered list', 'number', 'ordered list', 'item', 'ol']
 		},
 		{
 			blockType: 'to_do',
+			category: 'Writing',
 			label: 'To-do list',
 			description: 'Track tasks with a to-do checkbox.',
 			icon: 'checkbox',
-			keywords: 'to do todo task check checkbox checkbox-checked'
+			aliases: ['to do', 'todo', 'task', 'check', 'checkbox', 'checklist']
 		},
 		{
 			blockType: 'callout',
+			category: 'Writing',
 			label: 'Callout',
 			description: 'Highlight key notes and warnings.',
 			icon: 'callout',
-			keywords: 'callout note alert warning info tip box'
+			aliases: ['callout', 'note', 'alert', 'warning', 'info', 'tip', 'box']
 		},
 		{
 			blockType: 'quote',
+			category: 'Writing',
 			label: 'Quote',
 			description: 'Capture a quotation.',
 			icon: 'quote',
-			keywords: 'quote blockquote citation'
+			aliases: ['quote', 'blockquote', 'citation']
 		},
 		{
 			blockType: 'toggle',
+			category: 'Structure',
 			label: 'Toggle list',
 			description: 'Hide or show content inside.',
 			icon: 'toggle',
-			keywords: 'toggle collapse expand details'
+			aliases: ['toggle', 'collapsible', 'collapse', 'expand', 'details']
 		},
 		{
 			blockType: 'code',
+			category: 'Media',
 			label: 'Code',
 			description: 'Capture a code snippet with monospace font.',
 			icon: 'code',
-			keywords: 'code snippet pre snippet program'
+			aliases: ['code', 'snippet', 'pre', 'program']
 		},
 		{
 			blockType: 'divider',
+			category: 'Structure',
 			label: 'Divider',
 			description: 'Visually divide sections with a line.',
 			icon: 'divider',
-			keywords: 'divider hr line rule separate'
+			aliases: ['divider', 'hr', 'line', 'rule', 'separator']
 		},
 		{
 			blockType: 'table_of_contents',
+			category: 'Structure',
 			label: 'Table of contents',
 			description: 'Live outline of headings in this document.',
 			icon: 'toc',
-			keywords: 'table of contents toc outline summary headings'
+			aliases: ['table of contents', 'toc', 'outline', 'summary', 'headings']
 		},
 		{
 			blockType: 'synced_block',
+			category: 'Reuse',
 			label: 'Synced block',
 			description: 'Reference content from another block.',
 			icon: 'sync',
-			keywords: 'synced block sync reference mirror link'
+			aliases: ['synced block', 'sync', 'reference', 'mirror', 'linked block']
 		},
 		{
 			blockType: 'page_link',
+			category: 'Reuse',
 			label: 'Page link',
 			description: 'Link to another document.',
 			icon: 'link',
-			keywords: 'page link document subpage wiki mention reference'
+			aliases: ['page link', 'document', 'subpage', 'wiki', 'mention', 'reference']
 		},
 		{
 			blockType: 'collection_view',
+			category: 'Data',
 			label: 'Collection view',
 			description: 'Embed a Table, Board, or Calendar view of a collection.',
 			icon: 'table',
-			keywords: 'collection view table board kanban calendar database embed'
+			aliases: ['collection view', 'table view', 'board', 'kanban', 'calendar', 'database']
+		},
+		{
+			blockType: 'table',
+			category: 'Data',
+			label: 'Table',
+			description: 'Add a table for structured information.',
+			icon: 'table',
+			aliases: ['table', 'grid', 'rows', 'columns']
+		},
+		{
+			blockType: 'embed',
+			category: 'Media',
+			label: 'Embed',
+			description: 'Embed content from another source.',
+			icon: 'link',
+			aliases: ['embed', 'media', 'video', 'image', 'url']
 		}
 	];
 
@@ -166,14 +204,23 @@
 		COMMANDS.filter((c) => {
 			const q = query.toLowerCase().trim();
 			if (!q) return true;
-			return c.keywords.includes(q) || c.label.toLowerCase().includes(q);
+			return c.label.toLowerCase().includes(q) || c.aliases.some((alias) => alias.includes(q));
 		})
 	);
 
+	let categorized = $derived(
+		CATEGORY_ORDER.map((category) => ({
+			category,
+			commands: filtered.filter((command) => command.category === category)
+		})).filter((group) => group.commands.length > 0)
+	);
+
+	let visibleCommands = $derived(categorized.flatMap((group) => group.commands));
+
 	$effect(() => {
 		// Reset selection when filtered items change
-		if (selectedIndex >= filtered.length) {
-			selectedIndex = Math.max(0, filtered.length - 1);
+		if (selectedIndex >= visibleCommands.length) {
+			selectedIndex = Math.max(0, visibleCommands.length - 1);
 		}
 	});
 
@@ -181,16 +228,17 @@
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
 			e.stopPropagation();
-			selectedIndex = (selectedIndex + 1) % Math.max(1, filtered.length);
+			selectedIndex = (selectedIndex + 1) % Math.max(1, visibleCommands.length);
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
 			e.stopPropagation();
-			selectedIndex = (selectedIndex - 1 + filtered.length) % Math.max(1, filtered.length);
+			selectedIndex =
+				(selectedIndex - 1 + visibleCommands.length) % Math.max(1, visibleCommands.length);
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
 			e.stopPropagation();
-			if (filtered[selectedIndex]) {
-				onSelect(filtered[selectedIndex].blockType);
+			if (visibleCommands[selectedIndex]) {
+				onSelect(visibleCommands[selectedIndex].blockType);
 			}
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
@@ -216,34 +264,36 @@
 	role="listbox"
 	aria-label="Slash commands"
 >
-	<div class="px-2 py-1 text-[11px] font-medium tracking-wider text-muted uppercase">
-		Basic blocks
-	</div>
-
-	{#each filtered as command, index (command.blockType)}
-		{@const isActive = index === selectedIndex}
-		<button
-			type="button"
-			role="option"
-			aria-selected={isActive}
-			onclick={() => onSelect(command.blockType)}
-			onmouseenter={() => (selectedIndex = index)}
-			class="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors"
-			class:bg-surface={isActive}
-			class:text-accent={isActive}
-			class:text-fg={!isActive}
-		>
-			<div
-				class="flex h-6 w-6 items-center justify-center rounded border border-border bg-surface text-muted"
+	{#each categorized as group (group.category)}
+		<div class="px-2 pt-2 pb-1 text-[11px] font-medium tracking-wider text-muted uppercase">
+			{group.category}
+		</div>
+		{#each group.commands as command (command.blockType)}
+			{@const index = visibleCommands.indexOf(command)}
+			{@const isActive = index === selectedIndex}
+			<button
+				type="button"
+				role="option"
+				aria-selected={isActive}
+				onclick={() => onSelect(command.blockType)}
+				onmouseenter={() => (selectedIndex = index)}
+				class="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors"
+				class:bg-surface={isActive}
 				class:text-accent={isActive}
+				class:text-fg={!isActive}
 			>
-				<Icon name={command.icon} size={14} />
-			</div>
-			<div class="min-w-0 flex-1">
-				<div class="leading-none font-medium">{command.label}</div>
-				<div class="mt-0.5 truncate text-xs text-muted">{command.description}</div>
-			</div>
-		</button>
+				<div
+					class="flex h-6 w-6 items-center justify-center rounded border border-border bg-surface text-muted"
+					class:text-accent={isActive}
+				>
+					<Icon name={command.icon} size={14} />
+				</div>
+				<div class="min-w-0 flex-1">
+					<div class="leading-none font-medium">{command.label}</div>
+					<div class="mt-0.5 truncate text-xs text-muted">{command.description}</div>
+				</div>
+			</button>
+		{/each}
 	{:else}
 		<div class="px-3 py-2 text-xs text-muted italic">No matching commands</div>
 	{/each}

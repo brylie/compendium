@@ -96,13 +96,19 @@ A held block (another actor's placeholder — `collaboration.md`) has no mounted
 
 New control categories require an explicit interaction contract before implementation (for example, confirmation, audit attribution, and permissions for an agent-triggered action). They should not be smuggled into a text-format or block-insert registration merely to reuse the UI.
 
-## 7. Relationship to slash commands and collaboration
+## 7. Slash-command menu
+
+Slash commands remain the keyboard-first block conversion/insertion flow. The menu is organized into **Writing**, **Structure**, **Media**, **Data**, and **Reuse** sections rather than a single flat list. Each supported command belongs to exactly one section, has a short one-line description, and declares searchable aliases alongside its label (for example, `toggle`, `collapsible`, and `details` all select Toggle list). Filtering searches both labels and aliases, shows only sections that contain matches, and preserves the rendered category order for arrow-key navigation.
+
+The slash-menu catalog covers every currently supported `BlockType`; adding a block requires its category, aliases, and description in addition to the block-capability contract's icon and label. This keeps the slash menu and persistent toolbar aligned as the block vocabulary expands.
+
+## 8. Relationship to slash commands and collaboration
 
 Slash commands remain keyboard-first block conversion/insertion. The toolbar is the persistent, discoverable alternative; neither replaces the other. Both create the same block records and must expose the same supported block vocabulary.
 
 The toolbar does not alter holds, presence, permissions, or attribution. Focusing a block continues to claim the existing human-presence hold, and a remote agent edit continues to be rendered through the same Yjs observer path. This keeps native editing and agent-driven editing on one synchronization model, as required by the PRD.
 
-## 8. Verification contract
+## 9. Verification contract
 
 - A user can apply every supported formatting mark from the toolbar to a selection without literal markup appearing in the editor.
 - The active formatting state follows changes to the current selection/caret.
@@ -116,4 +122,4 @@ The toolbar does not alter holds, presence, permissions, or attribution. Focusin
 - A text-bearing insert control converts the active block in place (text and marks preserved, only `blockType` changes) instead of inserting a new block, but only when the active block is itself text-bearing; a structural insert control, a structural active block (e.g. a synced block), or no active block still inserts; a control matching the block's own current type toggles it to `paragraph`.
 - Enter mid-text splits the block at the caret: text before it stays, text after it (marks intact) moves into a new block — focused, except at caret offset 0, where the empty block stays focused instead (§5.2). This applies to every text-bearing block type, not only paragraphs/headings/lists.
 - Backspace at the start of a non-empty block joins its text onto the end of the previous block (marks from both sides intact, caret at the join point), not just when the current block is empty.
-- [`editing-conventions.svelte.test.ts`](../../src/routes/doc/[id]/editing-conventions.svelte.test.ts) is the dedicated acceptance suite for every rule in §5–5.3 — Enter, Backspace, and toolbar conversion — organized so each behavior is a named, independently-readable test rather than incidental coverage. Component tests elsewhere cover control rendering/dispatch, selected-mark state, tooltip presence, and layout (no wrap; overflow controls move to the dropdown, are all listed there, and are insertable from it). The full repository lint, Svelte check, and production build remain required before merge.
+- [`editing-conventions.svelte.test.ts`](../../src/routes/space/[spaceId]/doc/[id]/editing-conventions.svelte.test.ts) is the dedicated acceptance suite for every rule in §5–5.3 — Enter, Backspace, and toolbar conversion — organized so each behavior is a named, independently-readable test rather than incidental coverage. Component tests elsewhere cover control rendering/dispatch, selected-mark state, tooltip presence, and layout (no wrap; overflow controls move to the dropdown, are all listed there, and are insertable from it). The full repository lint, Svelte check, and production build remain required before merge.
