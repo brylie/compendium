@@ -75,6 +75,7 @@ function searchUncatalogedDocuments(
 	caller: CallerIdentity,
 	doc: Y.Doc,
 	spaceId: string | undefined,
+	defaultSpaceId: string,
 	catalogDocumentIds: Set<string>,
 	needle: string,
 	results: SearchHit[]
@@ -82,7 +83,11 @@ function searchUncatalogedDocuments(
 	if (spaceId !== undefined) return;
 	for (const document of crdtListDocuments(doc)) {
 		if (catalogDocumentIds.has(document.id)) continue;
-		if (isAccessToken(caller) && !tokenAllowsParent(caller, document.id)) continue;
+		// Uncataloged content belongs to the default Space (no locator row to
+		// resolve one from) — passed explicitly so a token whose only grant is
+		// a default-Space grant still matches here, not just one with this
+		// exact document id allowlisted.
+		if (isAccessToken(caller) && !tokenAllowsParent(caller, document.id, defaultSpaceId)) continue;
 		searchDocumentRecords(doc, document.id, needle, results);
 	}
 }
@@ -142,6 +147,7 @@ function searchUncatalogedCollections(
 	caller: CallerIdentity,
 	doc: Y.Doc,
 	spaceId: string | undefined,
+	defaultSpaceId: string,
 	catalogCollectionIds: Set<string>,
 	needle: string,
 	results: SearchHit[]
@@ -149,7 +155,10 @@ function searchUncatalogedCollections(
 	if (spaceId !== undefined) return;
 	for (const collection of listCollections(doc)) {
 		if (catalogCollectionIds.has(collection.id)) continue;
-		if (isAccessToken(caller) && !tokenAllowsParent(caller, collection.id)) continue;
+		// Uncataloged content belongs to the default Space — see
+		// searchUncatalogedDocuments' identical comment.
+		if (isAccessToken(caller) && !tokenAllowsParent(caller, collection.id, defaultSpaceId))
+			continue;
 		searchCollectionRows(doc, collection.id, needle, results);
 	}
 }
@@ -165,7 +174,7 @@ export function searchWorkspace(
 	query: string,
 	spaceId?: string
 ): SearchHit[] {
-	const { doc, workspaceId } = resolveWorkspaceContext();
+	const { doc, workspaceId, defaultSpaceId } = resolveWorkspaceContext();
 	const actor = actorForCaller(caller);
 	const needle = query.toLowerCase();
 	const results: SearchHit[] = [];
@@ -178,7 +187,15 @@ export function searchWorkspace(
 		needle,
 		results
 	);
-	searchUncatalogedDocuments(caller, doc, spaceId, catalogDocumentIds, needle, results);
+	searchUncatalogedDocuments(
+		caller,
+		doc,
+		spaceId,
+		defaultSpaceId,
+		catalogDocumentIds,
+		needle,
+		results
+	);
 
 	const catalogCollectionIds = searchCatalogCollections(
 		caller,
@@ -188,7 +205,15 @@ export function searchWorkspace(
 		needle,
 		results
 	);
-	searchUncatalogedCollections(caller, doc, spaceId, catalogCollectionIds, needle, results);
+	searchUncatalogedCollections(
+		caller,
+		doc,
+		spaceId,
+		defaultSpaceId,
+		catalogCollectionIds,
+		needle,
+		results
+	);
 
 	logAudit({
 		actor,

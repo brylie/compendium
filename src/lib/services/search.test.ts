@@ -188,4 +188,51 @@ describe('searchWorkspace: token scoping', () => {
 		const results = searchWorkspace(token, 'zeta');
 		expect(results.some((r) => r.recordId === row.id)).toBe(true);
 	});
+
+	// Regression coverage for a CodeRabbit finding on #170/#172: uncataloged
+	// content (no locator row) has no resolved spaceId, so it was being
+	// classified as "no Space" rather than the default Space — a token
+	// relying solely on a default-Space grant (not a per-id grant) was
+	// silently denied every uncataloged Document/Collection, in both search
+	// and getDocument's page_link/collection_view resolution.
+	it('finds a row in an uncataloged collection via a default-Space-only grant (no per-id grant)', () => {
+		const { doc, defaultSpaceId } = resolveWorkspaceContext();
+		const uncataloged = crdtCreateCollection(doc, {
+			title: 'Uncataloged Space-Granted',
+			schema: [{ key: 'summary', label: 'Summary', type: 'text' }]
+		});
+		const row = createRecord(human, {
+			parentId: uncataloged.id,
+			properties: { summary: { type: 'text', value: 'theta keyword' } }
+		});
+		const { record: token } = createToken({
+			clientLabel: 'Search Test Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: [],
+			allowedSpaceIds: [defaultSpaceId]
+		});
+
+		const results = searchWorkspace(token, 'theta');
+		expect(results.some((r) => r.recordId === row.id)).toBe(true);
+	});
+
+	it('finds a block in an uncataloged document via a default-Space-only grant (no per-id grant)', () => {
+		const { doc, defaultSpaceId } = resolveWorkspaceContext();
+		const uncataloged = crdtCreateDocument(doc, { title: 'Uncataloged Doc Space-Granted' });
+		const block = crdtCreateRecord(
+			doc,
+			{ parentId: uncataloged.id, blockType: 'paragraph' },
+			human
+		);
+		writeRecord(human, block.id, { markdown: 'iota keyword' });
+		const { record: token } = createToken({
+			clientLabel: 'Search Test Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: [],
+			allowedSpaceIds: [defaultSpaceId]
+		});
+
+		const results = searchWorkspace(token, 'iota');
+		expect(results.some((r) => r.recordId === block.id)).toBe(true);
+	});
 });
