@@ -179,7 +179,11 @@ export function resetAuditObserverForTests(): void {
 	pendingUpdateTimers.clear();
 }
 
-type FinalizedEntry = { kind: EntryKind; id: string; action: string };
+interface FinalizedEntry {
+	kind: EntryKind;
+	id: string;
+	action: string;
+}
 
 // Pass 1: whole entries created/deleted at a top-level map — a changed key
 // on the map itself always means "entry added" or "entry removed" (nothing

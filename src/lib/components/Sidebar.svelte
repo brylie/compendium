@@ -44,7 +44,7 @@
 
 	let collapsed = $state(false);
 	let darkMode = $state(false);
-	let expandedDocIds: SvelteSet<string> = new SvelteSet();
+	let expandedDocIds = new SvelteSet<string>();
 
 	let createDialog: 'document' | 'collection' | null = $state(null);
 	let pendingParentId: string | undefined = $state();

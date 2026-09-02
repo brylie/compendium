@@ -21,14 +21,14 @@ import type { ActorId, PropertyDefinition } from '$lib/data/types';
 
 const human: ActorId = { kind: 'human', userId: 'benchmark-seed' };
 
-type Profile = {
+interface Profile {
 	documents: number;
 	blocksPerDocument: number;
 	collections: number;
 	rowsPerCollection: number;
 	clients: number;
 	mcpWrites: number;
-};
+}
 
 const PROFILES: Record<string, Profile> = {
 	// Bounded enough for CI, while resembling a small working knowledgebase.
@@ -56,8 +56,15 @@ function percentile(values: number[], fraction: number): number {
 	return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))] ?? 0;
 }
 
+// A generic assertion-sugar helper: T is used only once in the
+// signature (this rule's own "replace with the constraint" fix would
+// collapse every call site's return type to `unknown`), but that single
+// use is exactly the point — dozens of call sites below rely on
+// parseMcpText<SomeShape>(result) inferring their own precise return
+// type instead of each repeating its own `as SomeShape` cast.
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
 function parseMcpText<T>(result: unknown): T {
-	const response = result as { content?: Array<{ text?: string }>; isError?: boolean };
+	const response = result as { content?: { text?: string }[]; isError?: boolean };
 	if (response.isError) throw new Error(response.content?.[0]?.text ?? 'MCP tool failed');
 	return JSON.parse(response.content?.[0]?.text ?? '') as T;
 }

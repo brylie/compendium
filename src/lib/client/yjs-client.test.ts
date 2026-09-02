@@ -67,6 +67,11 @@ describe('yjs-client: browser', () => {
 	it('uses wss when the page itself is loaded over https', async () => {
 		const originalLocation = window.location;
 		Object.defineProperty(window, 'location', {
+			// Plain-object mock of Location for yjs-client.ts's protocol/host
+			// read — only data properties matter here, not Location's
+			// prototype methods (assign/reload/etc.), which the code under
+			// test never calls.
+			// eslint-disable-next-line @typescript-eslint/no-misused-spread
 			value: { ...originalLocation, protocol: 'https:', host: originalLocation.host },
 			writable: true,
 			configurable: true

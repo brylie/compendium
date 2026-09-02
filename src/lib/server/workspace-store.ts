@@ -80,7 +80,7 @@ declare global {
 }
 
 function registry(): Map<string, InternalContext> {
-	if (!globalThis.__workspaceContexts) globalThis.__workspaceContexts = new Map();
+	globalThis.__workspaceContexts ??= new Map();
 	return globalThis.__workspaceContexts;
 }
 

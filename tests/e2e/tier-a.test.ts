@@ -24,8 +24,15 @@ import type { ActorId } from '$lib/data/types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
 
+// A generic assertion-sugar helper: T is used only once in the
+// signature (this rule's own "replace with the constraint" fix would
+// collapse every call site's return type to `unknown`), but that single
+// use is exactly the point — dozens of call sites below rely on
+// parseMcpText<SomeShape>(result) inferring their own precise return
+// type instead of each repeating its own `as SomeShape` cast.
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
 function parseMcpText<T = unknown>(result: unknown): T {
-	const r = result as { content?: Array<{ text?: string }>; isError?: boolean };
+	const r = result as { content?: { text?: string }[]; isError?: boolean };
 	if (r.isError) {
 		const text = r.content?.[0]?.text ?? 'Unknown error';
 		throw new Error(`MCP Error: ${text}`);
@@ -35,7 +42,7 @@ function parseMcpText<T = unknown>(result: unknown): T {
 }
 
 function getResultText(result: unknown): string {
-	const r = result as { content?: Array<{ text?: string }> };
+	const r = result as { content?: { text?: string }[] };
 	return r.content?.[0]?.text ?? '';
 }
 
@@ -130,7 +137,7 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					name: 'get_document',
 					arguments: { documentId: docMeta.id }
 				});
-				const data = parseMcpText<{ records: Array<{ id: string; markdown: string }> }>(res);
+				const data = parseMcpText<{ records: { id: string; markdown: string }[] }>(res);
 				const rec = data.records.find((r) => r.id === block.id);
 				if (rec?.markdown.includes('Content typed by human in browser')) {
 					observedMarkdown = rec.markdown;
@@ -317,7 +324,7 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 			name: 'search_workspace',
 			arguments: { query: 'unicornsparkle' }
 		});
-		const unscopedResults = parseMcpText<Array<{ recordId: string }>>(unscopedRes);
+		const unscopedResults = parseMcpText<{ recordId: string }[]>(unscopedRes);
 		expect(unscopedResults.map((r) => r.recordId)).toContain(recordA.recordId);
 		expect(unscopedResults.map((r) => r.recordId)).toContain(recordB.id);
 
@@ -328,7 +335,7 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 			name: 'search_workspace',
 			arguments: { query: 'unicornsparkle', space_id: spaceAId }
 		});
-		const scopedResults = parseMcpText<Array<{ recordId: string }>>(scopedRes);
+		const scopedResults = parseMcpText<{ recordId: string }[]>(scopedRes);
 		expect(scopedResults.map((r) => r.recordId)).toContain(recordA.recordId);
 		expect(scopedResults.map((r) => r.recordId)).not.toContain(recordB.id);
 	});
@@ -387,7 +394,7 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 
 		// list_documents (unscoped, no space_id filter) reflects the same grant.
 		const listRes = await mcp.callTool({ name: 'list_documents', arguments: {} });
-		const list = parseMcpText<Array<{ id: string }>>(listRes);
+		const list = parseMcpText<{ id: string }[]>(listRes);
 		expect(list.map((d) => d.id)).toContain(docA.id);
 		expect(list.map((d) => d.id)).not.toContain(docB.id);
 	});
@@ -414,9 +421,9 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 
 		// Wait for awareness state to propagate
 		await harness.waitForCondition(() => {
-			const states = Array.from(resolveWorkspaceContext().awareness.getStates().values()) as Array<{
+			const states = Array.from(resolveWorkspaceContext().awareness.getStates().values()) as {
 				heldRecordIds?: string[];
-			}>;
+			}[];
 			return states.some((s) => s.heldRecordIds?.includes(block1.id));
 		});
 
@@ -465,9 +472,9 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		});
 
 		await harness.waitForCondition(() => {
-			const states = Array.from(resolveWorkspaceContext().awareness.getStates().values()) as Array<{
+			const states = Array.from(resolveWorkspaceContext().awareness.getStates().values()) as {
 				heldRecordIds?: string[];
-			}>;
+			}[];
 			return states.some((s) => s.heldRecordIds?.includes(block.id));
 		});
 
@@ -659,7 +666,7 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 	});
 
 	it('10. Service layer manifest wiring check: validates all MCP tools and UI surface side effects', async () => {
-		const methods = Object.keys(serviceSurfaces) as Array<keyof typeof serviceSurfaces>;
+		const methods = Object.keys(serviceSurfaces) as (keyof typeof serviceSurfaces)[];
 		expect(methods.length).toBeGreaterThanOrEqual(15);
 
 		// 1. Verify all mcp: true entries are wired and discoverable over MCP transport

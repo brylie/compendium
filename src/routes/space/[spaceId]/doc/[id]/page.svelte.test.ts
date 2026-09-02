@@ -1154,7 +1154,7 @@ describe('doc/[id] +page', () => {
 		createDocument(ydoc, { id: 'doc-2', title: 'Second' });
 		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 
-		const callbacks: Array<(held: Map<string, ActorId>) => void> = [];
+		const callbacks: ((held: Map<string, ActorId>) => void)[] = [];
 		subscribeHeldByOthers.mockImplementation(
 			(_awareness: unknown, cb: (held: Map<string, ActorId>) => void) => {
 				callbacks.push(cb);

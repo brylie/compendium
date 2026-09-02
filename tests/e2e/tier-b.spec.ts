@@ -52,7 +52,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 			name: 'hold_records',
 			arguments: { recordIds: [block.id] }
 		});
-		const res = holdRes as { content?: Array<{ text?: string }> };
+		const res = holdRes as { content?: { text?: string }[] };
 		const rawText = res.content?.[0]?.text ?? '';
 		expect(rawText).toContain(block.id);
 
@@ -145,7 +145,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		const mcp = await harness.getMcpClient(token);
 
 		const listRes = (await mcp.callTool({ name: 'list_documents', arguments: {} })) as {
-			content?: Array<{ text?: string }>;
+			content?: { text?: string }[];
 		};
 		expect(listRes.content?.[0]?.text ?? '').toContain('Human-Created Doc');
 
@@ -153,7 +153,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		const createRes = (await mcp.callTool({
 			name: 'create_record',
 			arguments: { parentId: docId, blockType: 'paragraph' }
-		})) as { content?: Array<{ text?: string }> };
+		})) as { content?: { text?: string }[] };
 		const blockId = JSON.parse(createRes.content?.[0]?.text ?? '{}').recordId as string;
 		expect(blockId).toBeTruthy();
 
@@ -185,7 +185,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		const createRes = (await mcp.callTool({
 			name: 'create_document',
 			arguments: { title: 'Agent-Created Page' }
-		})) as { content?: Array<{ text?: string }> };
+		})) as { content?: { text?: string }[] };
 		const docId = JSON.parse(createRes.content?.[0]?.text ?? '{}').id as string;
 		expect(docId).toBeTruthy();
 
@@ -206,7 +206,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 			const getRes = (await mcp.callTool({
 				name: 'get_document',
 				arguments: { documentId: docId }
-			})) as { content?: Array<{ text?: string }> };
+			})) as { content?: { text?: string }[] };
 			expect(getRes.content?.[0]?.text ?? '').toContain(
 				'Human typed this after the agent created the page'
 			);
@@ -239,7 +239,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		const holdRes = (await mcp.callTool({
 			name: 'hold_records',
 			arguments: { recordIds: [blockA.id, blockB.id] }
-		})) as { content?: Array<{ text?: string }> };
+		})) as { content?: { text?: string }[] };
 		const holdResult = JSON.parse(holdRes.content?.[0]?.text ?? '{}') as { granted?: string[] };
 		expect(holdResult.granted).toEqual(expect.arrayContaining([blockA.id, blockB.id]));
 

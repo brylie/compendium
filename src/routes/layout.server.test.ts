@@ -13,8 +13,8 @@ describe('routes/+layout.server: sidebar navigation data', () => {
 			params: {},
 			locals: { requestContext: resolveRequestContext() }
 		} as unknown as Parameters<typeof load>[0]) as unknown as {
-			documents: Array<{ title: string }>;
-			collections: Array<{ title: string }>;
+			documents: { title: string }[];
+			collections: { title: string }[];
 		};
 
 		expect(result.documents.some((d) => d.title === 'Sidebar Doc')).toBe(true);

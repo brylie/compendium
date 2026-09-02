@@ -26,7 +26,7 @@ describe('routes/+page.server: workspace home', () => {
 			params: { spaceId: spaceId() },
 			locals: { requestContext: resolveRequestContext() }
 		} as unknown as Parameters<typeof load>[0]) as unknown as {
-			documents: Array<{ title: string }>;
+			documents: { title: string }[];
 			collections: unknown[];
 		};
 		expect(result.documents.some((d) => d.title === 'Existing Doc')).toBe(true);

@@ -6,7 +6,7 @@ import type { ActorId } from '$lib/data/types';
 class FakeAwareness {
 	clientID = 1;
 	private states = new Map<number, unknown>();
-	private listeners: Array<() => void> = [];
+	private listeners: (() => void)[] = [];
 	setLocalState(state: unknown): void {
 		this.states.set(this.clientID, state);
 		this.fire();

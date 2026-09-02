@@ -131,11 +131,11 @@ export function createRecord(
 	return record;
 }
 
-type WriteRecordInput = {
+interface WriteRecordInput {
 	markdown?: string;
 	properties?: Record<string, PropertyValue>;
 	referencedRecordId?: string;
-};
+}
 
 // Validated up front, before any mutation in writeRecord below: a call
 // combining markdown (or properties) with an invalid referencedRecordId

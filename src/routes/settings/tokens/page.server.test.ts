@@ -22,7 +22,7 @@ describe('routes/settings/tokens/+page.server', () => {
 		createDocument(doc, { title: 'Doc for tokens page' });
 
 		const result = load(undefined as unknown as Parameters<typeof load>[0]) as unknown as {
-			documents: Array<{ title: string }>;
+			documents: { title: string }[];
 			tokens: unknown[];
 		};
 

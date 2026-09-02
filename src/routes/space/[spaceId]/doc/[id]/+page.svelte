@@ -149,6 +149,11 @@
 		title = docMeta?.title ?? data.title;
 		if (docMeta?.parentDocumentId) {
 			const parent = documentMetadataById.get(docMeta.parentDocumentId);
+			// `||`, not `??`: a Document title can be user-edited down to an
+			// empty string (no blank-title validation), and an empty
+			// breadcrumb would be worse than this fallback label — unlike a
+			// record id, "" is a real value here, not just missing.
+			// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
 			parentDocTitle = parent?.title || 'Parent document';
 		} else {
 			parentDocTitle = null;
@@ -328,7 +333,7 @@
 			// previously-viewed document must not linger until this
 			// document's first real transition.
 			holdAnnouncement = '';
-			let previousHeldByOthers: Map<string, ActorId> = new Map();
+			let previousHeldByOthers = new Map<string, ActorId>();
 			// The subscription's first callback reports presence as of connect
 			// time, not a transition — without this, every actor who was
 			// already editing before this client joined gets misreported as
@@ -1203,7 +1208,7 @@
 									onEnter={() => addBlockAfter(block.id)}
 									onBackspaceAtStart={() => handleBackspace(block, index)}
 									onFocusBlock={() =>
-										handleFocusBlock(block.id, block.referencedRecordId || block.id)}
+										handleFocusBlock(block.id, block.referencedRecordId ?? block.id)}
 									onSlashKey={() => {}}
 									onLinkShortcut={() => openLinkComposer(block.id)}
 									isFirstBlock={index === 0}
