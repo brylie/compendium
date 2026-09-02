@@ -87,6 +87,23 @@ describe('SlashMenu', () => {
 		expect(options[0]).toHaveAttribute('aria-selected', 'true');
 	});
 
+	it('follows the rendered category order when keyboard navigation crosses categories', async () => {
+		const user = userEvent.setup();
+		render(SlashMenu, { query: '', onSelect: vi.fn() });
+
+		await user.keyboard('{ArrowDown}'.repeat(10));
+		expect(screen.getByText('Toggle list').closest('[role="option"]')).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
+
+		await user.keyboard('{ArrowDown}');
+		expect(screen.getByText('Divider').closest('[role="option"]')).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
+	});
+
 	it('selects the highlighted command on Enter', async () => {
 		const onSelect = vi.fn();
 		const user = userEvent.setup();

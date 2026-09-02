@@ -215,10 +215,12 @@
 		})).filter((group) => group.commands.length > 0)
 	);
 
+	let visibleCommands = $derived(categorized.flatMap((group) => group.commands));
+
 	$effect(() => {
 		// Reset selection when filtered items change
-		if (selectedIndex >= filtered.length) {
-			selectedIndex = Math.max(0, filtered.length - 1);
+		if (selectedIndex >= visibleCommands.length) {
+			selectedIndex = Math.max(0, visibleCommands.length - 1);
 		}
 	});
 
@@ -226,16 +228,17 @@
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
 			e.stopPropagation();
-			selectedIndex = (selectedIndex + 1) % Math.max(1, filtered.length);
+			selectedIndex = (selectedIndex + 1) % Math.max(1, visibleCommands.length);
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
 			e.stopPropagation();
-			selectedIndex = (selectedIndex - 1 + filtered.length) % Math.max(1, filtered.length);
+			selectedIndex =
+				(selectedIndex - 1 + visibleCommands.length) % Math.max(1, visibleCommands.length);
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
 			e.stopPropagation();
-			if (filtered[selectedIndex]) {
-				onSelect(filtered[selectedIndex].blockType);
+			if (visibleCommands[selectedIndex]) {
+				onSelect(visibleCommands[selectedIndex].blockType);
 			}
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
@@ -266,7 +269,7 @@
 			{group.category}
 		</div>
 		{#each group.commands as command (command.blockType)}
-			{@const index = filtered.indexOf(command)}
+			{@const index = visibleCommands.indexOf(command)}
 			{@const isActive = index === selectedIndex}
 			<button
 				type="button"
