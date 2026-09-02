@@ -5,6 +5,10 @@
 	import { getShardDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
 	import {
+		useCollectionView,
+		type CollectionViewSnapshot
+	} from '$lib/client/collection-view.svelte';
+	import {
 		createRecord,
 		deleteRecord,
 		resolvePrimaryField,
@@ -13,7 +17,6 @@
 	} from '$lib/data/records';
 	import {
 		dateKeyForRecord,
-		getCollectionView,
 		primaryFieldDisplayValue,
 		projectRecords,
 		visibleProperties
@@ -39,13 +42,44 @@
 
 	let ydoc: Y.Doc | undefined = $state();
 	let shardId: string | undefined = $state();
-	let schema: PropertyDefinition[] = $state([]);
-	let rows: WorkspaceRecord[] = $state([]);
-	let primaryFieldKey: string | undefined = $state();
+	// Set in lockstep with ydoc (never the raw collectionId prop) below — the
+	// prop can change synchronously on retarget while ydoc only catches up
+	// once the async shard fetch resolves, and useCollectionView must never
+	// see a doc paired with a collectionId it doesn't belong to.
+	let resolvedCollectionId: string | undefined = $state();
 	let viewYear = $state(today.getFullYear());
 	let viewMonth = $state(today.getMonth()); // 0-11
 	let newDatePropertyLabel = $state('Date');
 	let optionDialogPropertyKey: string | null = $state(null);
+
+	// Auto-picking a default groupBy is attempted at most once per
+	// collectionId, not on every refresh — the hook's snapshot callback fires
+	// on every Yjs change (including the auto-pick's own write), so
+	// re-attempting it each time would loop forever whenever config never
+	// actually changes back (e.g. no date property exists yet, so
+	// resolvedKey stays undefined).
+	let autoGroupByAttempted = false;
+
+	function handleSnapshot(snapshot: CollectionViewSnapshot): void {
+		if (autoGroupByAttempted) return;
+		autoGroupByAttempted = true;
+		const resolvedKey =
+			config.groupBy && snapshot.schema.some((p) => p.key === config.groupBy && p.type === 'date')
+				? config.groupBy
+				: snapshot.schema.find((p) => p.type === 'date')?.key;
+		if (resolvedKey !== config.groupBy) {
+			onConfigChange({ ...config, groupBy: resolvedKey });
+		}
+	}
+
+	const view = useCollectionView(
+		() => ydoc,
+		() => resolvedCollectionId ?? collectionId,
+		handleSnapshot
+	);
+	const schema = $derived(view.schema);
+	const rows = $derived(view.rows);
+	const primaryFieldKey = $derived(view.primaryFieldKey);
 
 	// The date property driving placement is config.groupBy, persisted on
 	// the embedding block — see EmbeddedViewConfig in $lib/data/types.
@@ -126,30 +160,6 @@
 		return result;
 	});
 
-	// Auto-picking a default groupBy is attempted at most once per
-	// collectionId, not on every refresh — refresh() re-runs on every Yjs
-	// change (including the auto-pick's own write), so re-attempting it each
-	// time would loop forever whenever config never actually changes back
-	// (e.g. no date property exists yet, so resolvedKey stays undefined).
-	let autoGroupByAttempted = false;
-
-	function refresh(): void {
-		if (!ydoc) return;
-		const view = getCollectionView(ydoc, collectionId);
-		schema = view.collection?.schema ?? [];
-		rows = view.records;
-		primaryFieldKey = view.collection?.primaryFieldKey;
-		if (autoGroupByAttempted) return;
-		autoGroupByAttempted = true;
-		const resolvedKey =
-			config.groupBy && schema.some((p) => p.key === config.groupBy && p.type === 'date')
-				? config.groupBy
-				: schema.find((p) => p.type === 'date')?.key;
-		if (resolvedKey !== config.groupBy) {
-			onConfigChange({ ...config, groupBy: resolvedKey });
-		}
-	}
-
 	// Resolves this Collection's real shard (#120) and (re)connects whenever
 	// collectionId changes — see TableCollectionView's identical pattern for
 	// why this can't just be a one-time onMount now that Collections have
@@ -158,7 +168,6 @@
 		const id = collectionId;
 		autoGroupByAttempted = false;
 		let cancelled = false;
-		let cleanup: (() => void) | undefined;
 
 		(async () => {
 			const res = await fetch(`/api/collections/${id}/shard`);
@@ -166,20 +175,8 @@
 			if (cancelled) return;
 
 			shardId = resolvedShardId;
-			const doc = getShardDoc(resolvedShardId);
-			ydoc = doc;
-
-			const recordsMap = doc.getMap('records');
-			const collectionsMap = doc.getMap('collections');
-			const observer = () => refresh();
-			recordsMap.observeDeep(observer);
-			collectionsMap.observeDeep(observer);
-			refresh();
-
-			cleanup = () => {
-				recordsMap.unobserveDeep(observer);
-				collectionsMap.unobserveDeep(observer);
-			};
+			resolvedCollectionId = id;
+			ydoc = getShardDoc(resolvedShardId);
 			// A rejection here (network failure, bad response) previously
 			// vanished as a silent unhandled rejection — this at least
 			// surfaces it, without inventing a toast/error-UI system this
@@ -190,7 +187,6 @@
 
 		return () => {
 			cancelled = true;
-			cleanup?.();
 		};
 	});
 

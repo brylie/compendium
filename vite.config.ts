@@ -93,7 +93,8 @@ export default defineConfig({
 				test: {
 					name: 'client',
 					environment: 'jsdom',
-					include: ['src/lib/client/**/*.{test,spec}.{js,ts}']
+					include: ['src/lib/client/**/*.{test,spec}.{js,ts}'],
+					exclude: ['src/lib/client/**/*.svelte.{test,spec}.{js,ts}']
 				}
 			},
 			{

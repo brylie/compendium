@@ -2,7 +2,8 @@
 	import { tick } from 'svelte';
 	import { nanoid } from 'nanoid';
 	import { getShardDoc } from '$lib/client/yjs-client';
-	import { getCollection, resolvePrimaryField, updateCollectionSchema } from '$lib/data/records';
+	import { useCollectionView } from '$lib/client/collection-view.svelte';
+	import { resolvePrimaryField, updateCollectionSchema } from '$lib/data/records';
 	import type { PropertyDefinition, PropertyType } from '$lib/data/types';
 	import Icon from './Icon.svelte';
 	import FieldMenu from './FieldMenu.svelte';
@@ -28,11 +29,20 @@
 		'relation'
 	];
 
-	let schema: PropertyDefinition[] = $state([]);
-	let primaryFieldKey: string | undefined = $state();
 	let newFieldLabel = $state('');
 	let newFieldType: PropertyType = $state('text');
 	let errorMessage = $state('');
+
+	// Gated on `open`, not a plain `() => getShardDoc(shardId)`: this dialog
+	// is mounted (closed) alongside every embedded view via ViewToolbar, so
+	// touching getShardDoc()/the Yjs doc unconditionally would open a live
+	// connection and subscribe observers for a dialog nobody has opened yet.
+	const view = useCollectionView(
+		() => (open ? getShardDoc(shardId) : undefined),
+		() => collectionId
+	);
+	const schema = $derived(view.schema);
+	const primaryFieldKey = $derived(view.primaryFieldKey);
 
 	const effectivePrimaryKey = $derived(resolvePrimaryField(schema, primaryFieldKey)?.key);
 
@@ -41,31 +51,14 @@
 	let upButtons: Record<string, HTMLButtonElement | undefined> = {};
 	let downButtons: Record<string, HTMLButtonElement | undefined> = {};
 
-	function refresh(): void {
-		const collection = getCollection(getShardDoc(shardId), collectionId);
-		schema = collection?.schema ?? [];
-		primaryFieldKey = collection?.primaryFieldKey;
-	}
-
-	// Gated on `open` rather than a plain onMount: this dialog is mounted
-	// (closed) alongside every embedded view via ViewToolbar, so touching
-	// getShardDoc()/the Yjs doc unconditionally would open a live connection
-	// and subscribe observers for a dialog nobody has opened yet.
+	// Focus management only — data subscription lives in useCollectionView
+	// above, which is itself inactive whenever `open` is false.
 	$effect(() => {
 		if (!open) return;
-		const doc = getShardDoc(shardId);
-		refresh();
-		const collectionsMap = doc.getMap('collections');
-		const recordsMap = doc.getMap('records');
-		const observer = () => refresh();
-		collectionsMap.observeDeep(observer);
-		recordsMap.observeDeep(observer);
 		const previousFocus =
 			document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		void tick().then(() => closeButton?.focus());
 		return () => {
-			collectionsMap.unobserveDeep(observer);
-			recordsMap.unobserveDeep(observer);
 			previousFocus?.focus();
 		};
 	});

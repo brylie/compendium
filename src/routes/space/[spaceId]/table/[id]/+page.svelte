@@ -5,6 +5,7 @@
 	import { nanoid } from 'nanoid';
 	import { getShardDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
+	import { useCollectionView } from '$lib/client/collection-view.svelte';
 	import {
 		createRecord,
 		deleteRecord,
@@ -13,7 +14,6 @@
 		updateCollectionTitle,
 		updateRecordProperties
 	} from '$lib/data/records';
-	import { getCollectionView } from '$lib/data/views';
 	import type { PropertyDefinition, PropertyValue, WorkspaceRecord } from '$lib/data/types';
 	import Icon from '$lib/components/Icon.svelte';
 	import PropertyValueCell from '$lib/components/PropertyValueCell.svelte';
@@ -26,31 +26,33 @@
 
 	let ydoc: Y.Doc | undefined = $state();
 	let shardId: string | undefined = $state();
-	// Initial-render-only snapshot of the SSR-loaded title, shown before ydoc
-	// mounts; refresh() (below) is what keeps it in sync with the Y.Doc
-	// afterwards — untrack() here just tells Svelte that's deliberate.
-	let title: string = $state(untrack(() => data.title));
-	let schema: PropertyDefinition[] = $state([]);
-	let rows: WorkspaceRecord[] = $state([]);
-	let primaryFieldKey: string | undefined = $state();
+	// Set in lockstep with ydoc (never the raw data.collectionId) below — the
+	// prop can change synchronously on navigation while ydoc only catches up
+	// once the async shard fetch resolves, and useCollectionView must never
+	// see a doc paired with a collectionId it doesn't belong to.
+	let resolvedCollectionId: string | undefined = $state();
 	let optionDialogPropertyKey: string | null = $state(null);
 	let optionDialogError = $state('');
 	let fieldManagerOpen = $state(false);
-	let effectivePrimaryKey = $derived(resolvePrimaryField(schema, primaryFieldKey)?.key);
+	// Initial-render-only snapshot of the SSR-loaded title, shown before ydoc
+	// mounts; the hook's snapshot callback below keeps it in sync with the
+	// Y.Doc afterwards — untrack() here just tells Svelte that's deliberate.
+	// Kept as its own $state (not a $derived off the hook) because
+	// handleTitleInput below needs to assign it directly for responsive
+	// typing, ahead of the Yjs write's own observer round-trip.
+	let title: string = $state(untrack(() => data.title));
 
-	// `title`/`schema`/`rows`/`primaryFieldKey` are tracked as their own
-	// $state, reassigned here on every observer-driven refresh(), so they
-	// stay live when the Yjs doc mutates from another tab, another user, or
-	// an MCP agent. A $derived keyed off `ydoc` (which is only ever assigned
-	// once, in onMount) would not re-run on those later mutations.
-	function refresh(): void {
-		if (!ydoc) return;
-		const view = getCollectionView(ydoc, data.collectionId);
-		title = view.collection?.title ?? data.title;
-		schema = view.collection?.schema ?? [];
-		rows = view.records;
-		primaryFieldKey = view.collection?.primaryFieldKey;
-	}
+	const view = useCollectionView(
+		() => ydoc,
+		() => resolvedCollectionId ?? data.collectionId,
+		(snapshot) => {
+			title = snapshot.collection?.title ?? data.title;
+		}
+	);
+	const schema = $derived(view.schema);
+	const rows = $derived(view.rows);
+	const primaryFieldKey = $derived(view.primaryFieldKey);
+	let effectivePrimaryKey = $derived(resolvePrimaryField(schema, primaryFieldKey)?.key);
 
 	// SvelteKit reuses this component instance across client-side navigations
 	// between two /table/[id] routes — this effect re-runs whenever
@@ -59,7 +61,6 @@
 	$effect(() => {
 		const id = data.collectionId;
 		let cancelled = false;
-		let cleanup: (() => void) | undefined;
 
 		(async () => {
 			const res = await fetch(`/api/collections/${id}/shard`);
@@ -67,20 +68,8 @@
 			if (cancelled) return;
 
 			shardId = resolvedShardId;
-			const doc = getShardDoc(resolvedShardId);
-			ydoc = doc;
-			refresh();
-
-			const recordsMap = doc.getMap('records');
-			const collectionsMap = doc.getMap('collections');
-			const observer = () => refresh();
-			recordsMap.observeDeep(observer);
-			collectionsMap.observeDeep(observer);
-
-			cleanup = () => {
-				recordsMap.unobserveDeep(observer);
-				collectionsMap.unobserveDeep(observer);
-			};
+			resolvedCollectionId = id;
+			ydoc = getShardDoc(resolvedShardId);
 			// A rejection here (network failure, bad response) previously
 			// vanished as a silent unhandled rejection — this at least
 			// surfaces it, without inventing a toast/error-UI system this
@@ -91,7 +80,6 @@
 
 		return () => {
 			cancelled = true;
-			cleanup?.();
 		};
 	});
 
