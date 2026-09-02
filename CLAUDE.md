@@ -80,6 +80,14 @@ When addressing a CodeRabbit finding on a PR (whether triggered by an automated 
 6. If a later CodeRabbit message claims a thread "remains open," verify via the GraphQL `reviewThreads` query (`isResolved`) before assuming it needs action — it's often already resolved and the message is stale.
 7. Never proactively poll CI status or run `/babysit-pr` unless asked.
 
+## Workflow: push cadence
+
+Every push to an open PR triggers a new CodeRabbit review, and CodeRabbit's review budget is rate-limited per hour — pushing after every small commit burns through it fast for no real benefit. Commit locally as often as convenient, but batch pushes:
+
+- Push once when a PR is first ready for review, then again only when a full round of changes is complete and validated — not after every individual fix, WIP commit, or one-off edit. When addressing several review findings (CodeRabbit or otherwise) in one sitting, fix all of them locally, validate once (`npm run test`, `npm run lint`, `npm run check`), then push once.
+- This applies to merge-conflict resolution too: if a conflict needs resolving while other fixes are still pending, resolve it and finish the pending work in the same local pass, then push the combined result — don't push the conflict resolution alone and the fixes separately.
+- Exception: push immediately when explicitly asked to.
+
 ## Architecture (the big picture)
 
 **One Node process, one resolved `Y.Doc` per workspace/shard context, three surfaces onto it** — not a client/server split with a real API. The UI's WebSocket sync, the MCP server's tool handlers, and SQLite persistence all read/write the _same_ in-memory `Y.Doc`; this is deliberate (see `architecture.md` §1) because the core acceptance bet is that MCP writes and UI edits are indistinguishable and appear live to each other with zero polling.
