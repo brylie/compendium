@@ -441,9 +441,11 @@ function resolveDocumentRecordView(
  * Returns a Document's title and its blocks rendered to markdown, after checking the caller
  * may access it. Each `page_link`/`collection_view` block's target is resolved and permission-
  * scoped independently (a referenced target can be any Document/Collection, not just ones
- * under this Document, so an out-of-scope target's title/id/schema must not leak) — an
- * out-of-scope or deleted target renders as a generic placeholder rather than exposing it,
- * and `linkBroken` distinguishes "target no longer exists" from "not a linking block" for
+ * under this Document, so an out-of-scope target's title/id/schema must not leak) — a deleted
+ * target renders as a generic placeholder, and an out-of-scope target falls back to the
+ * block's own content (`page_link`) or an unconfigured placeholder (`collection_view`); the
+ * target itself is never exposed either way, and `linkBroken` distinguishes "target no longer
+ * exists" from "not a linking block" for
  * callers that need to tell the two apart.
  */
 export function getDocument(
