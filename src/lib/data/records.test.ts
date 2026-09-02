@@ -1152,7 +1152,7 @@ describe('reorderRecord: block drag-and-drop repositioning (#40)', () => {
 
 	it('moves a block to the very start when afterRecordId is omitted', () => {
 		const { doc, document, a, b, c, d } = setup();
-		reorderRecord(doc, d.id, undefined);
+		reorderRecord(doc, d.id);
 		expect(ids(doc, document.id)).toEqual([d.id, a.id, b.id, c.id]);
 	});
 
@@ -1186,7 +1186,7 @@ describe('reorderRecord: block drag-and-drop repositioning (#40)', () => {
 
 	it('throws NotFoundError for an unknown record id', () => {
 		const { doc } = setup();
-		expect(() => reorderRecord(doc, 'missing', undefined)).toThrow(NotFoundError);
+		expect(() => reorderRecord(doc, 'missing')).toThrow(NotFoundError);
 	});
 
 	it('throws NotFoundError when afterRecordId is not an existing sibling', () => {
@@ -1203,7 +1203,7 @@ describe('reorderRecord: block drag-and-drop repositioning (#40)', () => {
 		const doc = new Y.Doc();
 		const collection = createCollection(doc, { title: 'Tasks', schema: [] });
 		const row = createRecord(doc, { parentId: collection.id, properties: {} }, human);
-		expect(() => reorderRecord(doc, row.id, undefined)).toThrow(ValidationError);
+		expect(() => reorderRecord(doc, row.id)).toThrow(ValidationError);
 	});
 
 	it('deleteRecord removes every occurrence of an id, cleaning up a leftover duplicate from a concurrent move', () => {

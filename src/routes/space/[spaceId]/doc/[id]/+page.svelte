@@ -626,6 +626,33 @@
 		document.querySelector<HTMLElement>(`[data-drag-handle="${CSS.escape(blockId)}"]`)?.focus();
 	}
 
+	// Resolves what "up"/"down"/"start"/"end" means in terms of
+	// reorderRecord's own afterRecordId semantics — split out from moveBlock
+	// below purely to keep each function's branching within the cognitive
+	// complexity budget; sequential early-return `if`s (not else-if) here
+	// avoid the nesting penalty an else-if chain would add.
+	function computeMoveTarget(
+		target: 'up' | 'down' | 'start' | 'end',
+		currentIndex: number,
+		lastIndex: number
+	): { afterRecordId: string | undefined; newIndex: number } | null {
+		if (target === 'start') {
+			if (currentIndex === 0) return null;
+			return { afterRecordId: undefined, newIndex: 0 };
+		}
+		if (target === 'end') {
+			if (currentIndex === lastIndex) return null;
+			return { afterRecordId: blocks[lastIndex].id, newIndex: lastIndex };
+		}
+		if (target === 'up') {
+			if (currentIndex === 0) return null;
+			const afterRecordId = currentIndex >= 2 ? blocks[currentIndex - 2].id : undefined;
+			return { afterRecordId, newIndex: currentIndex - 1 };
+		}
+		if (currentIndex === lastIndex) return null;
+		return { afterRecordId: blocks[currentIndex + 1].id, newIndex: currentIndex + 1 };
+	}
+
 	// Keyboard equivalent of dragging: an adjacent swap with the previous/next
 	// sibling, or a direct move to the very start/end — reusing reorderRecord's
 	// own afterRecordId semantics rather than the pointer-drag path's
@@ -635,30 +662,11 @@
 		if (!ydoc) return;
 		const currentIndex = blocks.findIndex((b) => b.id === blockId);
 		if (currentIndex === -1) return;
-		const lastIndex = blocks.length - 1;
+		const move = computeMoveTarget(target, currentIndex, blocks.length - 1);
+		if (!move) return;
 
-		let afterRecordId: string | undefined;
-		let newIndex: number;
-		if (target === 'start') {
-			if (currentIndex === 0) return;
-			afterRecordId = undefined;
-			newIndex = 0;
-		} else if (target === 'end') {
-			if (currentIndex === lastIndex) return;
-			afterRecordId = blocks[lastIndex].id;
-			newIndex = lastIndex;
-		} else if (target === 'up') {
-			if (currentIndex === 0) return;
-			afterRecordId = currentIndex >= 2 ? blocks[currentIndex - 2].id : undefined;
-			newIndex = currentIndex - 1;
-		} else {
-			if (currentIndex === lastIndex) return;
-			afterRecordId = blocks[currentIndex + 1].id;
-			newIndex = currentIndex + 1;
-		}
-
-		reorderRecord(ydoc, blockId, afterRecordId);
-		announceBlockMoved(newIndex);
+		reorderRecord(ydoc, blockId, move.afterRecordId);
+		announceBlockMoved(move.newIndex);
 		void focusDragHandle(blockId);
 	}
 
