@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import {
 	createRecord as crdtCreateRecord,
-	createDocument as crdtCreateDocument
+	createDocument as crdtCreateDocument,
+	reorderRecord as crdtReorderRecord
 } from '$lib/data/records';
 import { queryAuditLog } from './audit';
 import {
@@ -291,6 +292,19 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 			expect(recentActions(documentId).filter((a) => a === 'update_document')).toHaveLength(1);
 			// The reorder alone shouldn't be misattributed to either record.
 			expect(recentActions(a.id).filter((act) => act === 'update_record')).toHaveLength(0);
+		});
+
+		it("logs update_document, not update_record, for BlockEditor's actual drag-and-drop entry point (reorderRecord)", () => {
+			const documentId = makeDoc(doc);
+			const a = crdtCreateRecord(doc, { parentId: documentId, blockType: 'paragraph' }, human);
+			const b = crdtCreateRecord(doc, { parentId: documentId, blockType: 'paragraph' }, human);
+
+			doc.transact(() => crdtReorderRecord(doc, a.id, b.id), 'fake-ws-connection');
+
+			vi.advanceTimersByTime(3_000);
+			expect(recentActions(documentId).filter((act) => act === 'update_document')).toHaveLength(1);
+			expect(recentActions(a.id).filter((act) => act === 'update_record')).toHaveLength(0);
+			expect(recentActions(b.id).filter((act) => act === 'update_record')).toHaveLength(0);
 		});
 
 		it('does not retain a doc entry that still has another pending timer once one of its timers is pruned', () => {

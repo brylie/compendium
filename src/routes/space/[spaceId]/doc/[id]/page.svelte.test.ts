@@ -307,6 +307,236 @@ describe('doc/[id] +page', () => {
 		expect(event).toBe(true); // not prevented — native behavior applies
 	});
 
+	describe('block reordering (#40)', () => {
+		function renderThreeBlocks() {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const first = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, first.id)!.insert(0, 'First');
+			const second = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, second.id)!.insert(0, 'Second');
+			const third = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, third.id)!.insert(0, 'Third');
+			return { first, second, third };
+		}
+
+		function orderedBlockIds(): string[] {
+			return Array.from(document.querySelectorAll<HTMLElement>('[data-block-row]')).map((row) =>
+				row.id.replace(/^block-/, '')
+			);
+		}
+
+		it('exposes a move handle on every block, focusable and labeled for keyboard use', async () => {
+			const { first } = renderThreeBlocks();
+			const { container } = render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: {
+					spaces: [],
+					spaceId: 'space-1',
+					activeSpaceId: 'space-1',
+					documents: [],
+					collections: [],
+					documentId: 'doc-1',
+					title: 'D'
+				}
+			});
+			await flushShardResolution();
+
+			const handle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLButtonElement;
+			expect(handle).toBeInTheDocument();
+			expect(handle.tagName).toBe('BUTTON');
+			expect(handle.getAttribute('aria-label')).toMatch(/move block/i);
+		});
+
+		it('moves a block down with ArrowDown on its move handle, keeps focus on it, and announces the new position', async () => {
+			const { first } = renderThreeBlocks();
+			const { container } = render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: {
+					spaces: [],
+					spaceId: 'space-1',
+					activeSpaceId: 'space-1',
+					documents: [],
+					collections: [],
+					documentId: 'doc-1',
+					title: 'D'
+				}
+			});
+			await flushShardResolution();
+
+			const handle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLButtonElement;
+			handle.focus();
+			await fireEvent.keyDown(handle, { key: 'ArrowDown' });
+			await tick();
+
+			expect(orderedBlockIds()[1]).toBe(first.id);
+			expect(screen.getByText(/Moved block to position 2 of 3\./)).toBeInTheDocument();
+			// Focus follows the moved block, not lost to the body.
+			expect(document.activeElement?.getAttribute('data-drag-handle')).toBe(first.id);
+		});
+
+		it('moves a block to the start with Home and to the end with End', async () => {
+			const { first, third } = renderThreeBlocks();
+			const { container } = render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: {
+					spaces: [],
+					spaceId: 'space-1',
+					activeSpaceId: 'space-1',
+					documents: [],
+					collections: [],
+					documentId: 'doc-1',
+					title: 'D'
+				}
+			});
+			await flushShardResolution();
+
+			const thirdHandle = container.querySelector(
+				`[data-drag-handle="${third.id}"]`
+			) as HTMLButtonElement;
+			thirdHandle.focus();
+			await fireEvent.keyDown(thirdHandle, { key: 'Home' });
+			await tick();
+			expect(orderedBlockIds()[0]).toBe(third.id);
+
+			const firstHandle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLButtonElement;
+			firstHandle.focus();
+			await fireEvent.keyDown(firstHandle, { key: 'End' });
+			await tick();
+			expect(orderedBlockIds().at(-1)).toBe(first.id);
+		});
+
+		it('is a no-op at the top/bottom edge (ArrowUp on the first block, ArrowDown on the last)', async () => {
+			const { first, third } = renderThreeBlocks();
+			const { container } = render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: {
+					spaces: [],
+					spaceId: 'space-1',
+					activeSpaceId: 'space-1',
+					documents: [],
+					collections: [],
+					documentId: 'doc-1',
+					title: 'D'
+				}
+			});
+			await flushShardResolution();
+			const before = orderedBlockIds();
+
+			const firstHandle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLButtonElement;
+			firstHandle.focus();
+			await fireEvent.keyDown(firstHandle, { key: 'ArrowUp' });
+
+			const thirdHandle = container.querySelector(
+				`[data-drag-handle="${third.id}"]`
+			) as HTMLButtonElement;
+			thirdHandle.focus();
+			await fireEvent.keyDown(thirdHandle, { key: 'ArrowDown' });
+
+			expect(orderedBlockIds()).toEqual(before);
+		});
+
+		it('drags a block via pointer events, shows a live insertion indicator, and drops it at the new position', async () => {
+			const { first, second, third } = renderThreeBlocks();
+			const { container } = render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: {
+					spaces: [],
+					spaceId: 'space-1',
+					activeSpaceId: 'space-1',
+					documents: [],
+					collections: [],
+					documentId: 'doc-1',
+					title: 'D'
+				}
+			});
+			await flushShardResolution();
+
+			// jsdom lays everything out at (0,0) — stub each row's rect by its
+			// rendered position among the three blocks so the drop-position math
+			// (nearest row midpoint to clientY) has real geometry to work with.
+			const rowHeight = 40;
+			const rectFor = (id: string): DOMRect => {
+				const idx = orderedBlockIds().indexOf(id);
+				return {
+					top: idx * rowHeight,
+					bottom: idx * rowHeight + rowHeight,
+					height: rowHeight,
+					left: 0,
+					right: 100,
+					width: 100,
+					x: 0,
+					y: idx * rowHeight,
+					toJSON() {}
+				} as DOMRect;
+			};
+			vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+				this: Element
+			) {
+				const id = this.id.replace(/^block-/, '');
+				return rectFor(id);
+			});
+
+			const handle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLButtonElement;
+			await fireEvent.pointerDown(handle, { button: 0, pointerId: 1 });
+
+			// Drop just past the third row's midpoint — i.e. "move to the end".
+			await fireEvent.pointerMove(window, { clientY: rowHeight * 3 - 1, pointerId: 1 });
+			await tick();
+			expect(container.querySelector('.drop-indicator')).toBeInTheDocument();
+
+			await fireEvent.pointerUp(window, { pointerId: 1 });
+			await tick();
+
+			expect(container.querySelector('.drop-indicator')).not.toBeInTheDocument();
+			expect(orderedBlockIds()).toEqual([second.id, third.id, first.id]);
+		});
+
+		it('cancels an in-progress drag on Escape, leaving order unchanged', async () => {
+			const { first } = renderThreeBlocks();
+			const { container } = render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: {
+					spaces: [],
+					spaceId: 'space-1',
+					activeSpaceId: 'space-1',
+					documents: [],
+					collections: [],
+					documentId: 'doc-1',
+					title: 'D'
+				}
+			});
+			await flushShardResolution();
+			const before = orderedBlockIds();
+
+			const handle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLButtonElement;
+			await fireEvent.pointerDown(handle, { button: 0, pointerId: 1 });
+			await fireEvent.keyDown(window, { key: 'Escape' });
+			await fireEvent.pointerUp(window, { pointerId: 1 });
+			await tick();
+
+			expect(container.querySelector('.drop-indicator')).not.toBeInTheDocument();
+			expect(orderedBlockIds()).toEqual(before);
+		});
+	});
+
 	it('renders a to_do block with a checkbox toggle reflecting checked state', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'to_do' }, HUMAN);

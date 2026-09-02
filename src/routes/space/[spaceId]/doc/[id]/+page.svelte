@@ -12,6 +12,7 @@
 		getRecord,
 		getRecordYText,
 		listRecordsForParent,
+		reorderRecord,
 		setBlockType,
 		setRecordChecked,
 		setRecordCollapsed,
@@ -77,6 +78,9 @@
 	let linkDialog: HTMLDivElement | undefined = $state();
 	let provenanceAnnouncement = $state('');
 	let provenanceAnnouncementTimer: ReturnType<typeof setTimeout> | undefined;
+	let draggingBlockId: string | null = $state(null);
+	let dropIndicatorIndex: number | null = $state(null);
+	let reorderAnnouncement = $state('');
 
 	/**
 	 * Older imported documents may predate per-record attribution. This runtime
@@ -420,6 +424,12 @@
 		void tick().then(() => linkUrlInput?.focus());
 	});
 
+	// Guards against a leaked window listener if this page unmounts mid-drag
+	// (e.g. client-side navigation away while a pointer is still down).
+	$effect(() => {
+		return () => cleanupDragListeners();
+	});
+
 	function handleTitleInput(event: Event): void {
 		if (!ydoc) return;
 		title = (event.target as HTMLInputElement).value;
@@ -596,6 +606,152 @@
 			}
 		}
 		return false;
+	}
+
+	// ---------------------------------------------------------------------
+	// Block reordering (#40) — a visible move handle in each block's gutter,
+	// draggable with the pointer or operable with the keyboard once focused.
+	// Both paths end up calling reorderRecord, which only ever repositions
+	// the block's id within its Document's recordIds Y.Array (see that
+	// function's doc comment) — content, blockType, and provenance are
+	// never touched by either path.
+	// ---------------------------------------------------------------------
+
+	function announceBlockMoved(newIndex: number): void {
+		reorderAnnouncement = `Moved block to position ${newIndex + 1} of ${blocks.length}.`;
+	}
+
+	async function focusDragHandle(blockId: string): Promise<void> {
+		await tick();
+		document.querySelector<HTMLElement>(`[data-drag-handle="${CSS.escape(blockId)}"]`)?.focus();
+	}
+
+	// Keyboard equivalent of dragging: an adjacent swap with the previous/next
+	// sibling, or a direct move to the very start/end — reusing reorderRecord's
+	// own afterRecordId semantics rather than the pointer-drag path's
+	// index-into-the-original-list math below, since "swap with my neighbor"
+	// is simpler to express directly.
+	function moveBlock(blockId: string, target: 'up' | 'down' | 'start' | 'end'): void {
+		if (!ydoc) return;
+		const currentIndex = blocks.findIndex((b) => b.id === blockId);
+		if (currentIndex === -1) return;
+		const lastIndex = blocks.length - 1;
+
+		let afterRecordId: string | undefined;
+		let newIndex: number;
+		if (target === 'start') {
+			if (currentIndex === 0) return;
+			afterRecordId = undefined;
+			newIndex = 0;
+		} else if (target === 'end') {
+			if (currentIndex === lastIndex) return;
+			afterRecordId = blocks[lastIndex].id;
+			newIndex = lastIndex;
+		} else if (target === 'up') {
+			if (currentIndex === 0) return;
+			afterRecordId = currentIndex >= 2 ? blocks[currentIndex - 2].id : undefined;
+			newIndex = currentIndex - 1;
+		} else {
+			if (currentIndex === lastIndex) return;
+			afterRecordId = blocks[currentIndex + 1].id;
+			newIndex = currentIndex + 1;
+		}
+
+		reorderRecord(ydoc, blockId, afterRecordId);
+		announceBlockMoved(newIndex);
+		void focusDragHandle(blockId);
+	}
+
+	function handleDragHandleKeydown(event: KeyboardEvent, blockId: string): void {
+		const noModifiers = !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey;
+		if (!noModifiers) return;
+		if (event.key === 'ArrowUp') {
+			event.preventDefault();
+			moveBlock(blockId, 'up');
+		} else if (event.key === 'ArrowDown') {
+			event.preventDefault();
+			moveBlock(blockId, 'down');
+		} else if (event.key === 'Home') {
+			event.preventDefault();
+			moveBlock(blockId, 'start');
+		} else if (event.key === 'End') {
+			event.preventDefault();
+			moveBlock(blockId, 'end');
+		}
+	}
+
+	// Finds the boundary between rendered block rows closest to clientY, as an
+	// index into the *current* (pre-move) blocks array — 0..blocks.length,
+	// where blocks.length means "after the last block."
+	function dropIndexAtClientY(clientY: number): number {
+		const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-block-row]'));
+		for (let i = 0; i < rows.length; i++) {
+			const rect = rows[i].getBoundingClientRect();
+			if (clientY < rect.top + rect.height / 2) return i;
+		}
+		return rows.length;
+	}
+
+	// targetIndex is a drop-indicator position computed against the *current*
+	// blocks array (i.e. still including blockId at its old slot) — translated
+	// here into reorderRecord's afterRecordId (resolved among blockId's
+	// siblings, i.e. that same array *without* blockId).
+	function moveBlockToIndex(blockId: string, targetIndex: number): void {
+		if (!ydoc) return;
+		const currentIndex = blocks.findIndex((b) => b.id === blockId);
+		if (currentIndex === -1) return;
+
+		const adjusted = targetIndex > currentIndex ? targetIndex - 1 : targetIndex;
+		if (adjusted === currentIndex) return; // dropped back at its own position
+
+		const withoutSelf = blocks.filter((b) => b.id !== blockId);
+		const afterRecordId = adjusted > 0 ? withoutSelf[adjusted - 1]?.id : undefined;
+		reorderRecord(ydoc, blockId, afterRecordId);
+		announceBlockMoved(adjusted);
+	}
+
+	function cleanupDragListeners(): void {
+		window.removeEventListener('pointermove', handleDragPointerMove);
+		window.removeEventListener('pointerup', handleDragPointerUp);
+		window.removeEventListener('keydown', handleDragEscapeKeydown);
+	}
+
+	function cancelDrag(): void {
+		cleanupDragListeners();
+		draggingBlockId = null;
+		dropIndicatorIndex = null;
+	}
+
+	function handleDragPointerMove(event: PointerEvent): void {
+		if (!draggingBlockId) return;
+		dropIndicatorIndex = dropIndexAtClientY(event.clientY);
+	}
+
+	function handleDragPointerUp(): void {
+		const blockId = draggingBlockId;
+		const targetIndex = dropIndicatorIndex;
+		cleanupDragListeners();
+		draggingBlockId = null;
+		dropIndicatorIndex = null;
+		if (blockId !== null && targetIndex !== null) {
+			moveBlockToIndex(blockId, targetIndex);
+		}
+	}
+
+	function handleDragEscapeKeydown(event: KeyboardEvent): void {
+		if (event.key === 'Escape') cancelDrag();
+	}
+
+	function startBlockDrag(event: PointerEvent, blockId: string, index: number): void {
+		// Only the primary button/touch starts a drag — a right-click or an
+		// auxiliary button on the handle shouldn't hijack a context menu.
+		if (event.button !== 0) return;
+		event.preventDefault();
+		draggingBlockId = blockId;
+		dropIndicatorIndex = index;
+		window.addEventListener('pointermove', handleDragPointerMove);
+		window.addEventListener('pointerup', handleDragPointerUp);
+		window.addEventListener('keydown', handleDragEscapeKeydown);
 	}
 
 	/** Updates live provenance for the record whose editable text just changed. */
@@ -792,6 +948,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="mt-6 flex min-h-[350px] cursor-text flex-col gap-1 pb-16"
+		class:select-none={draggingBlockId !== null}
 		onclick={(e) => {
 			if (e.target === e.currentTarget) {
 				if (blocks.length > 0) {
@@ -818,7 +975,28 @@
 			{@const provenance = ydoc ? (getRecord(ydoc, provenanceRecordId) ?? block) : block}
 			{@const bt = block.blockType ?? 'paragraph'}
 
-			<div class="group relative flex items-start py-0.5" id="block-{block.id}">
+			{#if draggingBlockId && dropIndicatorIndex === index}
+				<div class="drop-indicator" aria-hidden="true"></div>
+			{/if}
+			<div
+				class="group relative flex items-start py-0.5"
+				class:opacity-50={draggingBlockId === block.id}
+				id="block-{block.id}"
+				data-block-row
+			>
+				<!-- Move handle: pointer-draggable, or ArrowUp/ArrowDown/Home/End
+					 once focused — see the block-reordering functions above. -->
+				<button
+					type="button"
+					class="mt-1 mr-1 flex h-5 w-5 flex-shrink-0 cursor-grab items-center justify-center rounded text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:bg-surface hover:text-fg focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent active:cursor-grabbing"
+					aria-label="Move block. Drag, or use Arrow Up, Arrow Down, Home, and End."
+					data-drag-handle={block.id}
+					onpointerdown={(e) => startBlockDrag(e, block.id, index)}
+					onkeydown={(e) => handleDragHandleKeydown(e, block.id)}
+				>
+					<Icon name="grip" size={14} />
+				</button>
+
 				<!-- Left Indicator / Control Gutter -->
 				{#if bt === 'to_do'}
 					<button
@@ -1170,8 +1348,12 @@
 				{/if}
 			</div>
 		{/each}
+		{#if draggingBlockId && dropIndicatorIndex === blocks.length}
+			<div class="drop-indicator" aria-hidden="true"></div>
+		{/if}
 	</div>
 	<span class="sr-only" aria-live="polite" aria-atomic="true">{provenanceAnnouncement}</span>
+	<span class="sr-only" aria-live="polite" aria-atomic="true">{reorderAnnouncement}</span>
 
 	<!-- Add Block Button -->
 	<div class="mt-6 flex items-center gap-2">
@@ -1295,6 +1477,12 @@
 {/if}
 
 <style>
+	.drop-indicator {
+		height: 2px;
+		margin: 2px 0;
+		border-radius: 1px;
+		background: var(--color-accent);
+	}
 	.shimmer-bar {
 		background: linear-gradient(
 			90deg,
