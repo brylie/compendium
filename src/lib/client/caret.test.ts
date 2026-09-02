@@ -84,6 +84,9 @@ describe('caret: offset <-> DOM selection conversion', () => {
 	});
 
 	it('no-ops when there is no selection object available', () => {
+		// Saved for restore below, never called standalone — safe despite the
+		// unbound-method warning.
+		// eslint-disable-next-line @typescript-eslint/unbound-method
 		const originalGetSelection = window.getSelection;
 		window.getSelection = () => null;
 		expect(() => setCaretOffset(root, 2)).not.toThrow();
@@ -158,6 +161,9 @@ describe('caret: cross-block ArrowUp/ArrowDown geometry', () => {
 
 describe('caret: point-based hit-testing (mocked, since jsdom implements neither API)', () => {
 	let root: HTMLElement;
+	// Saved for restore in afterEach below, never called standalone — safe
+	// despite the unbound-method warning.
+	// eslint-disable-next-line @typescript-eslint/unbound-method
 	const originalGetClientRects = Range.prototype.getClientRects;
 
 	beforeEach(() => {

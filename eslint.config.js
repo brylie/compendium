@@ -79,6 +79,10 @@ export default defineConfig(
 			'@typescript-eslint/no-misused-spread': 'error',
 			'@typescript-eslint/no-useless-default-assignment': 'error',
 			'@typescript-eslint/no-unnecessary-type-parameters': 'error',
+			'@typescript-eslint/no-base-to-string': 'error',
+			'@typescript-eslint/restrict-template-expressions': 'error',
+			'@typescript-eslint/restrict-plus-operands': 'error',
+			'@typescript-eslint/unbound-method': 'error',
 
 			// Deliberately NOT adopted repo-wide, even though each is real
 			// typescript-eslint *TypeChecked coverage (issue #174's canonical
@@ -191,6 +195,22 @@ export default defineConfig(
 			'@typescript-eslint/no-unsafe-call': 'error',
 			'@typescript-eslint/no-unsafe-return': 'error',
 			'@typescript-eslint/no-unnecessary-type-assertion': 'error'
+		}
+	},
+	{
+		// yjs's own YText.d.ts declares no `toString()` override (only
+		// `toJSON(): string`), so no-base-to-string can't see that Y.Text
+		// really does implement a meaningful toString() at runtime — Yjs's
+		// own UndoManager.d.ts doc comment relies on exactly this
+		// (`ytext.toString() // => ''`). A type-declaration gap in the
+		// library, not a real risk here — these two files are the ones that
+		// call `.toString()` on a Y.Text directly in assertions.
+		// Route folders use literal `[param]` brackets, which the glob
+		// matcher reads as a character class rather than literal text — `*`
+		// sidesteps that instead of escaping every bracket.
+		files: ['src/lib/client/undo.test.ts', 'src/routes/space/*/doc/*/BlockEditor.svelte.test.ts'],
+		rules: {
+			'@typescript-eslint/no-base-to-string': 'off'
 		}
 	},
 	{
