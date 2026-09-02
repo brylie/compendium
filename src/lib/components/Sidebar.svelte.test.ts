@@ -26,9 +26,31 @@ function setPath(path: string, params: Record<string, string> = {}): void {
 	mockPageState.params = params;
 }
 
+function setMobileViewport(initialMatches: boolean): (matches: boolean) => void {
+	let matches = initialMatches;
+	let changeListener: (() => void) | undefined;
+	vi.stubGlobal(
+		'matchMedia',
+		vi.fn().mockImplementation(() => ({
+			get matches() {
+				return matches;
+			},
+			addEventListener: vi.fn((event: string, listener: () => void) => {
+				if (event === 'change') changeListener = listener;
+			}),
+			removeEventListener: vi.fn()
+		}))
+	);
+	return (nextMatches: boolean) => {
+		matches = nextMatches;
+		changeListener?.();
+	};
+}
+
 describe('Sidebar', () => {
 	beforeEach(() => {
 		setPath('/');
+		setMobileViewport(false);
 		goto.mockClear();
 		invalidateAll.mockClear();
 		isDark.mockClear();
@@ -82,6 +104,52 @@ describe('Sidebar', () => {
 		render(Sidebar, { activeSpaceId: 'space-1' });
 		expect(screen.queryByText('Compendium')).not.toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
+	});
+
+	it('uses an accessible navigation drawer on a narrow viewport', async () => {
+		setMobileViewport(true);
+		const user = userEvent.setup();
+		render(Sidebar, { activeSpaceId: 'space-1' });
+
+		const trigger = screen.getByRole('button', { name: 'Open navigation' });
+		expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+		await user.click(trigger);
+		expect(screen.getByRole('dialog', { name: 'Workspace sidebar' })).toBeInTheDocument();
+		expect(trigger).toHaveAttribute('aria-expanded', 'true');
+
+		await user.keyboard('{Escape}');
+		expect(trigger).toHaveFocus();
+		expect(trigger).toHaveAttribute('aria-expanded', 'false');
+	});
+
+	it('moves focus to a desktop control when the open drawer becomes a desktop sidebar', async () => {
+		const changeViewport = setMobileViewport(true);
+		const user = userEvent.setup();
+		render(Sidebar, { activeSpaceId: 'space-1' });
+
+		await user.click(screen.getByRole('button', { name: 'Open navigation' }));
+		const closeButton = within(screen.getByRole('dialog')).getByRole('button', {
+			name: 'Close navigation'
+		});
+		closeButton.focus();
+		changeViewport(false);
+
+		await vi.waitFor(() =>
+			expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toHaveFocus()
+		);
+	});
+
+	it('moves focus to the menu button when a focused desktop sidebar becomes mobile', async () => {
+		const changeViewport = setMobileViewport(false);
+		render(Sidebar, { activeSpaceId: 'space-1' });
+
+		screen.getByRole('button', { name: 'Collapse sidebar' }).focus();
+		changeViewport(true);
+
+		await vi.waitFor(() =>
+			expect(screen.getByRole('button', { name: 'Open navigation' })).toHaveFocus()
+		);
 	});
 
 	it('lists documents from initialDocuments (catalog-backed, not derived from ydoc — #120)', () => {
