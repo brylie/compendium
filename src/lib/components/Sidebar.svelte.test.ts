@@ -26,15 +26,25 @@ function setPath(path: string, params: Record<string, string> = {}): void {
 	mockPageState.params = params;
 }
 
-function setMobileViewport(matches: boolean): void {
+function setMobileViewport(initialMatches: boolean): (matches: boolean) => void {
+	let matches = initialMatches;
+	let changeListener: (() => void) | undefined;
 	vi.stubGlobal(
 		'matchMedia',
 		vi.fn().mockImplementation(() => ({
-			matches,
-			addEventListener: vi.fn(),
+			get matches() {
+				return matches;
+			},
+			addEventListener: vi.fn((event: string, listener: () => void) => {
+				if (event === 'change') changeListener = listener;
+			}),
 			removeEventListener: vi.fn()
 		}))
 	);
+	return (nextMatches: boolean) => {
+		matches = nextMatches;
+		changeListener?.();
+	};
 }
 
 describe('Sidebar', () => {
@@ -111,6 +121,35 @@ describe('Sidebar', () => {
 		await user.keyboard('{Escape}');
 		expect(trigger).toHaveFocus();
 		expect(trigger).toHaveAttribute('aria-expanded', 'false');
+	});
+
+	it('moves focus to a desktop control when the open drawer becomes a desktop sidebar', async () => {
+		const changeViewport = setMobileViewport(true);
+		const user = userEvent.setup();
+		render(Sidebar, { activeSpaceId: 'space-1' });
+
+		await user.click(screen.getByRole('button', { name: 'Open navigation' }));
+		const closeButton = within(screen.getByRole('dialog')).getByRole('button', {
+			name: 'Close navigation'
+		});
+		closeButton.focus();
+		changeViewport(false);
+
+		await vi.waitFor(() =>
+			expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toHaveFocus()
+		);
+	});
+
+	it('moves focus to the menu button when a focused desktop sidebar becomes mobile', async () => {
+		const changeViewport = setMobileViewport(false);
+		render(Sidebar, { activeSpaceId: 'space-1' });
+
+		screen.getByRole('button', { name: 'Collapse sidebar' }).focus();
+		changeViewport(true);
+
+		await vi.waitFor(() =>
+			expect(screen.getByRole('button', { name: 'Open navigation' })).toHaveFocus()
+		);
 	});
 
 	it('lists documents from initialDocuments (catalog-backed, not derived from ydoc — #120)', () => {

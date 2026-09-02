@@ -48,6 +48,7 @@
 	let darkMode = $state(false);
 	let sidebarElement: HTMLElement;
 	let menuButton: HTMLButtonElement;
+	let desktopFocusTarget = $state<HTMLButtonElement>();
 	let expandedDocIds = new SvelteSet<string>();
 
 	let createDialog: 'document' | 'collection' | null = $state(null);
@@ -69,9 +70,17 @@
 	onMount(() => {
 		const mediaQuery =
 			typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 767px)') : null;
+		let hasMeasuredViewport = false;
 		const updateViewport = () => {
-			isMobile = mediaQuery?.matches ?? false;
-			if (!isMobile) mobileOpen = false;
+			const nextIsMobile = mediaQuery?.matches ?? false;
+			const focusNeedsMoving =
+				hasMeasuredViewport &&
+				isMobile !== nextIsMobile &&
+				sidebarElement?.contains(document.activeElement);
+			isMobile = nextIsMobile;
+			mobileOpen = false;
+			if (focusNeedsMoving) void moveFocusAfterViewportChange(nextIsMobile);
+			hasMeasuredViewport = true;
 		};
 		updateViewport();
 		mediaQuery?.addEventListener('change', updateViewport);
@@ -113,6 +122,14 @@
 		mobileOpen = false;
 		await tick();
 		menuButton?.focus();
+	}
+
+	/** Moves focus to a visible control after the responsive sidebar changes mode. */
+	async function moveFocusAfterViewportChange(nextIsMobile: boolean): Promise<void> {
+		await tick();
+		if (isMobile !== nextIsMobile) return;
+		if (nextIsMobile) menuButton?.focus();
+		else desktopFocusTarget?.focus();
 	}
 
 	/** Handles drawer dismissal and keeps keyboard focus within the mobile drawer. */
@@ -311,6 +328,7 @@
 				</button>
 			{:else}
 				<button
+					bind:this={desktopFocusTarget}
 					type="button"
 					onclick={toggleCollapse}
 					class="rounded p-1 text-muted transition-colors hover:bg-surface hover:text-fg"
@@ -322,6 +340,7 @@
 			{/if}
 		{:else}
 			<button
+				bind:this={desktopFocusTarget}
 				type="button"
 				onclick={toggleCollapse}
 				class="rounded p-1.5 text-muted transition-colors hover:bg-surface hover:text-accent"
