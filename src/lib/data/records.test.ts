@@ -301,14 +301,18 @@ describe('documents: title, parent, and delete edge cases', () => {
 		expect(document.id).not.toBe(nested.id);
 	});
 
-	it('updateDocumentParent treats an explicit empty-string parentDocumentId the same as omitted (moves to root)', () => {
+	it('updateDocumentParent treats an explicit empty-string parentDocumentId the same as omitted (moves to root, ordered among real root siblings)', () => {
 		const doc = new Y.Doc();
 		const folder = createDocument(doc, { title: 'Folder' });
+		const rootSibling = createDocument(doc, { title: 'Root Sibling' });
 		const child = createDocument(doc, { title: 'Child', parentDocumentId: folder.id });
 
 		updateDocumentParent(doc, child.id, '');
 
 		expect(getDocument(doc, child.id)?.parentDocumentId).toBeUndefined();
+		// Ordered after the real root sibling, not computed against an empty
+		// (parentDocumentId === '') sibling set that excludes it.
+		expect(getDocument(doc, child.id)!.order > rootSibling.order).toBe(true);
 	});
 
 	it('deleteDocument is a no-op for a nonexistent id', () => {
