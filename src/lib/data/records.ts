@@ -1168,8 +1168,7 @@ export function reorderRecord(doc: Y.Doc, id: string, afterRecordId?: string): v
 	doc.transact(() => {
 		const siblingIds = parentRecordIds(doc, parentId, kind);
 		const ids = siblingIds.toArray();
-		const currentIndex = ids.indexOf(id);
-		if (currentIndex === -1) throw new NotFoundError(`Record ${id} not found among siblings`);
+		if (ids.indexOf(id) === -1) throw new NotFoundError(`Record ${id} not found among siblings`);
 
 		const remaining = ids.filter((siblingId) => siblingId !== id);
 		const insertAt = afterRecordId ? remaining.indexOf(afterRecordId) + 1 : 0;
@@ -1177,7 +1176,15 @@ export function reorderRecord(doc: Y.Doc, id: string, afterRecordId?: string): v
 			throw new NotFoundError(`Record ${afterRecordId} not found among siblings`);
 		}
 
-		siblingIds.delete(currentIndex, 1);
+		// Removes every occurrence of `id`, not just the first, so the live
+		// array matches `remaining` (insertAt's basis) exactly before the
+		// insert below — a stale duplicate left by an earlier concurrent move
+		// (see this function's doc comment) would otherwise still sit ahead of
+		// the freshly-inserted entry, and listRecordsForParent's keep-first
+		// dedupe would then make this move produce no visible effect at all.
+		for (let i = siblingIds.length - 1; i >= 0; i--) {
+			if (siblingIds.get(i) === id) siblingIds.delete(i, 1);
+		}
 		siblingIds.insert(insertAt, [id]);
 	});
 }

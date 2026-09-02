@@ -721,6 +721,7 @@
 	function cleanupDragListeners(): void {
 		window.removeEventListener('pointermove', handleDragPointerMove);
 		window.removeEventListener('pointerup', handleDragPointerUp);
+		window.removeEventListener('pointercancel', cancelDrag);
 		window.removeEventListener('keydown', handleDragEscapeKeydown);
 	}
 
@@ -759,6 +760,12 @@
 		dropIndicatorIndex = index;
 		window.addEventListener('pointermove', handleDragPointerMove);
 		window.addEventListener('pointerup', handleDragPointerUp);
+		// The browser can cancel the pointer stream without ever firing
+		// pointerup — e.g. a touch drag that turns into a page scroll — which
+		// would otherwise leave the drag state (and these listeners) stuck
+		// active until an unrelated future pointerup silently commits a
+		// reorder the user never asked for.
+		window.addEventListener('pointercancel', cancelDrag);
 		window.addEventListener('keydown', handleDragEscapeKeydown);
 	}
 

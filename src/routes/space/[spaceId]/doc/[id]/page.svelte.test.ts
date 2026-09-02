@@ -482,28 +482,35 @@ describe('doc/[id] +page', () => {
 					toJSON() {}
 				} as DOMRect;
 			};
-			vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
-				this: Element
-			) {
-				const id = this.id.replace(/^block-/, '');
-				return rectFor(id);
-			});
+			const rectSpy = vi
+				.spyOn(Element.prototype, 'getBoundingClientRect')
+				.mockImplementation(function (this: Element) {
+					const id = this.id.replace(/^block-/, '');
+					return rectFor(id);
+				});
 
-			const handle = container.querySelector(
-				`[data-drag-handle="${first.id}"]`
-			) as HTMLButtonElement;
-			await fireEvent.pointerDown(handle, { button: 0, pointerId: 1 });
+			try {
+				const handle = container.querySelector(
+					`[data-drag-handle="${first.id}"]`
+				) as HTMLButtonElement;
+				await fireEvent.pointerDown(handle, { button: 0, pointerId: 1 });
 
-			// Drop just past the third row's midpoint — i.e. "move to the end".
-			await fireEvent.pointerMove(window, { clientY: rowHeight * 3 - 1, pointerId: 1 });
-			await tick();
-			expect(container.querySelector('.drop-indicator')).toBeInTheDocument();
+				// Drop just past the third row's midpoint — i.e. "move to the end".
+				await fireEvent.pointerMove(window, { clientY: rowHeight * 3 - 1, pointerId: 1 });
+				await tick();
+				expect(container.querySelector('.drop-indicator')).toBeInTheDocument();
 
-			await fireEvent.pointerUp(window, { pointerId: 1 });
-			await tick();
+				await fireEvent.pointerUp(window, { pointerId: 1 });
+				await tick();
 
-			expect(container.querySelector('.drop-indicator')).not.toBeInTheDocument();
-			expect(orderedBlockIds()).toEqual([second.id, third.id, first.id]);
+				expect(container.querySelector('.drop-indicator')).not.toBeInTheDocument();
+				expect(orderedBlockIds()).toEqual([second.id, third.id, first.id]);
+			} finally {
+				// Not restored, this leaks into later tests: every element in the
+				// suite would report a zero/negative rect instead of jsdom's real
+				// (also-zero, but unmocked) default.
+				rectSpy.mockRestore();
+			}
 		});
 
 		it('cancels an in-progress drag on Escape, leaving order unchanged', async () => {

@@ -1222,6 +1222,23 @@ describe('reorderRecord: block drag-and-drop repositioning (#40)', () => {
 		expect(ids(doc, document.id)).toEqual([b.id, c.id, d.id]);
 	});
 
+	it('reorderRecord cleans up a pre-existing duplicate and still produces a visible move (not just deleteRecord)', () => {
+		const { doc, document, a, b, c, d } = setup();
+		// Same leftover-duplicate state as the concurrent-move scenario above,
+		// but this time a *second* reorderRecord call comes in before anything
+		// cleans it up — the array still holds two entries for `a` when this
+		// move is requested.
+		const ymeta = doc.getMap('documents').get(document.id) as Y.Map<unknown>;
+		const recordIds = ymeta.get('recordIds') as Y.Array<string>;
+		doc.transact(() => recordIds.insert(2, [a.id])); // ids: a, b, a, c, d
+		expect(recordIds.toArray().filter((id) => id === a.id)).toHaveLength(2);
+
+		reorderRecord(doc, a.id, d.id); // move `a` to the very end
+
+		expect(recordIds.toArray().filter((id) => id === a.id)).toHaveLength(1);
+		expect(ids(doc, document.id)).toEqual([b.id, c.id, d.id, a.id]);
+	});
+
 	it('listRecordsForParent dedupes a duplicate id, keeping the first occurrence', () => {
 		const { doc, document, a, b } = setup();
 		const ymeta = doc.getMap('documents').get(document.id) as Y.Map<unknown>;
