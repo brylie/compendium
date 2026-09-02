@@ -229,6 +229,21 @@
 		return event.metaKey || event.ctrlKey;
 	}
 
+	// ArrowUp/ArrowDown at the visual first/last line of this block, with no
+	// modifier held, crosses into the previous/next block instead of moving
+	// within it — the column-preserving cross-block navigation the caller
+	// (+page.svelte's onArrowUpAtStart/onArrowDownAtEnd) implements.
+	function handleArrowNavigationAtEdge(event: KeyboardEvent): void {
+		if (!el) return;
+		const noModifiers = !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey;
+		if (!noModifiers) return;
+		if (event.key === 'ArrowUp' && !isFirstBlock && isCaretAtFirstLine(el)) {
+			if (onArrowUpAtStart(getCaretClientX(el))) event.preventDefault();
+		} else if (event.key === 'ArrowDown' && !isLastBlock && isCaretAtLastLine(el)) {
+			if (onArrowDownAtEnd(getCaretClientX(el))) event.preventDefault();
+		}
+	}
+
 	function handleKeydown(event: KeyboardEvent): void {
 		if (isComposingKeyEvent(event)) return;
 		if (event.key === 'Enter') {
@@ -251,15 +266,7 @@
 			event.preventDefault();
 			onLinkShortcut();
 		}
-		const noModifiers = !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey;
-		if (event.key === 'ArrowUp' && el && !isFirstBlock && noModifiers && isCaretAtFirstLine(el)) {
-			if (onArrowUpAtStart(getCaretClientX(el))) event.preventDefault();
-			return;
-		}
-		if (event.key === 'ArrowDown' && el && !isLastBlock && noModifiers && isCaretAtLastLine(el)) {
-			if (onArrowDownAtEnd(getCaretClientX(el))) event.preventDefault();
-			return;
-		}
+		handleArrowNavigationAtEdge(event);
 	}
 
 	/** Returns the current selection's character offsets within this block, or `null` if the block isn't focused/selected. */
@@ -369,10 +376,12 @@
 		setCaretOffset(el, offset);
 	}
 
-	// Column-preserving landing spot for a block-to-block ArrowUp/ArrowDown
-	// move — lands on this editor's first/last visual line, as close as
-	// possible to clientX (the caret's horizontal position in the block the
-	// user moved out of).
+	/**
+	 * Column-preserving landing spot for a block-to-block ArrowUp/ArrowDown
+	 * move — lands on this editor's first/last visual line, as close as
+	 * possible to clientX (the caret's horizontal position in the block the
+	 * user moved out of).
+	 */
 	export function focusEditorAtLine(edge: 'first' | 'last', clientX: number | null): void {
 		if (!el) return;
 		setCaretNearClientX(el, clientX, edge);

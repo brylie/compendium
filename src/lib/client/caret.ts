@@ -99,10 +99,12 @@ function isCaretAtEdge(root: HTMLElement, edge: 'first' | 'last'): boolean {
 		: rootRect.bottom - caretRect.bottom < caretRect.height / 2;
 }
 
+/** True when the caret sits on root's visual first line — the boundary an ArrowUp at the top should cross into the previous block. */
 export function isCaretAtFirstLine(root: HTMLElement): boolean {
 	return isCaretAtEdge(root, 'first');
 }
 
+/** True when the caret sits on root's visual last line — the boundary an ArrowDown at the bottom should cross into the next block. */
 export function isCaretAtLastLine(root: HTMLElement): boolean {
 	return isCaretAtEdge(root, 'last');
 }
@@ -123,7 +125,13 @@ export function setCaretNearClientX(
 	if (clientX !== null && y !== null) {
 		const doc = root.ownerDocument;
 		let range: Range | null = null;
+		// caretRangeFromPoint is deprecated/non-standard, but still the most
+		// broadly-supported point-based hit-testing API — caretPositionFromPoint
+		// (the standards-track replacement) is the fallback below for browsers
+		// that lack it, not a reason to drop the primary path.
+		// eslint-disable-next-line sonarjs/deprecation
 		if (typeof doc.caretRangeFromPoint === 'function') {
+			// eslint-disable-next-line sonarjs/deprecation
 			range = doc.caretRangeFromPoint(clientX, y);
 		} else if (typeof doc.caretPositionFromPoint === 'function') {
 			const pos = doc.caretPositionFromPoint(clientX, y);

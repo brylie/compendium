@@ -1,3 +1,10 @@
+// caret.ts's setCaretNearClientX deliberately uses the deprecated, non-
+// standard `document.caretRangeFromPoint` as its primary point-based
+// hit-testing strategy (with the standards-track `caretPositionFromPoint`
+// as a fallback for browsers that lack it) — this suite exists specifically
+// to test that feature-detection/fallback behavior, so mocking the
+// deprecated API is the point, not something to work around.
+/* eslint-disable sonarjs/deprecation */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
 	getCaretClientX,
