@@ -137,6 +137,8 @@ Chat/channels are explicitly not part of this model (see Non-Goals) — that gap
 
 Accessibility (WCAG 2.1 AA — keyboard navigation, screen-reader support, focus management) is a cross-cutting acceptance bar for every requirement below, Must-Have or Nice-to-Have alike, not a standalone feature — see #18 for the current tracking/audit issue.
 
+Responsive navigation is part of that bar: at narrow viewports, no persistent navigation chrome may push the active page off-screen or require horizontal scrolling to reach it. Desktop navigation may remain persistent, but a narrow viewport uses an accessible, keyboard-dismissible drawer that returns focus to its trigger when closed.
+
 ### Must-Have (P0)
 
 **Real-time collaborative editing**

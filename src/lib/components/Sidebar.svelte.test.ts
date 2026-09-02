@@ -26,9 +26,21 @@ function setPath(path: string, params: Record<string, string> = {}): void {
 	mockPageState.params = params;
 }
 
+function setMobileViewport(matches: boolean): void {
+	vi.stubGlobal(
+		'matchMedia',
+		vi.fn().mockImplementation(() => ({
+			matches,
+			addEventListener: vi.fn(),
+			removeEventListener: vi.fn()
+		}))
+	);
+}
+
 describe('Sidebar', () => {
 	beforeEach(() => {
 		setPath('/');
+		setMobileViewport(false);
 		goto.mockClear();
 		invalidateAll.mockClear();
 		isDark.mockClear();
@@ -82,6 +94,23 @@ describe('Sidebar', () => {
 		render(Sidebar, { activeSpaceId: 'space-1' });
 		expect(screen.queryByText('Compendium')).not.toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
+	});
+
+	it('uses an accessible navigation drawer on a narrow viewport', async () => {
+		setMobileViewport(true);
+		const user = userEvent.setup();
+		render(Sidebar, { activeSpaceId: 'space-1' });
+
+		const trigger = screen.getByRole('button', { name: 'Open navigation' });
+		expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+		await user.click(trigger);
+		expect(screen.getByRole('dialog', { name: 'Workspace sidebar' })).toBeInTheDocument();
+		expect(trigger).toHaveAttribute('aria-expanded', 'true');
+
+		await user.keyboard('{Escape}');
+		expect(trigger).toHaveFocus();
+		expect(trigger).toHaveAttribute('aria-expanded', 'false');
 	});
 
 	it('lists documents from initialDocuments (catalog-backed, not derived from ydoc — #120)', () => {

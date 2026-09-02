@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
@@ -43,7 +43,11 @@
 	let collections = $derived(initialCollections ?? []);
 
 	let collapsed = $state(false);
+	let isMobile = $state(false);
+	let mobileOpen = $state(false);
 	let darkMode = $state(false);
+	let sidebarElement: HTMLElement;
+	let menuButton: HTMLButtonElement;
 	let expandedDocIds = new SvelteSet<string>();
 
 	let createDialog: 'document' | 'collection' | null = $state(null);
@@ -53,19 +57,38 @@
 
 	let documentTree = $derived(buildDocumentTree(documents));
 	let currentPath = $derived(page.url.pathname);
+	let previousPath = $state('');
 	let currentDocId = $derived(
 		page.params.id && currentPath.includes('/doc/') ? page.params.id : null
 	);
 	let currentTableId = $derived(
 		page.params.id && currentPath.includes('/table/') ? page.params.id : null
 	);
+	let expanded = $derived(!collapsed || isMobile);
 
 	onMount(() => {
+		const mediaQuery = window.matchMedia('(max-width: 767px)');
+		const updateViewport = () => {
+			isMobile = mediaQuery.matches;
+			if (!isMobile) mobileOpen = false;
+		};
+		updateViewport();
+		mediaQuery.addEventListener('change', updateViewport);
+
 		try {
 			collapsed = localStorage.getItem('sidebar_collapsed') === 'true';
 			darkMode = isDark();
 		} catch {
 			// ignore localStorage errors in non-browser or sandboxed environments
+		}
+
+		return () => mediaQuery.removeEventListener('change', updateViewport);
+	});
+
+	$effect(() => {
+		if (currentPath !== previousPath) {
+			mobileOpen = false;
+			previousPath = currentPath;
 		}
 	});
 
@@ -75,6 +98,45 @@
 			localStorage.setItem('sidebar_collapsed', String(collapsed));
 		} catch {
 			// ignore localStorage errors
+		}
+	}
+
+	async function openMobileNavigation(): Promise<void> {
+		mobileOpen = true;
+		await tick();
+		sidebarElement.querySelector<HTMLElement>('a, button')?.focus();
+	}
+
+	async function closeMobileNavigation(): Promise<void> {
+		mobileOpen = false;
+		await tick();
+		menuButton?.focus();
+	}
+
+	function handleSidebarKeydown(event: KeyboardEvent): void {
+		if (!isMobile || !mobileOpen) return;
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			void closeMobileNavigation();
+			return;
+		}
+		if (event.key !== 'Tab') return;
+
+		const focusable = Array.from(
+			sidebarElement.querySelectorAll<HTMLElement>(
+				'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])'
+			)
+		);
+		if (focusable.length === 0) return;
+
+		const first = focusable[0];
+		const last = focusable.at(-1)!;
+		if (event.shiftKey && document.activeElement === first) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && document.activeElement === last) {
+			event.preventDefault();
+			first.focus();
 		}
 	}
 
@@ -197,18 +259,36 @@
 	}
 </script>
 
+{#if mobileOpen}
+	<button
+		type="button"
+		class="fixed inset-0 z-40 bg-black/30 md:hidden"
+		aria-label="Close navigation"
+		onclick={() => void closeMobileNavigation()}
+	></button>
+{/if}
+
 <aside
-	class="sidebar flex flex-shrink-0 flex-col border-r border-border bg-sidebar-bg transition-all duration-200 ease-in-out select-none"
-	class:w-59={!collapsed}
-	class:w-11={collapsed}
+	bind:this={sidebarElement}
+	id="workspace-sidebar"
+	class="sidebar fixed inset-y-0 left-0 z-50 flex h-dvh flex-col border-r border-border bg-sidebar-bg shadow-xl transition-all duration-200 ease-in-out select-none md:static md:z-auto md:h-auto md:flex-shrink-0 md:translate-x-0 md:shadow-none"
+	class:w-59={expanded}
+	class:w-11={!expanded}
+	class:-translate-x-full={!mobileOpen}
+	class:translate-x-0={mobileOpen}
+	role={isMobile ? 'dialog' : 'navigation'}
+	aria-modal={isMobile ? 'true' : undefined}
+	aria-hidden={isMobile && !mobileOpen}
+	inert={isMobile && !mobileOpen}
 	aria-label="Workspace sidebar"
+	onkeydown={handleSidebarKeydown}
 >
 	<!-- Header -->
 	<div
 		class="flex h-12 items-center justify-between border-b border-border px-2.5"
-		class:justify-center={collapsed}
+		class:justify-center={!expanded}
 	>
-		{#if !collapsed}
+		{#if expanded}
 			<a
 				href={resolve('/space/[spaceId]', { spaceId: activeSpaceId })}
 				class="flex items-center gap-2 overflow-hidden font-display text-sm font-semibold tracking-tight text-ellipsis whitespace-nowrap text-fg hover:text-accent"
@@ -216,15 +296,27 @@
 				<Icon name="logo" size={18} class="flex-shrink-0 text-accent" />
 				<span class="truncate">Compendium</span>
 			</a>
-			<button
-				type="button"
-				onclick={toggleCollapse}
-				class="rounded p-1 text-muted transition-colors hover:bg-surface hover:text-fg"
-				title="Collapse sidebar"
-				aria-label="Collapse sidebar"
-			>
-				<Icon name="chevron-left" size={16} />
-			</button>
+			{#if isMobile}
+				<button
+					type="button"
+					onclick={() => void closeMobileNavigation()}
+					class="rounded p-1 text-muted transition-colors hover:bg-surface hover:text-fg"
+					title="Close navigation"
+					aria-label="Close navigation"
+				>
+					<Icon name="close" size={16} />
+				</button>
+			{:else}
+				<button
+					type="button"
+					onclick={toggleCollapse}
+					class="rounded p-1 text-muted transition-colors hover:bg-surface hover:text-fg"
+					title="Collapse sidebar"
+					aria-label="Collapse sidebar"
+				>
+					<Icon name="chevron-left" size={16} />
+				</button>
+			{/if}
 		{:else}
 			<button
 				type="button"
@@ -239,14 +331,14 @@
 	</div>
 
 	<!-- Space Switcher -->
-	{#if !collapsed}
+	{#if expanded}
 		<div class="border-b border-border px-2 py-2">
 			<SpaceSwitcher {spaces} {activeSpaceId} />
 		</div>
 	{/if}
 
 	<!-- Main Navigation Content -->
-	{#if !collapsed}
+	{#if expanded}
 		<div class="flex-1 overflow-y-auto px-2 py-3">
 			<!-- Documents Section -->
 			<div class="mb-5">
@@ -428,7 +520,7 @@
 
 	<!-- Footer Chrome -->
 	<div class="border-t border-border p-2">
-		{#if !collapsed}
+		{#if expanded}
 			<div class="flex items-center justify-between text-xs text-muted">
 				<div class="flex items-center gap-1">
 					<a
@@ -503,6 +595,18 @@
 		</div>
 	{/if}
 </aside>
+
+<button
+	bind:this={menuButton}
+	type="button"
+	class="fixed top-3 left-3 z-30 rounded-md border border-border bg-sidebar-bg p-2 text-muted shadow-sm transition-colors hover:bg-surface hover:text-fg md:hidden"
+	aria-label="Open navigation"
+	aria-controls="workspace-sidebar"
+	aria-expanded={mobileOpen}
+	onclick={() => void openMobileNavigation()}
+>
+	<Icon name="sidebar" size={18} />
+</button>
 
 <PromptDialog
 	open={createDialog !== null}
