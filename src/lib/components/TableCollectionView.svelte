@@ -153,7 +153,7 @@
 
 	function setSummary(propertyKey: string, type: FieldSummaryType): void {
 		const next = { ...(config.summaries ?? {}) };
-		if (type === 'none') delete next[propertyKey];
+		if (type === 'none') Reflect.deleteProperty(next, propertyKey);
 		else next[propertyKey] = type;
 		onConfigChange({
 			...config,

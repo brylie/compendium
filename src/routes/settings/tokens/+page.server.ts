@@ -4,6 +4,7 @@ import { listCollections, listDocuments } from '$lib/data/records';
 import { listSpaces } from '$lib/server/catalog';
 import { createToken, listTokens, revokeToken } from '$lib/mcp/tokens';
 import { logAudit } from '$lib/server/audit';
+import { formString } from '$lib/server/form-data';
 import type { Actions, PageServerLoad } from './$types';
 
 const CURRENT_USER = { kind: 'human', userId: 'local' } as const;
@@ -22,7 +23,7 @@ export const load: PageServerLoad = () => {
 export const actions: Actions = {
 	create: async ({ request }) => {
 		const data = await request.formData();
-		const clientLabel = String(data.get('clientLabel') ?? '').trim();
+		const clientLabel = formString(data.get('clientLabel')).trim();
 		if (!clientLabel) return fail(400, { error: 'Client label is required' });
 
 		const allowedDocumentIds = data.getAll('documentIds').map(String);
@@ -52,7 +53,7 @@ export const actions: Actions = {
 	},
 	revoke: async ({ request }) => {
 		const data = await request.formData();
-		const tokenHash = String(data.get('tokenHash') ?? '');
+		const tokenHash = formString(data.get('tokenHash'));
 		if (!tokenHash) return fail(400, { error: 'Missing token' });
 		revokeToken(tokenHash);
 		logAudit({ actor: CURRENT_USER, action: 'revoke_token', targetRecordId: tokenHash });

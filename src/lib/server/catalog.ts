@@ -111,7 +111,7 @@ function reserveLocator(
 			.values({ workspaceId, recordId, kind, spaceId, shardId, createdAt: Date.now() })
 			.run();
 	} catch (err) {
-		if (err instanceof Error && /UNIQUE constraint failed/.test(err.message)) {
+		if (err instanceof Error && err.message.includes('UNIQUE constraint failed')) {
 			throw new RecordIdConflictError(recordId);
 		}
 		throw err;

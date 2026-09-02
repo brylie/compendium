@@ -17,6 +17,7 @@ import type {
 } from './types';
 import { applyRichTextToYText, yTextToRichText } from './richtext';
 import { nextSelectOptionColor } from './select-colors';
+import { type TypedYMap, typedYMap, typedYMapRegistry } from './yjs-typed';
 
 const DOCUMENTS = 'documents';
 const COLLECTIONS = 'collections';
@@ -28,14 +29,66 @@ const RECORDS = 'records';
 // per-key LWW) instead of one clobbering the other's unrelated edit.
 const PROP_PREFIX = 'prop:';
 
-function documentsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
-	return doc.getMap(DOCUMENTS);
+// The known field shape of each top-level Y.Map's entries — the single
+// source of truth TypedYMap uses to give every get/set on these maps a real
+// type instead of `unknown` (issue #174). `recordIds` on Document/Collection
+// carries the Y.Array itself (not its snapshot), same as the raw Yjs shape
+// always has.
+interface DocumentYShape {
+	id: string;
+	title: string;
+	parentDocumentId?: string;
+	order: string;
+	recordIds: Y.Array<string>;
 }
-function collectionsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
-	return doc.getMap(COLLECTIONS);
+
+interface CollectionYShape {
+	title: string;
+	schema: PropertyDefinition[];
+	recordIds: Y.Array<string>;
+	primaryFieldKey?: string;
 }
-function recordsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
-	return doc.getMap(RECORDS);
+
+// Collection-row properties aren't part of this shape: they live under
+// dynamic `prop:<key>` entries (see PROP_PREFIX above), read/written via
+// getPropertyValue/setPropertyValue/deletePropertyValue below rather than
+// TypedYMap's fixed-key get/set.
+interface RecordYShape {
+	id: string;
+	parentId: string;
+	order: string;
+	blockType?: BlockType;
+	content?: Y.Text;
+	isCollectionRow?: boolean;
+	checked?: boolean;
+	collapsed?: boolean;
+	referencedRecordId?: string;
+	viewConfig?: EmbeddedViewConfig;
+	createdBy: ActorId;
+	createdAt: number;
+	lastEditedBy: ActorId;
+	lastEditedAt: number;
+}
+
+function documentsMap(doc: Y.Doc) {
+	return typedYMapRegistry<DocumentYShape>(doc.getMap(DOCUMENTS));
+}
+function collectionsMap(doc: Y.Doc) {
+	return typedYMapRegistry<CollectionYShape>(doc.getMap(COLLECTIONS));
+}
+function recordsMap(doc: Y.Doc) {
+	return typedYMapRegistry<RecordYShape>(doc.getMap(RECORDS));
+}
+
+function setPropertyValue(
+	yrecord: TypedYMap<RecordYShape>,
+	key: string,
+	value: PropertyValue
+): void {
+	yrecord.raw.set(PROP_PREFIX + key, value);
+}
+function deletePropertyValue(yrecord: TypedYMap<RecordYShape>, key: string): void {
+	yrecord.raw.delete(PROP_PREFIX + key);
 }
 
 /** Thrown when a requested Document, Collection, record, property, or select option doesn't exist. */
@@ -53,24 +106,24 @@ export class ValidationError extends Error {}
 export function listDocuments(doc: Y.Doc): DocumentMeta[] {
 	const out: DocumentMeta[] = [];
 	documentsMap(doc).forEach((ymeta, id) => {
-		out.push(readDocumentMeta(id, ymeta as Y.Map<unknown>));
+		out.push(readDocumentMeta(id, ymeta));
 	});
 	return out.sort((a, b) => a.order.localeCompare(b.order));
 }
 
 /** Looks up one Document's metadata by id, or undefined if it doesn't exist. */
 export function getDocument(doc: Y.Doc, id: string): DocumentMeta | undefined {
-	const ymeta = documentsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const ymeta = documentsMap(doc).get(id);
 	return ymeta ? readDocumentMeta(id, ymeta) : undefined;
 }
 
-function readDocumentMeta(id: string, ymeta: Y.Map<unknown>): DocumentMeta {
-	const recordIds = ymeta.get('recordIds') as Y.Array<string> | undefined;
+function readDocumentMeta(id: string, ymeta: TypedYMap<DocumentYShape>): DocumentMeta {
+	const recordIds = ymeta.get('recordIds');
 	return {
 		id,
-		title: (ymeta.get('title') as string) ?? 'Untitled',
-		parentDocumentId: (ymeta.get('parentDocumentId') as string | undefined) || undefined,
-		order: (ymeta.get('order') as string) ?? 'a0',
+		title: ymeta.get('title') ?? 'Untitled',
+		parentDocumentId: ymeta.get('parentDocumentId') ?? undefined,
+		order: ymeta.get('order') ?? 'a0',
 		recordIds: recordIds ? recordIds.toArray() : []
 	};
 }
@@ -117,6 +170,12 @@ export function createDocument(
 	}
 ): DocumentMeta {
 	const id = input.id ?? nanoid();
+	// `||`, not `??`: a caller (e.g. an MCP client's `parentDocumentId:
+	// z.string().optional()`) can pass `''` instead of omitting the field —
+	// `??` would leave it as a truthy-but-invalid id, computing sibling
+	// order among documents with parentDocumentId === '' (none) instead of
+	// among the real root siblings.
+	// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
 	const parentDocumentId = input.parentDocumentId || undefined;
 
 	return doc.transact(() => {
@@ -127,7 +186,7 @@ export function createDocument(
 				input.afterDocumentId
 			);
 
-		const ymeta = new Y.Map<unknown>();
+		const ymeta = typedYMap<DocumentYShape>(new Y.Map<unknown>());
 		ymeta.set('id', id);
 		ymeta.set('title', input.title);
 		if (parentDocumentId) {
@@ -135,7 +194,7 @@ export function createDocument(
 		}
 		ymeta.set('order', order);
 		ymeta.set('recordIds', new Y.Array<string>());
-		documentsMap(doc).set(id, ymeta);
+		documentsMap(doc).set(id, ymeta.raw);
 
 		return {
 			id,
@@ -149,7 +208,7 @@ export function createDocument(
 
 /** Renames a Document. Throws NotFoundError if it doesn't exist. */
 export function updateDocumentTitle(doc: Y.Doc, id: string, title: string): void {
-	const ymeta = documentsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const ymeta = documentsMap(doc).get(id);
 	if (!ymeta) throw new NotFoundError(`Document ${id} not found`);
 	ymeta.set('title', title);
 }
@@ -166,16 +225,21 @@ export function updateDocumentParent(
 	afterDocumentId?: string,
 	order?: string
 ): void {
-	const ymeta = documentsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const ymeta = documentsMap(doc).get(id);
 	if (!ymeta) throw new NotFoundError(`Document ${id} not found`);
 
 	doc.transact(() => {
+		// Same `||` reasoning as createDocument above: a caller-supplied `''`
+		// must match real root siblings (parentDocumentId === undefined), not
+		// filter down to nothing.
+		// eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+		const normalizedParentDocumentId = parentDocumentId || undefined;
 		const resolvedOrder =
 			order ??
 			computeSiblingOrder(
 				listDocuments(doc)
 					.filter((d) => d.id !== id)
-					.filter((d) => d.parentDocumentId === (parentDocumentId || undefined)),
+					.filter((d) => d.parentDocumentId === normalizedParentDocumentId),
 				afterDocumentId
 			);
 
@@ -190,7 +254,7 @@ export function updateDocumentParent(
 
 /** Renames a Collection. Throws NotFoundError if it doesn't exist. */
 export function updateCollectionTitle(doc: Y.Doc, id: string, title: string): void {
-	const ymeta = collectionsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const ymeta = collectionsMap(doc).get(id);
 	if (!ymeta) throw new NotFoundError(`Collection ${id} not found`);
 	ymeta.set('title', title);
 }
@@ -262,25 +326,25 @@ export function buildDocumentTree(documents: DocumentMeta[]): DocumentTreeNode[]
 export function listCollections(doc: Y.Doc): CollectionMeta[] {
 	const out: CollectionMeta[] = [];
 	collectionsMap(doc).forEach((ymeta, id) => {
-		out.push(readCollectionMeta(id, ymeta as Y.Map<unknown>));
+		out.push(readCollectionMeta(id, ymeta));
 	});
 	return out;
 }
 
 /** Looks up one Collection's metadata by id, or undefined if it doesn't exist. */
 export function getCollection(doc: Y.Doc, id: string): CollectionMeta | undefined {
-	const ymeta = collectionsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const ymeta = collectionsMap(doc).get(id);
 	return ymeta ? readCollectionMeta(id, ymeta) : undefined;
 }
 
-function readCollectionMeta(id: string, ymeta: Y.Map<unknown>): CollectionMeta {
-	const recordIds = ymeta.get('recordIds') as Y.Array<string>;
+function readCollectionMeta(id: string, ymeta: TypedYMap<CollectionYShape>): CollectionMeta {
+	const recordIds = ymeta.get('recordIds');
 	return {
 		id,
-		title: ymeta.get('title') as string,
-		schema: (ymeta.get('schema') as PropertyDefinition[]) ?? [],
+		title: ymeta.get('title')!,
+		schema: ymeta.get('schema') ?? [],
 		recordIds: recordIds ? recordIds.toArray() : [],
-		primaryFieldKey: (ymeta.get('primaryFieldKey') as string | undefined) || undefined
+		primaryFieldKey: ymeta.get('primaryFieldKey') ?? undefined
 	};
 }
 
@@ -291,18 +355,18 @@ export function createCollection(
 ): CollectionMeta {
 	const id = input.id ?? nanoid();
 	doc.transact(() => {
-		const ymeta = new Y.Map<unknown>();
+		const ymeta = typedYMap<CollectionYShape>(new Y.Map<unknown>());
 		ymeta.set('title', input.title);
 		ymeta.set('schema', input.schema);
 		ymeta.set('recordIds', new Y.Array<string>());
-		collectionsMap(doc).set(id, ymeta);
+		collectionsMap(doc).set(id, ymeta.raw);
 	});
 	return { id, title: input.title, schema: input.schema, recordIds: [] };
 }
 
 /** Replaces a Collection's entire schema wholesale, with no per-field migration of existing record values — use updateCollectionProperty for a single-field rename/retype that needs that. */
 export function updateCollectionSchema(doc: Y.Doc, id: string, schema: PropertyDefinition[]): void {
-	const ymeta = collectionsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const ymeta = collectionsMap(doc).get(id);
 	if (!ymeta) throw new NotFoundError(`Collection ${id} not found`);
 	ymeta.set('schema', schema);
 }
@@ -350,13 +414,13 @@ export function setPrimaryField(
 	collectionId: string,
 	propertyKey: string | null
 ): void {
-	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	const ymeta = collectionsMap(doc).get(collectionId);
 	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
 	if (propertyKey === null) {
 		ymeta.delete('primaryFieldKey');
 		return;
 	}
-	const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+	const schema = ymeta.get('schema') ?? [];
 	const property = schema.find((p) => p.key === propertyKey);
 	if (!property) throw new NotFoundError(`Property ${propertyKey} not found`);
 	if (!isEligiblePrimaryFieldType(property.type)) {
@@ -439,17 +503,18 @@ export function previewCollectionPropertyTypeChange(
 function migrateRecordsForPropertyRetype(
 	doc: Y.Doc,
 	collectionId: string,
-	ymeta: Y.Map<unknown>,
+	ymeta: TypedYMap<CollectionYShape>,
 	propertyKey: string,
 	toType: PropertyType
 ): void {
 	for (const record of listRecordsForParent(doc, collectionId)) {
 		const value = record.properties?.[propertyKey];
 		if (value === undefined) continue;
-		const yrecord = recordsMap(doc).get(record.id) as Y.Map<unknown> | undefined;
+		const yrecord = recordsMap(doc).get(record.id);
 		const coerced = coercePropertyValue(value, toType);
-		if (coerced) yrecord?.set(PROP_PREFIX + propertyKey, coerced);
-		else yrecord?.delete(PROP_PREFIX + propertyKey);
+		if (!yrecord) continue;
+		if (coerced) setPropertyValue(yrecord, propertyKey, coerced);
+		else deletePropertyValue(yrecord, propertyKey);
 	}
 	if (ymeta.get('primaryFieldKey') === propertyKey && !isEligiblePrimaryFieldType(toType)) {
 		ymeta.delete('primaryFieldKey');
@@ -463,10 +528,10 @@ export function updateCollectionProperty(
 	propertyKey: string,
 	patch: { label?: string; type?: PropertyType }
 ): void {
-	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	const ymeta = collectionsMap(doc).get(collectionId);
 	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
 	doc.transact(() => {
-		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+		const schema = ymeta.get('schema') ?? [];
 		const index = schema.findIndex((p) => p.key === propertyKey);
 		if (index === -1) throw new NotFoundError(`Property ${propertyKey} not found`);
 		const current = schema[index];
@@ -481,7 +546,7 @@ export function updateCollectionProperty(
 		}
 		const next: PropertyDefinition = {
 			...current,
-			label: patch.label !== undefined ? patch.label : current.label,
+			label: patch.label ?? current.label,
 			type: nextType,
 			options: nextOptions
 		};
@@ -501,10 +566,10 @@ export function duplicateCollectionProperty(
 	collectionId: string,
 	propertyKey: string
 ): PropertyDefinition {
-	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	const ymeta = collectionsMap(doc).get(collectionId);
 	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
 	return doc.transact(() => {
-		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+		const schema = ymeta.get('schema') ?? [];
 		const index = schema.findIndex((p) => p.key === propertyKey);
 		if (index === -1) throw new NotFoundError(`Property ${propertyKey} not found`);
 		const source = schema[index];
@@ -520,8 +585,8 @@ export function duplicateCollectionProperty(
 		for (const record of listRecordsForParent(doc, collectionId)) {
 			const value = record.properties?.[propertyKey];
 			if (value === undefined) continue;
-			const yrecord = recordsMap(doc).get(record.id) as Y.Map<unknown> | undefined;
-			yrecord?.set(PROP_PREFIX + copy.key, value);
+			const yrecord = recordsMap(doc).get(record.id);
+			if (yrecord) setPropertyValue(yrecord, copy.key, value);
 		}
 
 		return copy;
@@ -553,7 +618,7 @@ function repairEmbeddedViewsAfterPropertyRemoval(
 	recordsMap(doc).forEach((yrecord) => {
 		if (yrecord.get('blockType') !== 'collection_view') return;
 		if (yrecord.get('referencedRecordId') !== collectionId) return;
-		const config = yrecord.get('viewConfig') as EmbeddedViewConfig | undefined;
+		const config = yrecord.get('viewConfig');
 		if (!config) return;
 
 		const next: EmbeddedViewConfig = { ...config };
@@ -596,10 +661,10 @@ export function deleteCollectionProperty(
 	propertyKey: string,
 	documentsDoc: Y.Doc = doc
 ): void {
-	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	const ymeta = collectionsMap(doc).get(collectionId);
 	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
 	doc.transact(() => {
-		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+		const schema = ymeta.get('schema') ?? [];
 		ymeta.set(
 			'schema',
 			schema.filter((p) => p.key !== propertyKey)
@@ -607,8 +672,8 @@ export function deleteCollectionProperty(
 
 		for (const record of listRecordsForParent(doc, collectionId)) {
 			if (record.properties?.[propertyKey] === undefined) continue;
-			const yrecord = recordsMap(doc).get(record.id) as Y.Map<unknown> | undefined;
-			yrecord?.delete(PROP_PREFIX + propertyKey);
+			const yrecord = recordsMap(doc).get(record.id);
+			if (yrecord) deletePropertyValue(yrecord, propertyKey);
 		}
 
 		if (ymeta.get('primaryFieldKey') === propertyKey) {
@@ -666,10 +731,10 @@ export function addSelectOption(
 	label: string,
 	color?: string
 ): { id: string; label: string; color?: string } {
-	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	const ymeta = collectionsMap(doc).get(collectionId);
 	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
 	return doc.transact(() => {
-		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+		const schema = ymeta.get('schema') ?? [];
 		const { index, property, options } = getSelectPropertyForMutation(schema, propertyKey);
 		const trimmed = assertUniqueOptionLabel(options, label);
 		const option = {
@@ -692,10 +757,10 @@ export function updateSelectOption(
 	optionId: string,
 	patch: { label?: string; color?: string }
 ): void {
-	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	const ymeta = collectionsMap(doc).get(collectionId);
 	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
 	doc.transact(() => {
-		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+		const schema = ymeta.get('schema') ?? [];
 		const { index, property, options } = getSelectPropertyForMutation(schema, propertyKey);
 		const optIndex = options.findIndex((o) => o.id === optionId);
 		if (optIndex === -1) throw new NotFoundError(`Option ${optionId} not found`);
@@ -708,7 +773,7 @@ export function updateSelectOption(
 		nextOptions[optIndex] = {
 			...current,
 			label: nextLabel,
-			color: patch.color !== undefined ? patch.color : current.color
+			color: patch.color ?? current.color
 		};
 		const nextSchema = [...schema];
 		nextSchema[index] = { ...property, options: nextOptions };
@@ -724,10 +789,10 @@ export function moveSelectOption(
 	optionId: string,
 	toIndex: number
 ): void {
-	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	const ymeta = collectionsMap(doc).get(collectionId);
 	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
 	doc.transact(() => {
-		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+		const schema = ymeta.get('schema') ?? [];
 		const { index, property, options } = getSelectPropertyForMutation(schema, propertyKey);
 		const fromIndex = options.findIndex((o) => o.id === optionId);
 		if (fromIndex === -1) throw new NotFoundError(`Option ${optionId} not found`);
@@ -770,7 +835,7 @@ function repairEmbeddedViewsAfterOptionRemoval(
 	recordsMap(doc).forEach((yrecord) => {
 		if (yrecord.get('blockType') !== 'collection_view') return;
 		if (yrecord.get('referencedRecordId') !== collectionId) return;
-		const config = yrecord.get('viewConfig') as EmbeddedViewConfig | undefined;
+		const config = yrecord.get('viewConfig');
 		if (!config?.filters?.length) return;
 		const nextFilters = config.filters.filter(
 			(f) => !(f.propertyKey === propertyKey && f.value === optionId)
@@ -798,11 +863,11 @@ export function deleteSelectOption(
 	optionId: string,
 	documentsDoc: Y.Doc = doc
 ): void {
-	const ymeta = collectionsMap(doc).get(collectionId) as Y.Map<unknown> | undefined;
+	const ymeta = collectionsMap(doc).get(collectionId);
 	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
 	let removed = false;
 	doc.transact(() => {
-		const schema = (ymeta.get('schema') as PropertyDefinition[]) ?? [];
+		const schema = ymeta.get('schema') ?? [];
 		const { index, property, options } = getSelectPropertyForMutation(schema, propertyKey);
 		const nextOptions = options.filter((o) => o.id !== optionId);
 		if (nextOptions.length === options.length) return;
@@ -814,8 +879,8 @@ export function deleteSelectOption(
 		for (const record of listRecordsForParent(doc, collectionId)) {
 			const value = record.properties?.[propertyKey];
 			if (value?.type !== 'select' || value.value !== optionId) continue;
-			const yrecord = recordsMap(doc).get(record.id) as Y.Map<unknown> | undefined;
-			yrecord?.delete(PROP_PREFIX + propertyKey);
+			const yrecord = recordsMap(doc).get(record.id);
+			if (yrecord) deletePropertyValue(yrecord, propertyKey);
 		}
 	});
 	if (removed)
@@ -845,9 +910,10 @@ function parentKindOf(doc: Y.Doc, parentId: string): ParentKind | undefined {
 }
 
 function parentRecordIds(doc: Y.Doc, parentId: string, kind: ParentKind): Y.Array<string> {
-	const map = kind === 'document' ? documentsMap(doc) : collectionsMap(doc);
-	const ymeta = map.get(parentId) as Y.Map<unknown>;
-	return ymeta.get('recordIds') as Y.Array<string>;
+	if (kind === 'document') {
+		return documentsMap(doc).get(parentId)!.get('recordIds')!;
+	}
+	return collectionsMap(doc).get(parentId)!.get('recordIds')!;
 }
 
 /**
@@ -856,13 +922,12 @@ function parentRecordIds(doc: Y.Doc, parentId: string, kind: ParentKind): Y.Arra
  * replace instead, since they arrive as one finished write, not keystrokes.
  */
 export function getRecordYText(doc: Y.Doc, id: string): Y.Text | undefined {
-	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
-	return yrecord?.get('content') as Y.Text | undefined;
+	return recordsMap(doc).get(id)?.get('content');
 }
 
 /** Stamps lastEditedBy/lastEditedAt without touching content — for the UI's live keystroke binding, which writes straight to the record's Y.Text (via getRecordYText) and so needs attribution updated separately. */
 export function touchRecordEditor(doc: Y.Doc, id: string, actor: ActorId): void {
-	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const yrecord = recordsMap(doc).get(id);
 	if (!yrecord) return;
 	doc.transact(() => {
 		yrecord.set('lastEditedBy', actor);
@@ -872,14 +937,14 @@ export function touchRecordEditor(doc: Y.Doc, id: string, actor: ActorId): void 
 
 /** Looks up one record (block or Collection row) by id, or undefined if it doesn't exist. */
 export function getRecord(doc: Y.Doc, id: string): WorkspaceRecord | undefined {
-	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const yrecord = recordsMap(doc).get(id);
 	return yrecord ? readRecord(yrecord) : undefined;
 }
 
-function readRecord(yrecord: Y.Map<unknown>): WorkspaceRecord {
-	const content = yrecord.get('content') as Y.Text | undefined;
+function readRecord(yrecord: TypedYMap<RecordYShape>): WorkspaceRecord {
+	const content = yrecord.get('content');
 	const properties: Record<string, PropertyValue> = {};
-	yrecord.forEach((value, key) => {
+	yrecord.raw.forEach((value, key) => {
 		if (key.startsWith(PROP_PREFIX)) {
 			properties[key.slice(PROP_PREFIX.length)] = value as PropertyValue;
 		}
@@ -887,20 +952,20 @@ function readRecord(yrecord: Y.Map<unknown>): WorkspaceRecord {
 	const hasProps = Object.keys(properties).length > 0 || yrecord.get('isCollectionRow');
 
 	return {
-		id: yrecord.get('id') as string,
-		parentId: yrecord.get('parentId') as string,
-		order: yrecord.get('order') as string,
-		blockType: yrecord.get('blockType') as BlockType | undefined,
+		id: yrecord.get('id')!,
+		parentId: yrecord.get('parentId')!,
+		order: yrecord.get('order')!,
+		blockType: yrecord.get('blockType'),
 		content: content ? yTextToRichText(content) : undefined,
 		properties: hasProps ? properties : undefined,
-		checked: yrecord.get('checked') as boolean | undefined,
-		collapsed: yrecord.get('collapsed') as boolean | undefined,
-		referencedRecordId: yrecord.get('referencedRecordId') as string | undefined,
-		viewConfig: yrecord.get('viewConfig') as EmbeddedViewConfig | undefined,
-		createdBy: yrecord.get('createdBy') as ActorId,
-		createdAt: yrecord.get('createdAt') as number,
-		lastEditedBy: yrecord.get('lastEditedBy') as ActorId,
-		lastEditedAt: yrecord.get('lastEditedAt') as number
+		checked: yrecord.get('checked'),
+		collapsed: yrecord.get('collapsed'),
+		referencedRecordId: yrecord.get('referencedRecordId'),
+		viewConfig: yrecord.get('viewConfig'),
+		createdBy: yrecord.get('createdBy')!,
+		createdAt: yrecord.get('createdAt')!,
+		lastEditedBy: yrecord.get('lastEditedBy')!,
+		lastEditedAt: yrecord.get('lastEditedAt')!
 	};
 }
 
@@ -937,7 +1002,7 @@ export function createRecord(
 		const after = insertAt < siblingIds.length ? recordOrder(doc, siblingIds.get(insertAt)) : null;
 		const order = generateKeyBetween(before, after);
 
-		const yrecord = new Y.Map<unknown>();
+		const yrecord = typedYMap<RecordYShape>(new Y.Map<unknown>());
 		yrecord.set('id', id);
 		yrecord.set('parentId', input.parentId);
 		yrecord.set('order', order);
@@ -956,11 +1021,11 @@ export function createRecord(
 		} else {
 			yrecord.set('isCollectionRow', true);
 			for (const [key, value] of Object.entries(input.properties ?? {})) {
-				yrecord.set(PROP_PREFIX + key, value);
+				setPropertyValue(yrecord, key, value);
 			}
 		}
 
-		recordsMap(doc).set(id, yrecord);
+		recordsMap(doc).set(id, yrecord.raw);
 		siblingIds.insert(insertAt, [id]);
 
 		return readRecord(yrecord);
@@ -968,8 +1033,7 @@ export function createRecord(
 }
 
 function recordOrder(doc: Y.Doc, id: string): string | null {
-	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
-	return (yrecord?.get('order') as string) ?? null;
+	return recordsMap(doc).get(id)?.get('order') ?? null;
 }
 
 /** Replaces a block record's rich-text content wholesale — for a single finished write (e.g. from MCP), as opposed to the UI's live keystroke binding which writes to the Y.Text directly. Throws if the record has no block content (i.e. it's a Collection row). */
@@ -979,9 +1043,9 @@ export function updateRecordContent(
 	content: RichText,
 	actor: ActorId
 ): WorkspaceRecord {
-	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const yrecord = recordsMap(doc).get(id);
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
-	const ytext = yrecord.get('content') as Y.Text | undefined;
+	const ytext = yrecord.get('content');
 	if (!ytext) throw new Error(`Record ${id} has no block content (is it a Collection row?)`);
 
 	doc.transact(() => {
@@ -999,12 +1063,12 @@ export function updateRecordProperties(
 	properties: Record<string, PropertyValue>,
 	actor: ActorId
 ): WorkspaceRecord {
-	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const yrecord = recordsMap(doc).get(id);
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 
 	doc.transact(() => {
 		for (const [key, value] of Object.entries(properties)) {
-			yrecord.set(PROP_PREFIX + key, value);
+			setPropertyValue(yrecord, key, value);
 		}
 		yrecord.set('lastEditedBy', actor);
 		yrecord.set('lastEditedAt', Date.now());
@@ -1014,7 +1078,7 @@ export function updateRecordProperties(
 
 /** Changes a Document block's type (e.g. paragraph to heading) in place, without touching its content. */
 export function setBlockType(doc: Y.Doc, id: string, blockType: BlockType, actor: ActorId): void {
-	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const yrecord = recordsMap(doc).get(id);
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	doc.transact(() => {
 		yrecord.set('blockType', blockType);
@@ -1025,7 +1089,7 @@ export function setBlockType(doc: Y.Doc, id: string, blockType: BlockType, actor
 
 /** Sets a to-do block's checked state. */
 export function setRecordChecked(doc: Y.Doc, id: string, checked: boolean, actor: ActorId): void {
-	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const yrecord = recordsMap(doc).get(id);
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	doc.transact(() => {
 		yrecord.set('checked', checked);
@@ -1041,7 +1105,7 @@ export function setRecordCollapsed(
 	collapsed: boolean,
 	actor: ActorId
 ): void {
-	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const yrecord = recordsMap(doc).get(id);
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	doc.transact(() => {
 		yrecord.set('collapsed', collapsed);
@@ -1057,7 +1121,7 @@ export function setRecordReferencedId(
 	referencedRecordId: string,
 	actor: ActorId
 ): void {
-	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const yrecord = recordsMap(doc).get(id);
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	doc.transact(() => {
 		yrecord.set('referencedRecordId', referencedRecordId);
@@ -1080,7 +1144,7 @@ export function setRecordViewConfig(
 	viewConfig: EmbeddedViewConfig,
 	actor: ActorId
 ): void {
-	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const yrecord = recordsMap(doc).get(id);
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	doc.transact(() => {
 		yrecord.set('viewConfig', viewConfig);
@@ -1092,9 +1156,9 @@ export function setRecordViewConfig(
 /** Deletes a record and removes its id from its parent's sibling order. */
 export function deleteRecord(doc: Y.Doc, id: string): void {
 	doc.transact(() => {
-		const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+		const yrecord = recordsMap(doc).get(id);
 		if (!yrecord) return;
-		const parentId = yrecord.get('parentId') as string;
+		const parentId = yrecord.get('parentId')!;
 		const kind = parentKindOf(doc, parentId);
 		if (kind) {
 			const siblingIds = parentRecordIds(doc, parentId, kind);
@@ -1154,12 +1218,12 @@ export function listRecordsForParent(doc: Y.Doc, parentId: string): WorkspaceRec
  * eventually deleted (deleteRecord above removes every occurrence).
  */
 export function reorderRecord(doc: Y.Doc, id: string, afterRecordId?: string): void {
-	const yrecord = recordsMap(doc).get(id) as Y.Map<unknown> | undefined;
+	const yrecord = recordsMap(doc).get(id);
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	if (afterRecordId === id) {
 		throw new ValidationError('Cannot move a block after itself');
 	}
-	const parentId = yrecord.get('parentId') as string;
+	const parentId = yrecord.get('parentId')!;
 	const kind = parentKindOf(doc, parentId);
 	if (kind !== 'document') {
 		throw new ValidationError('reorderRecord only supports blocks within a Document');
@@ -1168,7 +1232,7 @@ export function reorderRecord(doc: Y.Doc, id: string, afterRecordId?: string): v
 	doc.transact(() => {
 		const siblingIds = parentRecordIds(doc, parentId, kind);
 		const ids = siblingIds.toArray();
-		if (ids.indexOf(id) === -1) throw new NotFoundError(`Record ${id} not found among siblings`);
+		if (!ids.includes(id)) throw new NotFoundError(`Record ${id} not found among siblings`);
 
 		const remaining = ids.filter((siblingId) => siblingId !== id);
 		const insertAt = afterRecordId ? remaining.indexOf(afterRecordId) + 1 : 0;
@@ -1205,14 +1269,14 @@ export function copyDocumentVerbatim(sourceDoc: Y.Doc, targetDoc: Y.Doc, id: str
 	if (!meta) throw new NotFoundError(`Document ${id} not found in source doc`);
 
 	targetDoc.transact(() => {
-		const ymeta = new Y.Map<unknown>();
+		const ymeta = typedYMap<DocumentYShape>(new Y.Map<unknown>());
 		ymeta.set('id', meta.id);
 		ymeta.set('title', meta.title);
 		if (meta.parentDocumentId) ymeta.set('parentDocumentId', meta.parentDocumentId);
 		ymeta.set('order', meta.order);
 		const recordIds = new Y.Array<string>();
 		ymeta.set('recordIds', recordIds);
-		documentsMap(targetDoc).set(meta.id, ymeta);
+		documentsMap(targetDoc).set(meta.id, ymeta.raw);
 
 		for (const recordId of meta.recordIds) {
 			copyRecordVerbatim(sourceDoc, targetDoc, recordId, 'document');
@@ -1227,13 +1291,13 @@ export function copyCollectionVerbatim(sourceDoc: Y.Doc, targetDoc: Y.Doc, id: s
 	if (!meta) throw new NotFoundError(`Collection ${id} not found in source doc`);
 
 	targetDoc.transact(() => {
-		const ymeta = new Y.Map<unknown>();
+		const ymeta = typedYMap<CollectionYShape>(new Y.Map<unknown>());
 		ymeta.set('title', meta.title);
 		ymeta.set('schema', meta.schema);
 		const recordIds = new Y.Array<string>();
 		ymeta.set('recordIds', recordIds);
 		if (meta.primaryFieldKey) ymeta.set('primaryFieldKey', meta.primaryFieldKey);
-		collectionsMap(targetDoc).set(meta.id, ymeta);
+		collectionsMap(targetDoc).set(meta.id, ymeta.raw);
 
 		for (const recordId of meta.recordIds) {
 			copyRecordVerbatim(sourceDoc, targetDoc, recordId, 'collection');
@@ -1257,7 +1321,7 @@ function copyRecordVerbatim(
 	const record = getRecord(sourceDoc, id);
 	if (!record) throw new NotFoundError(`Record ${id} not found in source doc`);
 
-	const yrecord = new Y.Map<unknown>();
+	const yrecord = typedYMap<RecordYShape>(new Y.Map<unknown>());
 	yrecord.set('id', record.id);
 	yrecord.set('parentId', record.parentId);
 	yrecord.set('order', record.order);
@@ -1278,9 +1342,9 @@ function copyRecordVerbatim(
 	} else {
 		yrecord.set('isCollectionRow', true);
 		for (const [key, value] of Object.entries(record.properties ?? {})) {
-			yrecord.set(PROP_PREFIX + key, value);
+			setPropertyValue(yrecord, key, value);
 		}
 	}
 
-	recordsMap(targetDoc).set(id, yrecord);
+	recordsMap(targetDoc).set(id, yrecord.raw);
 }

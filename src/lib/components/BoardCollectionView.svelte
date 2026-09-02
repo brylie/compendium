@@ -75,6 +75,7 @@
 	// the same check with the same result, just without that ambiguity, and
 	// computed once instead of three times in the template below.
 	const optionDialogTargetsGroupColumn = $derived(
+		// eslint-disable-next-line @typescript-eslint/prefer-optional-chain -- see comment above
 		groupProperty != null && optionDialogPropertyKey === groupProperty.key
 	);
 

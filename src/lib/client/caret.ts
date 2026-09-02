@@ -129,9 +129,9 @@ export function setCaretNearClientX(
 		// broadly-supported point-based hit-testing API — caretPositionFromPoint
 		// (the standards-track replacement) is the fallback below for browsers
 		// that lack it, not a reason to drop the primary path.
-		// eslint-disable-next-line sonarjs/deprecation
+		// eslint-disable-next-line sonarjs/deprecation, @typescript-eslint/no-deprecated
 		if (typeof doc.caretRangeFromPoint === 'function') {
-			// eslint-disable-next-line sonarjs/deprecation
+			// eslint-disable-next-line sonarjs/deprecation, @typescript-eslint/no-deprecated
 			range = doc.caretRangeFromPoint(clientX, y);
 		} else if (typeof doc.caretPositionFromPoint === 'function') {
 			const pos = doc.caretPositionFromPoint(clientX, y);

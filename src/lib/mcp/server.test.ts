@@ -41,7 +41,7 @@ async function invokeTool(
 
 function getTextContent(result: CallToolResult): string {
 	const first = result.content[0];
-	if (first && first.type === 'text') return first.text;
+	if (first?.type === 'text') return first.text;
 	return '';
 }
 

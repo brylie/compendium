@@ -6,7 +6,7 @@ interface AuditLoadResult {
 	actorKind: string;
 	targetRecordId: string;
 	hasTargetRecordScope: boolean;
-	entries: Array<{ actor: { kind: string }; targetRecordId?: string }>;
+	entries: { actor: { kind: string }; targetRecordId?: string }[];
 }
 
 function urlEvent(searchParams: Record<string, string>): Parameters<typeof load>[0] {

@@ -159,11 +159,11 @@ function indexDocumentSources(doc: Y.Doc, index: BacklinkIndex, sourceDocumentId
 
 /** Collect direct record or Document IDs affected by a deep Yjs observer event batch. */
 function eventIds(
-	events: Array<{
-		path: Array<string | number>;
+	events: {
+		path: (string | number)[];
 		target: unknown;
 		changes: { keys: Map<string, unknown> };
-	}>,
+	}[],
 	root: unknown
 ): Set<string> {
 	const ids = new Set<string>();

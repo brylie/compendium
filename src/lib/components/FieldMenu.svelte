@@ -27,9 +27,9 @@
 		shardId,
 		schema,
 		property,
-		primaryFieldKey = undefined,
-		visible = undefined,
-		onToggleVisible = undefined
+		primaryFieldKey,
+		visible,
+		onToggleVisible
 	}: {
 		collectionId: string;
 		shardId: string;

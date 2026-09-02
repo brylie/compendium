@@ -13,8 +13,15 @@ import { getRecordYText } from '$lib/data/records';
 // (separate DATABASE_URLs, separate ports) already holds today and isn't
 // what this test re-proves.
 
+// A generic assertion-sugar helper: T is used only once in the
+// signature (this rule's own "replace with the constraint" fix would
+// collapse every call site's return type to `unknown`), but that single
+// use is exactly the point — dozens of call sites below rely on
+// parseMcpText<SomeShape>(result) inferring their own precise return
+// type instead of each repeating its own `as SomeShape` cast.
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
 function parseMcpText<T>(result: unknown): T {
-	const response = result as { content?: Array<{ text?: string }>; isError?: boolean };
+	const response = result as { content?: { text?: string }[]; isError?: boolean };
 	if (response.isError) throw new Error(response.content?.[0]?.text ?? 'MCP tool failed');
 	return JSON.parse(response.content?.[0]?.text ?? '') as T;
 }
@@ -64,13 +71,13 @@ describe('Instance isolation: two configured instances never cross-observe (#111
 		// otherwise unaffected by the intervening instance-b calls).
 		process.env.COMPENDIUM_INSTANCE_ID = 'instance-a';
 		const listResA = await mcpA.callTool({ name: 'list_documents', arguments: {} });
-		const listA = parseMcpText<Array<{ id: string }>>(listResA);
+		const listA = parseMcpText<{ id: string }[]>(listResA);
 		expect(listA.map((d) => d.id)).toContain(docA.id);
 		expect(listA.map((d) => d.id)).not.toContain(docB.id);
 
 		process.env.COMPENDIUM_INSTANCE_ID = 'instance-b';
 		const listResB = await mcpB.callTool({ name: 'list_documents', arguments: {} });
-		const listB = parseMcpText<Array<{ id: string }>>(listResB);
+		const listB = parseMcpText<{ id: string }[]>(listResB);
 		expect(listB.map((d) => d.id)).toContain(docB.id);
 		expect(listB.map((d) => d.id)).not.toContain(docA.id);
 	});
@@ -116,7 +123,7 @@ describe('Instance isolation: two configured instances never cross-observe (#111
 		// all, so it can never even learn docA.id to try connecting to its
 		// shard — the isolation is at the discovery layer, not just content.
 		const listResB = await mcpB.callTool({ name: 'list_documents', arguments: {} });
-		const listB = parseMcpText<Array<{ id: string }>>(listResB);
+		const listB = parseMcpText<{ id: string }[]>(listResB);
 		expect(listB.map((d) => d.id)).not.toContain(docA.id);
 
 		// Even a client that somehow already knows docA.id (guessed, leaked,

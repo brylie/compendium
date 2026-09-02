@@ -53,16 +53,55 @@ export default defineConfig(
 
 			// A deliberately curated slice of typescript-eslint's *TypeChecked
 			// rule sets, not the full recommendedTypeChecked/strictTypeChecked
-			// preset: those flag ~300-900 pre-existing findings dominated by
-			// Yjs's loosely-typed API surface (no-unsafe-member-access and
-			// friends) with low signal for this codebase. These four are the
-			// ones that catch a real class of bug — a promise whose rejection
-			// is silently dropped, or an async function passed somewhere a
-			// signature demands sync — not a stylistic preference.
+			// preset (see the src/lib/data override below and issue #174 for
+			// the measured reason). These four are the ones that catch a real
+			// class of bug — a promise whose rejection is silently dropped, or
+			// an async function passed somewhere a signature demands sync —
+			// not a stylistic preference.
 			'@typescript-eslint/no-floating-promises': 'error',
 			'@typescript-eslint/no-misused-promises': 'error',
 			'@typescript-eslint/await-thenable': 'error',
 			'@typescript-eslint/no-implied-eval': 'error',
+
+			// Independently-adoptable typescript-eslint *TypeChecked rules
+			// (strict/stylistic, not in the curated four above) — measured at
+			// under 70 findings total repo-wide, none Yjs-related, so unlike
+			// the no-unsafe-* family below they don't need the src/lib/data
+			// wrapper first. See issue #174's canonical rule-adoption comment.
+			'@typescript-eslint/prefer-nullish-coalescing': 'error',
+			'@typescript-eslint/no-deprecated': 'error',
+			'@typescript-eslint/array-type': 'error',
+			'@typescript-eslint/consistent-type-definitions': 'error',
+			'@typescript-eslint/prefer-optional-chain': 'error',
+			'@typescript-eslint/prefer-includes': 'error',
+			'@typescript-eslint/consistent-generic-constructors': 'error',
+			'@typescript-eslint/no-dynamic-delete': 'error',
+			'@typescript-eslint/no-misused-spread': 'error',
+			'@typescript-eslint/no-useless-default-assignment': 'error',
+			'@typescript-eslint/no-unnecessary-type-parameters': 'error',
+			'@typescript-eslint/no-base-to-string': 'error',
+			'@typescript-eslint/restrict-template-expressions': 'error',
+			'@typescript-eslint/restrict-plus-operands': 'error',
+			'@typescript-eslint/unbound-method': 'error',
+
+			// Deliberately NOT adopted repo-wide, even though each is real
+			// typescript-eslint *TypeChecked coverage (issue #174's canonical
+			// comment measured these against strictTypeChecked):
+			//  - no-non-null-assertion (172 hits): this codebase deliberately
+			//    uses `!` after establishing an invariant on the preceding
+			//    line (e.g. `map.get(id)!` right after `.has(id)`), not
+			//    carelessly — banning it wholesale forces uglier `as` casts
+			//    (working against the no-unsafe-* goal below) or a large
+			//    cosmetic refactor for no safety gain.
+			//  - no-confusing-void-expression (229 hits): fires on idiomatic
+			//    Svelte `onclick={() => doThing()}` handlers, not bugs.
+			//  - no-unnecessary-condition (65), require-await (33),
+			//    no-empty-function (37): each mixes real hits with legitimate
+			//    cases (defensive runtime checks, interface-mandated async
+			//    signatures, intentional no-op stubs) and needs case-by-case
+			//    triage, not blanket adoption.
+			// Worth a deliberate, separately-scoped follow-up, not a blocker
+			// for the wrapper work below.
 
 			// detect-object-injection flags every `obj[dynamicKey]` read/write —
 			// including plain, safe Record<string, T> indexing, which is most of
@@ -127,7 +166,51 @@ export default defineConfig(
 			// anywhere near it), a parser/source-map interaction between
 			// sonarjs's type-aware check and svelte-eslint-parser's virtual
 			// TS module. Off here; still active for plain .ts files.
-			'sonarjs/deprecation': 'off'
+			'sonarjs/deprecation': 'off',
+			// no-useless-default-assignment's autofix doesn't recognize Svelte
+			// 5's `$bindable()` rune macro as anything other than a removable
+			// default value — it silently rewrote `config = $bindable()` to
+			// `config` on ViewToolbar.svelte, turning `bind:config` at every
+			// call site into a compile error (props are no longer bindable
+			// without `$bindable()`). Off here; still active for plain .ts
+			// files, where no such macro exists to misread.
+			'@typescript-eslint/no-useless-default-assignment': 'off'
+		}
+	},
+	{
+		// The Yjs data layer: every CRDT read here goes through the typed
+		// wrapper in yjs-typed.ts (issue #174) instead of a raw `Y.Map<unknown>`
+		// `as X` cast, so the no-unsafe-*/no-unnecessary-type-assertion rules
+		// that fire ~250 times repo-wide (dominated by Svelte component event
+		// handlers and MCP/API route+test mocks — unrelated to Yjs, and a
+		// separate, larger cleanup) apply cleanly here with zero findings.
+		// Scoped rather than repo-wide so this file's contract stays enforced
+		// without forcing that unrelated cleanup as part of this change; add a
+		// file here if it's migrated onto the wrapper too.
+		files: ['src/lib/data/records.ts', 'src/lib/data/yjs-typed.ts'],
+		rules: {
+			'@typescript-eslint/no-unsafe-assignment': 'error',
+			'@typescript-eslint/no-unsafe-member-access': 'error',
+			'@typescript-eslint/no-unsafe-argument': 'error',
+			'@typescript-eslint/no-unsafe-call': 'error',
+			'@typescript-eslint/no-unsafe-return': 'error',
+			'@typescript-eslint/no-unnecessary-type-assertion': 'error'
+		}
+	},
+	{
+		// yjs's own YText.d.ts declares no `toString()` override (only
+		// `toJSON(): string`), so no-base-to-string can't see that Y.Text
+		// really does implement a meaningful toString() at runtime — Yjs's
+		// own UndoManager.d.ts doc comment relies on exactly this
+		// (`ytext.toString() // => ''`). A type-declaration gap in the
+		// library, not a real risk here — these two files are the ones that
+		// call `.toString()` on a Y.Text directly in assertions.
+		// Route folders use literal `[param]` brackets, which the glob
+		// matcher reads as a character class rather than literal text — `*`
+		// sidesteps that instead of escaping every bracket.
+		files: ['src/lib/client/undo.test.ts', 'src/routes/space/*/doc/*/BlockEditor.svelte.test.ts'],
+		rules: {
+			'@typescript-eslint/no-base-to-string': 'off'
 		}
 	},
 	{
@@ -139,6 +222,12 @@ export default defineConfig(
 			'jsdoc/require-jsdoc': 'off',
 			'sonarjs/cognitive-complexity': 'off',
 			'security/detect-object-injection': 'off',
+			// A test file that specifically exercises a deprecated browser API
+			// (e.g. caret.test.ts mocking document.caretRangeFromPoint — see
+			// caret.ts's own per-line disable for the same API) necessarily
+			// names that API repeatedly by design; policing that the same way
+			// as production call sites just adds noise, not signal.
+			'@typescript-eslint/no-deprecated': 'off',
 			// Test fixtures routinely build fs paths from their own generated
 			// temp directories (mkdtempSync et al.) — self-produced, never
 			// request- or user-supplied, so there's no path-traversal risk this

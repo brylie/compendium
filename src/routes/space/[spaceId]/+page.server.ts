@@ -7,6 +7,7 @@ import {
 	listDocuments,
 	SpaceMismatchError
 } from '$lib/services';
+import { formString } from '$lib/server/form-data';
 import type { Actions, PageServerLoad } from './$types';
 
 /**
@@ -27,8 +28,8 @@ export const load: PageServerLoad = ({ params, locals }) => {
 export const actions: Actions = {
 	createDocument: async ({ params, request, locals }) => {
 		const data = await request.formData();
-		const title = String(data.get('title') ?? '').trim();
-		const parentDocumentId = String(data.get('parentDocumentId') ?? '').trim() || undefined;
+		const title = formString(data.get('title')).trim();
+		const parentDocumentId = formString(data.get('parentDocumentId')).trim() || undefined;
 		if (!title) return fail(400, { error: 'Title is required' });
 
 		let document;
@@ -52,7 +53,7 @@ export const actions: Actions = {
 	},
 	createCollection: async ({ params, request, locals }) => {
 		const data = await request.formData();
-		const title = String(data.get('title') ?? '').trim();
+		const title = formString(data.get('title')).trim();
 		if (!title) return fail(400, { error: 'Title is required' });
 
 		const collection = createCollection(locals.requestContext.caller, {

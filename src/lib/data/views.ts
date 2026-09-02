@@ -153,7 +153,7 @@ export function applySort(
 	schema: PropertyDefinition[],
 	sort: ViewSort | undefined
 ): WorkspaceRecord[] {
-	if (!sort || sort.mode !== 'property' || !sort.propertyKey) return records;
+	if (sort?.mode !== 'property' || !sort.propertyKey) return records;
 	const key = sort.propertyKey;
 	const property = schema.find((p) => p.key === key);
 	const dir = sort.direction === 'desc' ? -1 : 1;
@@ -315,7 +315,7 @@ function summariesEqual(
 ): boolean {
 	const ae = Object.entries(a ?? {});
 	const be = Object.entries(b ?? {});
-	return ae.length === be.length && ae.every(([k, v]) => (b ?? {})[k] === v);
+	return ae.length === be.length && ae.every(([k, v]) => b?.[k] === v);
 }
 
 /** Structural equality over a ViewConfig's fields — the dirty/draft-vs-saved check CollectionViewBlock uses to tell whether a viewer's local edits actually differ from what's persisted. */

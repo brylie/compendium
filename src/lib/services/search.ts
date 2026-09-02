@@ -15,7 +15,10 @@ import { tokenAllowsParent } from '$lib/mcp/tokens';
 import { richTextToMarkdown } from '$lib/mcp/markdown-transcode';
 import { actorForCaller, isAccessToken, type CallerIdentity } from './permissions';
 
-type SearchHit = { recordId: string; snippet: string };
+interface SearchHit {
+	recordId: string;
+	snippet: string;
+}
 
 function snippetAround(text: string, needle: string): string {
 	const index = text.toLowerCase().indexOf(needle);

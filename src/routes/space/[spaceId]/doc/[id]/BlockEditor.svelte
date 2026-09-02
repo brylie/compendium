@@ -209,6 +209,7 @@
 		// reported line/column for this exact finding don't correspond to
 		// this usage — a parser/source-map interaction with .svelte files,
 		// not a second deprecated API elsewhere in this file.
+		// eslint-disable-next-line @typescript-eslint/no-deprecated -- see comment above
 		return event.isComposing || event.keyCode === 229;
 	}
 
