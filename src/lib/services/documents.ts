@@ -353,6 +353,7 @@ function resolveRecordLink(
 	r: WorkspaceRecord,
 	doc: Y.Doc,
 	workspaceId: string,
+	defaultSpaceId: string,
 	caller: CallerIdentity,
 	isPageLink: boolean,
 	isCollectionView: boolean
@@ -363,7 +364,15 @@ function resolveRecordLink(
 		tokenAllowsParent(
 			caller,
 			r.referencedRecordId,
-			resolveShardForParent(workspaceId, r.referencedRecordId)?.spaceId
+			// An uncataloged/legacy target (no locator row — content written
+			// directly to the Y.Doc, bypassing the service layer) has no
+			// resolved spaceId to fall back on. Classified as defaultSpaceId
+			// here, the same way resolveEffectiveDocumentSpaceId above already
+			// does for the create/move Space-mismatch check — without this, a
+			// token whose only grant is a default-Space grant would fail this
+			// check for every uncataloged target, hiding an otherwise-accessible
+			// link instead of exposing it.
+			resolveShardForParent(workspaceId, r.referencedRecordId)?.spaceId ?? defaultSpaceId
 		);
 	// The reference target can be a Document (unsharded, always in `doc`)
 	// or a Collection (its own shard, possibly a different doc entirely).
@@ -376,12 +385,19 @@ function resolveRecordLink(
 					r.referencedRecordId
 				))
 			: undefined;
-	// collection_view's target must resolve to a Collection specifically
-	// (page_link's own read side already enforces the equivalent
-	// Document-kind check via internal-links.md §1) — a target that
-	// resolved but is the wrong kind is treated the same as unresolved.
-	const linkedTarget =
-		isCollectionView && resolvedTarget?.kind !== 'collection' ? undefined : resolvedTarget;
+	// Each block type's target must resolve to the right kind — collection_view
+	// to a Collection, page_link to a Document (mirroring validatePageLinkTarget's
+	// write-side enforcement in services/records.ts, which rejects a page_link
+	// write whose target isn't a Document). A page_link's referencedRecordId can
+	// still end up pointing at a Collection despite that — validatePageLinkTarget
+	// only guards the MCP write_record path; a direct UI edit via
+	// setRecordReferencedId (src/lib/data/records.ts) isn't routed through it —
+	// so this read side must enforce the same kind check independently rather
+	// than trust the target is already the right kind.
+	const wrongKind =
+		(isCollectionView && resolvedTarget?.kind !== 'collection') ||
+		(isPageLink && resolvedTarget?.kind !== 'document');
+	const linkedTarget = wrongKind ? undefined : resolvedTarget;
 	const linkBroken: true | undefined =
 		(isPageLink || isCollectionView) && r.referencedRecordId && targetInScope && !linkedTarget
 			? true
@@ -419,11 +435,20 @@ function resolveDocumentRecordView(
 	r: WorkspaceRecord,
 	doc: Y.Doc,
 	workspaceId: string,
+	defaultSpaceId: string,
 	caller: CallerIdentity
 ): DocumentRecordView {
 	const isPageLink = r.blockType === 'page_link';
 	const isCollectionView = r.blockType === 'collection_view';
-	const link = resolveRecordLink(r, doc, workspaceId, caller, isPageLink, isCollectionView);
+	const link = resolveRecordLink(
+		r,
+		doc,
+		workspaceId,
+		defaultSpaceId,
+		caller,
+		isPageLink,
+		isCollectionView
+	);
 	const markdown = renderRecordMarkdown(r, doc, isPageLink, isCollectionView, link);
 	return {
 		id: r.id,
@@ -457,7 +482,7 @@ export function getDocument(
 	parentDocumentId?: string;
 	records: DocumentRecordView[];
 } | null {
-	const { doc, workspaceId } = resolveParentWorkspaceContext(documentId);
+	const { doc, workspaceId, defaultSpaceId } = resolveParentWorkspaceContext(documentId);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'get_document');
@@ -465,7 +490,7 @@ export function getDocument(
 	if (!document) return null;
 
 	const records = crdtListRecordsForParent(doc, documentId).map((r) =>
-		resolveDocumentRecordView(r, doc, workspaceId, caller)
+		resolveDocumentRecordView(r, doc, workspaceId, defaultSpaceId, caller)
 	);
 
 	logAudit({ actor, action: 'get_document', targetRecordId: documentId });

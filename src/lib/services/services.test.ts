@@ -364,6 +364,60 @@ describe('service layer: centralized business rules & side effects', () => {
 		expect(embedRecord?.referencedRecordId).toBe(docTarget.id);
 		expect(embedRecord?.viewConfig).toBeUndefined();
 	});
+
+	// Regression coverage for a CodeRabbit finding on #172: the read side
+	// (getDocument) didn't reject a page_link whose target resolves to a
+	// Collection, even though validatePageLinkTarget already rejects that at
+	// write time on the MCP path (services/records.ts) — reachable via a
+	// direct UI edit (setRecordReferencedId), which isn't routed through that
+	// validation. Mirrors the collection_view-wrong-kind test above.
+	it('marks a page_link broken when its referencedRecordId names a Collection, not a Document', () => {
+		const docPublic = createDocument(human, { title: 'Team Page' });
+		const collectionTarget = createCollection(human, { title: 'Not A Document', schema: [] });
+		const link = crdtCreateRecord(
+			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
+			{ parentId: docPublic.id, blockType: 'page_link', referencedRecordId: collectionTarget.id },
+			human
+		);
+
+		const result = getDocument(human, docPublic.id);
+		const linkRecord = result?.records.find((r) => r.id === link.id);
+		expect(linkRecord?.linkBroken).toBe(true);
+		expect(linkRecord?.markdown).toBe('[[Deleted page]]');
+		expect(linkRecord?.referencedRecordId).toBe(collectionTarget.id);
+	});
+
+	// Regression coverage for a CodeRabbit finding on #172: an uncataloged
+	// target (no locator row) has no resolved spaceId, so a token relying
+	// solely on a default-Space grant (not a per-id grant) was silently
+	// denied access to it — hiding an otherwise-accessible page_link instead
+	// of rendering it.
+	it('resolves a page_link to an uncataloged Document via a default-Space-only grant', () => {
+		const docPublic = createDocument(human, { title: 'Team Page' });
+		const { doc, defaultSpaceId } = resolveWorkspaceContext();
+		const uncatalogedTarget = crdtCreateDocument(doc, { title: 'Uncataloged Target' });
+		const link = crdtCreateRecord(
+			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
+			{
+				parentId: docPublic.id,
+				blockType: 'page_link',
+				referencedRecordId: uncatalogedTarget.id
+			},
+			human
+		);
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Space-Scoped Bot',
+			allowedDocumentIds: [docPublic.id],
+			allowedCollectionIds: [],
+			allowedSpaceIds: [defaultSpaceId]
+		});
+
+		const result = getDocument(tokenRecord, docPublic.id);
+		const linkRecord = result?.records.find((r) => r.id === link.id);
+		expect(linkRecord?.linkBroken).toBeUndefined();
+		expect(linkRecord?.referencedRecordId).toBe(uncatalogedTarget.id);
+		expect(linkRecord?.markdown).toBe('[[Uncataloged Target]]');
+	});
 });
 
 describe('service layer: MCP authoring and repair of page_link targets (issue #46)', () => {
