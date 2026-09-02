@@ -1,4 +1,6 @@
 import { nanoid } from 'nanoid';
+import type * as Y from 'yjs';
+import type { Awareness } from 'y-protocols/awareness';
 import { clientIdForToken, isHeldByClient, releaseAgentHold } from '$lib/server/holds';
 import {
 	createRecord as crdtCreateRecord,
@@ -25,6 +27,7 @@ import {
 	type CallerIdentity
 } from './permissions';
 
+/** Thrown when an agent caller tries to write a record's content without first holding it via `hold_records`. */
 export class HoldRequiredError extends Error {
 	constructor(message: string) {
 		super(message);
@@ -32,12 +35,13 @@ export class HoldRequiredError extends Error {
 	}
 }
 
-// A page_link's target must be a Document the caller can already reach —
-// deliberately a single generic message for "doesn't exist" and "exists but
-// out of token scope" alike, so a probing caller can't use this as an oracle
-// to learn whether a given ID exists (docs/specifications/internal-links.md §4,
-// audit-coverage.md §3's "never leak more than what the caller already
-// supplied" principle).
+/**
+ * Thrown when a `page_link`'s target isn't a Document the caller can already reach.
+ * Deliberately a single generic message for "doesn't exist" and "exists but out of token
+ * scope" alike, so a probing caller can't use this as an oracle to learn whether a given ID
+ * exists (docs/specifications/internal-links.md §4, audit-coverage.md §3's "never leak more
+ * than what the caller already supplied" principle).
+ */
 export class InvalidLinkTargetError extends Error {
 	constructor(targetId: string) {
 		super(`${targetId} is not an accessible Document — page_link can only target one.`);
@@ -57,6 +61,13 @@ function validatePageLinkTarget(caller: CallerIdentity, targetId: string): void 
 	}
 }
 
+/**
+ * Creates a new record (block or row) under `input.parentId`, after checking the caller may
+ * access that parent and, for a `page_link` block, that its `referencedRecordId` target is
+ * itself an accessible Document. Reserves the record's catalog locator before the CRDT write
+ * so a row can never exist in a non-default shard without one, rolling the reservation back
+ * if the write itself then fails.
+ */
 export function createRecord(
 	caller: CallerIdentity,
 	input: {
@@ -120,14 +131,101 @@ export function createRecord(
 	return record;
 }
 
+type WriteRecordInput = {
+	markdown?: string;
+	properties?: Record<string, PropertyValue>;
+	referencedRecordId?: string;
+};
+
+// Validated up front, before any mutation in writeRecord below: a call
+// combining markdown (or properties) with an invalid referencedRecordId
+// must reject cleanly, not commit the content write, release the hold, and
+// audit it before throwing on the retarget.
+function validateReferencedRecordIdWrite(
+	caller: CallerIdentity,
+	doc: Y.Doc,
+	record: WorkspaceRecord,
+	referencedRecordId: string
+): void {
+	if (record.blockType !== 'page_link') {
+		throw new Error('referencedRecordId can only be written on a page_link block.');
+	}
+	if (!crdtGetDocument(doc, record.parentId)) {
+		throw new Error('page_link blocks can only exist inside a Document.');
+	}
+	validatePageLinkTarget(caller, referencedRecordId);
+}
+
+function writeRecordMarkdown(
+	caller: CallerIdentity,
+	doc: Y.Doc,
+	awareness: Awareness,
+	recordId: string,
+	actor: ReturnType<typeof actorForCaller>,
+	markdown: string
+): void {
+	// An agent (access-token caller) must hold the record first — same
+	// concurrent-edit protection a human's cursor gives implicitly (see
+	// collaboration.md). A human-attributed write (the personal-AI-client
+	// path, still `human-via-client`) has no separate hold step to check.
+	const clientId = isAccessToken(caller) ? clientIdForToken(caller.tokenHash) : undefined;
+	if (clientId !== undefined && !isHeldByClient(awareness, clientId, recordId)) {
+		throw new HoldRequiredError(
+			`No active hold on ${recordId} — call hold_records first, then retry (the hold may have been released by a concurrent human edit).`
+		);
+	}
+
+	const richText = markdownToRichText(doc, markdown);
+	const ytext = getRecordYText(doc, recordId);
+	const before = ytext ? yTextToRichText(ytext) : undefined;
+	updateRecordContent(doc, recordId, richText, actor);
+	if (clientId !== undefined) {
+		releaseAgentHold(awareness, clientId, [recordId]);
+	}
+
+	logAudit({
+		actor,
+		action: 'write_record',
+		targetRecordId: recordId,
+		diff: { before, after: richText }
+	});
+}
+
+function applyReferencedRecordIdWrite(
+	doc: Y.Doc,
+	record: WorkspaceRecord,
+	recordId: string,
+	actor: ReturnType<typeof actorForCaller>,
+	referencedRecordId: string
+): void {
+	// A retarget is a metadata write, not a content write — there's no Y.Text
+	// for a human cursor to be inside, so unlike the markdown branch above
+	// this needs no hold (same exemption already applied to `properties`,
+	// which is also metadata-only; see docs/specifications/mcp-tools.md).
+	// Idempotent by construction: writing the same target twice is a no-op
+	// Y.Map.set, not a distinct state transition.
+	const before = record.referencedRecordId;
+	crdtSetRecordReferencedId(doc, recordId, referencedRecordId, actor);
+	logAudit({
+		actor,
+		action: 'write_record',
+		targetRecordId: recordId,
+		diff: { referencedRecordId: { before, after: referencedRecordId } }
+	});
+}
+
+/**
+ * Applies one or more of `input.markdown`/`properties`/`referencedRecordId` to a record,
+ * after checking the caller may access it. Each part is validated up front — an invalid
+ * `referencedRecordId` rejects before any mutation, content write, or hold release commits —
+ * and each applied part is audited separately. A markdown write additionally requires an
+ * agent caller to already hold the record (see writeRecordMarkdown), releasing that hold on
+ * success.
+ */
 export function writeRecord(
 	caller: CallerIdentity,
 	recordId: string,
-	input: {
-		markdown?: string;
-		properties?: Record<string, PropertyValue>;
-		referencedRecordId?: string;
-	}
+	input: WriteRecordInput
 ): void {
 	if (input.markdown === undefined && !input.properties && input.referencedRecordId === undefined) {
 		throw new Error('write_record requires markdown, properties, or referencedRecordId');
@@ -137,54 +235,12 @@ export function writeRecord(
 	const actor = actorForCaller(caller);
 	const record = requireAccessibleRecord(caller, recordId, 'write_record');
 
-	// Validated up front, before any mutation below: a call combining markdown
-	// (or properties) with an invalid referencedRecordId must reject cleanly,
-	// not commit the content write, release the hold, and audit it before
-	// throwing on the retarget.
 	if (input.referencedRecordId !== undefined) {
-		if (record.blockType !== 'page_link') {
-			throw new Error('referencedRecordId can only be written on a page_link block.');
-		}
-		if (!crdtGetDocument(doc, record.parentId)) {
-			throw new Error('page_link blocks can only exist inside a Document.');
-		}
-		validatePageLinkTarget(caller, input.referencedRecordId);
+		validateReferencedRecordIdWrite(caller, doc, record, input.referencedRecordId);
 	}
 
 	if (input.markdown !== undefined) {
-		if (isAccessToken(caller)) {
-			const clientId = clientIdForToken(caller.tokenHash);
-			if (!isHeldByClient(awareness, clientId, recordId)) {
-				throw new HoldRequiredError(
-					`No active hold on ${recordId} — call hold_records first, then retry (the hold may have been released by a concurrent human edit).`
-				);
-			}
-			const richText = markdownToRichText(doc, input.markdown);
-			const ytext = getRecordYText(doc, recordId);
-			const before = ytext ? yTextToRichText(ytext) : undefined;
-
-			updateRecordContent(doc, recordId, richText, actor);
-			releaseAgentHold(awareness, clientId, [recordId]);
-
-			logAudit({
-				actor,
-				action: 'write_record',
-				targetRecordId: recordId,
-				diff: { before, after: richText }
-			});
-		} else {
-			const richText = markdownToRichText(doc, input.markdown);
-			const ytext = getRecordYText(doc, recordId);
-			const before = ytext ? yTextToRichText(ytext) : undefined;
-
-			updateRecordContent(doc, recordId, richText, actor);
-			logAudit({
-				actor,
-				action: 'write_record',
-				targetRecordId: recordId,
-				diff: { before, after: richText }
-			});
-		}
+		writeRecordMarkdown(caller, doc, awareness, recordId, actor, input.markdown);
 	}
 
 	if (input.properties) {
@@ -198,23 +254,16 @@ export function writeRecord(
 	}
 
 	if (input.referencedRecordId !== undefined) {
-		// A retarget is a metadata write, not a content write — there's no Y.Text
-		// for a human cursor to be inside, so unlike the markdown branch above
-		// this needs no hold (same exemption already applied to `properties`,
-		// which is also metadata-only; see docs/specifications/mcp-tools.md).
-		// Idempotent by construction: writing the same target twice is a no-op
-		// Y.Map.set, not a distinct state transition.
-		const before = record.referencedRecordId;
-		crdtSetRecordReferencedId(doc, recordId, input.referencedRecordId, actor);
-		logAudit({
-			actor,
-			action: 'write_record',
-			targetRecordId: recordId,
-			diff: { referencedRecordId: { before, after: input.referencedRecordId } }
-		});
+		applyReferencedRecordIdWrite(doc, record, recordId, actor, input.referencedRecordId);
 	}
 }
 
+/**
+ * Deletes a record (after a permission check) and releases its catalog locator. A locator
+ * release failure is logged, not thrown — the CRDT delete has already committed by that
+ * point, so failing the call back to the caller would misreport a completed deletion as an
+ * error; a stale locator row for a since-deleted record fails safe either way.
+ */
 export function deleteRecord(caller: CallerIdentity, recordId: string): void {
 	const { doc, workspaceId } = resolveRecordWorkspaceContext(recordId);
 	const actor = actorForCaller(caller);
@@ -234,6 +283,7 @@ export function deleteRecord(caller: CallerIdentity, recordId: string): void {
 	logAudit({ actor, action: 'delete_record', targetRecordId: recordId });
 }
 
+/** Returns a single record after checking the caller may access it. */
 export function getRecord(caller: CallerIdentity, recordId: string): WorkspaceRecord | undefined {
 	return requireAccessibleRecord(caller, recordId, 'get_record');
 }

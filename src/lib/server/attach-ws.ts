@@ -12,7 +12,8 @@ const SHARD_ROOM_PREFIX = 'shard-';
  * segment at all) is the existing shared room — Documents, unsharded — and
  * resolves to no selector, exactly as before. `'shard-<id>'` names one
  * Document or Collection's own shard; the client always obtains `<id>` from
- * the server first (GET /api/{documents,collections}/[id]/shard), never
+ * the server first (GET /api/documents/[id]/shard or
+ * /api/collections/[id]/shard), never
  * assumes it equals the parent id. This selector is still just a hint, not
  * authority — but `setupWSConnection` (yjs-ws-server.ts) now verifies `<id>`
  * against the catalog's own record locator before accepting the connection

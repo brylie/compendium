@@ -20,14 +20,20 @@ declare global {
 	var __db: DbState | undefined;
 }
 
-// Lazy + resettable (via closeDb) rather than a top-level singleton: each
-// test run points DATABASE_URL at its own temp file and needs a fresh
-// connection, which a module-scope `export const db = drizzle(...)` can't
-// give since ESM only evaluates a module body once per process.
+/**
+ * Lazy + resettable (via closeDb) rather than a top-level singleton: each
+ * test run points DATABASE_URL at its own temp file and needs a fresh
+ * connection, which a module-scope `export const db = drizzle(...)` can't
+ * give since ESM only evaluates a module body once per process.
+ */
 export function getDb(): Db {
 	if (globalThis.__db) return globalThis.__db.db;
 
 	const url = process.env.DATABASE_URL ?? '.data/compendium.db';
+	// DATABASE_URL is deploy-time server configuration (mise's [env] .file, or
+	// the process environment) — never derived from a request, so this isn't
+	// path traversal risk the way a request-supplied filename would be.
+	// eslint-disable-next-line security/detect-non-literal-fs-filename
 	mkdirSync(dirname(url), { recursive: true });
 
 	const client = new Database(url);
@@ -44,6 +50,7 @@ export function getDb(): Db {
 	return db;
 }
 
+/** Closes the process's shared SQLite connection and clears it so the next `getDb()` call opens a fresh one. */
 export function closeDb(): void {
 	globalThis.__db?.client.close();
 	globalThis.__db = undefined;

@@ -84,6 +84,11 @@
 	 */
 	function hasProvenance(block: WorkspaceRecord): boolean {
 		return (
+			// WorkspaceRecord.lastEditedBy is a required field per its type, so
+			// sonarjs sees this as always-true — but this function's own point is
+			// guarding against legacy/imported data that predates that
+			// requirement and violates it at runtime, per the doc comment above.
+			// eslint-disable-next-line sonarjs/different-types-comparison
 			block.lastEditedBy !== undefined &&
 			typeof block.lastEditedAt === 'number' &&
 			Number.isFinite(block.lastEditedAt)
@@ -373,7 +378,13 @@
 				unsubscribeUndoRedo();
 				releaseBlockPresence(docAwareness);
 			};
-		})();
+			// A rejection here (network failure, bad response) previously
+			// vanished as a silent unhandled rejection — this at least
+			// surfaces it, without inventing a toast/error-UI system this
+			// lint pass isn't scoped to add.
+		})().catch((err: unknown) => {
+			console.error(`Failed to resolve shard for document ${id}:`, err);
+		});
 
 		return () => {
 			cancelled = true;
@@ -624,7 +635,7 @@
 		}
 		setBlockType(ydoc, blockId, blockType, CURRENT_USER);
 		slashMenuBlockId = null;
-		tick().then(() => blockRefs[blockId]?.focusEditor(true));
+		void tick().then(() => blockRefs[blockId]?.focusEditor(true));
 	}
 
 	function toggleTodoCheck(block: WorkspaceRecord): void {
@@ -654,6 +665,18 @@
 		return ytext ? plainText(yTextToRichText(ytext)) : '';
 	}
 
+	// A synced_block mirrors another record's content — its Y.Text, hold
+	// state, and edit provenance all resolve through that target record, not
+	// the synced_block record itself. Every other block type resolves
+	// through its own id. Was three separately-inlined copies of this same
+	// condition in the template below; factored out once both to de-nest
+	// and to keep them from drifting out of sync with each other.
+	function syncedBlockTargetId(block: WorkspaceRecord): string {
+		return block.blockType === 'synced_block' && block.referencedRecordId
+			? block.referencedRecordId
+			: block.id;
+	}
+
 	function getHeadingLevel(blockType?: BlockType): number {
 		switch (blockType) {
 			case 'heading_1':
@@ -666,6 +689,23 @@
 				return 4;
 			default:
 				return 1;
+		}
+	}
+
+	// Same per-block-type dispatch shape as getHeadingLevel above, for the
+	// text styling a heading block's own BlockEditor renders with.
+	function headingTextClass(blockType?: BlockType): string {
+		switch (blockType) {
+			case 'heading_1':
+				return 'font-display text-2xl font-bold text-fg';
+			case 'heading_2':
+				return 'font-display text-xl font-semibold text-fg';
+			case 'heading_3':
+				return 'font-display text-lg font-semibold text-fg';
+			case 'heading_4':
+				return 'font-display text-base font-semibold text-fg';
+			default:
+				return 'text-base text-fg';
 		}
 	}
 
@@ -687,7 +727,7 @@
 			if (blocks.length > 0) {
 				blockRefs[blocks[0].id]?.focusEditor(true);
 			} else {
-				await addBlockAfter(undefined);
+				await addBlockAfter();
 			}
 		}
 	}
@@ -757,7 +797,7 @@
 				if (blocks.length > 0) {
 					blockRefs[blocks[blocks.length - 1].id]?.focusEditor(false);
 				} else {
-					addBlockAfter(undefined);
+					void addBlockAfter();
 				}
 			}
 		}}
@@ -765,27 +805,16 @@
 		{#if blocks.length === 0}
 			<button
 				type="button"
-				onclick={() => addBlockAfter(undefined)}
+				onclick={() => void addBlockAfter()}
 				class="w-full cursor-text py-2 text-left text-base font-normal text-muted/60 select-none hover:text-muted"
 			>
 				Type '/' for commands, or start typing...
 			</button>
 		{/if}
 		{#each blocks as block, index (block.id)}
-			{@const ytext = ydoc
-				? block.blockType === 'synced_block' && block.referencedRecordId
-					? getRecordYText(ydoc, block.referencedRecordId)
-					: getRecordYText(ydoc, block.id)
-				: undefined}
-			{@const holder = heldByOthers.get(
-				block.blockType === 'synced_block' && block.referencedRecordId
-					? block.referencedRecordId
-					: block.id
-			)}
-			{@const provenanceRecordId =
-				block.blockType === 'synced_block' && block.referencedRecordId
-					? block.referencedRecordId
-					: block.id}
+			{@const ytext = ydoc ? getRecordYText(ydoc, syncedBlockTargetId(block)) : undefined}
+			{@const holder = heldByOthers.get(syncedBlockTargetId(block))}
+			{@const provenanceRecordId = syncedBlockTargetId(block)}
 			{@const provenance = ydoc ? (getRecord(ydoc, provenanceRecordId) ?? block) : block}
 			{@const bt = block.blockType ?? 'paragraph'}
 
@@ -1095,15 +1124,7 @@
 									{ytext}
 									recordId={block.id}
 									{linkTargets}
-									class={bt === 'heading_1'
-										? 'font-display text-2xl font-bold text-fg'
-										: bt === 'heading_2'
-											? 'font-display text-xl font-semibold text-fg'
-											: bt === 'heading_3'
-												? 'font-display text-lg font-semibold text-fg'
-												: bt === 'heading_4'
-													? 'font-display text-base font-semibold text-fg'
-													: 'text-base text-fg'}
+									class={headingTextClass(bt)}
 									placeholder={index === 0 ? "Type '/' for commands, or start typing..." : ''}
 									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 									onEnter={(caretOffset) => handleEnter(block, caretOffset)}

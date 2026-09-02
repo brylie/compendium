@@ -92,6 +92,6 @@ describe('presence: block holds via Awareness', () => {
 			heldRecordIds: ['r5']
 		});
 
-		expect(onChange.mock.calls.length).toBe(callsAtSubscribe);
+		expect(onChange.mock.calls).toHaveLength(callsAtSubscribe);
 	});
 });

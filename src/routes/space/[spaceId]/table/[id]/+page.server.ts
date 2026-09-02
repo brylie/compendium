@@ -4,6 +4,10 @@ import { getCollection } from '$lib/data/records';
 import { resolveParentWorkspaceContext } from '$lib/services/permissions';
 import type { PageServerLoad } from './$types';
 
+/**
+ * Loads a Collection for the table view, self-healing the URL's [spaceId] when
+ * it disagrees with the Collection's actual owning Space rather than 404ing.
+ */
 export const load: PageServerLoad = ({ params }) => {
 	// Resolves the Collection's real shard, not the default doc — a
 	// Collection's own meta entry lives in its own shard (see #120).

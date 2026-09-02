@@ -168,7 +168,7 @@ describe('Toolbar', () => {
 			el.className
 				.split(' ')
 				.filter((c) => c !== 'bg-accent' && c !== 'text-accent-fg')
-				.sort()
+				.sort((a, b) => a.localeCompare(b))
 				.join(' ');
 		expect(normalize(bold)).toBe(normalize(insertText));
 	});

@@ -136,7 +136,7 @@ function createContext(workspaceId: string, shardId: string): InternalContext {
 }
 
 /**
- * Resolves the live context for a {workspaceId, shardId} selector, creating
+ * Resolves the live context for a workspaceId/shardId selector, creating
  * and lazily loading it from its last snapshot on first access. Defaults
  * fill in the Phase 0 single-workspace key when a caller omits the selector
  * entirely (the common case at every current boundary).
@@ -212,7 +212,7 @@ export function releaseContextIfIdle(workspaceId: string, shardId: string): bool
  * idle. Exported directly (not just reachable via the timer below) so tests
  * can call it deterministically instead of waiting on real time — the same
  * testability shape flush() already has relative to the save timer. The
- * default {workspaceId: 'default', shardId: 'default'} context is not
+ * default workspaceId: 'default', shardId: 'default' context is not
  * special-cased: once truly idle it unloads and reloads like any other,
  * lazily reloading its snapshot on next resolution (see createContext).
  */

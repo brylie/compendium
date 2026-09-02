@@ -226,6 +226,14 @@ export interface MigrateWorkspaceOptions {
 	dryRun?: boolean;
 }
 
+/**
+ * Runs (or, with `dryRun`, simulates) the §7 legacy-shard migration for one
+ * workspace: relocates every not-yet-migrated legacy Document/Collection into
+ * its own per-record shard, reusing the existing `migrationRuns` row if this
+ * workspace/version has already been run so re-invocation only processes
+ * genuinely new legacy content. A dry run reports what would move without
+ * writing anything.
+ */
 export function migrateWorkspace(options: MigrateWorkspaceOptions = {}): MigrationResult {
 	const workspaceId = options.workspaceId ?? DEFAULT_WORKSPACE_ID;
 	const dryRun = options.dryRun ?? false;

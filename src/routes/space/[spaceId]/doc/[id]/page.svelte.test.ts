@@ -694,7 +694,12 @@ describe('doc/[id] +page', () => {
 
 		const editor = container.querySelector('[contenteditable]') as HTMLElement;
 		editor.textContent = '/';
-		await editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+		editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+		// dispatchEvent itself is synchronous (a plain boolean return, not a
+		// promise — no-await-thenable is right about that), but the slash
+		// menu's own appearance is driven by Svelte's reactive state update
+		// in response to the event, which needs a tick to flush.
+		await tick();
 
 		expect(screen.getByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
 

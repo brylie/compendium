@@ -15,7 +15,13 @@ describe('routes/space/[spaceId]/+layout.server: Space id validation', () => {
 		const { defaultSpaceId } = resolveWorkspaceContext();
 		expect.assertions(1);
 		try {
-			load({ params: { spaceId: 'not-a-real-space' } } as unknown as Parameters<typeof load>[0]);
+			// See routes/page.server.test.ts's identical case: this load is
+			// synchronous and throws before ever producing a promise, despite
+			// PageServerLoad's type allowing an async implementation.
+			// eslint-disable-next-line sonarjs/void-use
+			void load({
+				params: { spaceId: 'not-a-real-space' }
+			} as unknown as Parameters<typeof load>[0]);
 		} catch (err) {
 			expect(err).toMatchObject({ status: 307, location: `/space/${defaultSpaceId}` });
 		}

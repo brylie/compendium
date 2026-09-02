@@ -81,7 +81,13 @@
 				recordsMap.unobserveDeep(observer);
 				collectionsMap.unobserveDeep(observer);
 			};
-		})();
+			// A rejection here (network failure, bad response) previously
+			// vanished as a silent unhandled rejection — this at least
+			// surfaces it, without inventing a toast/error-UI system this
+			// lint pass isn't scoped to add.
+		})().catch((err: unknown) => {
+			console.error(`Failed to resolve shard for collection ${id}:`, err);
+		});
 
 		return () => {
 			cancelled = true;

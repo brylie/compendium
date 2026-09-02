@@ -95,6 +95,7 @@ export function initHoldEviction(awareness: Awareness): void {
 	);
 }
 
+/** Test-only: clears the wired-Awareness registry so `initHoldEviction` can be re-wired against a fresh Awareness instance. */
 export function resetHoldEvictionForTests(): void {
 	wiredAwareness = new WeakSet<Awareness>();
 	clearAllTestTimers();
@@ -167,6 +168,13 @@ export interface HoldRequestResult {
 	denied: string[];
 }
 
+/**
+ * Grants or denies an agent's hold request per-record (never all-or-nothing):
+ * a record already held by another client, or that fails `permissionCheck`,
+ * is denied while the rest are granted. Also revalidates every record this
+ * client already holds against `permissionCheck`, since permissions can
+ * change between calls and a now-unauthorized hold must not silently persist.
+ */
 export function requestAgentHold(
 	awareness: Awareness,
 	clientId: number,
@@ -221,6 +229,7 @@ export function requestAgentHold(
 	return { granted, denied };
 }
 
+/** Releases the given record IDs from a client's holds, or every held record when `recordIds` is omitted. */
 export function releaseAgentHold(
 	awareness: Awareness,
 	clientId: number,
@@ -245,6 +254,7 @@ export function releaseAgentHold(
 	}
 }
 
+/** Whether the given client currently holds `recordId`. */
 export function isHeldByClient(awareness: Awareness, clientId: number, recordId: string): boolean {
 	return readHoldState(awareness, clientId)?.heldRecordIds.includes(recordId) ?? false;
 }

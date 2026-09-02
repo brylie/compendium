@@ -450,9 +450,9 @@ describe('dateKeyForRecord', () => {
 
 	it('returns undefined when the property is unset or empty', () => {
 		expect(dateKeyForRecord(record('a', {}), dueProperty)).toBeUndefined();
-		expect(dateKeyForRecord(record('a', { due: { type: 'date', value: '' } }), dueProperty)).toBe(
-			undefined
-		);
+		expect(
+			dateKeyForRecord(record('a', { due: { type: 'date', value: '' } }), dueProperty)
+		).toBeUndefined();
 	});
 
 	it('returns undefined when the record has a value of the wrong property type', () => {

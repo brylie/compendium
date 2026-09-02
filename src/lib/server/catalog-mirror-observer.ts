@@ -153,7 +153,7 @@ export function resetCatalogMirrorObserverForTests(): void {
 /**
  * Attaches the generic "mirror a direct title/parentDocumentId/order edit
  * into the catalog" observer to one resolved shard's Y.Doc. Call once per
- * {workspaceId, shardId} context (workspace-store.ts's createContext(), the
+ * workspaceId/shardId context (workspace-store.ts's createContext(), the
  * same call site attachDocAuditObserver already uses) — deletion is
  * deliberately not handled here; it's already correctly cascaded by routing
  * through the service layer's own recordCatalog*Deleted call (see

@@ -125,6 +125,13 @@ export async function createTestHarness(): Promise<TestHarness> {
 	let appHandler: ((req: IncomingMessage, res: ServerResponse, next: () => void) => void) | null =
 		null;
 
+	// http.createServer expects a void-returning callback; this one is async,
+	// which typescript-eslint flags as a rejection Node would never observe.
+	// Every branch below is inside the try/catch that follows (500 on any
+	// error), so the returned promise can't actually reject — there's no
+	// unhandled-rejection risk to fix, just a signature mismatch to
+	// acknowledge.
+	// eslint-disable-next-line @typescript-eslint/no-misused-promises
 	const server: Server = createServer(async (req, res) => {
 		try {
 			if (req.url?.startsWith('/mcp')) {
@@ -195,7 +202,15 @@ export async function createTestHarness(): Promise<TestHarness> {
 
 	try {
 		const buildPath = join(process.cwd(), 'build/handler.js');
+		// The indirect-eval-via-new-Function trick, not a code-execution risk:
+		// the function body is this fixed string literal, never derived from
+		// untrusted input, and exists only so bundlers don't statically
+		// resolve/transform `import(p)` at build time — `p` (a plain file
+		// path this codebase computes, not attacker-controlled) is passed as
+		// data, not executed as code.
+		// eslint-disable-next-line @typescript-eslint/no-implied-eval
 		const dynamicImport = new Function('p', 'return import(p)');
+		// eslint-disable-next-line sonarjs/code-eval -- same rationale as above; buildPath is this codebase's own computed path, not untrusted input.
 		const mod = (await dynamicImport(buildPath)) as {
 			handler?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
 		};
@@ -298,11 +313,16 @@ export async function createTestHarness(): Promise<TestHarness> {
 			}
 		}
 
+		// Two sequential awaits, not one 3-deep nested callback: wss must
+		// finish closing (it holds its own client sockets open) before
+		// server.close can complete, but that ordering doesn't require
+		// nesting the second call inside the first's callback.
+		server.closeAllConnections?.();
 		await new Promise<void>((resolve) => {
-			server.closeAllConnections?.();
-			wss.close(() => {
-				server.close(() => resolve());
-			});
+			wss.close(() => resolve());
+		});
+		await new Promise<void>((resolve) => {
+			server.close(() => resolve());
 		});
 
 		closeDb();

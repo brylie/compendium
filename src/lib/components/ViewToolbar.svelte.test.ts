@@ -81,7 +81,7 @@ describe('ViewToolbar', () => {
 
 		await user.selectOptions(modeSelect, 'property').catch(() => {});
 
-		expect(onConfigChange.mock.calls.length).toBe(callsBeforeAttempt);
+		expect(onConfigChange.mock.calls).toHaveLength(callsBeforeAttempt);
 		expect(screen.queryByRole('option', { name: 'Ascending' })).not.toBeInTheDocument();
 	});
 });

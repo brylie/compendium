@@ -125,6 +125,12 @@
 		return html;
 	}
 
+	/**
+	 * Re-derives this block's contenteditable DOM from the current state of
+	 * `ytext` and restores the caret afterward. Called on every ytext mutation
+	 * (local or remote) via the observer below, so it's the single point
+	 * where CRDT state becomes visible markup.
+	 */
 	export function render(): void {
 		if (!el) return;
 		// A remote peer can edit this same block while the user is mid-IME-
@@ -190,59 +196,111 @@
 		e: 'code'
 	};
 
-	function handleKeydown(event: KeyboardEvent): void {
+	function isComposingKeyEvent(event: KeyboardEvent): boolean {
 		// keyCode 229 is the legacy signal some browsers still send instead of
 		// isComposing for IME-driven key events (e.g. committing a composition
 		// with Enter). Either way, structural shortcuts like the Enter-splits-
-		// block behavior below must not fire mid-composition.
-		if (event.isComposing || event.keyCode === 229) return;
+		// block behavior below must not fire mid-composition. `keyCode` is
+		// deprecated but there's no equivalent modern signal for this specific
+		// cross-browser quirk — kept deliberately rather than dropping a
+		// working IME-compatibility check to satisfy the lint rule.
+		// sonarjs/deprecation is disabled for .svelte files in
+		// eslint.config.js rather than suppressed per-line here: its
+		// reported line/column for this exact finding don't correspond to
+		// this usage — a parser/source-map interaction with .svelte files,
+		// not a second deprecated API elsewhere in this file.
+		return event.isComposing || event.keyCode === 229;
+	}
+
+	// Word-processor convention: Backspace at the very start of a block's
+	// text joins it onto the end of the previous block, same as it would
+	// join two lines of a single document — not just when this block
+	// happens to be empty. An empty block always counts as "at the start"
+	// (there's only one possible caret position in it); a non-empty one
+	// needs an actual collapsed caret at offset 0. +page.svelte's
+	// handleBackspace decides how to join based on both blocks' content.
+	function isCaretAtBlockStart(target: HTMLElement): boolean {
+		if (lastPlainText === '') return true;
+		const offsets = getSelectionOffsets(target);
+		return offsets !== null && offsets.start === 0 && offsets.end === 0;
+	}
+
+	function isShortcutModifierPressed(event: KeyboardEvent): boolean {
+		return event.metaKey || event.ctrlKey;
+	}
+
+	// ArrowUp/ArrowDown at the visual first/last line of this block, with no
+	// modifier held, crosses into the previous/next block instead of moving
+	// within it — the column-preserving cross-block navigation the caller
+	// (+page.svelte's onArrowUpAtStart/onArrowDownAtEnd) implements.
+	function handleArrowNavigationAtEdge(event: KeyboardEvent): void {
+		if (!el) return;
+		const noModifiers = !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey;
+		if (!noModifiers) return;
+		if (event.key === 'ArrowUp' && !isFirstBlock && isCaretAtFirstLine(el)) {
+			if (onArrowUpAtStart(getCaretClientX(el))) event.preventDefault();
+		} else if (event.key === 'ArrowDown' && !isLastBlock && isCaretAtLastLine(el)) {
+			if (onArrowDownAtEnd(getCaretClientX(el))) event.preventDefault();
+		}
+	}
+
+	function handleKeydown(event: KeyboardEvent): void {
+		if (isComposingKeyEvent(event)) return;
 		if (event.key === 'Enter') {
 			event.preventDefault();
 			onEnter(el ? getCaretOffset(el) : lastPlainText.length);
 			return;
 		}
-		if (event.key === 'Backspace' && el) {
-			// Word-processor convention: Backspace at the very start of a
-			// block's text joins it onto the end of the previous block, same
-			// as it would join two lines of a single document — not just
-			// when this block happens to be empty. An empty block always
-			// counts as "at the start" (there's only one possible caret
-			// position in it); a non-empty one needs an actual collapsed
-			// caret at offset 0. +page.svelte's handleBackspace decides how
-			// to join based on both blocks' content.
-			const offsets = getSelectionOffsets(el);
-			const atStart =
-				lastPlainText === '' || (offsets !== null && offsets.start === 0 && offsets.end === 0);
-			if (atStart) {
-				event.preventDefault();
-				onBackspaceAtStart();
-				return;
-			}
-		}
-		if ((event.metaKey || event.ctrlKey) && SHORTCUT_MARKS[event.key.toLowerCase()]) {
+		if (event.key === 'Backspace' && el && isCaretAtBlockStart(el)) {
 			event.preventDefault();
-			applyFormat(SHORTCUT_MARKS[event.key.toLowerCase()]);
+			onBackspaceAtStart();
 			return;
 		}
-		if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+		const shortcutMark = SHORTCUT_MARKS[event.key.toLowerCase()];
+		if (isShortcutModifierPressed(event) && shortcutMark) {
+			event.preventDefault();
+			applyFormat(shortcutMark);
+			return;
+		}
+		if (isShortcutModifierPressed(event) && event.key.toLowerCase() === 'k') {
 			event.preventDefault();
 			onLinkShortcut();
 		}
-		const noModifiers = !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey;
-		if (event.key === 'ArrowUp' && el && !isFirstBlock && noModifiers && isCaretAtFirstLine(el)) {
-			if (onArrowUpAtStart(getCaretClientX(el))) event.preventDefault();
-			return;
-		}
-		if (event.key === 'ArrowDown' && el && !isLastBlock && noModifiers && isCaretAtLastLine(el)) {
-			if (onArrowDownAtEnd(getCaretClientX(el))) event.preventDefault();
-			return;
-		}
+		handleArrowNavigationAtEdge(event);
 	}
 
+	/** Returns the current selection's character offsets within this block, or `null` if the block isn't focused/selected. */
 	export function getSelectionRange(): { start: number; end: number } | null {
 		return el ? getSelectionOffsets(el) : null;
 	}
 
+	// True when every run overlapping [start, end) carries `mark` — a ranged
+	// selection is only "active" for a mark if the whole selection has it,
+	// not just some of it.
+	function markCoversSelection(
+		runs: { text: string; marks: TextMarks }[],
+		mark: keyof TextMarks,
+		start: number,
+		end: number
+	): boolean {
+		let hasSelection = false;
+		let markedThroughout = true;
+		let offset = 0;
+		for (const run of runs) {
+			const runEnd = offset + run.text.length;
+			if (start < runEnd && end > offset) {
+				hasSelection = true;
+				if (!run.marks[mark]) markedThroughout = false;
+			}
+			offset = runEnd;
+		}
+		return hasSelection && markedThroughout;
+	}
+
+	/**
+	 * Reports which text marks (bold, italic, etc.) are active at the current
+	 * selection, for driving the toolbar's pressed/unpressed button state.
+	 */
 	export function getFormatState(): Partial<Record<keyof TextMarks, boolean>> {
 		if (!el) return {};
 		const offsets = getSelectionOffsets(el);
@@ -259,26 +317,15 @@
 		const runs = yTextToRichText(ytext).runs;
 		const marks: (keyof TextMarks)[] = ['bold', 'italic', 'strikethrough', 'code', 'link'];
 		const state: Partial<Record<keyof TextMarks, boolean>> = {};
-		let offset: number;
 
 		for (const mark of marks) {
-			let hasSelection = false;
-			let markedThroughout = true;
-			offset = 0;
-			for (const run of runs) {
-				const runEnd = offset + run.text.length;
-				if (start < runEnd && end > offset) {
-					hasSelection = true;
-					if (!run.marks[mark]) markedThroughout = false;
-				}
-				offset = runEnd;
-			}
-			if (hasSelection && markedThroughout) state[mark] = true;
+			if (markCoversSelection(runs, mark, start, end)) state[mark] = true;
 		}
 
 		return state;
 	}
 
+	/** Toggles or sets `mark` on the current selection; a no-op if nothing is selected. */
 	export function applyFormat(mark: keyof TextMarks, value?: unknown): void {
 		if (!el) return;
 		const offsets = getSelectionOffsets(el);
@@ -286,13 +333,23 @@
 		applyFormatAtRange(mark, offsets, value);
 	}
 
+	/**
+	 * Toggles or sets `mark` on an explicit `[start, end)` range rather than
+	 * the live selection — used when the caller already has offsets in hand
+	 * (e.g. `applyFormat` after reading the current selection).
+	 */
 	export function applyFormatAtRange(
 		mark: keyof TextMarks,
 		offsets: { start: number; end: number },
 		value?: unknown
 	): void {
 		if (offsets.start === offsets.end) return;
-		const nextValue = value === undefined ? (getFormatState()[mark] ? null : true) : value;
+		// No explicit value: toggle the mark off if it's currently on
+		// anywhere in the selection, on otherwise.
+		let nextValue = value;
+		if (value === undefined) {
+			nextValue = getFormatState()[mark] ? null : true;
+		}
 		const doc = ytext.doc;
 		const apply = () =>
 			ytext.format(offsets.start, offsets.end - offsets.start, { [mark]: nextValue });
@@ -300,21 +357,31 @@
 		else apply();
 	}
 
-	// `position` is either the boolean shorthand (start/end) most callers
-	// want, or an exact character offset — used to land the caret at the
-	// join point when Backspace merges a block's text onto the end of this
-	// one, rather than always at its very end.
+	/**
+	 * Focuses this block's contenteditable and places the caret. `position` is
+	 * either the boolean shorthand (start/end) most callers want, or an exact
+	 * character offset — used to land the caret at the join point when
+	 * Backspace merges a block's text onto the end of this one, rather than
+	 * always at its very end.
+	 */
 	export function focusEditor(position: boolean | number = false): void {
 		el?.focus();
 		if (!el) return;
-		const offset = typeof position === 'number' ? position : position ? 0 : lastPlainText.length;
+		let offset: number;
+		if (typeof position === 'number') {
+			offset = position;
+		} else {
+			offset = position ? 0 : lastPlainText.length;
+		}
 		setCaretOffset(el, offset);
 	}
 
-	// Column-preserving landing spot for a block-to-block ArrowUp/ArrowDown
-	// move — lands on this editor's first/last visual line, as close as
-	// possible to clientX (the caret's horizontal position in the block the
-	// user moved out of).
+	/**
+	 * Column-preserving landing spot for a block-to-block ArrowUp/ArrowDown
+	 * move — lands on this editor's first/last visual line, as close as
+	 * possible to clientX (the caret's horizontal position in the block the
+	 * user moved out of).
+	 */
 	export function focusEditorAtLine(edge: 'first' | 'last', clientX: number | null): void {
 		if (!el) return;
 		setCaretNearClientX(el, clientX, edge);

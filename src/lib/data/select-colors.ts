@@ -29,6 +29,7 @@ export const SELECT_OPTION_COLORS: SelectOptionColor[] = [
 	{ value: 'oklch(65% 0.15 350)', label: 'Pink' }
 ];
 
+/** Picks the next palette color for a newly added Select option, cycling through SELECT_OPTION_COLORS so every new option gets a color automatically instead of defaulting to gray. */
 export function nextSelectOptionColor(existingOptionCount: number): string {
 	return SELECT_OPTION_COLORS[existingOptionCount % SELECT_OPTION_COLORS.length].value;
 }

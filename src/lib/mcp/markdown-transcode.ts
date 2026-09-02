@@ -15,7 +15,16 @@ import type { RichText, TextMarks } from '$lib/data/types';
 // `record:` scheme, so the rich-text model doesn't need a dedicated mark
 // type for it.
 
-const SPECIAL_TOKEN = /(@[\w-]+)|(\[\[[^\]]+\]\])/g;
+// The wiki-link body is bounded to 500 chars (far beyond any real
+// Document/Collection title) rather than left unbounded ([^\]]+): an
+// unbounded body means every unclosed "[[" in the input — e.g. pasted text
+// containing many "[[" sequences with no matching "]]" — forces the engine
+// to scan to the end of the string and backtrack one character at a time
+// before giving up, for every single one of those starting positions. That's
+// quadratic in input length, not linear, on content this function has to
+// run over untrusted document/MCP-write text. Bounding the body caps the
+// worst case per position to a constant instead.
+const SPECIAL_TOKEN = /(@[\w-]+)|(\[\[[^\]]{1,500}\]\])/g;
 
 // Rendered in place of the target's title when a wiki-link's target ID no
 // longer resolves to any Document/Collection (see docs/specifications/
@@ -32,6 +41,7 @@ interface MutableRun {
 // RichText -> Markdown
 // ---------------------------------------------------------------------------
 
+/** Serializes a block's RichText model to Markdown (the Y.Text ⇄ Markdown boundary, see markdown-transcoding.md). */
 export function richTextToMarkdown(doc: Y.Doc, richText: RichText): string {
 	return richText.runs.map((run) => runToMarkdown(doc, run.text, run.marks)).join('');
 }
@@ -74,6 +84,7 @@ interface MdastNode {
 	children?: MdastNode[];
 }
 
+/** Parses Markdown into the RichText model (the reverse of {@link richTextToMarkdown}), resolving mentions and [[wiki-links]] against `doc`. */
 export function markdownToRichText(doc: Y.Doc, markdown: string): RichText {
 	const tree = remark().use(remarkGfm).parse(markdown) as unknown as MdastNode;
 	const runs: MutableRun[] = [];

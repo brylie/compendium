@@ -13,10 +13,12 @@ import type { ActorId } from '$lib/data/types';
 // belongs to whichever shard's Awareness its own Document is connected to
 // (#120: each Document has its own shard), not a single shared instance.
 
+/** Publishes this client's cursor position in `blockId` as an implicit hold, replacing any block it previously held. */
 export function claimBlockPresence(awareness: Awareness, blockId: string): void {
 	awareness.setLocalState({ actor: CURRENT_USER, heldRecordIds: [blockId] });
 }
 
+/** Clears this client's implicit hold, e.g. when focus leaves the editor entirely. */
 export function releaseBlockPresence(awareness: Awareness): void {
 	awareness.setLocalState({ actor: CURRENT_USER, heldRecordIds: [] });
 }

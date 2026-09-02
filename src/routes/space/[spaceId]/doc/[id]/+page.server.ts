@@ -5,6 +5,10 @@ import { listDocuments, listCollections } from '$lib/services';
 import { resolveParentWorkspaceContext } from '$lib/services/permissions';
 import type { PageServerLoad } from './$types';
 
+/**
+ * Loads a Document for the doc view, self-healing the URL's [spaceId] when it
+ * disagrees with the Document's actual owning Space rather than 404ing.
+ */
 export const load: PageServerLoad = ({ params, locals }) => {
 	// Resolves the Document's real shard, not the default doc — a Document's
 	// own meta entry lives in its own shard (see #120).

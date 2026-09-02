@@ -179,6 +179,64 @@ export function resetAuditObserverForTests(): void {
 	pendingUpdateTimers.clear();
 }
 
+type FinalizedEntry = { kind: EntryKind; id: string; action: string };
+
+// Pass 1: whole entries created/deleted at a top-level map — a changed key
+// on the map itself always means "entry added" or "entry removed" (nothing
+// in this codebase reassigns an existing top-level key). Mutates `finalized`
+// in place rather than returning a new map, so both passes accumulate into
+// the one map attachDocAuditObserver's transaction handler owns.
+function collectTopLevelEntryChanges(
+	transaction: Y.Transaction,
+	maps: TopLevelMap[],
+	finalized: Map<string, FinalizedEntry>
+): void {
+	for (const { kind, map } of maps) {
+		const keys = transaction.changed.get(map);
+		if (!keys) continue;
+		for (const key of keys) {
+			if (key == null) continue;
+			const action = (map as Y.Map<unknown>).has(key) ? ACTIONS[kind].create : ACTIONS[kind].delete;
+			finalized.set(`${kind}:${key}`, { kind, id: key, action });
+		}
+	}
+}
+
+// Pass 2: field/content/order changes nested within an existing entry.
+function collectNestedEntryChanges(
+	transaction: Y.Transaction,
+	maps: TopLevelMap[],
+	finalized: Map<string, FinalizedEntry>
+): void {
+	transaction.changed.forEach((_keys, type) => {
+		if (maps.some((t) => t.map === type)) return; // handled in pass 1
+		const owner = resolveOwningEntry(maps, type);
+		if (!owner) return;
+		const dedupeKey = `${owner.kind}:${owner.id}`;
+		if (finalized.has(dedupeKey)) return; // already create/delete this transaction
+		finalized.set(dedupeKey, {
+			kind: owner.kind,
+			id: owner.id,
+			action: ACTIONS[owner.kind].update
+		});
+	});
+}
+
+function flushFinalizedEntries(doc: Y.Doc, finalized: Map<string, FinalizedEntry>): void {
+	for (const { kind, id, action } of finalized.values()) {
+		if (action === ACTIONS[kind].update) {
+			scheduleUpdateAudit(doc, kind, id);
+		} else {
+			// A create/delete resolves any edit still sitting in the debounce
+			// window for this same entry first, so it's written in the order it
+			// actually happened rather than surfacing later, after the entry is
+			// already gone.
+			flushPendingFor(doc, kind, id);
+			logAudit({ actor: CURRENT_USER, action, targetRecordId: id });
+		}
+	}
+}
+
 /**
  * Attaches the generic "audit whatever the UI just did" observer to the
  * server's Y.Doc. Call once per Y.Doc instance (workspace-store.ts's
@@ -193,48 +251,9 @@ export function attachDocAuditObserver(doc: Y.Doc): void {
 	doc.on('afterTransaction', (transaction: Y.Transaction) => {
 		if (transaction.origin == null) return; // service-layer write — already audited itself
 
-		const finalized = new Map<string, { kind: EntryKind; id: string; action: string }>();
-
-		// Pass 1: whole entries created/deleted at a top-level map — a changed
-		// key on the map itself always means "entry added" or "entry removed"
-		// (nothing in this codebase reassigns an existing top-level key).
-		for (const { kind, map } of maps) {
-			const keys = transaction.changed.get(map);
-			if (!keys) continue;
-			for (const key of keys) {
-				if (key == null) continue;
-				const action = (map as Y.Map<unknown>).has(key)
-					? ACTIONS[kind].create
-					: ACTIONS[kind].delete;
-				finalized.set(`${kind}:${key}`, { kind, id: key, action });
-			}
-		}
-
-		// Pass 2: field/content/order changes nested within an existing entry.
-		transaction.changed.forEach((_keys, type) => {
-			if (maps.some((t) => t.map === type)) return; // handled in pass 1
-			const owner = resolveOwningEntry(maps, type);
-			if (!owner) return;
-			const dedupeKey = `${owner.kind}:${owner.id}`;
-			if (finalized.has(dedupeKey)) return; // already create/delete this transaction
-			finalized.set(dedupeKey, {
-				kind: owner.kind,
-				id: owner.id,
-				action: ACTIONS[owner.kind].update
-			});
-		});
-
-		for (const { kind, id, action } of finalized.values()) {
-			if (action === ACTIONS[kind].update) {
-				scheduleUpdateAudit(doc, kind, id);
-			} else {
-				// A create/delete resolves any edit still sitting in the debounce
-				// window for this same entry first, so it's written in the order it
-				// actually happened rather than surfacing later, after the entry is
-				// already gone.
-				flushPendingFor(doc, kind, id);
-				logAudit({ actor: CURRENT_USER, action, targetRecordId: id });
-			}
-		}
+		const finalized = new Map<string, FinalizedEntry>();
+		collectTopLevelEntryChanges(transaction, maps, finalized);
+		collectNestedEntryChanges(transaction, maps, finalized);
+		flushFinalizedEntries(doc, finalized);
 	});
 }

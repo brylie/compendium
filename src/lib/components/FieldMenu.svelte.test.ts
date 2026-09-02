@@ -432,7 +432,7 @@ describe('FieldMenu', () => {
 			const input = screen.getByLabelText('Rename option To do');
 			await user.clear(input);
 			await user.type(input, 'Backlog');
-			fireEvent.blur(input);
+			await fireEvent.blur(input);
 
 			const options = getCollection(ydoc, collection.id)?.schema[0].options ?? [];
 			expect(options[0].label).toBe('Backlog');

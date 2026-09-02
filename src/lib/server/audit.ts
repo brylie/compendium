@@ -12,6 +12,7 @@ export interface AuditEntry {
 	diff?: unknown;
 }
 
+/** Appends one immutable audit-log entry recording an actor's action against a record. */
 export function logAudit(input: {
 	actor: ActorId;
 	action: string;

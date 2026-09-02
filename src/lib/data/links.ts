@@ -69,6 +69,7 @@ interface IndexedBacklink extends Backlink {
 
 const backlinkIndexes = new WeakMap<Y.Doc, BacklinkIndex>();
 
+/** True when a link's target could not be resolved — the Document/Collection it pointed to has been deleted. */
 export function isLinkBroken(link: OutgoingLink): boolean {
 	return link.target === undefined;
 }

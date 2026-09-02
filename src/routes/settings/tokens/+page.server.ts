@@ -8,6 +8,7 @@ import type { Actions, PageServerLoad } from './$types';
 
 const CURRENT_USER = { kind: 'human', userId: 'local' } as const;
 
+/** Loads existing access tokens plus every Document/Collection/Space so the token-management UI can render its allowlist pickers. */
 export const load: PageServerLoad = () => {
 	const { doc, workspaceId } = resolveWorkspaceContext();
 	return {
