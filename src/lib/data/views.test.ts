@@ -4,6 +4,7 @@ import {
 	applySort,
 	computeFieldSummary,
 	dateKeyForRecord,
+	diffViewConfig,
 	fieldSummaryLabel,
 	groupBySelectProperty,
 	primaryFieldDisplayValue,
@@ -510,6 +511,40 @@ describe('viewConfigsEqual', () => {
 			false
 		);
 		expect(viewConfigsEqual({ summaries: { a: 'sum' } }, {})).toBe(false);
+	});
+});
+
+describe('diffViewConfig', () => {
+	it('returns an empty patch when nothing changed', () => {
+		const config: ViewConfig = { groupBy: 'status', filters: [] };
+		expect(diffViewConfig(config, { ...config })).toEqual({});
+	});
+
+	it('includes only the members that actually changed', () => {
+		const base: ViewConfig = { groupBy: 'status', sort: { mode: 'manual' } };
+		const next: ViewConfig = {
+			groupBy: 'status',
+			sort: { mode: 'property', propertyKey: 'title' }
+		};
+		expect(diffViewConfig(base, next)).toEqual({
+			sort: { mode: 'property', propertyKey: 'title' }
+		});
+	});
+
+	it('includes a member reset back to undefined, so the patch clears it', () => {
+		expect(diffViewConfig({ groupBy: 'status' }, {})).toEqual({ groupBy: undefined });
+	});
+
+	// Issue #183 review: undefined (show every property) and [] (show none)
+	// are both empty sets to stringSetEqual, but mean opposite things — a
+	// transition between them must still produce a patch, or a viewer's
+	// "hide every column" edit would silently fail to save.
+	it('distinguishes an unset visibleProperties override from an explicit empty allowlist', () => {
+		expect(diffViewConfig({}, { visibleProperties: [] })).toEqual({ visibleProperties: [] });
+		expect(diffViewConfig({ visibleProperties: [] }, {})).toEqual({ visibleProperties: undefined });
+		expect(diffViewConfig({ visibleProperties: ['a'] }, { visibleProperties: [] })).toEqual({
+			visibleProperties: []
+		});
 	});
 });
 

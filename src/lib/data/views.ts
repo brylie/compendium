@@ -329,6 +329,37 @@ export function viewConfigsEqual(a: ViewConfig, b: ViewConfig): boolean {
 	);
 }
 
+/**
+ * Per-member diff between the config a viewer started editing from (`base`)
+ * and their local draft (`next`) — only the members that actually changed
+ * are included, using the same per-field equality as viewConfigsEqual rather
+ * than a reference/JSON compare. CollectionViewBlock passes this straight to
+ * patchRecordViewConfig on Save so a viewer's edit to (say) only `filters`
+ * never overwrites a `sort` change someone else saved in the meantime with a
+ * stale copy of it — see records.ts's patchRecordViewConfig doc comment and
+ * issue #71. A member reset back to `undefined` (e.g. clearing groupBy) is
+ * still included, so patchRecordViewConfig clears it rather than leaving the
+ * old value in place.
+ *
+ * visibleProperties needs its own equality rather than stringSetEqual
+ * directly: `undefined` (show every property) and `[]` (show none) are both
+ * empty sets but mean opposite things, so a transition between them must
+ * still produce a patch even though stringSetEqual alone would call them equal.
+ */
+export function diffViewConfig(base: ViewConfig, next: ViewConfig): Partial<ViewConfig> {
+	const patch: Partial<ViewConfig> = {};
+	if (!filtersEqual(base.filters, next.filters)) patch.filters = next.filters;
+	if (!sortEqual(base.sort, next.sort)) patch.sort = next.sort;
+	const visibilityChanged =
+		base.visibleProperties === undefined || next.visibleProperties === undefined
+			? base.visibleProperties !== next.visibleProperties
+			: !stringSetEqual(base.visibleProperties, next.visibleProperties);
+	if (visibilityChanged) patch.visibleProperties = next.visibleProperties;
+	if (base.groupBy !== next.groupBy) patch.groupBy = next.groupBy;
+	if (!summariesEqual(base.summaries, next.summaries)) patch.summaries = next.summaries;
+	return patch;
+}
+
 // Which aggregations a property's type offers in Table's per-column footer
 // (issue #32's "type-appropriate field summaries") — mirrors Notion/Airtable's
 // footer-summary picker, scoped to the property types this schema has.

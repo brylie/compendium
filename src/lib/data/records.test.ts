@@ -26,6 +26,7 @@ import {
 	listRecordsForParent,
 	moveSelectOption,
 	NotFoundError,
+	patchRecordViewConfig,
 	previewCollectionPropertyTypeChange,
 	reorderRecord,
 	resolvePrimaryField,
@@ -233,6 +234,64 @@ describe('records: CRDT merge acceptance criteria', () => {
 		const merged = getRecord(docA, row.id);
 		expect(merged?.properties?.status).toEqual({ type: 'select', value: 'done' });
 		expect(merged?.properties?.owner).toEqual({ type: 'text', value: 'Brylie' });
+	});
+
+	// Issue #71: viewConfig was previously stored as one whole-value Y.Map
+	// entry, so two actors patching different members concurrently (one's
+	// filter change, another's sort change) would resolve via last-write-wins
+	// on the *entire* object — whichever patch's transaction landed later
+	// would silently reintroduce its own stale copy of the member it didn't
+	// touch, dropping the other actor's edit. patchRecordViewConfig now writes
+	// each member to its own `viewConfig:<field>` entry, so this merges
+	// per-member instead, the same way updateRecordProperties already does
+	// for row properties (previous test).
+	it('merges concurrent viewConfig patches on different members of the same collection_view block', () => {
+		const docA = new Y.Doc();
+		const collection = createCollection(docA, {
+			title: 'Tasks',
+			schema: [{ key: 'status', label: 'Status', type: 'select' }]
+		});
+		const document = createDocument(docA, { title: 'Doc' });
+		const block = createRecord(
+			docA,
+			{
+				parentId: document.id,
+				blockType: 'collection_view',
+				referencedRecordId: collection.id,
+				viewConfig: { viewType: 'board', groupBy: 'status' }
+			},
+			human
+		);
+
+		const docB = new Y.Doc();
+		Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+
+		patchRecordViewConfig(
+			docA,
+			block.id,
+			{ filters: [{ propertyKey: 'status', op: 'is', value: 'todo' }] },
+			human
+		);
+		patchRecordViewConfig(
+			docB,
+			block.id,
+			{ sort: { mode: 'property', propertyKey: 'status', direction: 'asc' } },
+			agent
+		);
+
+		Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+		Y.applyUpdate(docA, Y.encodeStateAsUpdate(docB));
+
+		const expected = {
+			viewType: 'board',
+			groupBy: 'status',
+			filters: [{ propertyKey: 'status', op: 'is', value: 'todo' }],
+			sort: { mode: 'property', propertyKey: 'status', direction: 'asc' }
+		};
+		// Both replicas converge to the same merged result, not just the one
+		// that happened to receive the other's update second.
+		expect(getRecord(docA, block.id)?.viewConfig).toEqual(expected);
+		expect(getRecord(docB, block.id)?.viewConfig).toEqual(expected);
 	});
 });
 
@@ -1123,6 +1182,128 @@ describe('records: creation ordering, mutation, and not-found edge cases', () =>
 		expect(() => setRecordViewConfig(doc, 'missing', { viewType: 'table' }, human)).toThrow(
 			NotFoundError
 		);
+	});
+
+	it('setRecordViewConfig fully replaces a prior config, clearing any member absent from the new one', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(doc, { parentId: document.id, blockType: 'collection_view' }, human);
+		setRecordViewConfig(
+			doc,
+			block.id,
+			{
+				viewType: 'table',
+				filters: [{ propertyKey: 'status', op: 'is', value: 'todo' }],
+				groupBy: 'status'
+			},
+			human
+		);
+		setRecordViewConfig(doc, block.id, { viewType: 'table', sort: { mode: 'manual' } }, human);
+		expect(getRecord(doc, block.id)?.viewConfig).toEqual({
+			viewType: 'table',
+			sort: { mode: 'manual' }
+		});
+	});
+
+	it("patchRecordViewConfig merges only the named members, leaving the rest of a collection_view block's config untouched", () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(
+			doc,
+			{
+				parentId: document.id,
+				blockType: 'collection_view',
+				viewConfig: {
+					viewType: 'board',
+					filters: [{ propertyKey: 'status', op: 'is', value: 'todo' }],
+					groupBy: 'status'
+				}
+			},
+			human
+		);
+
+		patchRecordViewConfig(
+			doc,
+			block.id,
+			{ sort: { mode: 'property', propertyKey: 'status', direction: 'asc' } },
+			human
+		);
+		expect(getRecord(doc, block.id)?.viewConfig).toEqual({
+			viewType: 'board',
+			filters: [{ propertyKey: 'status', op: 'is', value: 'todo' }],
+			groupBy: 'status',
+			sort: { mode: 'property', propertyKey: 'status', direction: 'asc' }
+		});
+
+		// A member explicitly named with an `undefined` value clears it rather
+		// than being treated as "not part of this patch".
+		patchRecordViewConfig(doc, block.id, { groupBy: undefined }, human);
+		expect(getRecord(doc, block.id)?.viewConfig?.groupBy).toBeUndefined();
+		expect(getRecord(doc, block.id)?.viewConfig?.filters).toEqual([
+			{ propertyKey: 'status', op: 'is', value: 'todo' }
+		]);
+
+		expect(() => patchRecordViewConfig(doc, 'missing', { groupBy: 'status' }, human)).toThrow(
+			NotFoundError
+		);
+	});
+
+	it('patchRecordViewConfig rejects a viewType key at runtime, even past a type-system bypass', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'collection_view', viewConfig: { viewType: 'board' } },
+			human
+		);
+
+		// Partial<ViewConfig> already blocks this at compile time for a typed
+		// caller — this simulates an untyped caller or an unsafe cast getting
+		// `viewType` into the patch anyway.
+		expect(() =>
+			patchRecordViewConfig(
+				doc,
+				block.id,
+				{ viewType: 'calendar' } as Partial<import('./views').ViewConfig>,
+				human
+			)
+		).toThrow(ValidationError);
+		// Rejected before any write — the config is untouched.
+		expect(getRecord(doc, block.id)?.viewConfig).toEqual({ viewType: 'board' });
+	});
+
+	it('reads a pre-#183 legacy whole-value viewConfig, and patchRecordViewConfig migrates it into per-member entries on first write', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(doc, { parentId: document.id, blockType: 'collection_view' }, human);
+
+		// Simulate a record persisted before #183: the whole config under one
+		// `viewConfig` key, bypassing writeViewConfig/setRecordViewConfig
+		// entirely so this doesn't just re-exercise the new write path.
+		const yrecord = (doc.getMap('records') as Y.Map<Y.Map<unknown>>).get(block.id)!;
+		const legacyConfig = {
+			viewType: 'board' as const,
+			filters: [{ propertyKey: 'status', op: 'is' as const, value: 'todo' }],
+			groupBy: 'status'
+		};
+		yrecord.set('viewConfig', legacyConfig);
+
+		// readViewConfig falls back to the legacy key read-only — an existing
+		// embed doesn't look unconfigured just because this PR shipped.
+		expect(getRecord(doc, block.id)?.viewConfig).toEqual(legacyConfig);
+		expect(yrecord.has('viewConfig:viewType')).toBe(false);
+
+		patchRecordViewConfig(doc, block.id, { sort: { mode: 'manual' } }, human);
+
+		// The patch's first write migrates the legacy value into prefixed
+		// entries (and removes the legacy key) before applying itself, so the
+		// patch lands on top of the migrated data instead of being shadowed by
+		// the still-present legacy object on the next read.
+		expect(yrecord.has('viewConfig')).toBe(false);
+		expect(getRecord(doc, block.id)?.viewConfig).toEqual({
+			...legacyConfig,
+			sort: { mode: 'manual' }
+		});
 	});
 
 	it('createRecord accepts an initial viewConfig for a collection_view block', () => {
