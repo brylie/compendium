@@ -92,7 +92,16 @@ export async function resolveCollectionDoc(collectionId: string): Promise<Y.Doc>
 	if (!shardIdPromise) {
 		shardIdPromise = fetch(`/api/collections/${collectionId}/shard`)
 			.then((res) => res.json())
-			.then((body: { shardId: string }) => body.shardId);
+			.then((body: { shardId: string }) => body.shardId)
+			// A rejected lookup (network blip, endpoint briefly down) must not
+			// stay cached — every later resolveCollectionDoc(collectionId) call
+			// would otherwise keep reusing that same rejection until a full page
+			// reload, even once the endpoint recovers. Evicting on failure lets
+			// the next call retry fresh instead.
+			.catch((err: unknown) => {
+				collectionShardIds.delete(collectionId);
+				throw err;
+			});
 		collectionShardIds.set(collectionId, shardIdPromise);
 	}
 	const shardId = await shardIdPromise;

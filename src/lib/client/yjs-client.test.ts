@@ -150,6 +150,21 @@ describe('yjs-client: browser', () => {
 			expect(docA).not.toBe(docB);
 			expect(fetchMock).toHaveBeenCalledTimes(2);
 		});
+
+		it('evicts a failed lookup from the cache, so a later call retries instead of reusing the rejection', async () => {
+			const fetchMock = vi
+				.fn()
+				.mockRejectedValueOnce(new Error('network error'))
+				.mockImplementation(async () => ({ json: async () => ({ shardId: 'shard-x' }) }));
+			vi.stubGlobal('fetch', fetchMock);
+			const mod = await import('./yjs-client');
+
+			await expect(mod.resolveCollectionDoc('col-1')).rejects.toThrow('network error');
+			const doc = await mod.resolveCollectionDoc('col-1');
+
+			expect(doc).toBe(mod.getShardDoc('shard-x'));
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+		});
 	});
 });
 

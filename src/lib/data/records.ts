@@ -629,13 +629,21 @@ export function updateCollectionProperty(
 			nextOptions = current.type === 'select' ? current.options : [];
 		}
 		// Same rationale as options above: targetCollectionId only means
-		// anything for 'relation'. An explicit patch.targetCollectionId (`null`
-		// clears it) always wins; otherwise it survives an edit that leaves the
-		// field as 'relation', and is dropped on any retype away from it.
+		// anything for 'relation'. Checked on nextType first, not merely
+		// whether patch.targetCollectionId was given — a caller passing one
+		// alongside a non-'relation' type must never persist it, or a later
+		// retype back to 'relation' with no explicit target of its own would
+		// silently resurrect that stale id via the `current.targetCollectionId`
+		// fallback below. An explicit patch.targetCollectionId (`null` clears
+		// it) wins while staying 'relation'; otherwise it survives an edit
+		// that leaves the field as 'relation', and is dropped on any retype
+		// away from it.
 		let nextTargetCollectionId: string | undefined;
-		if (patch.targetCollectionId !== undefined) {
+		if (nextType !== 'relation') {
+			nextTargetCollectionId = undefined;
+		} else if (patch.targetCollectionId !== undefined) {
 			nextTargetCollectionId = patch.targetCollectionId ?? undefined;
-		} else if (nextType === 'relation') {
+		} else {
 			nextTargetCollectionId = current.targetCollectionId;
 		}
 		const next: PropertyDefinition = {

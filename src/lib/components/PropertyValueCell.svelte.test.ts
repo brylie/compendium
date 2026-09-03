@@ -10,10 +10,15 @@ import type { ActorId, PropertyDefinition } from '$lib/data/types';
 // its target Collection via resolveCollectionDoc, not the getShardDoc/fetch
 // pairing every other Collection-content view uses directly — mocked
 // straight to a pre-built local doc rather than also stubbing fetch, since
-// this component never calls it itself.
+// this component never calls it itself. A real vi.fn(), not a plain arrow
+// function, so a test can override its resolution (e.g. reject once) via
+// mockRejectedValueOnce/mockImplementationOnce.
 let relationDoc: Y.Doc;
+const resolveCollectionDocMock = vi.fn<(collectionId: string) => Promise<Y.Doc>>(() =>
+	Promise.resolve(relationDoc)
+);
 vi.mock('$lib/client/yjs-client', () => ({
-	resolveCollectionDoc: () => Promise.resolve(relationDoc)
+	resolveCollectionDoc: (id: string) => resolveCollectionDocMock(id)
 }));
 
 const actor: ActorId = { kind: 'human', userId: 'local' };
@@ -130,6 +135,47 @@ describe('PropertyValueCell', () => {
 			render(PropertyValueCell, { property, value: undefined, oninput: vi.fn() });
 			expect(screen.getByText('No target collection set')).toBeInTheDocument();
 			expect(screen.queryByRole('button', { name: 'Add Links' })).not.toBeInTheDocument();
+		});
+
+		it('does not mark an existing value as a deleted record before the target Collection is actually confirmed available', () => {
+			// Nothing has been confirmed either way yet (no target Collection
+			// configured at all here) — an existing id must render as a plain,
+			// neutral value, not the "Linked record was deleted" broken state,
+			// which would misreport "confirmed gone" for something merely
+			// unverifiable.
+			const property: PropertyDefinition = { key: 'links', label: 'Links', type: 'relation' };
+			render(PropertyValueCell, {
+				property,
+				value: { type: 'relation', value: ['rec-a'] },
+				oninput: vi.fn()
+			});
+			expect(screen.getByText('rec-a')).toBeInTheDocument();
+			expect(screen.queryByTitle('Linked record was deleted')).not.toBeInTheDocument();
+		});
+
+		it('shows an error with a Retry action when resolving the target Collection fails, and a retry recovers', async () => {
+			relationDoc = new Y.Doc();
+			const target = createCollection(relationDoc, { title: 'People', schema: [] });
+			const property: PropertyDefinition = {
+				key: 'assignee',
+				label: 'Assignee',
+				type: 'relation',
+				targetCollectionId: target.id
+			};
+			resolveCollectionDocMock.mockRejectedValueOnce(new Error('network error'));
+			const user = userEvent.setup();
+			render(PropertyValueCell, { property, value: undefined, oninput: vi.fn() });
+
+			await waitFor(() =>
+				expect(screen.getByText("Couldn't load target collection")).toBeInTheDocument()
+			);
+
+			await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+			await waitFor(() =>
+				expect(screen.getByRole('button', { name: 'Add Assignee' })).toBeInTheDocument()
+			);
+			expect(screen.queryByText("Couldn't load target collection")).not.toBeInTheDocument();
 		});
 
 		it("resolves selected ids to the target Collection's records, and adds/removes via the picker", async () => {

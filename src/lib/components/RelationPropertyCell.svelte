@@ -31,29 +31,61 @@
 	// collectionId/shardId pair.
 	let targetDoc: Y.Doc | undefined = $state();
 	let resolvedFor: string | undefined = $state();
+	let resolveFailed = $state(false);
+
+	// Shared by the effect below and by retry() — a manual retry only ever
+	// runs once the effect's own attempt has already settled (the Retry
+	// button only renders after `resolveFailed`), so there's no real
+	// concurrent-write race between them; the live `property.targetCollectionId`
+	// comparison at commit time is what guards against a *stale* attempt
+	// (this one, or the effect's) writing state after the field retargeted
+	// to a different Collection while it was in flight.
+	function beginResolve(targetCollectionId: string): void {
+		resolveFailed = false;
+		resolveCollectionDoc(targetCollectionId)
+			.then((doc) => {
+				if (property.targetCollectionId !== targetCollectionId) return;
+				targetDoc = doc;
+				resolvedFor = targetCollectionId;
+			})
+			.catch(() => {
+				// A transient failure (network blip, shard endpoint briefly
+				// down) shouldn't leave the picker looking merely empty with no
+				// explanation, or leave an unhandled rejection behind —
+				// resolveCollectionDoc itself evicts the failed lookup from its
+				// cache, so a retry gets a fresh attempt, not the same cached
+				// rejection.
+				if (property.targetCollectionId !== targetCollectionId) return;
+				resolveFailed = true;
+			});
+	}
 
 	$effect(() => {
 		const targetCollectionId = property.targetCollectionId;
 		if (!targetCollectionId) {
 			targetDoc = undefined;
 			resolvedFor = undefined;
+			resolveFailed = false;
 			return;
 		}
-		let cancelled = false;
-		void resolveCollectionDoc(targetCollectionId).then((doc) => {
-			if (cancelled) return;
-			targetDoc = doc;
-			resolvedFor = targetCollectionId;
-		});
-		return () => {
-			cancelled = true;
-		};
+		beginResolve(targetCollectionId);
 	});
+
+	function retry(): void {
+		if (property.targetCollectionId) beginResolve(property.targetCollectionId);
+	}
 
 	const view = useCollectionView(
 		() => (resolvedFor === property.targetCollectionId ? targetDoc : undefined),
 		() => property.targetCollectionId ?? ''
 	);
+
+	// Only once the target Collection is actually connected *and* confirmed
+	// to exist do we have grounds to call a missing row "deleted" — before
+	// that (still loading, unconfigured, resolution failed, or the target
+	// Collection itself is gone) `view.rows` is simply empty, which must not
+	// be mistaken for every selected id having been deleted.
+	const targetReady = $derived(resolvedFor === property.targetCollectionId && !!view.collection);
 
 	const titleProperty = $derived(resolvePrimaryField(view.schema, view.primaryFieldKey));
 	const selectedIds = $derived((value as { value?: string[] } | undefined)?.value ?? []);
@@ -67,23 +99,29 @@
 		);
 	}
 
+	type ChipStyle = 'resolved' | 'broken' | 'pending';
+
 	interface Chip {
 		id: string;
 		title: string;
-		// A deleted target record: the id is preserved (never silently
-		// dropped) and rendered as a distinct, visually broken state, rather
-		// than resolving to a blank/misleading title — same precedent
-		// internal-links.md establishes for a page_link pointing at a deleted
-		// Document (issue #15).
-		broken: boolean;
+		// 'broken': the target Collection is confirmed available but this id
+		// no longer names a record in it — preserved and rendered as a
+		// distinct, visually broken state rather than a blank/misleading
+		// title, the same precedent internal-links.md establishes for a
+		// page_link pointing at a deleted Document (issue #15). 'pending':
+		// nothing confirmed yet either way (loading/unconfigured/errored/
+		// target Collection missing) — shown as a plain, neutral id rather
+		// than being misreported as deleted.
+		style: ChipStyle;
 	}
 
 	const chips: Chip[] = $derived(
-		selectedIds.map((id) => {
+		selectedIds.map((id): Chip => {
+			if (!targetReady) return { id, title: id, style: 'pending' };
 			const row = view.rows.find((r) => r.id === id);
 			return row
-				? { id, title: displayTitle(row), broken: false }
-				: { id, title: id, broken: true };
+				? { id, title: displayTitle(row), style: 'resolved' }
+				: { id, title: id, style: 'broken' };
 		})
 	);
 
@@ -123,12 +161,13 @@
 <div class="flex flex-wrap items-center gap-1 {compact ? 'py-0.5' : 'py-1'}">
 	{#each chips as chip (chip.id)}
 		<span
-			class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs {chip.broken
+			class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs {chip.style ===
+			'broken'
 				? 'border border-dashed border-red-400/60 text-red-500'
 				: 'bg-surface text-fg'}"
-			title={chip.broken ? 'Linked record was deleted' : chip.title}
+			title={chip.style === 'broken' ? 'Linked record was deleted' : chip.title}
 		>
-			{#if chip.broken}
+			{#if chip.style === 'broken'}
 				<Icon name="callout" size={11} />
 			{/if}
 			<span class="max-w-32 truncate">{chip.title}</span>
@@ -145,6 +184,11 @@
 
 	{#if !property.targetCollectionId}
 		<span class="text-xs text-muted italic">No target collection set</span>
+	{:else if resolveFailed}
+		<span class="text-xs text-red-500 italic">Couldn't load target collection</span>
+		<button type="button" onclick={retry} class="text-xs text-muted hover:text-accent">
+			Retry
+		</button>
 	{:else if resolvedFor === property.targetCollectionId && !view.collection}
 		<span class="text-xs text-muted italic">Target collection not found</span>
 	{:else}

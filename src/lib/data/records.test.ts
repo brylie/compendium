@@ -569,6 +569,29 @@ describe('collection field lifecycle: rename, retype, duplicate, delete', () => 
 		expect(getCollection(doc, collection.id)?.schema[0].targetCollectionId).toBeUndefined();
 	});
 
+	it("updateCollectionProperty never persists targetCollectionId on a non-relation field, even if a caller passes one — so it can't resurface on a later retype back to relation", () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [{ key: 'assignee', label: 'Assignee', type: 'text' }]
+		});
+		const people = createCollection(doc, { title: 'People', schema: [] });
+
+		// A caller passing targetCollectionId while retyping to something other
+		// than 'relation' must not have it take effect.
+		updateCollectionProperty(doc, collection.id, 'assignee', {
+			type: 'text',
+			targetCollectionId: people.id
+		});
+		expect(getCollection(doc, collection.id)?.schema[0].targetCollectionId).toBeUndefined();
+
+		// A later retype to 'relation' with no target of its own must not pick
+		// up that stray id via the "preserve current.targetCollectionId" path —
+		// there's nothing valid to preserve, since it was never actually set.
+		updateCollectionProperty(doc, collection.id, 'assignee', { type: 'relation' });
+		expect(getCollection(doc, collection.id)?.schema[0].targetCollectionId).toBeUndefined();
+	});
+
 	it('updateCollectionProperty throws NotFoundError for an unknown collection or field', () => {
 		const doc = new Y.Doc();
 		const { collection } = setupCollection(doc);
