@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import { getShardDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
+	import { useCollectionView } from '$lib/client/collection-view.svelte';
 	import {
 		addSelectOption as addSelectOptionToSchema,
 		createRecord,
@@ -15,7 +16,6 @@
 	import {
 		computeFieldSummary,
 		fieldSummaryLabel,
-		getCollectionView,
 		projectRecords,
 		summaryOptionsForType,
 		visibleProperties
@@ -45,23 +45,24 @@
 
 	let ydoc: Y.Doc | undefined = $state();
 	let shardId: string | undefined = $state();
-	let schema: PropertyDefinition[] = $state([]);
-	let rows: WorkspaceRecord[] = $state([]);
-	let primaryFieldKey: string | undefined = $state();
+	// Set in lockstep with ydoc (never the raw collectionId prop) below — the
+	// prop can change synchronously on retarget while ydoc only catches up
+	// once the async shard fetch resolves, and useCollectionView must never
+	// see a doc paired with a collectionId it doesn't belong to.
+	let resolvedCollectionId: string | undefined = $state();
 	let optionDialogPropertyKey: string | null = $state(null);
 	let optionDialogError = $state('');
 
+	const view = useCollectionView(
+		() => ydoc,
+		() => resolvedCollectionId ?? collectionId
+	);
+	const schema = $derived(view.schema);
+	const rows = $derived(view.rows);
+	const primaryFieldKey = $derived(view.primaryFieldKey);
 	const columns = $derived(visibleProperties(schema, config));
 	const projected = $derived(projectRecords(rows, schema, config));
 	const effectivePrimaryKey = $derived(resolvePrimaryField(schema, primaryFieldKey)?.key);
-
-	function refresh(): void {
-		if (!ydoc) return;
-		const view = getCollectionView(ydoc, collectionId);
-		schema = view.collection?.schema ?? [];
-		rows = view.records;
-		primaryFieldKey = view.collection?.primaryFieldKey;
-	}
 
 	// Resolves this Collection's real shard (#120) — never assumed equal to
 	// collectionId, since a Collection created before the shard-assignment
@@ -72,7 +73,6 @@
 	$effect(() => {
 		const id = collectionId;
 		let cancelled = false;
-		let cleanup: (() => void) | undefined;
 
 		(async () => {
 			const res = await fetch(`/api/collections/${id}/shard`);
@@ -80,20 +80,8 @@
 			if (cancelled) return;
 
 			shardId = resolvedShardId;
-			const doc = getShardDoc(resolvedShardId);
-			ydoc = doc;
-
-			const recordsMap = doc.getMap('records');
-			const collectionsMap = doc.getMap('collections');
-			const observer = () => refresh();
-			recordsMap.observeDeep(observer);
-			collectionsMap.observeDeep(observer);
-			refresh();
-
-			cleanup = () => {
-				recordsMap.unobserveDeep(observer);
-				collectionsMap.unobserveDeep(observer);
-			};
+			resolvedCollectionId = id;
+			ydoc = getShardDoc(resolvedShardId);
 			// A rejection here (network failure, bad response) previously
 			// vanished as a silent unhandled rejection — this at least
 			// surfaces it, without inventing a toast/error-UI system this
@@ -104,7 +92,6 @@
 
 		return () => {
 			cancelled = true;
-			cleanup?.();
 		};
 	});
 
