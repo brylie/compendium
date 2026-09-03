@@ -282,13 +282,16 @@ describe('records: CRDT merge acceptance criteria', () => {
 		Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
 		Y.applyUpdate(docA, Y.encodeStateAsUpdate(docB));
 
-		const merged = getRecord(docA, block.id);
-		expect(merged?.viewConfig).toEqual({
+		const expected = {
 			viewType: 'board',
 			groupBy: 'status',
 			filters: [{ propertyKey: 'status', op: 'is', value: 'todo' }],
 			sort: { mode: 'property', propertyKey: 'status', direction: 'asc' }
-		});
+		};
+		// Both replicas converge to the same merged result, not just the one
+		// that happened to receive the other's update second.
+		expect(getRecord(docA, block.id)?.viewConfig).toEqual(expected);
+		expect(getRecord(docB, block.id)?.viewConfig).toEqual(expected);
 	});
 });
 
@@ -1243,6 +1246,40 @@ describe('records: creation ordering, mutation, and not-found edge cases', () =>
 		expect(() => patchRecordViewConfig(doc, 'missing', { groupBy: 'status' }, human)).toThrow(
 			NotFoundError
 		);
+	});
+
+	it('reads a pre-#183 legacy whole-value viewConfig, and patchRecordViewConfig migrates it into per-member entries on first write', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(doc, { parentId: document.id, blockType: 'collection_view' }, human);
+
+		// Simulate a record persisted before #183: the whole config under one
+		// `viewConfig` key, bypassing writeViewConfig/setRecordViewConfig
+		// entirely so this doesn't just re-exercise the new write path.
+		const yrecord = (doc.getMap('records') as Y.Map<Y.Map<unknown>>).get(block.id)!;
+		const legacyConfig = {
+			viewType: 'board' as const,
+			filters: [{ propertyKey: 'status', op: 'is' as const, value: 'todo' }],
+			groupBy: 'status'
+		};
+		yrecord.set('viewConfig', legacyConfig);
+
+		// readViewConfig falls back to the legacy key read-only — an existing
+		// embed doesn't look unconfigured just because this PR shipped.
+		expect(getRecord(doc, block.id)?.viewConfig).toEqual(legacyConfig);
+		expect(yrecord.has('viewConfig:viewType')).toBe(false);
+
+		patchRecordViewConfig(doc, block.id, { sort: { mode: 'manual' } }, human);
+
+		// The patch's first write migrates the legacy value into prefixed
+		// entries (and removes the legacy key) before applying itself, so the
+		// patch lands on top of the migrated data instead of being shadowed by
+		// the still-present legacy object on the next read.
+		expect(yrecord.has('viewConfig')).toBe(false);
+		expect(getRecord(doc, block.id)?.viewConfig).toEqual({
+			...legacyConfig,
+			sort: { mode: 'manual' }
+		});
 	});
 
 	it('createRecord accepts an initial viewConfig for a collection_view block', () => {

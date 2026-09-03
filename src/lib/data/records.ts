@@ -14,6 +14,7 @@ import type {
 	PropertyType,
 	PropertyValue,
 	RichText,
+	ViewConfig,
 	ViewFilter,
 	ViewSort,
 	ViewType,
@@ -38,6 +39,15 @@ const PROP_PREFIX = 'prop:';
 // edit to `filters` and a concurrent edit to `sort` merge independently
 // instead of one whole-value write silently dropping the other (issue #71).
 const VIEW_CONFIG_PREFIX = 'viewConfig:';
+
+// A collection_view block created before per-member storage (#183) has its
+// whole EmbeddedViewConfig under this single legacy key instead. Reads fall
+// back to it (readViewConfig below) so an existing embed doesn't suddenly
+// look unconfigured; any write to the record's viewConfig upgrades it into
+// the prefixed entries and removes it (migrateLegacyViewConfig below) — a
+// one-time, lazy per-record migration on next touch rather than a separate
+// migration pass, since Phase 0 is single-tenant with few such records.
+const LEGACY_VIEW_CONFIG_KEY = 'viewConfig';
 
 // The known field shape of each top-level Y.Map's entries — the single
 // source of truth TypedYMap uses to give every get/set on these maps a real
@@ -102,10 +112,12 @@ function deletePropertyValue(yrecord: TypedYMap<RecordYShape>, key: string): voi
 	yrecord.raw.delete(PROP_PREFIX + key);
 }
 
-/** Reads one collection_view block's viewConfig back out of its `viewConfig:<field>` entries, or undefined if it isn't configured yet (no `viewType` written). */
+/** Reads one collection_view block's viewConfig back out of its `viewConfig:<field>` entries, falling back read-only to a pre-#183 legacy whole-value key (see LEGACY_VIEW_CONFIG_KEY above), or undefined if it isn't configured at all. */
 function readViewConfig(yrecord: TypedYMap<RecordYShape>): EmbeddedViewConfig | undefined {
 	const viewType = yrecord.raw.get(VIEW_CONFIG_PREFIX + 'viewType') as ViewType | undefined;
-	if (!viewType) return undefined;
+	if (!viewType) {
+		return yrecord.raw.get(LEGACY_VIEW_CONFIG_KEY) as EmbeddedViewConfig | undefined;
+	}
 
 	const filters = yrecord.raw.get(VIEW_CONFIG_PREFIX + 'filters') as ViewFilter[] | undefined;
 	const sort = yrecord.raw.get(VIEW_CONFIG_PREFIX + 'sort') as ViewSort | undefined;
@@ -135,7 +147,7 @@ function writeViewConfigField<K extends keyof EmbeddedViewConfig>(
 	else yrecord.raw.set(VIEW_CONFIG_PREFIX + field, value);
 }
 
-/** Writes every member of a full viewConfig, clearing any member absent from it — for a fresh record or an outright reconfigure (new embed target / view type change), not a partial in-place edit (use patchRecordViewConfig for that). */
+/** Writes every member of a full viewConfig, clearing any member absent from it — for a fresh record or an outright reconfigure (new embed target / view type change), not a partial in-place edit (use patchRecordViewConfig for that). Also clears any pre-#183 legacy whole-value entry, so a full replace always leaves the record fully migrated. */
 function writeViewConfig(yrecord: TypedYMap<RecordYShape>, config: EmbeddedViewConfig): void {
 	writeViewConfigField(yrecord, 'viewType', config.viewType);
 	writeViewConfigField(yrecord, 'filters', config.filters);
@@ -143,6 +155,24 @@ function writeViewConfig(yrecord: TypedYMap<RecordYShape>, config: EmbeddedViewC
 	writeViewConfigField(yrecord, 'visibleProperties', config.visibleProperties);
 	writeViewConfigField(yrecord, 'groupBy', config.groupBy);
 	writeViewConfigField(yrecord, 'summaries', config.summaries);
+	yrecord.raw.delete(LEGACY_VIEW_CONFIG_KEY);
+}
+
+/**
+ * One-time upgrade of a pre-#183 record's legacy whole-value viewConfig into
+ * the prefixed per-member entries — a no-op once already migrated (or if the
+ * record was never configured). Called at the start of any *partial*
+ * viewConfig write (patchRecordViewConfig, and the two field-repair
+ * functions below), so that write doesn't get silently shadowed by (or lost
+ * under) a legacy value readViewConfig would otherwise keep falling back to.
+ * A full replace (writeViewConfig/setRecordViewConfig) doesn't need this: it
+ * already overwrites every prefixed field and clears the legacy key itself.
+ */
+function migrateLegacyViewConfig(yrecord: TypedYMap<RecordYShape>): void {
+	if (yrecord.raw.has(VIEW_CONFIG_PREFIX + 'viewType')) return;
+	const legacy = yrecord.raw.get(LEGACY_VIEW_CONFIG_KEY) as EmbeddedViewConfig | undefined;
+	if (!legacy) return;
+	writeViewConfig(yrecord, legacy);
 }
 
 /** Thrown when a requested Document, Collection, record, property, or select option doesn't exist. */
@@ -672,6 +702,7 @@ function repairEmbeddedViewsAfterPropertyRemoval(
 	recordsMap(doc).forEach((yrecord) => {
 		if (yrecord.get('blockType') !== 'collection_view') return;
 		if (yrecord.get('referencedRecordId') !== collectionId) return;
+		migrateLegacyViewConfig(yrecord);
 		const config = readViewConfig(yrecord);
 		if (!config) return;
 
@@ -894,6 +925,7 @@ function repairEmbeddedViewsAfterOptionRemoval(
 	recordsMap(doc).forEach((yrecord) => {
 		if (yrecord.get('blockType') !== 'collection_view') return;
 		if (yrecord.get('referencedRecordId') !== collectionId) return;
+		migrateLegacyViewConfig(yrecord);
 		const config = readViewConfig(yrecord);
 		if (!config?.filters?.length) return;
 		const nextFilters = config.filters.filter(
@@ -1226,17 +1258,26 @@ export function setRecordViewConfig(
  * (issue #71) — the caller (CollectionViewBlock.svelte) is responsible for
  * diffing its local draft against the config it started editing from and
  * passing only the members that actually changed.
+ *
+ * Deliberately `Partial<ViewConfig>`, not `Partial<EmbeddedViewConfig>`:
+ * `viewType` can't be patched here. Clearing it would make readViewConfig
+ * report the record as unconfigured while its other members lingered
+ * orphaned in prefixed entries, and changing it wouldn't reset the
+ * now-previous view type's dependent members (e.g. a Board's `groupBy`
+ * surviving a switch to Calendar). Use setRecordViewConfig for that — an
+ * outright reconfigure, not a member-level edit.
  */
 export function patchRecordViewConfig(
 	doc: Y.Doc,
 	id: string,
-	patch: Partial<EmbeddedViewConfig>,
+	patch: Partial<ViewConfig>,
 	actor: ActorId
 ): void {
 	const yrecord = recordsMap(doc).get(id);
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	doc.transact(() => {
-		for (const field of Object.keys(patch) as (keyof EmbeddedViewConfig)[]) {
+		migrateLegacyViewConfig(yrecord);
+		for (const field of Object.keys(patch) as (keyof ViewConfig)[]) {
 			writeViewConfigField(yrecord, field, patch[field]);
 		}
 		yrecord.set('lastEditedBy', actor);
