@@ -31,7 +31,8 @@ import {
 	createCollection as crdtCreateCollection,
 	getDocument as crdtGetDocument,
 	getCollection as crdtGetCollection,
-	getRecord as crdtGetRecord
+	getRecord as crdtGetRecord,
+	getRecordYText as crdtGetRecordYText
 } from '$lib/data/records';
 import {
 	listCatalogCollections,
@@ -385,6 +386,81 @@ describe('service layer: centralized business rules & side effects', () => {
 		expect(linkRecord?.linkBroken).toBe(true);
 		expect(linkRecord?.markdown).toBe('[[Deleted page]]');
 		expect(linkRecord?.referencedRecordId).toBe(collectionTarget.id);
+	});
+
+	describe('callout style (issue #42)', () => {
+		it('emits a GitHub-alert-style prefix for a preset callout, and exposes calloutStyle read-only', () => {
+			const docPublic = createDocument(human, { title: 'Handbook' });
+			const doc = resolveWorkspaceContext({ shardId: docPublic.id }).doc;
+			const callout = crdtCreateRecord(
+				doc,
+				{
+					parentId: docPublic.id,
+					blockType: 'callout',
+					calloutStyle: { kind: 'preset', preset: 'danger' }
+				},
+				human
+			);
+			crdtGetRecordYText(doc, callout.id)!.insert(0, 'Handle with care.');
+
+			const result = getDocument(human, docPublic.id);
+			const record = result?.records.find((r) => r.id === callout.id);
+			expect(record?.calloutStyle).toEqual({ kind: 'preset', preset: 'danger' });
+			expect(record?.markdown).toBe('> [!DANGER]\n> Handle with care\\.');
+		});
+
+		it('emits just the alert marker for an empty preset callout', () => {
+			const docPublic = createDocument(human, { title: 'Handbook' });
+			crdtCreateRecord(
+				resolveWorkspaceContext({ shardId: docPublic.id }).doc,
+				{
+					parentId: docPublic.id,
+					blockType: 'callout',
+					calloutStyle: { kind: 'preset', preset: 'tip' }
+				},
+				human
+			);
+
+			const result = getDocument(human, docPublic.id);
+			const record = result?.records.find((r) => r.blockType === 'callout');
+			expect(record?.markdown).toBe('> [!TIP]');
+		});
+
+		it('renders a custom-styled callout as plain content — no markdown alert equivalent for an arbitrary color', () => {
+			const docPublic = createDocument(human, { title: 'Handbook' });
+			const doc = resolveWorkspaceContext({ shardId: docPublic.id }).doc;
+			const callout = crdtCreateRecord(
+				doc,
+				{
+					parentId: docPublic.id,
+					blockType: 'callout',
+					calloutStyle: { kind: 'custom', icon: 'star', color: '#336699' }
+				},
+				human
+			);
+			crdtGetRecordYText(doc, callout.id)!.insert(0, 'Plain text, styled cell only.');
+
+			const result = getDocument(human, docPublic.id);
+			const record = result?.records.find((r) => r.id === callout.id);
+			expect(record?.calloutStyle).toEqual({ kind: 'custom', icon: 'star', color: '#336699' });
+			expect(record?.markdown).toBe('Plain text, styled cell only\\.');
+		});
+
+		it('renders an unstyled callout as plain content, same as before issue #42', () => {
+			const docPublic = createDocument(human, { title: 'Handbook' });
+			const doc = resolveWorkspaceContext({ shardId: docPublic.id }).doc;
+			const callout = crdtCreateRecord(
+				doc,
+				{ parentId: docPublic.id, blockType: 'callout' },
+				human
+			);
+			crdtGetRecordYText(doc, callout.id)!.insert(0, 'Careful!');
+
+			const result = getDocument(human, docPublic.id);
+			const record = result?.records.find((r) => r.id === callout.id);
+			expect(record?.calloutStyle).toBeUndefined();
+			expect(record?.markdown).toBe('Careful\\!');
+		});
 	});
 
 	// Regression coverage for a CodeRabbit finding on #172: an uncataloged

@@ -32,6 +32,7 @@ import {
 	resolvePrimaryField,
 	setBlockType,
 	setPrimaryField,
+	setRecordCalloutStyle,
 	setRecordChecked,
 	setRecordCollapsed,
 	setRecordReferencedId,
@@ -1237,6 +1238,49 @@ describe('records: creation ordering, mutation, and not-found edge cases', () =>
 		setRecordCollapsed(doc, block.id, true, human);
 		expect(getRecord(doc, block.id)?.collapsed).toBe(true);
 		expect(() => setRecordCollapsed(doc, 'missing', true, human)).toThrow(NotFoundError);
+	});
+
+	it('setRecordCalloutStyle sets a preset or custom style on a callout block, clears it back to the default with null, and throws NotFoundError for an unknown record (issue #42)', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(doc, { parentId: document.id, blockType: 'callout' }, human);
+		expect(getRecord(doc, block.id)?.calloutStyle).toBeUndefined();
+
+		setRecordCalloutStyle(doc, block.id, { kind: 'preset', preset: 'caution' }, human);
+		expect(getRecord(doc, block.id)?.calloutStyle).toEqual({ kind: 'preset', preset: 'caution' });
+
+		setRecordCalloutStyle(doc, block.id, { kind: 'custom', icon: 'star', color: '#123456' }, human);
+		expect(getRecord(doc, block.id)?.calloutStyle).toEqual({
+			kind: 'custom',
+			icon: 'star',
+			color: '#123456'
+		});
+
+		setRecordCalloutStyle(doc, block.id, null, human);
+		expect(getRecord(doc, block.id)?.calloutStyle).toBeUndefined();
+
+		expect(() =>
+			setRecordCalloutStyle(doc, 'missing', { kind: 'preset', preset: 'note' }, human)
+		).toThrow(NotFoundError);
+	});
+
+	it('createRecord accepts an initial calloutStyle, and copyDocumentVerbatim preserves it (issue #42)', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(
+			doc,
+			{
+				parentId: document.id,
+				blockType: 'callout',
+				calloutStyle: { kind: 'preset', preset: 'tip' }
+			},
+			human
+		);
+		expect(getRecord(doc, block.id)?.calloutStyle).toEqual({ kind: 'preset', preset: 'tip' });
+
+		const targetDoc = new Y.Doc();
+		copyDocumentVerbatim(doc, targetDoc, document.id);
+		expect(getRecord(targetDoc, block.id)?.calloutStyle).toEqual({ kind: 'preset', preset: 'tip' });
 	});
 
 	it('setRecordReferencedId points a page_link block at another document and throws NotFoundError for an unknown record', () => {

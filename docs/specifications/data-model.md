@@ -45,6 +45,7 @@ interface WorkspaceRecord {
 	collapsed?: boolean; // for toggle blocks
 	referencedRecordId?: string; // for synced_block / page_link / collection_view blocks
 	viewConfig?: EmbeddedViewConfig; // for collection_view blocks only — see §2
+	calloutStyle?: CalloutStyle; // for callout blocks only — absent renders the pre-#42 neutral default, see collection-views.md's sibling pattern and design-system.md §6
 	createdBy: ActorId;
 	createdAt: number;
 	lastEditedBy: ActorId;
@@ -76,6 +77,21 @@ type BlockType =
 // never an MVC-style page/route. There is no standalone view route — a View
 // is configuration that exists only as a collection_view block's viewConfig.
 type ViewType = 'table' | 'board' | 'calendar';
+
+// The four Starlight/Confluence-aligned semantic callout styles (issue #42) —
+// see design-system.md §6 for their actual colors/icons.
+type CalloutPreset = 'note' | 'tip' | 'caution' | 'danger';
+
+// The icons a callout may use — the four preset icons plus one neutral
+// extra, not the full icon roster (design-system.md §4).
+type CalloutIcon = 'callout' | 'lightbulb' | 'warning' | 'danger' | 'star';
+
+type CalloutStyle =
+	| { kind: 'preset'; preset: CalloutPreset }
+	// `color` is the single base color the user picked; light/dark
+	// background+text pairs are derived from it at render time
+	// (deriveCustomCalloutColors), not stored — see design-system.md §6.
+	| { kind: 'custom'; icon: CalloutIcon; color: string };
 
 // Table-only per-column footer aggregation — see collection-views.md §9.
 type FieldSummaryType =

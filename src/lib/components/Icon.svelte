@@ -47,7 +47,10 @@
 			| 'arrow-down'
 			| 'close'
 			| 'grip'
-			| 'star';
+			| 'star'
+			| 'lightbulb'
+			| 'warning'
+			| 'danger';
 		size?: number;
 		class?: string;
 	} = $props();
@@ -190,5 +193,14 @@
 			fill="currentColor"
 			stroke="none"
 		/>
+	{:else if name === 'lightbulb'}
+		<path d="M10 3a5 5 0 0 0-2.5 9.3c.5.3.8.9.8 1.5v.2h3.4v-.2c0-.6.3-1.2.8-1.5A5 5 0 0 0 10 3Z" />
+		<path d="M7.7 14.5h4.6M8.5 17h3" />
+	{:else if name === 'warning'}
+		<path d="M10 3.5 2.5 16.5h15L10 3.5Z" stroke-linejoin="round" />
+		<path d="M10 8.5v3.5m0 3h.01" />
+	{:else if name === 'danger'}
+		<path d="M6.5 3.5h7L17 6.5v7L13.5 16.5h-7L3 13.5v-7L6.5 3.5Z" stroke-linejoin="round" />
+		<path d="M10 6.5v4.5m0 3h.01" />
 	{/if}
 </svg>

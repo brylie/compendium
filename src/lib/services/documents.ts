@@ -27,7 +27,13 @@ import {
 import { grantDocumentAccess, tokenAllowsParent } from '$lib/mcp/tokens';
 import { richTextToMarkdown } from '$lib/mcp/markdown-transcode';
 import { resolveInternalLinkTarget, type InternalLinkTarget } from '$lib/data/links';
-import type { DocumentMeta, EmbeddedViewConfig, WorkspaceRecord } from '$lib/data/types';
+import type {
+	CalloutPreset,
+	CalloutStyle,
+	DocumentMeta,
+	EmbeddedViewConfig,
+	WorkspaceRecord
+} from '$lib/data/types';
 import type * as Y from 'yjs';
 import { nanoid } from 'nanoid';
 import {
@@ -333,8 +339,30 @@ interface DocumentRecordView {
 	// since it names properties/filters from a Collection whose schema an
 	// out-of-scope caller was never granted visibility into either.
 	viewConfig?: EmbeddedViewConfig;
+	// Only set for callout blocks (issue #42) — read-only, same as checked/
+	// collapsed: there is no MCP write path for it (create_record/
+	// write_record don't accept it either), matching the precedent those two
+	// fields already established rather than adding new write-side surface.
+	calloutStyle?: CalloutStyle;
 	markdown: string;
 }
+
+// GitHub's `> [!NOTE]` alert-blockquote syntax is the nearest existing
+// convention (issue #42 names it explicitly) — reused here for the four
+// presets' *keyword*, not adopted wholesale: GitHub itself only defines
+// NOTE/TIP/IMPORTANT/WARNING/CAUTION, not our "danger", and this repo has no
+// blockquote parser at all (markdown-transcoding.md is scoped to inline
+// Y.Text <-> Markdown only) — so this is read-direction only. A custom
+// callout has no markdown representation (an arbitrary color has no
+// alert-syntax equivalent) and renders as plain content, same as before this
+// feature; see markdown-transcoding.md's callout section for the full
+// decision writeup.
+const CALLOUT_PRESET_ALERT_KEYWORD: Record<CalloutPreset, string> = {
+	note: 'NOTE',
+	tip: 'TIP',
+	caution: 'CAUTION',
+	danger: 'DANGER'
+};
 
 interface ResolvedLink {
 	targetInScope: boolean;
@@ -423,7 +451,12 @@ function renderRecordMarkdown(
 			? `[collection view: ${link.linkedTarget?.title ?? 'Deleted collection'}]`
 			: '[collection view: unconfigured]';
 	}
-	return r.content ? richTextToMarkdown(doc, r.content) : '';
+	const content = r.content ? richTextToMarkdown(doc, r.content) : '';
+	if (r.blockType === 'callout' && r.calloutStyle?.kind === 'preset') {
+		const keyword = CALLOUT_PRESET_ALERT_KEYWORD[r.calloutStyle.preset];
+		return content ? `> [!${keyword}]\n> ${content}` : `> [!${keyword}]`;
+	}
+	return content;
 }
 
 // The per-record half of getDocument's job: resolve a page_link/
@@ -458,6 +491,7 @@ function resolveDocumentRecordView(
 		referencedRecordId: link.targetInScope ? r.referencedRecordId : undefined,
 		linkBroken: link.linkBroken,
 		viewConfig: isCollectionView && link.linkedTarget ? r.viewConfig : undefined,
+		calloutStyle: r.blockType === 'callout' ? r.calloutStyle : undefined,
 		markdown
 	};
 }
