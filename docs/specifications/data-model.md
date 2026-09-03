@@ -76,6 +76,21 @@ type BlockType =
 // is configuration that exists only as a collection_view block's viewConfig.
 type ViewType = 'table' | 'board' | 'calendar';
 
+// Table-only per-column footer aggregation — see collection-views.md §9.
+type FieldSummaryType =
+	| 'none'
+	| 'count_all'
+	| 'count_values'
+	| 'count_empty'
+	| 'sum'
+	| 'average'
+	| 'min'
+	| 'max'
+	| 'earliest'
+	| 'latest'
+	| 'checked'
+	| 'unchecked';
+
 interface EmbeddedViewConfig {
 	viewType: ViewType;
 	filters?: {
@@ -86,6 +101,7 @@ interface EmbeddedViewConfig {
 	sort?: { mode: 'manual' | 'property'; propertyKey?: string; direction?: 'asc' | 'desc' };
 	visibleProperties?: string[]; // property keys; undefined = all visible
 	groupBy?: string; // property key driving the layout: select for Board, date for Calendar
+	summaries?: Record<string, FieldSummaryType>; // property key -> footer aggregation (Table only)
 }
 
 interface RichText {
@@ -130,9 +146,9 @@ A view is a non-owning projection of one Collection — Table, Board, and Calend
 
 A view may have configuration — filters, sorts, grouping, visible properties, and a layout-specific driving property — but it never copies records, changes their identity, or introduces view-specific row fields. That configuration lives on the embedding block's own `viewConfig` field (`EmbeddedViewConfig` above) — a `WorkspaceRecord` field like `referencedRecordId`, not a second write path. `referencedRecordId` names the target Collection (the same field `page_link`/`synced_block` already use for "what this block references"); `viewConfig` says how to render it. Both are set together once insertion is configured, and can be changed later without changing the block's identity — a newly inserted, not-yet-configured `collection_view` block temporarily has neither field set, while the inline picker (`collection-views.md` §2) is showing.
 
-GitLab projects are the interaction reference for Board and data-grid configuration: users can choose visible fields, a grouping property (Board columns or Calendar placement — Table doesn't use `groupBy`), manual or property-based sort, and filtering — all implemented today in `EmbeddedViewConfig`. Optional Board swimlanes (tracked in #67) and field summaries (next paragraph) are GitLab-inspired future work, not yet part of the type. These choices are declarative view configuration, not Collection schema changes. Moving a card between Board columns updates the selected existing property; rearranging a manually sorted view updates only its view ordering. A Table view (whether the `/table/[id]` full page or a `collection_view` block with `viewType: 'table'`) is an application data grid with this configuration, distinct from the `table` Document block, which is inline narrative content.
+GitLab projects are the interaction reference for Board and data-grid configuration: users can choose visible fields, a grouping property (Board columns or Calendar placement — Table doesn't use `groupBy`), manual or property-based sort, filtering, and (Table only) per-column footer summaries (next paragraph) — all implemented today in `EmbeddedViewConfig`. Optional Board swimlanes (tracked in #67) are the one remaining GitLab-inspired future item, not yet part of the type. These choices are declarative view configuration, not Collection schema changes. Moving a card between Board columns updates the selected existing property; rearranging a manually sorted view updates only its view ordering. A Table view (whether the `/table/[id]` full page or a `collection_view` block with `viewType: 'table'`) is an application data grid with this configuration, distinct from the `table` Document block, which is inline narrative content.
 
-Column summaries are computed view output rather than stored properties. Later work may offer count, sum, mean, median, mode, and other type-appropriate aggregations across the records currently included by a view's filter. Relation rollups are a separate computed-property concern. Neither creates a second write path or persisted aggregate record.
+Column summaries (issue #32, see [`collection-views.md`](./collection-views.md) §9) are computed view output, not a stored aggregate record — `EmbeddedViewConfig.summaries` persists only the type-appropriate aggregation _choice_ per column (`count_all`/`sum`/`average`/etc., picked from the type-appropriate options `summaryOptionsForType` offers), the same declarative-config role as `filters`/`sort`/`groupBy`; the aggregation itself is recomputed client-side over a view's currently-projected records on every read via `computeFieldSummary`, never written back. Relation rollups are a separate, still-unbuilt computed-property concern. Neither creates a second write path.
 
 A `collection_view` block is exactly the "inline or linked Collection view in a Document" this section used to describe as future work — a reference plus view configuration, not an embedded copy of the Collection. Two `collection_view` blocks pointing at the same Collection with different `viewConfig` are independent views of the same live records; editing either edits the source Collection directly. Dashboards, when built, would compose multiple such non-owning views rather than creating another store of aggregate data.
 

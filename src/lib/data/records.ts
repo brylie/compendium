@@ -1265,7 +1265,10 @@ export function setRecordViewConfig(
  * orphaned in prefixed entries, and changing it wouldn't reset the
  * now-previous view type's dependent members (e.g. a Board's `groupBy`
  * surviving a switch to Calendar). Use setRecordViewConfig for that — an
- * outright reconfigure, not a member-level edit.
+ * outright reconfigure, not a member-level edit. The type already blocks
+ * `viewType` at compile time for a typed caller; the explicit check below
+ * enforces the same rule at runtime, in case an untyped caller or an unsafe
+ * cast gets one into `patch` anyway.
  */
 export function patchRecordViewConfig(
 	doc: Y.Doc,
@@ -1273,6 +1276,11 @@ export function patchRecordViewConfig(
 	patch: Partial<ViewConfig>,
 	actor: ActorId
 ): void {
+	if ('viewType' in patch) {
+		throw new ValidationError(
+			'patchRecordViewConfig cannot change viewType — use setRecordViewConfig instead'
+		);
+	}
 	const yrecord = recordsMap(doc).get(id);
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	doc.transact(() => {

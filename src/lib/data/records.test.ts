@@ -1248,6 +1248,30 @@ describe('records: creation ordering, mutation, and not-found edge cases', () =>
 		);
 	});
 
+	it('patchRecordViewConfig rejects a viewType key at runtime, even past a type-system bypass', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'collection_view', viewConfig: { viewType: 'board' } },
+			human
+		);
+
+		// Partial<ViewConfig> already blocks this at compile time for a typed
+		// caller — this simulates an untyped caller or an unsafe cast getting
+		// `viewType` into the patch anyway.
+		expect(() =>
+			patchRecordViewConfig(
+				doc,
+				block.id,
+				{ viewType: 'calendar' } as Partial<import('./views').ViewConfig>,
+				human
+			)
+		).toThrow(ValidationError);
+		// Rejected before any write — the config is untouched.
+		expect(getRecord(doc, block.id)?.viewConfig).toEqual({ viewType: 'board' });
+	});
+
 	it('reads a pre-#183 legacy whole-value viewConfig, and patchRecordViewConfig migrates it into per-member entries on first write', () => {
 		const doc = new Y.Doc();
 		const document = createDocument(doc, { title: 'Notes' });
