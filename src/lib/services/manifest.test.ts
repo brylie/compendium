@@ -1,4 +1,7 @@
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { createMcpServer } from '$lib/mcp/server';
 import {
 	mcpAdapterBindings,
 	serviceModules,
@@ -35,6 +38,22 @@ describe('service surface manifest', () => {
 			expect(mcpAdapterBindings[method as keyof typeof mcpAdapterBindings]).toBe(
 				serviceSurfaces[method].mcpToolName
 			);
+		}
+	});
+
+	it('registers every declared MCP adapter at runtime', () => {
+		const serverWithTools = createMcpServer() as unknown as {
+			_registeredTools: Record<string, unknown>;
+		};
+
+		expect(alphabetically(Object.keys(serverWithTools._registeredTools))).toEqual(
+			alphabetically(Object.values(mcpAdapterBindings))
+		);
+	});
+
+	it('binds every declared UI adapter to an existing route module', () => {
+		for (const [method, routeModule] of Object.entries(uiAdapterBindings)) {
+			expect(existsSync(resolve(process.cwd(), routeModule)), method).toBe(true);
 		}
 	});
 });
