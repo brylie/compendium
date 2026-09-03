@@ -183,7 +183,8 @@ for the shared record primitive.
 
 ```sh
 npm run test          # unit and component tests
-npm run test:e2e      # real MCP↔Yjs and browser-level flows
+npm run test:integration # real HTTP/WebSocket protocol tests (Tier A + transport isolation)
+npm run test:e2e      # protocol integration plus browser-level flows
 npm run benchmark:workspace        # bounded CRDT capacity profile
 npm run benchmark:workspace:large  # manual sharding/persistence profile
 npm run check         # Svelte and TypeScript checks

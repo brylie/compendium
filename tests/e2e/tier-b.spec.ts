@@ -21,7 +21,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 	});
 
 	test.afterEach(async () => {
-		await harness.cleanup();
+		await harness?.cleanup();
 	});
 
 	test('Held-block placeholder appears on MCP hold and resolves atomically on MCP write', async ({

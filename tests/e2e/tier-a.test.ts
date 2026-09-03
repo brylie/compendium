@@ -55,7 +55,7 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 	});
 
 	afterEach(async () => {
-		await harness.cleanup();
+		await harness?.cleanup();
 	});
 
 	it('1. MCP write_record -> Yjs websocket client observes new content within latency bound', async () => {

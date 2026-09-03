@@ -7,6 +7,7 @@ import { GET, POST, DELETE } from './+server';
 import { createDocument } from '$lib/data/records';
 import { createToken } from '$lib/mcp/tokens';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import { closeTestServer, listenOnLoopback } from '../../../tests/e2e/listener';
 
 // Mirrors tests/e2e/harness.ts's node-request/web-request bridge, but points
 // at this route's own exported handlers rather than reimplementing MCP
@@ -44,7 +45,7 @@ describe('routes/mcp: HTTP transport wiring and bearer-token extraction', () => 
 	beforeEach(async () => {
 		server = createServer((req: IncomingMessage, res: ServerResponse) => {
 			void (async () => {
-				const request = await nodeRequestToWebRequest(req, 'http://localhost');
+				const request = await nodeRequestToWebRequest(req, 'http://127.0.0.1');
 				let response: Response;
 				if (req.method === 'POST') {
 					response = await POST({ request } as Parameters<typeof POST>[0]);
@@ -67,14 +68,12 @@ describe('routes/mcp: HTTP transport wiring and bearer-token extraction', () => 
 				res.end();
 			})();
 		});
-		await new Promise<void>((resolve) => server.listen(0, resolve));
-		const address = server.address();
-		const port = address && typeof address === 'object' ? address.port : 0;
-		baseUrl = `http://localhost:${port}`;
+		const port = await listenOnLoopback(server);
+		baseUrl = `http://127.0.0.1:${port}`;
 	});
 
 	afterEach(async () => {
-		await new Promise<void>((resolve) => server.close(() => resolve()));
+		if (server) await closeTestServer(server);
 	});
 
 	it('serves an authenticated tool call end-to-end over the real MCP HTTP transport', async () => {

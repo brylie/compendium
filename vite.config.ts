@@ -67,14 +67,26 @@ export default defineConfig({
 				test: {
 					name: 'server',
 					environment: 'node',
-					include: ['src/**/*.{test,spec}.{js,ts}', 'tests/**/*.test.{js,ts}'],
+					include: ['src/**/*.{test,spec}.{js,ts}'],
 					exclude: [
 						'src/**/*.svelte.{test,spec}.{js,ts}',
+						'src/routes/mcp/server.test.ts',
 						'tests/**/*.spec.{js,ts}',
+						'tests/e2e/**',
 						'tests/benchmark/**',
 						'src/lib/client/**/*.{test,spec}.{js,ts}'
 					],
 					setupFiles: ['./tests/setup/isolate-persistence.ts']
+				}
+			},
+			{
+				extends: './vite.config.ts',
+				test: {
+					name: 'integration',
+					environment: 'node',
+					include: ['tests/e2e/**/*.test.{js,ts}', 'src/routes/mcp/server.test.ts'],
+					setupFiles: ['./tests/setup/isolate-persistence.ts'],
+					fileParallelism: false
 				}
 			},
 			{
