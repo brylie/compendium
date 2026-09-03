@@ -13,7 +13,13 @@ import Page from './+page.svelte';
 let ydoc: Y.Doc;
 vi.mock('$lib/client/yjs-client', () => ({
 	getClientDoc: () => ydoc,
-	getShardDoc: () => ydoc
+	getShardDoc: () => ydoc,
+	// A relation field's target Collection resolves through this instead of
+	// getShardDoc directly (RelationPropertyCell, issue #15) — every fixture
+	// in this file already lives in the one shared `ydoc`, so resolving any
+	// targetCollectionId to that same doc keeps it consistent with
+	// getShardDoc's own single-doc stand-in above.
+	resolveCollectionDoc: () => Promise.resolve(ydoc)
 }));
 
 // +page.svelte resolves its real shard via a fetch before connecting — see
@@ -410,6 +416,20 @@ describe('table/[id] +page', () => {
 	});
 
 	it('edits number, date, select, and relation cell values', async () => {
+		const people = createCollection(ydoc, {
+			title: 'People',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+		const alice = createRecord(
+			ydoc,
+			{ parentId: people.id, properties: { name: { type: 'text', value: 'Alice' } } },
+			{ kind: 'human', userId: 'local' }
+		);
+		const bob = createRecord(
+			ydoc,
+			{ parentId: people.id, properties: { name: { type: 'text', value: 'Bob' } } },
+			{ kind: 'human', userId: 'local' }
+		);
 		createCollection(ydoc, {
 			id: 'col-1',
 			title: 'T',
@@ -425,7 +445,7 @@ describe('table/[id] +page', () => {
 						{ id: 'opt-2', label: 'Done' }
 					]
 				},
-				{ key: 'links', label: 'Links', type: 'relation' }
+				{ key: 'links', label: 'Links', type: 'relation', targetCollectionId: people.id }
 			]
 		});
 		const row = createRecord(
@@ -436,7 +456,7 @@ describe('table/[id] +page', () => {
 					qty: { type: 'number', value: 1 },
 					due: { type: 'date', value: '2026-01-01' },
 					status: { type: 'select', value: 'opt-1' },
-					links: { type: 'relation', value: ['rec-a'] }
+					links: { type: 'relation', value: [alice.id] }
 				}
 			},
 			{ kind: 'human', userId: 'local' }
@@ -470,15 +490,19 @@ describe('table/[id] +page', () => {
 		const select = within(screen.getByRole('table')).getByRole('combobox');
 		await user.selectOptions(select, 'opt-2');
 
-		const relationInput = screen.getByDisplayValue('rec-a');
-		await user.clear(relationInput);
-		await user.type(relationInput, 'rec-b, rec-c');
-		await user.tab();
+		// Relation: replace the resolved "Alice" chip with "Bob" via the
+		// search picker (issue #15) — the old raw comma-separated-id input no
+		// longer exists.
+		await screen.findByText('Alice');
+		await user.click(screen.getByRole('button', { name: 'Add Links' }));
+		await user.type(screen.getByPlaceholderText(/Search/), 'Bob');
+		await user.click(await screen.findByRole('button', { name: 'Bob' }));
+		await user.click(screen.getByRole('button', { name: 'Remove Alice' }));
 
 		const stored = ydoc.getMap('records').get(row.id) as Y.Map<unknown>;
 		expect(stored.get('prop:qty')).toMatchObject({ value: 7 });
 		expect(stored.get('prop:due')).toMatchObject({ value: '2026-02-02' });
 		expect(stored.get('prop:status')).toMatchObject({ value: 'opt-2' });
-		expect(stored.get('prop:links')).toMatchObject({ value: ['rec-b', 'rec-c'] });
+		expect(stored.get('prop:links')).toMatchObject({ value: [bob.id] });
 	});
 });

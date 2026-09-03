@@ -184,6 +184,7 @@
 										{schema}
 										{property}
 										{primaryFieldKey}
+										collections={data.collections}
 									/>
 								</div>
 							</div>
@@ -252,6 +253,7 @@
 	open={fieldManagerOpen}
 	collectionId={data.collectionId}
 	shardId={shardId!}
+	collections={data.collections}
 	onClose={() => (fieldManagerOpen = false)}
 />
 

@@ -531,6 +531,67 @@ describe('collection field lifecycle: rename, retype, duplicate, delete', () => 
 		expect(getRecord(doc, nonNumeric.id)?.properties?.qty).toBeUndefined();
 	});
 
+	it("updateCollectionProperty sets, preserves, clears, and drops a relation field's targetCollectionId (issue #15)", () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [{ key: 'assignee', label: 'Assignee', type: 'relation' }]
+		});
+		const people = createCollection(doc, { title: 'People', schema: [] });
+
+		// Retyping into 'relation' with a targetCollectionId in the same patch
+		// sets it.
+		updateCollectionProperty(doc, collection.id, 'assignee', {
+			type: 'relation',
+			targetCollectionId: people.id
+		});
+		expect(getCollection(doc, collection.id)?.schema[0].targetCollectionId).toBe(people.id);
+
+		// A save that leaves the field as 'relation' without naming
+		// targetCollectionId at all preserves the existing one.
+		updateCollectionProperty(doc, collection.id, 'assignee', { label: 'Owner' });
+		expect(getCollection(doc, collection.id)?.schema[0].targetCollectionId).toBe(people.id);
+
+		// Explicit `null` clears it while staying 'relation'.
+		updateCollectionProperty(doc, collection.id, 'assignee', {
+			type: 'relation',
+			targetCollectionId: null
+		});
+		expect(getCollection(doc, collection.id)?.schema[0].targetCollectionId).toBeUndefined();
+
+		// Retyping away from 'relation' drops targetCollectionId even without
+		// an explicit clear — same rationale as dropping select options.
+		updateCollectionProperty(doc, collection.id, 'assignee', {
+			type: 'relation',
+			targetCollectionId: people.id
+		});
+		updateCollectionProperty(doc, collection.id, 'assignee', { type: 'text' });
+		expect(getCollection(doc, collection.id)?.schema[0].targetCollectionId).toBeUndefined();
+	});
+
+	it("updateCollectionProperty never persists targetCollectionId on a non-relation field, even if a caller passes one — so it can't resurface on a later retype back to relation", () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [{ key: 'assignee', label: 'Assignee', type: 'text' }]
+		});
+		const people = createCollection(doc, { title: 'People', schema: [] });
+
+		// A caller passing targetCollectionId while retyping to something other
+		// than 'relation' must not have it take effect.
+		updateCollectionProperty(doc, collection.id, 'assignee', {
+			type: 'text',
+			targetCollectionId: people.id
+		});
+		expect(getCollection(doc, collection.id)?.schema[0].targetCollectionId).toBeUndefined();
+
+		// A later retype to 'relation' with no target of its own must not pick
+		// up that stray id via the "preserve current.targetCollectionId" path —
+		// there's nothing valid to preserve, since it was never actually set.
+		updateCollectionProperty(doc, collection.id, 'assignee', { type: 'relation' });
+		expect(getCollection(doc, collection.id)?.schema[0].targetCollectionId).toBeUndefined();
+	});
+
 	it('updateCollectionProperty throws NotFoundError for an unknown collection or field', () => {
 		const doc = new Y.Doc();
 		const { collection } = setupCollection(doc);
@@ -581,6 +642,21 @@ describe('collection field lifecycle: rename, retype, duplicate, delete', () => 
 			value: 'Alice'
 		});
 		expect(getRecord(doc, withoutValue.id)?.properties?.[copy.key]).toBeUndefined();
+	});
+
+	it("duplicateCollectionProperty carries a relation field's targetCollectionId over to the copy", () => {
+		const doc = new Y.Doc();
+		const people = createCollection(doc, { title: 'People', schema: [] });
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [
+				{ key: 'assignee', label: 'Assignee', type: 'relation', targetCollectionId: people.id }
+			]
+		});
+
+		const copy = duplicateCollectionProperty(doc, collection.id, 'assignee');
+
+		expect(copy.targetCollectionId).toBe(people.id);
 	});
 
 	it('duplicateCollectionProperty throws NotFoundError for an unknown collection or field', () => {

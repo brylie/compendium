@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { PropertyDefinition } from '$lib/data/types';
+	import type { CollectionMeta, PropertyDefinition } from '$lib/data/types';
 	import type {
 		ViewConfig,
 		ViewFilter,
@@ -14,11 +14,13 @@
 		collectionId,
 		shardId,
 		schema,
+		collections = [],
 		config = $bindable()
 	}: {
 		collectionId: string;
 		shardId: string;
 		schema: PropertyDefinition[];
+		collections?: CollectionMeta[];
 		config: ViewConfig;
 	} = $props();
 
@@ -262,5 +264,6 @@
 	open={fieldManagerOpen}
 	{collectionId}
 	{shardId}
+	{collections}
 	onClose={() => (fieldManagerOpen = false)}
 />

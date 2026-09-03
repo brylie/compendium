@@ -206,18 +206,21 @@
 				collectionId={collection!.id}
 				config={draftConfig}
 				onConfigChange={onDraftChange}
+				{collections}
 			/>
 		{:else if block.viewConfig?.viewType === 'board'}
 			<BoardCollectionView
 				collectionId={collection!.id}
 				config={draftConfig}
 				onConfigChange={onDraftChange}
+				{collections}
 			/>
 		{:else if block.viewConfig?.viewType === 'calendar'}
 			<CalendarCollectionView
 				collectionId={collection!.id}
 				config={draftConfig}
 				onConfigChange={onDraftChange}
+				{collections}
 			/>
 		{/if}
 	{:else if isBroken && !changing}

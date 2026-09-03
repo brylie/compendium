@@ -1,8 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
+import * as Y from 'yjs';
 import PropertyValueCell from './PropertyValueCell.svelte';
-import type { PropertyDefinition } from '$lib/data/types';
+import { createCollection, createRecord } from '$lib/data/records';
+import type { ActorId, PropertyDefinition } from '$lib/data/types';
+
+// RelationPropertyCell (rendered for property.type === 'relation') resolves
+// its target Collection via resolveCollectionDoc, not the getShardDoc/fetch
+// pairing every other Collection-content view uses directly — mocked
+// straight to a pre-built local doc rather than also stubbing fetch, since
+// this component never calls it itself. A real vi.fn(), not a plain arrow
+// function, so a test can override its resolution (e.g. reject once) via
+// mockRejectedValueOnce/mockImplementationOnce.
+let relationDoc: Y.Doc;
+const resolveCollectionDocMock = vi.fn<(collectionId: string) => Promise<Y.Doc>>(() =>
+	Promise.resolve(relationDoc)
+);
+vi.mock('$lib/client/yjs-client', () => ({
+	resolveCollectionDoc: (id: string) => resolveCollectionDocMock(id)
+}));
+
+const actor: ActorId = { kind: 'human', userId: 'local' };
 
 describe('PropertyValueCell', () => {
 	it('renders and edits a text property', async () => {
@@ -110,21 +129,114 @@ describe('PropertyValueCell', () => {
 		expect(screen.queryByTitle('Add option')).not.toBeInTheDocument();
 	});
 
-	it('renders and edits a relation property as a comma-separated id list', async () => {
-		const oninput = vi.fn();
-		const user = userEvent.setup();
-		const property: PropertyDefinition = { key: 'links', label: 'Links', type: 'relation' };
-		render(PropertyValueCell, {
-			property,
-			value: { type: 'relation', value: ['rec-a'] },
-			oninput
+	describe('relation property (issue #15)', () => {
+		it('shows a placeholder instead of a picker when no target collection is configured', () => {
+			const property: PropertyDefinition = { key: 'links', label: 'Links', type: 'relation' };
+			render(PropertyValueCell, { property, value: undefined, oninput: vi.fn() });
+			expect(screen.getByText('No target collection set')).toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: 'Add Links' })).not.toBeInTheDocument();
 		});
 
-		const input = screen.getByDisplayValue('rec-a');
-		await user.clear(input);
-		await user.type(input, 'rec-b, rec-c');
-		await user.tab();
+		it('does not mark an existing value as a deleted record before the target Collection is actually confirmed available', () => {
+			// Nothing has been confirmed either way yet (no target Collection
+			// configured at all here) — an existing id must render as a plain,
+			// neutral value, not the "Linked record was deleted" broken state,
+			// which would misreport "confirmed gone" for something merely
+			// unverifiable.
+			const property: PropertyDefinition = { key: 'links', label: 'Links', type: 'relation' };
+			render(PropertyValueCell, {
+				property,
+				value: { type: 'relation', value: ['rec-a'] },
+				oninput: vi.fn()
+			});
+			expect(screen.getByText('rec-a')).toBeInTheDocument();
+			expect(screen.queryByTitle('Linked record was deleted')).not.toBeInTheDocument();
+		});
 
-		expect(oninput).toHaveBeenCalledWith({ type: 'relation', value: ['rec-b', 'rec-c'] });
+		it('shows an error with a Retry action when resolving the target Collection fails, and a retry recovers', async () => {
+			relationDoc = new Y.Doc();
+			const target = createCollection(relationDoc, { title: 'People', schema: [] });
+			const property: PropertyDefinition = {
+				key: 'assignee',
+				label: 'Assignee',
+				type: 'relation',
+				targetCollectionId: target.id
+			};
+			resolveCollectionDocMock.mockRejectedValueOnce(new Error('network error'));
+			const user = userEvent.setup();
+			render(PropertyValueCell, { property, value: undefined, oninput: vi.fn() });
+
+			await waitFor(() =>
+				expect(screen.getByText("Couldn't load target collection")).toBeInTheDocument()
+			);
+
+			await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+			await waitFor(() =>
+				expect(screen.getByRole('button', { name: 'Add Assignee' })).toBeInTheDocument()
+			);
+			expect(screen.queryByText("Couldn't load target collection")).not.toBeInTheDocument();
+		});
+
+		it("resolves selected ids to the target Collection's records, and adds/removes via the picker", async () => {
+			relationDoc = new Y.Doc();
+			const target = createCollection(relationDoc, {
+				title: 'People',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			const alice = createRecord(
+				relationDoc,
+				{ parentId: target.id, properties: { name: { type: 'text', value: 'Alice' } } },
+				actor
+			);
+			const bob = createRecord(
+				relationDoc,
+				{ parentId: target.id, properties: { name: { type: 'text', value: 'Bob' } } },
+				actor
+			);
+
+			const oninput = vi.fn();
+			const user = userEvent.setup();
+			const property: PropertyDefinition = {
+				key: 'assignee',
+				label: 'Assignee',
+				type: 'relation',
+				targetCollectionId: target.id
+			};
+			render(PropertyValueCell, {
+				property,
+				value: { type: 'relation', value: [alice.id] },
+				oninput
+			});
+
+			await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
+
+			await user.click(screen.getByRole('button', { name: 'Add Assignee' }));
+			await user.type(screen.getByPlaceholderText(/Search/), 'Bob');
+			await user.click(await screen.findByRole('button', { name: 'Bob' }));
+			expect(oninput).toHaveBeenCalledWith({ type: 'relation', value: [alice.id, bob.id] });
+
+			await user.click(screen.getByRole('button', { name: 'Remove Alice' }));
+			expect(oninput).toHaveBeenCalledWith({ type: 'relation', value: [] });
+		});
+
+		it('renders a value pointing at a deleted record as a distinct broken chip, keeping the id', async () => {
+			relationDoc = new Y.Doc();
+			const target = createCollection(relationDoc, { title: 'People', schema: [] });
+			const property: PropertyDefinition = {
+				key: 'assignee',
+				label: 'Assignee',
+				type: 'relation',
+				targetCollectionId: target.id
+			};
+			render(PropertyValueCell, {
+				property,
+				value: { type: 'relation', value: ['missing-id'] },
+				oninput: vi.fn()
+			});
+
+			await waitFor(() => expect(screen.getByText('missing-id')).toBeInTheDocument());
+			expect(screen.getByTitle('Linked record was deleted')).toBeInTheDocument();
+		});
 	});
 });

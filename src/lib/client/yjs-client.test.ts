@@ -107,6 +107,65 @@ describe('yjs-client: browser', () => {
 		mod.getShardDoc('shard-c');
 		expect(mod.getShardAwareness('shard-c')).toEqual({ fake: true });
 	});
+
+	describe('resolveCollectionDoc (issue #15)', () => {
+		afterEach(() => {
+			vi.unstubAllGlobals();
+		});
+
+		it("fetches the Collection's shard and connects via getShardDoc", async () => {
+			const fetchMock = vi.fn(async () => ({ json: async () => ({ shardId: 'shard-x' }) }));
+			vi.stubGlobal('fetch', fetchMock);
+			const mod = await import('./yjs-client');
+
+			const doc = await mod.resolveCollectionDoc('col-1');
+
+			expect(fetchMock).toHaveBeenCalledWith('/api/collections/col-1/shard');
+			expect(doc).toBe(mod.getShardDoc('shard-x'));
+			expect(providerInstances).toHaveLength(1);
+		});
+
+		it('memoizes the shard lookup per collectionId — one fetch no matter how many calls', async () => {
+			const fetchMock = vi.fn(async () => ({ json: async () => ({ shardId: 'shard-x' }) }));
+			vi.stubGlobal('fetch', fetchMock);
+			const mod = await import('./yjs-client');
+
+			await mod.resolveCollectionDoc('col-1');
+			await mod.resolveCollectionDoc('col-1');
+			await mod.resolveCollectionDoc('col-1');
+
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+		});
+
+		it('resolves different Collections to their own shard independently', async () => {
+			const fetchMock = vi.fn(async (url: string) => ({
+				json: async () => ({ shardId: url.includes('col-a') ? 'shard-a' : 'shard-b' })
+			}));
+			vi.stubGlobal('fetch', fetchMock);
+			const mod = await import('./yjs-client');
+
+			const docA = await mod.resolveCollectionDoc('col-a');
+			const docB = await mod.resolveCollectionDoc('col-b');
+
+			expect(docA).not.toBe(docB);
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+		});
+
+		it('evicts a failed lookup from the cache, so a later call retries instead of reusing the rejection', async () => {
+			const fetchMock = vi
+				.fn()
+				.mockRejectedValueOnce(new Error('network error'))
+				.mockImplementation(async () => ({ json: async () => ({ shardId: 'shard-x' }) }));
+			vi.stubGlobal('fetch', fetchMock);
+			const mod = await import('./yjs-client');
+
+			await expect(mod.resolveCollectionDoc('col-1')).rejects.toThrow('network error');
+			const doc = await mod.resolveCollectionDoc('col-1');
+
+			expect(doc).toBe(mod.getShardDoc('shard-x'));
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+		});
+	});
 });
 
 describe('yjs-client: outside the browser', () => {

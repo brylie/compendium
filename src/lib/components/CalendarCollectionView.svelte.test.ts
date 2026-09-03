@@ -9,7 +9,11 @@ import CalendarCollectionViewHarness from './CalendarCollectionViewHarness.svelt
 let ydoc: Y.Doc;
 vi.mock('$lib/client/yjs-client', () => ({
 	getClientDoc: () => ydoc,
-	getShardDoc: () => ydoc
+	getShardDoc: () => ydoc,
+	// A relation field's target Collection resolves through this instead of
+	// getShardDoc directly (RelationPropertyCell, issue #15) — every fixture
+	// in this file already lives in the one shared `ydoc`.
+	resolveCollectionDoc: () => Promise.resolve(ydoc)
 }));
 
 const actor = { kind: 'human' as const, userId: 'local' };
@@ -102,6 +106,45 @@ describe('CalendarCollectionView', () => {
 
 		expect(await screen.findByText('Unscheduled')).toBeInTheDocument();
 		expect(screen.getByText('No date yet')).toBeInTheDocument();
+	});
+
+	it("resolves a relation field's value to the target Collection's record title on a scheduled entry (issue #15)", async () => {
+		// Unscheduled entries render only their title + date field (see the
+		// Unscheduled section's own markup below), so this needs a *scheduled*
+		// entry — the only place Calendar renders entryFields at all.
+		const people = createCollection(ydoc, {
+			title: 'People',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+		const alice = createRecord(
+			ydoc,
+			{ parentId: people.id, properties: { name: { type: 'text', value: 'Alice' } } },
+			actor
+		);
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Cal',
+			schema: [
+				{ key: 'title', label: 'Title', type: 'text' },
+				{ key: 'due', label: 'Due', type: 'date' },
+				{ key: 'assignee', label: 'Assignee', type: 'relation', targetCollectionId: people.id }
+			]
+		});
+		createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: {
+					title: { type: 'text', value: 'Launch' },
+					due: { type: 'date', value: '2026-03-20' },
+					assignee: { type: 'relation', value: [alice.id] }
+				}
+			},
+			actor
+		);
+		renderCalendar('col-1', { groupBy: 'due' });
+
+		expect(await screen.findByText('Alice')).toBeInTheDocument();
 	});
 
 	it('adds an entry on a specific day via that cell\'s "+" button', async () => {

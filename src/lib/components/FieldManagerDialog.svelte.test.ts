@@ -120,6 +120,37 @@ describe('FieldManagerDialog', () => {
 		]);
 	});
 
+	it("adds a relation field with a target collection, and doesn't offer the picker for other types (issue #15)", async () => {
+		const people = createCollection(ydoc, { title: 'People', schema: [] });
+		const collection = createCollection(ydoc, { title: 'T', schema: [] });
+		const user = userEvent.setup();
+		render(FieldManagerDialog, {
+			open: true,
+			collectionId: collection.id,
+			shardId: 'test-shard',
+			collections: [
+				{ id: people.id, title: 'People', schema: [], recordIds: [] },
+				{ id: collection.id, title: 'T', schema: [], recordIds: [] }
+			],
+			onClose: vi.fn()
+		});
+
+		expect(screen.queryByLabelText('Target collection')).not.toBeInTheDocument();
+
+		await user.type(screen.getByPlaceholderText('Field name…'), 'Assignee');
+		await user.selectOptions(screen.getByLabelText('Field type'), 'relation');
+		await user.selectOptions(screen.getByLabelText('Target collection'), people.id);
+		await user.click(screen.getByRole('button', { name: 'Add field' }));
+
+		expect(getCollection(ydoc, collection.id)?.schema).toEqual([
+			expect.objectContaining({
+				label: 'Assignee',
+				type: 'relation',
+				targetCollectionId: people.id
+			})
+		]);
+	});
+
 	it('closes on Escape', async () => {
 		const collection = createCollection(ydoc, { title: 'T', schema: [] });
 		const onClose = vi.fn();

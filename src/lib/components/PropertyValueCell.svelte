@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { PropertyDefinition, PropertyValue } from '$lib/data/types';
+	import RelationPropertyCell from './RelationPropertyCell.svelte';
 
 	let {
 		property,
@@ -83,18 +84,5 @@
 		{/if}
 	</div>
 {:else if property.type === 'relation'}
-	<input
-		type="text"
-		placeholder="record ids…"
-		value={(value as { value?: string[] })?.value?.join(', ') ?? ''}
-		onchange={(e) =>
-			oninput({
-				type: 'relation',
-				value: (e.target as HTMLInputElement).value
-					.split(',')
-					.map((s) => s.trim())
-					.filter(Boolean)
-			})}
-		class={fieldClass}
-	/>
+	<RelationPropertyCell {property} {value} {oninput} {compact} />
 {/if}

@@ -24,7 +24,12 @@
 		visibleProperties
 	} from '$lib/data/views';
 	import type { ViewConfig, BoardColumn } from '$lib/data/views';
-	import type { PropertyDefinition, PropertyValue, WorkspaceRecord } from '$lib/data/types';
+	import type {
+		CollectionMeta,
+		PropertyDefinition,
+		PropertyValue,
+		WorkspaceRecord
+	} from '$lib/data/types';
 	import Icon from './Icon.svelte';
 	import PropertyValueCell from './PropertyValueCell.svelte';
 	import ViewToolbar from './ViewToolbar.svelte';
@@ -33,11 +38,13 @@
 	let {
 		collectionId,
 		config,
-		onConfigChange
+		onConfigChange,
+		collections = []
 	}: {
 		collectionId: string;
 		config: ViewConfig;
 		onConfigChange: (config: ViewConfig) => void;
+		collections?: CollectionMeta[];
 	} = $props();
 
 	const UNASSIGNED_KEY = '__unassigned__';
@@ -257,6 +264,7 @@
 		{collectionId}
 		shardId={shardId!}
 		{schema}
+		{collections}
 		bind:config={() => config, onConfigChange}
 	/>
 {/if}
