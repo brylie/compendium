@@ -80,6 +80,10 @@ When addressing a CodeRabbit finding on a PR (whether triggered by an automated 
 6. If a later CodeRabbit message claims a thread "remains open," verify via the GraphQL `reviewThreads` query (`isResolved`) before assuming it needs action — it's often already resolved and the message is stale.
 7. Never proactively poll CI status or run `/babysit-pr` unless asked.
 
+## Workflow: comprehensive pull request review
+
+Use the `pull-request-review` skill (`.claude/skills/pull-request-review/SKILL.md`) when asked to review a PR or assess merge readiness. It complements automated review by tracing the affected behavior beyond changed lines: linked issue and canonical specs, service/data boundaries, UI/MCP/API parity, workspace/shard isolation, permissions/audit side effects, persistence and collaboration behavior, and whether tests exercise the real failure boundary. Report evidence-backed High/Medium/Low findings first, followed by concrete strengths, verification, and a merge-readiness verdict. Reviewing does not authorize code changes, GitHub comments, or issue creation unless the user asks for them separately.
+
 ## Workflow: push cadence
 
 Every push to an open PR triggers a new CodeRabbit review, and CodeRabbit's review budget is rate-limited per hour — pushing after every small commit burns through it fast for no real benefit. Commit locally as often as convenient, but batch pushes:
