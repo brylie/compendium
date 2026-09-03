@@ -5,6 +5,8 @@ import type {
 	ActorId,
 	BlockType,
 	CalloutStyle,
+	ChildPageNode,
+	ChildPagesDepth,
 	CollectionMeta,
 	DocumentMeta,
 	DocumentTreeNode,
@@ -88,6 +90,7 @@ interface RecordYShape {
 	collapsed?: boolean;
 	referencedRecordId?: string;
 	calloutStyle?: CalloutStyle;
+	childPagesDepth?: ChildPagesDepth;
 	createdBy: ActorId;
 	createdAt: number;
 	lastEditedBy: ActorId;
@@ -193,11 +196,11 @@ function sanitizeCalloutStyle(calloutStyle: CalloutStyle): CalloutStyle {
 }
 
 /**
- * Sets the checked/collapsed/referencedRecordId/viewConfig/calloutStyle
- * group of block-only optional fields — shared by createRecord and
- * copyRecordVerbatim, which otherwise each repeat the same five
- * conditionals inline (pushing both functions' own cognitive complexity
- * over the lint threshold once calloutStyle was the fifth).
+ * Sets the checked/collapsed/referencedRecordId/viewConfig/calloutStyle/
+ * childPagesDepth group of block-only optional fields — shared by
+ * createRecord and copyRecordVerbatim, which otherwise each repeat the same
+ * conditionals inline (pushing both functions' own cognitive complexity over
+ * the lint threshold once calloutStyle was the fifth).
  */
 function applyOptionalBlockFields(
 	yrecord: TypedYMap<RecordYShape>,
@@ -207,6 +210,7 @@ function applyOptionalBlockFields(
 		referencedRecordId?: string;
 		viewConfig?: EmbeddedViewConfig;
 		calloutStyle?: CalloutStyle;
+		childPagesDepth?: ChildPagesDepth;
 	}
 ): void {
 	if (fields.checked !== undefined) yrecord.set('checked', fields.checked);
@@ -214,6 +218,9 @@ function applyOptionalBlockFields(
 	if (fields.referencedRecordId) yrecord.set('referencedRecordId', fields.referencedRecordId);
 	if (fields.viewConfig) writeViewConfig(yrecord, fields.viewConfig);
 	if (fields.calloutStyle) yrecord.set('calloutStyle', sanitizeCalloutStyle(fields.calloutStyle));
+	if (fields.childPagesDepth !== undefined) {
+		yrecord.set('childPagesDepth', fields.childPagesDepth);
+	}
 }
 
 /** Thrown when a requested Document, Collection, record, property, or select option doesn't exist. */
@@ -441,6 +448,42 @@ export function buildDocumentTree(documents: DocumentMeta[]): DocumentTreeNode[]
 	setLevel(roots, 0);
 
 	return roots;
+}
+
+function trimChildPagesDepth(nodes: DocumentTreeNode[], remaining: number): ChildPageNode[] {
+	if (remaining <= 0) return [];
+	return nodes.map((n) => ({
+		id: n.id,
+		title: n.title,
+		children: trimChildPagesDepth(n.children, remaining - 1)
+	}));
+}
+
+/**
+ * Resolves a child_pages block's rendered listing (issue #43): `targetDocumentId`'s
+ * immediate children (depth 1, the default), N levels of nesting, or its whole subtree
+ * (`depth: 'unlimited'`) — reusing buildDocumentTree's own sorted, nested tree rather than
+ * re-walking `documents` from scratch. `targetDocumentId` not being present in `documents`
+ * at all (deleted, or filtered out by a caller's permission scope) resolves to an empty
+ * list here — callers that need to distinguish "target missing" from "no children yet" do
+ * that check independently against the same `documents` array before calling this.
+ */
+export function resolveChildPages(
+	documents: DocumentMeta[],
+	targetDocumentId: string,
+	depth: ChildPagesDepth
+): ChildPageNode[] {
+	const tree = buildDocumentTree(documents);
+	function findNode(nodes: DocumentTreeNode[], id: string): DocumentTreeNode | undefined {
+		for (const node of nodes) {
+			if (node.id === id) return node;
+			const found = findNode(node.children, id);
+			if (found) return found;
+		}
+		return undefined;
+	}
+	const children = findNode(tree, targetDocumentId)?.children ?? [];
+	return trimChildPagesDepth(children, depth === 'unlimited' ? Infinity : depth);
 }
 
 // ---------------------------------------------------------------------------
@@ -1114,6 +1157,7 @@ function readRecord(yrecord: TypedYMap<RecordYShape>): WorkspaceRecord {
 		referencedRecordId: yrecord.get('referencedRecordId'),
 		viewConfig: readViewConfig(yrecord),
 		calloutStyle: yrecord.get('calloutStyle'),
+		childPagesDepth: yrecord.get('childPagesDepth'),
 		createdBy: yrecord.get('createdBy')!,
 		createdAt: yrecord.get('createdAt')!,
 		lastEditedBy: yrecord.get('lastEditedBy')!,
@@ -1132,6 +1176,7 @@ export interface CreateRecordInput {
 	referencedRecordId?: string;
 	viewConfig?: EmbeddedViewConfig; // for collection_view blocks
 	calloutStyle?: CalloutStyle; // for callout blocks
+	childPagesDepth?: ChildPagesDepth; // for child_pages blocks
 }
 
 /** Creates a new record (a block if the parent is a Document, a row if the parent is a Collection) and inserts it into the parent's sibling order via a fresh fractional-index `order`. */
@@ -1276,6 +1321,38 @@ export function setRecordCalloutStyle(
 	doc.transact(() => {
 		if (calloutStyle === null) yrecord.raw.delete('calloutStyle');
 		else yrecord.set('calloutStyle', sanitizeCalloutStyle(calloutStyle));
+		yrecord.set('lastEditedBy', actor);
+		yrecord.set('lastEditedAt', Date.now());
+	});
+}
+
+/**
+ * Reconfigures a child_pages block's target Document and/or nesting depth
+ * (issue #43) — `referencedRecordId: null` clears an explicit target back to
+ * the default ("the current Document"); `depth: null` clears back to the
+ * default depth (1, immediate children only). Either field, passed
+ * `undefined`, is left untouched, so a picker can update just the one the
+ * viewer actually changed. Like setRecordCalloutStyle, this is a direct
+ * record mutation with no MCP write path — write_record's referencedRecordId
+ * support is page_link-only (mcp-tools.md); an agent configures a
+ * child_pages block's target/depth only at creation time, via
+ * create_record's own referencedRecordId/childPagesDepth fields.
+ */
+export function setRecordChildPagesConfig(
+	doc: Y.Doc,
+	id: string,
+	config: { referencedRecordId?: string | null; depth?: ChildPagesDepth | null },
+	actor: ActorId
+): void {
+	const yrecord = recordsMap(doc).get(id);
+	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
+	doc.transact(() => {
+		if (config.referencedRecordId === null) yrecord.raw.delete('referencedRecordId');
+		else if (config.referencedRecordId !== undefined) {
+			yrecord.set('referencedRecordId', config.referencedRecordId);
+		}
+		if (config.depth === null) yrecord.raw.delete('childPagesDepth');
+		else if (config.depth !== undefined) yrecord.set('childPagesDepth', config.depth);
 		yrecord.set('lastEditedBy', actor);
 		yrecord.set('lastEditedAt', Date.now());
 	});

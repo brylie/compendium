@@ -8,6 +8,7 @@ import {
 	getDocument as crdtGetDocument,
 	listDocuments as crdtListDocuments,
 	listRecordsForParent as crdtListRecordsForParent,
+	resolveChildPages,
 	updateDocumentParent as crdtUpdateDocumentParent,
 	updateDocumentTitle as crdtUpdateDocumentTitle
 } from '$lib/data/records';
@@ -30,6 +31,8 @@ import { resolveInternalLinkTarget, type InternalLinkTarget } from '$lib/data/li
 import type {
 	CalloutPreset,
 	CalloutStyle,
+	ChildPageNode,
+	ChildPagesDepth,
 	DocumentMeta,
 	EmbeddedViewConfig,
 	WorkspaceRecord
@@ -344,6 +347,13 @@ interface DocumentRecordView {
 	// write_record don't accept it either), matching the precedent those two
 	// fields already established rather than adding new write-side surface.
 	calloutStyle?: CalloutStyle;
+	// Only set for child_pages blocks (issue #43) — read-only, same rationale
+	// as calloutStyle above: no MCP write path beyond create_record's initial
+	// value, since reconfiguring after creation is UI-only (see
+	// setRecordChildPagesConfig). Absent means depth 1 (immediate children
+	// only), the same "absent = default" convention calloutStyle/viewConfig
+	// already use.
+	childPagesDepth?: ChildPagesDepth;
 	markdown: string;
 }
 
@@ -376,7 +386,10 @@ interface ResolvedLink {
 // A referenced target can be any Document or Collection, not just ones
 // under this documentId — an out-of-scope target must not leak its
 // title/id/schema to a token that was never granted access to it. Only
-// page_link/collection_view blocks have a target to resolve at all.
+// page_link/collection_view/child_pages blocks have a target to resolve at
+// all — child_pages' target is optional (absent means "the current
+// Document", not "unconfigured"), but when it *is* set, it must resolve the
+// same way a page_link's target does: an existing, in-scope Document.
 function resolveRecordLink(
 	r: WorkspaceRecord,
 	doc: Y.Doc,
@@ -384,7 +397,8 @@ function resolveRecordLink(
 	defaultSpaceId: string,
 	caller: CallerIdentity,
 	isPageLink: boolean,
-	isCollectionView: boolean
+	isCollectionView: boolean,
+	isChildPages: boolean
 ): ResolvedLink {
 	const targetInScope =
 		!r.referencedRecordId ||
@@ -406,7 +420,7 @@ function resolveRecordLink(
 	// or a Collection (its own shard, possibly a different doc entirely).
 	// Try `doc` itself first, then fall back to resolving its real shard.
 	const resolvedTarget =
-		(isPageLink || isCollectionView) && r.referencedRecordId && targetInScope
+		(isPageLink || isCollectionView || isChildPages) && r.referencedRecordId && targetInScope
 			? (resolveInternalLinkTarget(doc, r.referencedRecordId) ??
 				resolveInternalLinkTarget(
 					resolveParentWorkspaceContext(r.referencedRecordId).doc,
@@ -414,23 +428,72 @@ function resolveRecordLink(
 				))
 			: undefined;
 	// Each block type's target must resolve to the right kind — collection_view
-	// to a Collection, page_link to a Document (mirroring validatePageLinkTarget's
-	// write-side enforcement in services/records.ts, which rejects a page_link
-	// write whose target isn't a Document). A page_link's referencedRecordId can
-	// still end up pointing at a Collection despite that — validatePageLinkTarget
-	// only guards the MCP write_record path; a direct UI edit via
-	// setRecordReferencedId (src/lib/data/records.ts) isn't routed through it —
-	// so this read side must enforce the same kind check independently rather
-	// than trust the target is already the right kind.
+	// to a Collection, page_link/child_pages to a Document (mirroring
+	// validateDocumentReferenceTarget's write-side enforcement in services/records.ts,
+	// which rejects a page_link/child_pages write whose target isn't a
+	// Document). A page_link's referencedRecordId can still end up pointing at
+	// a Collection despite that — validateDocumentReferenceTarget only guards the MCP
+	// write_record path; a direct UI edit via setRecordReferencedId
+	// (src/lib/data/records.ts) isn't routed through it — so this read side
+	// must enforce the same kind check independently rather than trust the
+	// target is already the right kind.
 	const wrongKind =
 		(isCollectionView && resolvedTarget?.kind !== 'collection') ||
-		(isPageLink && resolvedTarget?.kind !== 'document');
+		((isPageLink || isChildPages) && resolvedTarget?.kind !== 'document');
 	const linkedTarget = wrongKind ? undefined : resolvedTarget;
 	const linkBroken: true | undefined =
-		(isPageLink || isCollectionView) && r.referencedRecordId && targetInScope && !linkedTarget
+		(isPageLink || isCollectionView || isChildPages) &&
+		r.referencedRecordId &&
+		targetInScope &&
+		!linkedTarget
 			? true
 			: undefined;
 	return { targetInScope, linkedTarget, linkBroken };
+}
+
+// Nested markdown bullets of `[[Title]]` wiki-links, one per resolved child
+// (issue #43) — matching page_link's own `[[Title]]` convention rather than
+// inventing a second link syntax, and fully expressible in plain Markdown
+// (unlike collection_view's viewConfig, this resolved listing needs no
+// separate structured field — see markdown-transcoding.md). Read-direction
+// only, same as every other block-level markdown emission in this file: no
+// parser turns a `- [[Title]]` list back into childPagesDepth/referencedRecordId.
+function renderChildPagesMarkdown(nodes: ChildPageNode[], depth = 0): string {
+	if (nodes.length === 0) return depth === 0 ? '_No sub-pages yet._' : '';
+	return nodes
+		.map((n) => {
+			const line = `${'  '.repeat(depth)}- [[${n.title || 'Untitled'}]]`;
+			const childLines = renderChildPagesMarkdown(n.children, depth + 1);
+			return childLines ? `${line}\n${childLines}` : line;
+		})
+		.join('\n');
+}
+
+function renderPageLinkMarkdown(r: WorkspaceRecord, doc: Y.Doc, link: ResolvedLink): string {
+	if (r.referencedRecordId && link.targetInScope) {
+		return `[[${link.linkedTarget?.title ?? 'Deleted page'}]]`;
+	}
+	return r.content ? richTextToMarkdown(doc, r.content) : '';
+}
+
+function renderCollectionViewMarkdown(r: WorkspaceRecord, link: ResolvedLink): string {
+	return r.referencedRecordId && link.targetInScope
+		? `[collection view: ${link.linkedTarget?.title ?? 'Deleted collection'}]`
+		: '[collection view: unconfigured]';
+}
+
+// One generic "unavailable" placeholder for both "target was deleted" and
+// "target exists but is out of this caller's scope" — deliberately not
+// distinguished, the same anti-oracle principle InvalidLinkTargetError's own
+// single error message already applies to page_link's write-side target
+// validation (services/records.ts).
+function renderChildPagesBlockMarkdown(
+	r: WorkspaceRecord,
+	link: ResolvedLink,
+	childPages: ChildPageNode[] | undefined
+): string {
+	if (r.referencedRecordId && !link.linkedTarget) return '[child pages: unavailable]';
+	return renderChildPagesMarkdown(childPages ?? []);
 }
 
 function renderRecordMarkdown(
@@ -438,46 +501,50 @@ function renderRecordMarkdown(
 	doc: Y.Doc,
 	isPageLink: boolean,
 	isCollectionView: boolean,
-	link: ResolvedLink
+	isChildPages: boolean,
+	link: ResolvedLink,
+	childPages: ChildPageNode[] | undefined
 ): string {
-	if (isPageLink) {
-		if (r.referencedRecordId && link.targetInScope) {
-			return `[[${link.linkedTarget?.title ?? 'Deleted page'}]]`;
-		}
-		return r.content ? richTextToMarkdown(doc, r.content) : '';
-	}
-	if (isCollectionView) {
-		return r.referencedRecordId && link.targetInScope
-			? `[collection view: ${link.linkedTarget?.title ?? 'Deleted collection'}]`
-			: '[collection view: unconfigured]';
-	}
+	if (isPageLink) return renderPageLinkMarkdown(r, doc, link);
+	if (isCollectionView) return renderCollectionViewMarkdown(r, link);
+	if (isChildPages) return renderChildPagesBlockMarkdown(r, link, childPages);
 	const content = r.content ? richTextToMarkdown(doc, r.content) : '';
 	if (r.blockType === 'callout' && r.calloutStyle?.kind === 'preset') {
-		const keyword = CALLOUT_PRESET_ALERT_KEYWORD[r.calloutStyle.preset];
-		if (!content) return `> [!${keyword}]`;
-		const quotedLines = content
-			.split('\n')
-			.map((line) => `> ${line}`)
-			.join('\n');
-		return `> [!${keyword}]\n${quotedLines}`;
+		return renderPresetCalloutMarkdown(r.calloutStyle.preset, content);
 	}
 	return content;
 }
 
+function renderPresetCalloutMarkdown(preset: CalloutPreset, content: string): string {
+	const keyword = CALLOUT_PRESET_ALERT_KEYWORD[preset];
+	if (!content) return `> [!${keyword}]`;
+	const quotedLines = content
+		.split('\n')
+		.map((line) => `> ${line}`)
+		.join('\n');
+	return `> [!${keyword}]\n${quotedLines}`;
+}
+
 // The per-record half of getDocument's job: resolve a page_link/
-// collection_view's target (permission-scoped), and render the block's
-// markdown accordingly. Split out because this — not the surrounding
+// collection_view/child_pages target (permission-scoped), and render the
+// block's markdown accordingly. Split out because this — not the surrounding
 // fetch/audit/reshape in getDocument itself — is where nearly all of that
-// function's own complexity actually lived.
+// function's own complexity actually lived. `getDocuments` is lazy (a
+// memoized closure, not a plain array) so a Document with no child_pages
+// blocks costs this function nothing extra — the one catalog read it wraps
+// only actually runs the first time a child_pages block needs it.
 function resolveDocumentRecordView(
 	r: WorkspaceRecord,
 	doc: Y.Doc,
+	documentId: string,
 	workspaceId: string,
 	defaultSpaceId: string,
-	caller: CallerIdentity
+	caller: CallerIdentity,
+	getDocuments: () => DocumentMeta[]
 ): DocumentRecordView {
 	const isPageLink = r.blockType === 'page_link';
 	const isCollectionView = r.blockType === 'collection_view';
+	const isChildPages = r.blockType === 'child_pages';
 	const link = resolveRecordLink(
 		r,
 		doc,
@@ -485,9 +552,29 @@ function resolveDocumentRecordView(
 		defaultSpaceId,
 		caller,
 		isPageLink,
-		isCollectionView
+		isCollectionView,
+		isChildPages
 	);
-	const markdown = renderRecordMarkdown(r, doc, isPageLink, isCollectionView, link);
+	// Absent referencedRecordId defaults to documentId (the current Document)
+	// — always resolvable, so children are computed whenever there's no
+	// explicit target, or the explicit one resolved cleanly.
+	const childPages =
+		isChildPages && (!r.referencedRecordId || link.linkedTarget)
+			? resolveChildPages(
+					getDocuments(),
+					r.referencedRecordId ?? documentId,
+					r.childPagesDepth ?? 1
+				)
+			: undefined;
+	const markdown = renderRecordMarkdown(
+		r,
+		doc,
+		isPageLink,
+		isCollectionView,
+		isChildPages,
+		link,
+		childPages
+	);
 	return {
 		id: r.id,
 		blockType: r.blockType,
@@ -497,20 +584,22 @@ function resolveDocumentRecordView(
 		linkBroken: link.linkBroken,
 		viewConfig: isCollectionView && link.linkedTarget ? r.viewConfig : undefined,
 		calloutStyle: r.blockType === 'callout' ? r.calloutStyle : undefined,
+		childPagesDepth: isChildPages ? r.childPagesDepth : undefined,
 		markdown
 	};
 }
 
 /**
  * Returns a Document's title and its blocks rendered to markdown, after checking the caller
- * may access it. Each `page_link`/`collection_view` block's target is resolved and permission-
- * scoped independently (a referenced target can be any Document/Collection, not just ones
- * under this Document, so an out-of-scope target's title/id/schema must not leak) — a deleted
- * target renders as a generic placeholder, and an out-of-scope target falls back to the
- * block's own content (`page_link`) or an unconfigured placeholder (`collection_view`); the
- * target itself is never exposed either way, and `linkBroken` distinguishes "target no longer
- * exists" from "not a linking block" for
- * callers that need to tell the two apart.
+ * may access it. Each `page_link`/`collection_view`/`child_pages` block's target is resolved
+ * and permission-scoped independently (a referenced target can be any Document/Collection, not
+ * just ones under this Document, so an out-of-scope target's title/id/schema must not leak) — a
+ * deleted target renders as a generic placeholder, and an out-of-scope target falls back to the
+ * block's own content (`page_link`) or an unconfigured placeholder (`collection_view`/
+ * `child_pages`); the target itself is never exposed either way, and `linkBroken` distinguishes
+ * "target no longer exists" from "not a linking block" for callers that need to tell the two
+ * apart. A `child_pages` block with no explicit target defaults to `documentId` itself — always
+ * resolvable, since the caller already passed the accessibility check above to reach it.
  */
 export function getDocument(
 	caller: CallerIdentity,
@@ -528,8 +617,14 @@ export function getDocument(
 	const document = crdtGetDocument(doc, documentId);
 	if (!document) return null;
 
+	// Memoized so a Document with no child_pages blocks never pays for this
+	// catalog read at all, and a Document with several pays for it once, not
+	// once per block.
+	let cachedDocuments: DocumentMeta[] | undefined;
+	const getDocuments = (): DocumentMeta[] => (cachedDocuments ??= listDocuments(caller));
+
 	const records = crdtListRecordsForParent(doc, documentId).map((r) =>
-		resolveDocumentRecordView(r, doc, workspaceId, defaultSpaceId, caller)
+		resolveDocumentRecordView(r, doc, documentId, workspaceId, defaultSpaceId, caller, getDocuments)
 	);
 
 	logAudit({ actor, action: 'get_document', targetRecordId: documentId });

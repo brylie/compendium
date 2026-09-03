@@ -25,7 +25,8 @@
 			| 'toc'
 			| 'sync'
 			| 'link'
-			| 'table';
+			| 'table'
+			| 'child-pages';
 		aliases: string[];
 	}
 
@@ -145,6 +146,14 @@
 			description: 'Live outline of headings in this document.',
 			icon: 'toc',
 			aliases: ['table of contents', 'toc', 'outline', 'summary', 'headings']
+		},
+		{
+			blockType: 'child_pages',
+			category: 'Structure',
+			label: 'Child pages',
+			description: "Live list of this page's sub-pages.",
+			icon: 'child-pages',
+			aliases: ['child pages', 'page tree', 'subpages', 'sub-pages', 'children', 'index']
 		},
 		{
 			blockType: 'synced_block',
