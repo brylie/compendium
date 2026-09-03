@@ -558,6 +558,13 @@ describe('service layer: centralized business rules & side effects', () => {
 			).toThrow(/Document/);
 		});
 
+		it('rejects a targetless, default-depth child_pages block under a Collection parent', () => {
+			const col = createCollection(human, { title: 'Rows' });
+			expect(() => createRecord(human, { parentId: col.id, blockType: 'child_pages' })).toThrow(
+				/Document/
+			);
+		});
+
 		it('renders "[child pages: unavailable]" for a deleted target, without distinguishing it from an out-of-scope one', () => {
 			const target = createDocument(human, { title: 'Target' });
 			const host = createDocument(human, { title: 'Host' });

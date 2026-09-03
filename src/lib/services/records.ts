@@ -69,7 +69,7 @@ function validateDocumentReferenceTarget(caller: CallerIdentity, targetId: strin
 
 function validateChildPagesDepth(depth: ChildPagesDepth): void {
 	if (depth === 'unlimited') return;
-	if (!Number.isInteger(depth) || depth < 1) {
+	if (!Number.isSafeInteger(depth) || depth < 1) {
 		throw new Error('childPagesDepth must be a positive integer or "unlimited".');
 	}
 }
@@ -98,6 +98,15 @@ export function createRecord(
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, input.parentId, 'create_record');
+
+	// Checked unconditionally, not just when referencedRecordId/childPagesDepth
+	// happen to be supplied — a targetless, default-depth child_pages block
+	// ("list the current Document's own children") is the single most common
+	// call shape, and without this the CRDT layer would otherwise silently
+	// treat a Collection parent as a plain row, ignoring blockType entirely.
+	if (input.blockType === 'child_pages' && !crdtGetDocument(doc, input.parentId)) {
+		throw new Error('child_pages blocks can only be created inside a Document.');
+	}
 
 	if (input.referencedRecordId !== undefined) {
 		if (!input.blockType || !DOCUMENT_REFERENCE_BLOCK_TYPES.includes(input.blockType)) {

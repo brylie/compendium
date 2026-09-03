@@ -1346,6 +1346,23 @@ export function setRecordChildPagesConfig(
 ): void {
 	const yrecord = recordsMap(doc).get(id);
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
+	// This bypasses the service layer (a direct-UI-mutation, like
+	// setRecordCalloutStyle) so its own validation is the only guard —
+	// without it, a caller could retarget an unrelated block type (e.g.
+	// overwrite a page_link's referencedRecordId) or persist a depth
+	// (NaN/fraction/negative/unsafe-integer) that would silently corrupt
+	// resolveChildPages' output.
+	if (yrecord.get('blockType') !== 'child_pages') {
+		throw new ValidationError(`Record ${id} is not a child_pages block`);
+	}
+	if (
+		config.depth !== undefined &&
+		config.depth !== null &&
+		config.depth !== 'unlimited' &&
+		!(Number.isSafeInteger(config.depth) && config.depth >= 1)
+	) {
+		throw new ValidationError('childPagesDepth must be a positive integer or "unlimited"');
+	}
 	doc.transact(() => {
 		if (config.referencedRecordId === null) yrecord.raw.delete('referencedRecordId');
 		else if (config.referencedRecordId !== undefined) {

@@ -249,6 +249,35 @@ describe('setRecordChildPagesConfig (issue #43)', () => {
 			NotFoundError
 		);
 	});
+
+	it('rejects reconfiguring a record that is not a child_pages block, leaving it untouched', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const target = createDocument(doc, { title: 'Target' });
+		const link = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'page_link', referencedRecordId: target.id },
+			human
+		);
+
+		expect(() =>
+			setRecordChildPagesConfig(doc, link.id, { referencedRecordId: document.id }, human)
+		).toThrow(ValidationError);
+		expect(getRecord(doc, link.id)?.referencedRecordId).toBe(target.id);
+	});
+
+	it('rejects a depth that is not a positive safe integer or "unlimited"', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(doc, { parentId: document.id, blockType: 'child_pages' }, human);
+
+		for (const invalid of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+			expect(() => setRecordChildPagesConfig(doc, block.id, { depth: invalid }, human)).toThrow(
+				ValidationError
+			);
+		}
+		expect(getRecord(doc, block.id)?.childPagesDepth).toBeUndefined();
+	});
 });
 
 describe('records: CRDT merge acceptance criteria', () => {
