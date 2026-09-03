@@ -136,7 +136,7 @@ export async function createTestHarness(): Promise<TestHarness> {
 	const server: Server = createServer(async (req, res) => {
 		try {
 			if (req.url?.startsWith('/mcp')) {
-				const webReq = await nodeRequestToWebRequest(req, `http://localhost:${port}`);
+				const webReq = await nodeRequestToWebRequest(req, `http://127.0.0.1:${port}`);
 				const auth = webReq.headers.get('authorization');
 				const token = auth?.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : undefined;
 
@@ -199,8 +199,8 @@ export async function createTestHarness(): Promise<TestHarness> {
 		throw error;
 	}
 
-	const httpUrl = `http://localhost:${port}`;
-	const wsUrl = `ws://localhost:${port}/ws`;
+	const httpUrl = `http://127.0.0.1:${port}`;
+	const wsUrl = `ws://127.0.0.1:${port}/ws`;
 
 	try {
 		const buildPath = join(process.cwd(), 'build/handler.js');

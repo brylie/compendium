@@ -45,7 +45,7 @@ describe('routes/mcp: HTTP transport wiring and bearer-token extraction', () => 
 	beforeEach(async () => {
 		server = createServer((req: IncomingMessage, res: ServerResponse) => {
 			void (async () => {
-				const request = await nodeRequestToWebRequest(req, 'http://localhost');
+				const request = await nodeRequestToWebRequest(req, 'http://127.0.0.1');
 				let response: Response;
 				if (req.method === 'POST') {
 					response = await POST({ request } as Parameters<typeof POST>[0]);
@@ -69,7 +69,7 @@ describe('routes/mcp: HTTP transport wiring and bearer-token extraction', () => 
 			})();
 		});
 		const port = await listenOnLoopback(server);
-		baseUrl = `http://localhost:${port}`;
+		baseUrl = `http://127.0.0.1:${port}`;
 	});
 
 	afterEach(async () => {
