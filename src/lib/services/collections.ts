@@ -20,7 +20,7 @@ import {
 	reserveCollectionLocator,
 	resolveShardForParent
 } from '$lib/server/catalog';
-import { grantCollectionAccess, tokenAllowsParent } from '$lib/mcp/tokens';
+import { grantCollectionAccess, tokenAllowsParent } from '$lib/server/token-store';
 import type { CollectionMeta, PropertyDefinition, WorkspaceRecord } from '$lib/data/types';
 import { nanoid } from 'nanoid';
 import {

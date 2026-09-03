@@ -25,7 +25,7 @@ import {
 	reserveDocumentLocator,
 	resolveShardForParent
 } from '$lib/server/catalog';
-import { grantDocumentAccess, tokenAllowsParent } from '$lib/mcp/tokens';
+import { grantDocumentAccess, tokenAllowsParent } from '$lib/server/token-store';
 import { richTextToMarkdown } from '$lib/mcp/markdown-transcode';
 import { resolveInternalLinkTarget, type InternalLinkTarget } from '$lib/data/links';
 import type {

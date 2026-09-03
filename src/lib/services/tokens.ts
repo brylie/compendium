@@ -5,7 +5,7 @@ import {
 	listTokens as storeListTokens,
 	revokeToken as storeRevokeToken,
 	type AccessToken
-} from '$lib/mcp/tokens';
+} from '$lib/server/token-store';
 import { logAudit } from '$lib/server/audit';
 import { actorForCaller, type CallerIdentity } from './permissions';
 
