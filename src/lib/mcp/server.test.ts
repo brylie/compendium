@@ -285,6 +285,92 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 		expect(createResult.isError).toBe(true);
 		expect(getTextContent(createResult)).not.toContain('Secret Doc');
 	});
+
+	it('create_record accepts blockType: collection_view and sets referencedRecordId + viewConfig in one call, and write_record retargets/reconfigures it (issue #37)', async () => {
+		const { doc } = resolveWorkspaceContext();
+		const targetA = createCollection(doc, { title: 'Tasks A', schema: [] });
+		const targetB = createCollection(doc, { title: 'Tasks B', schema: [] });
+		const source = createDocument(doc, { title: 'Source Doc' });
+
+		const { token } = createToken({
+			clientLabel: 'Embed Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: [targetA.id, targetB.id]
+		});
+		const mcpServer = createMcpServer();
+
+		const createResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{
+				parentId: source.id,
+				blockType: 'collection_view',
+				referencedRecordId: targetA.id,
+				viewConfig: { viewType: 'table' }
+			},
+			token
+		);
+		expect(createResult.isError).toBeFalsy();
+		const blockId = JSON.parse(getTextContent(createResult)).recordId;
+
+		let getResult = await invokeTool(mcpServer, 'get_document', { documentId: source.id }, token);
+		let embed = JSON.parse(getTextContent(getResult)).records.find(
+			(r: { id: string }) => r.id === blockId
+		);
+		expect(embed.referencedRecordId).toBe(targetA.id);
+		expect(embed.viewConfig).toEqual({ viewType: 'table' });
+		expect(embed.markdown).toBe('[collection view: Tasks A]');
+
+		const retargetResult = await invokeTool(
+			mcpServer,
+			'write_record',
+			{
+				recordId: blockId,
+				referencedRecordId: targetB.id,
+				viewConfig: { viewType: 'board', groupBy: 'status' }
+			},
+			token
+		);
+		expect(retargetResult.isError).toBeFalsy();
+
+		getResult = await invokeTool(mcpServer, 'get_document', { documentId: source.id }, token);
+		embed = JSON.parse(getTextContent(getResult)).records.find(
+			(r: { id: string }) => r.id === blockId
+		);
+		expect(embed.referencedRecordId).toBe(targetB.id);
+		expect(embed.viewConfig).toEqual({ viewType: 'board', groupBy: 'status' });
+	});
+
+	it('rejects a collection_view target that is out of scope or resolves to a Document, not a Collection', async () => {
+		const { doc } = resolveWorkspaceContext();
+		const secret = createCollection(doc, { title: 'Secret Tasks', schema: [] });
+		const docTarget = createDocument(doc, { title: 'Not A Collection' });
+		const source = createDocument(doc, { title: 'Source Doc' });
+
+		const { token } = createToken({
+			clientLabel: 'Scoped Embed Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: []
+		});
+		const mcpServer = createMcpServer();
+
+		const outOfScopeResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{ parentId: source.id, blockType: 'collection_view', referencedRecordId: secret.id },
+			token
+		);
+		expect(outOfScopeResult.isError).toBe(true);
+		expect(getTextContent(outOfScopeResult)).not.toContain('Secret Tasks');
+
+		const wrongKindResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{ parentId: source.id, blockType: 'collection_view', referencedRecordId: docTarget.id },
+			token
+		);
+		expect(wrongKindResult.isError).toBe(true);
+	});
 });
 
 describe('mcp server: authentication', () => {
@@ -511,9 +597,11 @@ describe('mcp server: full tool surface', () => {
 		);
 		const blockId = JSON.parse(getTextContent(createBlockResult)).recordId;
 
-		// write_record with none of markdown/properties/referencedRecordId throws a plain Error.
+		// write_record with none of markdown/properties/referencedRecordId/viewConfig throws a plain Error.
 		const writeResult = await invokeTool(mcpServer, 'write_record', { recordId: blockId }, token);
 		expect(writeResult.isError).toBe(true);
-		expect(getTextContent(writeResult)).toContain('markdown, properties, or referencedRecordId');
+		expect(getTextContent(writeResult)).toContain(
+			'markdown, properties, referencedRecordId, or viewConfig'
+		);
 	});
 });

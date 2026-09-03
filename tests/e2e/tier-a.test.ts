@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
 import {
+	createCollection,
 	createDocument,
 	createRecord,
 	getRecord,
@@ -969,6 +970,82 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		expect(getResultText(deniedRes)).not.toContain('Secret Doc');
 
 		// The rejected retarget left the link pointing at targetB, unchanged.
+		const record = getRecord(yjs.doc, blockId);
+		expect(record?.referencedRecordId).toBe(targetB.id);
+	});
+
+	it('13. MCP create_record accepts blockType: collection_view (previously rejected by the schema itself), sets referencedRecordId + viewConfig in one call, and write_record retargets/reconfigures it, with the permission and kind boundaries enforced (issue #37)', async () => {
+		const yjs = harness.getYjsClient();
+		const targetA = createCollection(yjs.doc, { title: 'Tasks A', schema: [] });
+		const targetB = createCollection(yjs.doc, { title: 'Tasks B', schema: [] });
+		const docTarget = createDocument(yjs.doc, { title: 'Not A Collection' });
+		const secretCollection = createCollection(yjs.doc, { title: 'Secret Tasks', schema: [] });
+		const source = createDocument(yjs.doc, { title: 'Source Doc' });
+
+		const { token } = harness.createToken({
+			clientLabel: 'Embed Agent',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: [targetA.id, targetB.id]
+		});
+
+		const mcp = await harness.getMcpClient(token);
+
+		// 1st call: create + configure a collection_view block in one call. Before
+		// issue #37, 'collection_view' wasn't even in the MCP blockType schema, so
+		// this call would be rejected by protocol-level zod validation before ever
+		// reaching service-layer code.
+		const createRes = await mcp.callTool({
+			name: 'create_record',
+			arguments: {
+				parentId: source.id,
+				blockType: 'collection_view',
+				referencedRecordId: targetA.id,
+				viewConfig: { viewType: 'table' }
+			}
+		});
+		expect(createRes.isError).toBeFalsy();
+		const blockId = parseMcpText<{ recordId: string }>(createRes).recordId;
+
+		await harness.waitForCondition(() => {
+			const record = getRecord(yjs.doc, blockId);
+			return record?.referencedRecordId === targetA.id && record?.viewConfig?.viewType === 'table';
+		});
+
+		// 2nd, independent MCP client + call: retarget and reconfigure via
+		// write_record's named fields.
+		const mcp2 = await harness.getMcpClient(token);
+		const writeRes = await mcp2.callTool({
+			name: 'write_record',
+			arguments: {
+				recordId: blockId,
+				referencedRecordId: targetB.id,
+				viewConfig: { viewType: 'board', groupBy: 'status' }
+			}
+		});
+		expect(writeRes.isError).toBeFalsy();
+
+		await harness.waitForCondition(() => {
+			const record = getRecord(yjs.doc, blockId);
+			return record?.referencedRecordId === targetB.id && record?.viewConfig?.viewType === 'board';
+		});
+
+		// Rejected: target resolves to a Document, not a Collection.
+		const wrongKindRes = await mcp2.callTool({
+			name: 'write_record',
+			arguments: { recordId: blockId, referencedRecordId: docTarget.id }
+		});
+		expect(wrongKindRes.isError).toBe(true);
+
+		// Rejected: target outside the caller's granted Collections, without
+		// leaking whether it exists.
+		const deniedRes = await mcp2.callTool({
+			name: 'write_record',
+			arguments: { recordId: blockId, referencedRecordId: secretCollection.id }
+		});
+		expect(deniedRes.isError).toBe(true);
+		expect(getResultText(deniedRes)).not.toContain('Secret Tasks');
+
+		// Neither rejected retarget mutated the block — still pointing at targetB.
 		const record = getRecord(yjs.doc, blockId);
 		expect(record?.referencedRecordId).toBe(targetB.id);
 	});

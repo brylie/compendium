@@ -5,9 +5,11 @@ import { clientIdForToken, isHeldByClient, releaseAgentHold } from '$lib/server/
 import {
 	createRecord as crdtCreateRecord,
 	deleteRecord as crdtDeleteRecord,
+	getCollection as crdtGetCollection,
 	getDocument as crdtGetDocument,
 	getRecordYText,
 	setRecordReferencedId as crdtSetRecordReferencedId,
+	setRecordViewConfig as crdtSetRecordViewConfig,
 	updateRecordContent,
 	updateRecordProperties
 } from '$lib/data/records';
@@ -16,7 +18,14 @@ import { reserveRecordLocator, releaseRecordLocator } from '$lib/server/catalog'
 import { markdownToRichText } from '$lib/mcp/markdown-transcode';
 import { yTextToRichText } from '$lib/data/richtext';
 import { tokenAllowsParent } from '$lib/mcp/tokens';
-import type { BlockType, ChildPagesDepth, PropertyValue, WorkspaceRecord } from '$lib/data/types';
+import type {
+	BlockType,
+	ChildPagesDepth,
+	EmbeddedViewConfig,
+	PropertyValue,
+	ViewType,
+	WorkspaceRecord
+} from '$lib/data/types';
 import {
 	actorForCaller,
 	isAccessToken,
@@ -36,15 +45,20 @@ export class HoldRequiredError extends Error {
 }
 
 /**
- * Thrown when a `page_link`/`child_pages` block's target isn't a Document the caller can
- * already reach. Deliberately a single generic message for "doesn't exist" and "exists but out
- * of token scope" alike, so a probing caller can't use this as an oracle to learn whether a
- * given ID exists (docs/specifications/internal-links.md §4, audit-coverage.md §3's "never leak
- * more than what the caller already supplied" principle).
+ * Thrown when a `page_link`/`child_pages` block's target isn't a Document, or a
+ * `collection_view` block's target isn't a Collection, that the caller can already reach.
+ * Deliberately a single generic message per kind for "doesn't exist" and "exists but out of
+ * token scope" alike, so a probing caller can't use this as an oracle to learn whether a given
+ * ID exists (docs/specifications/internal-links.md §4, audit-coverage.md §3's "never leak more
+ * than what the caller already supplied" principle).
  */
 export class InvalidLinkTargetError extends Error {
-	constructor(targetId: string) {
-		super(`${targetId} is not an accessible Document — page_link/child_pages can only target one.`);
+	constructor(targetId: string, kind: 'Document' | 'Collection' = 'Document') {
+		super(
+			kind === 'Document'
+				? `${targetId} is not an accessible Document — page_link/child_pages can only target one.`
+				: `${targetId} is not an accessible Collection — collection_view can only target one.`
+		);
 		this.name = 'InvalidLinkTargetError';
 	}
 }
@@ -67,11 +81,74 @@ function validateDocumentReferenceTarget(caller: CallerIdentity, targetId: strin
 	}
 }
 
+// A collection_view block's referencedRecordId must resolve to an existing,
+// caller-accessible Collection (never a Document) — mirrors the
+// `linkedTarget?.kind === 'collection'` check the read side already applies
+// (services/documents.ts's resolveRecordLink), closing the write-side gap
+// tracked by issue #37.
+function validateCollectionReferenceTarget(caller: CallerIdentity, targetId: string): void {
+	// A Collection has its own real shard too (#120) — same locator-backed
+	// resolution validateDocumentReferenceTarget uses above.
+	const { doc, parentSpaceId } = resolveParentWorkspaceContext(targetId);
+	const target = crdtGetCollection(doc, targetId);
+	if (!target) throw new InvalidLinkTargetError(targetId, 'Collection');
+	if (isAccessToken(caller) && !tokenAllowsParent(caller, targetId, parentSpaceId)) {
+		throw new InvalidLinkTargetError(targetId, 'Collection');
+	}
+}
+
+const VIEW_TYPES: readonly ViewType[] = ['table', 'board', 'calendar'];
+
+/** Validates a `collection_view` block's `viewConfig` — only accepted on that block type, and only with a recognized `viewType`. Deeper member shape (filters/sort/etc.) is left to the MCP-boundary zod schema, the same depth every other structured MCP input (e.g. `properties`) is validated at. */
+function validateViewConfig(
+	blockType: BlockType | undefined,
+	viewConfig: EmbeddedViewConfig
+): void {
+	if (blockType !== 'collection_view') {
+		throw new Error('viewConfig is only valid on a collection_view block.');
+	}
+	if (!VIEW_TYPES.includes(viewConfig.viewType)) {
+		throw new Error('viewConfig.viewType must be "table", "board", or "calendar".');
+	}
+}
+
 function validateChildPagesDepth(depth: ChildPagesDepth): void {
 	if (depth === 'unlimited') return;
 	if (!Number.isSafeInteger(depth) || depth < 1) {
 		throw new Error('childPagesDepth must be a positive integer or "unlimited".');
 	}
+}
+
+// Extracted from createRecord purely to keep that function's cognitive
+// complexity down — this is still exactly its referencedRecordId branch,
+// not a reusable rule applied elsewhere (create_record is the only place a
+// referencedRecordId is set alongside a fresh blockType; writeRecord's
+// retarget path already knows its record's existing blockType, so it has
+// its own, differently-shaped validateReferencedRecordIdWrite below).
+function validateCreateReferencedRecordId(
+	caller: CallerIdentity,
+	doc: Y.Doc,
+	parentId: string,
+	blockType: BlockType | undefined,
+	referencedRecordId: string
+): void {
+	if (blockType && DOCUMENT_REFERENCE_BLOCK_TYPES.includes(blockType)) {
+		if (!crdtGetDocument(doc, parentId)) {
+			throw new Error('page_link and child_pages blocks can only be created inside a Document.');
+		}
+		validateDocumentReferenceTarget(caller, referencedRecordId);
+		return;
+	}
+	if (blockType === 'collection_view') {
+		if (!crdtGetDocument(doc, parentId)) {
+			throw new Error('collection_view blocks can only be created inside a Document.');
+		}
+		validateCollectionReferenceTarget(caller, referencedRecordId);
+		return;
+	}
+	throw new Error(
+		'referencedRecordId is only valid on a page_link, child_pages, or collection_view block.'
+	);
 }
 
 /**
@@ -89,6 +166,7 @@ export function createRecord(
 		blockType?: BlockType;
 		properties?: Record<string, PropertyValue>;
 		referencedRecordId?: string;
+		viewConfig?: EmbeddedViewConfig;
 		childPagesDepth?: ChildPagesDepth;
 	}
 ): WorkspaceRecord {
@@ -109,13 +187,17 @@ export function createRecord(
 	}
 
 	if (input.referencedRecordId !== undefined) {
-		if (!input.blockType || !DOCUMENT_REFERENCE_BLOCK_TYPES.includes(input.blockType)) {
-			throw new Error('referencedRecordId is only valid on a page_link or child_pages block.');
-		}
-		if (!crdtGetDocument(doc, input.parentId)) {
-			throw new Error('page_link and child_pages blocks can only be created inside a Document.');
-		}
-		validateDocumentReferenceTarget(caller, input.referencedRecordId);
+		validateCreateReferencedRecordId(
+			caller,
+			doc,
+			input.parentId,
+			input.blockType,
+			input.referencedRecordId
+		);
+	}
+
+	if (input.viewConfig !== undefined) {
+		validateViewConfig(input.blockType, input.viewConfig);
 	}
 
 	if (input.childPagesDepth !== undefined) {
@@ -149,6 +231,7 @@ export function createRecord(
 				blockType: input.blockType,
 				properties: input.properties,
 				referencedRecordId: input.referencedRecordId,
+				viewConfig: input.viewConfig,
 				childPagesDepth: input.childPagesDepth
 			},
 			actor
@@ -166,29 +249,41 @@ interface WriteRecordInput {
 	markdown?: string;
 	properties?: Record<string, PropertyValue>;
 	referencedRecordId?: string;
+	viewConfig?: EmbeddedViewConfig;
 }
 
 // Validated up front, before any mutation in writeRecord below: a call
 // combining markdown (or properties) with an invalid referencedRecordId
 // must reject cleanly, not commit the content write, release the hold, and
 // audit it before throwing on the retarget. write_record's referencedRecordId
-// support stays page_link-only — unlike create_record's initial value,
-// reconfiguring a child_pages block's target after creation is UI-only, via
-// setRecordChildPagesConfig, the same "no MCP write path" precedent
-// calloutStyle already established (rich-text-toolbar.md §7).
+// support covers page_link and collection_view (the two block types whose
+// target is retargetable post-creation) — unlike create_record's initial
+// value, reconfiguring a child_pages block's target after creation is
+// UI-only, via setRecordChildPagesConfig, the same "no MCP write path"
+// precedent calloutStyle already established (rich-text-toolbar.md §7).
 function validateReferencedRecordIdWrite(
 	caller: CallerIdentity,
 	doc: Y.Doc,
 	record: WorkspaceRecord,
 	referencedRecordId: string
 ): void {
-	if (record.blockType !== 'page_link') {
-		throw new Error('referencedRecordId can only be written on a page_link block.');
+	if (record.blockType === 'page_link') {
+		if (!crdtGetDocument(doc, record.parentId)) {
+			throw new Error('page_link blocks can only exist inside a Document.');
+		}
+		validateDocumentReferenceTarget(caller, referencedRecordId);
+		return;
 	}
-	if (!crdtGetDocument(doc, record.parentId)) {
-		throw new Error('page_link blocks can only exist inside a Document.');
+	if (record.blockType === 'collection_view') {
+		if (!crdtGetDocument(doc, record.parentId)) {
+			throw new Error('collection_view blocks can only exist inside a Document.');
+		}
+		validateCollectionReferenceTarget(caller, referencedRecordId);
+		return;
 	}
-	validateDocumentReferenceTarget(caller, referencedRecordId);
+	throw new Error(
+		'referencedRecordId can only be written on a page_link or collection_view block.'
+	);
 }
 
 function writeRecordMarkdown(
@@ -249,21 +344,50 @@ function applyReferencedRecordIdWrite(
 	});
 }
 
+function applyViewConfigWrite(
+	doc: Y.Doc,
+	record: WorkspaceRecord,
+	recordId: string,
+	actor: ReturnType<typeof actorForCaller>,
+	viewConfig: EmbeddedViewConfig
+): void {
+	// A full replace, mirroring create_record's initial value — not the UI's
+	// per-member patchRecordViewConfig (issue #71), which exists to let two
+	// draft-editing collaborators' concurrent member edits both survive. An
+	// MCP write always supplies a whole EmbeddedViewConfig, the same "outright
+	// reconfigure" shape setRecordViewConfig is for (see its own doc comment).
+	const before = record.viewConfig;
+	crdtSetRecordViewConfig(doc, recordId, viewConfig, actor);
+	logAudit({
+		actor,
+		action: 'write_record',
+		targetRecordId: recordId,
+		diff: { viewConfig: { before, after: viewConfig } }
+	});
+}
+
 /**
- * Applies one or more of `input.markdown`/`properties`/`referencedRecordId` to a record,
- * after checking the caller may access it. Each part is validated up front — an invalid
- * `referencedRecordId` rejects before any mutation, content write, or hold release commits —
- * and each applied part is audited separately. A markdown write additionally requires an
- * agent caller to already hold the record (see writeRecordMarkdown), releasing that hold on
- * success.
+ * Applies one or more of `input.markdown`/`properties`/`referencedRecordId`/`viewConfig` to a
+ * record, after checking the caller may access it. Each part is validated up front — an
+ * invalid `referencedRecordId`/`viewConfig` rejects before any mutation, content write, or
+ * hold release commits — and each applied part is audited separately. A markdown write
+ * additionally requires an agent caller to already hold the record (see writeRecordMarkdown),
+ * releasing that hold on success.
  */
 export function writeRecord(
 	caller: CallerIdentity,
 	recordId: string,
 	input: WriteRecordInput
 ): void {
-	if (input.markdown === undefined && !input.properties && input.referencedRecordId === undefined) {
-		throw new Error('write_record requires markdown, properties, or referencedRecordId');
+	if (
+		input.markdown === undefined &&
+		!input.properties &&
+		input.referencedRecordId === undefined &&
+		input.viewConfig === undefined
+	) {
+		throw new Error(
+			'write_record requires markdown, properties, referencedRecordId, or viewConfig'
+		);
 	}
 
 	const { doc, awareness } = resolveRecordWorkspaceContext(recordId);
@@ -272,6 +396,10 @@ export function writeRecord(
 
 	if (input.referencedRecordId !== undefined) {
 		validateReferencedRecordIdWrite(caller, doc, record, input.referencedRecordId);
+	}
+
+	if (input.viewConfig !== undefined) {
+		validateViewConfig(record.blockType, input.viewConfig);
 	}
 
 	if (input.markdown !== undefined) {
@@ -290,6 +418,10 @@ export function writeRecord(
 
 	if (input.referencedRecordId !== undefined) {
 		applyReferencedRecordIdWrite(doc, record, recordId, actor, input.referencedRecordId);
+	}
+
+	if (input.viewConfig !== undefined) {
+		applyViewConfigWrite(doc, record, recordId, actor, input.viewConfig);
 	}
 }
 
