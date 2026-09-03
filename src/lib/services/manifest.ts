@@ -66,7 +66,7 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 		ui: true,
 		mcpToolName: 'create_record',
 		mcpDescription:
-			'Create a new block (in a Document) or row (in a Collection). No hold needed. `referencedRecordId` sets a page_link block\'s target in the same call — only valid when blockType is "page_link", the parent is a Document, and the target is an accessible Document.'
+			'Create a new block (in a Document) or row (in a Collection). No hold needed. `referencedRecordId` sets a page_link or child_pages block\'s target in the same call — only valid when blockType is "page_link" or "child_pages", the parent is a Document, and the target is an accessible Document; for child_pages it is optional (absent defaults to the current Document). `childPagesDepth` (a positive integer, or "unlimited") sets a child_pages block\'s nesting depth — only valid when blockType is "child_pages"; absent defaults to 1 (immediate children only).'
 	},
 	'records.writeRecord': {
 		mcp: true,

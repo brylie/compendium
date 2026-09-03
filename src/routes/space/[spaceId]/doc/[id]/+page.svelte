@@ -42,6 +42,7 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import CollectionViewBlock from '$lib/components/CollectionViewBlock.svelte';
 	import CalloutBlock from '$lib/components/CalloutBlock.svelte';
+	import ChildPagesBlock from '$lib/components/ChildPagesBlock.svelte';
 	import PromptDialog from '$lib/components/PromptDialog.svelte';
 	import type { PageProps } from './$types';
 
@@ -477,7 +478,8 @@
 		'page_link',
 		'embed',
 		'synced_block',
-		'collection_view'
+		'collection_view',
+		'child_pages'
 	];
 
 	function blockHoldsFreeformText(blockType?: BlockType): boolean {
@@ -1308,6 +1310,15 @@
 					{:else if bt === 'collection_view'}
 						{#if ydoc}
 							<CollectionViewBlock {block} {ydoc} collections={data.collections} />
+						{/if}
+					{:else if bt === 'child_pages'}
+						{#if ydoc}
+							<ChildPagesBlock
+								{block}
+								{ydoc}
+								documents={data.documents}
+								currentDocumentId={data.documentId}
+							/>
 						{/if}
 					{:else}
 						<!-- Standard text blocks: headings, paragraph, to_do text, toggle text -->

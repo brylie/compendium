@@ -44,7 +44,8 @@ export type BlockType =
 	| 'synced_block'
 	| 'page_link'
 	| 'embed'
-	| 'collection_view'; // embeds a Table/Board/Calendar view of a Collection inline in a Document — see collection-views.md
+	| 'collection_view' // embeds a Table/Board/Calendar view of a Collection inline in a Document — see collection-views.md
+	| 'child_pages'; // live listing of a Document's sub-pages (Confluence-style page tree) — issue #43
 
 // "View" here means a Collection/database view (Table/Board/Calendar — a
 // rendering + configuration over a Collection's records), never an MVC-style
@@ -77,6 +78,22 @@ export type CalloutStyle =
 	// stored — computed text contrast must never go stale relative to a
 	// separately-stored, independently-editable color.
 	| { kind: 'custom'; icon: CalloutIcon; color: string };
+
+// How many levels of sub-pages a child_pages block renders below its target
+// Document — 1 (the default, absent value) lists immediate children only, a
+// higher integer lists that many nesting levels, and 'unlimited' walks the
+// whole subtree. Mirrors Confluence's "Children Display" macro's own depth
+// option (issue #43).
+export type ChildPagesDepth = number | 'unlimited';
+
+// One node of a child_pages block's resolved listing — deliberately lighter
+// than DocumentTreeNode (no `order`/`recordIds`/`spaceId`/`level`): this is
+// read-only display output, not a Document read model in its own right.
+export interface ChildPageNode {
+	id: string;
+	title: string;
+	children: ChildPageNode[];
+}
 
 export type ViewFilterOp = 'is' | 'is_not' | 'is_empty' | 'is_not_empty';
 
@@ -152,9 +169,14 @@ export interface WorkspaceRecord {
 	properties?: Record<string, PropertyValue>; // set when parent is a Collection
 	checked?: boolean; // for to_do blocks
 	collapsed?: boolean; // for toggle blocks
-	referencedRecordId?: string; // for synced_block, page_link, and collection_view (the target Collection)
+	// for synced_block, page_link, and collection_view (the target Collection);
+	// also for child_pages (the target Document whose sub-pages are listed) —
+	// absent there means "the current Document", a different absent-value
+	// meaning than page_link/collection_view's "unconfigured" (issue #43)
+	referencedRecordId?: string;
 	viewConfig?: EmbeddedViewConfig; // for collection_view blocks only
 	calloutStyle?: CalloutStyle; // for callout blocks only — absent renders the pre-#42 neutral default
+	childPagesDepth?: ChildPagesDepth; // for child_pages blocks only — absent means depth 1 (immediate children only)
 	createdBy: ActorId;
 	createdAt: number;
 	lastEditedBy: ActorId;

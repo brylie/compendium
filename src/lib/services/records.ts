@@ -16,7 +16,7 @@ import { reserveRecordLocator, releaseRecordLocator } from '$lib/server/catalog'
 import { markdownToRichText } from '$lib/mcp/markdown-transcode';
 import { yTextToRichText } from '$lib/data/richtext';
 import { tokenAllowsParent } from '$lib/mcp/tokens';
-import type { BlockType, PropertyValue, WorkspaceRecord } from '$lib/data/types';
+import type { BlockType, ChildPagesDepth, PropertyValue, WorkspaceRecord } from '$lib/data/types';
 import {
 	actorForCaller,
 	isAccessToken,
@@ -36,23 +36,29 @@ export class HoldRequiredError extends Error {
 }
 
 /**
- * Thrown when a `page_link`'s target isn't a Document the caller can already reach.
- * Deliberately a single generic message for "doesn't exist" and "exists but out of token
- * scope" alike, so a probing caller can't use this as an oracle to learn whether a given ID
- * exists (docs/specifications/internal-links.md §4, audit-coverage.md §3's "never leak more
- * than what the caller already supplied" principle).
+ * Thrown when a `page_link`/`child_pages` block's target isn't a Document the caller can
+ * already reach. Deliberately a single generic message for "doesn't exist" and "exists but out
+ * of token scope" alike, so a probing caller can't use this as an oracle to learn whether a
+ * given ID exists (docs/specifications/internal-links.md §4, audit-coverage.md §3's "never leak
+ * more than what the caller already supplied" principle).
  */
 export class InvalidLinkTargetError extends Error {
 	constructor(targetId: string) {
-		super(`${targetId} is not an accessible Document — page_link can only target one.`);
+		super(`${targetId} is not an accessible Document — page_link/child_pages can only target one.`);
 		this.name = 'InvalidLinkTargetError';
 	}
 }
 
-function validatePageLinkTarget(caller: CallerIdentity, targetId: string): void {
-	// A page_link's target is always a Document, which has its own real shard
-	// (#120) — resolveParentWorkspaceContext finds it via the catalog locator,
-	// falling back to the default doc for an untracked/legacy target.
+// Both block types' referencedRecordId must resolve to an existing,
+// caller-accessible Document (never a Collection) — page_link's target is
+// always required to be one, and child_pages' explicit target (when set at
+// all; it's optional there) is one too.
+const DOCUMENT_REFERENCE_BLOCK_TYPES: readonly BlockType[] = ['page_link', 'child_pages'];
+
+function validateDocumentReferenceTarget(caller: CallerIdentity, targetId: string): void {
+	// The target is always a Document, which has its own real shard (#120) —
+	// resolveParentWorkspaceContext finds it via the catalog locator, falling
+	// back to the default doc for an untracked/legacy target.
 	const { doc, parentSpaceId } = resolveParentWorkspaceContext(targetId);
 	const target = crdtGetDocument(doc, targetId);
 	if (!target) throw new InvalidLinkTargetError(targetId);
@@ -61,12 +67,19 @@ function validatePageLinkTarget(caller: CallerIdentity, targetId: string): void 
 	}
 }
 
+function validateChildPagesDepth(depth: ChildPagesDepth): void {
+	if (depth === 'unlimited') return;
+	if (!Number.isSafeInteger(depth) || depth < 1) {
+		throw new Error('childPagesDepth must be a positive integer or "unlimited".');
+	}
+}
+
 /**
  * Creates a new record (block or row) under `input.parentId`, after checking the caller may
- * access that parent and, for a `page_link` block, that its `referencedRecordId` target is
- * itself an accessible Document. Reserves the record's catalog locator before the CRDT write
- * so a row can never exist in a non-default shard without one, rolling the reservation back
- * if the write itself then fails.
+ * access that parent and, for a `page_link`/`child_pages` block whose `referencedRecordId` is
+ * set, that its target is itself an accessible Document. Reserves the record's catalog locator
+ * before the CRDT write so a row can never exist in a non-default shard without one, rolling
+ * the reservation back if the write itself then fails.
  */
 export function createRecord(
 	caller: CallerIdentity,
@@ -76,6 +89,7 @@ export function createRecord(
 		blockType?: BlockType;
 		properties?: Record<string, PropertyValue>;
 		referencedRecordId?: string;
+		childPagesDepth?: ChildPagesDepth;
 	}
 ): WorkspaceRecord {
 	const { doc, workspaceId, shardId, defaultSpaceId } = resolveParentWorkspaceContext(
@@ -85,14 +99,30 @@ export function createRecord(
 
 	requireAccessibleParent(caller, input.parentId, 'create_record');
 
+	// Checked unconditionally, not just when referencedRecordId/childPagesDepth
+	// happen to be supplied — a targetless, default-depth child_pages block
+	// ("list the current Document's own children") is the single most common
+	// call shape, and without this the CRDT layer would otherwise silently
+	// treat a Collection parent as a plain row, ignoring blockType entirely.
+	if (input.blockType === 'child_pages' && !crdtGetDocument(doc, input.parentId)) {
+		throw new Error('child_pages blocks can only be created inside a Document.');
+	}
+
 	if (input.referencedRecordId !== undefined) {
-		if (input.blockType !== 'page_link') {
-			throw new Error('referencedRecordId is only valid on a page_link block.');
+		if (!input.blockType || !DOCUMENT_REFERENCE_BLOCK_TYPES.includes(input.blockType)) {
+			throw new Error('referencedRecordId is only valid on a page_link or child_pages block.');
 		}
 		if (!crdtGetDocument(doc, input.parentId)) {
-			throw new Error('page_link blocks can only be created inside a Document.');
+			throw new Error('page_link and child_pages blocks can only be created inside a Document.');
 		}
-		validatePageLinkTarget(caller, input.referencedRecordId);
+		validateDocumentReferenceTarget(caller, input.referencedRecordId);
+	}
+
+	if (input.childPagesDepth !== undefined) {
+		if (input.blockType !== 'child_pages') {
+			throw new Error('childPagesDepth is only valid on a child_pages block.');
+		}
+		validateChildPagesDepth(input.childPagesDepth);
 	}
 
 	// Reserved before the CRDT write (not after) so a row can never exist in a
@@ -118,7 +148,8 @@ export function createRecord(
 				afterRecordId: input.afterRecordId,
 				blockType: input.blockType,
 				properties: input.properties,
-				referencedRecordId: input.referencedRecordId
+				referencedRecordId: input.referencedRecordId,
+				childPagesDepth: input.childPagesDepth
 			},
 			actor
 		);
@@ -140,7 +171,11 @@ interface WriteRecordInput {
 // Validated up front, before any mutation in writeRecord below: a call
 // combining markdown (or properties) with an invalid referencedRecordId
 // must reject cleanly, not commit the content write, release the hold, and
-// audit it before throwing on the retarget.
+// audit it before throwing on the retarget. write_record's referencedRecordId
+// support stays page_link-only — unlike create_record's initial value,
+// reconfiguring a child_pages block's target after creation is UI-only, via
+// setRecordChildPagesConfig, the same "no MCP write path" precedent
+// calloutStyle already established (rich-text-toolbar.md §7).
 function validateReferencedRecordIdWrite(
 	caller: CallerIdentity,
 	doc: Y.Doc,
@@ -153,7 +188,7 @@ function validateReferencedRecordIdWrite(
 	if (!crdtGetDocument(doc, record.parentId)) {
 		throw new Error('page_link blocks can only exist inside a Document.');
 	}
-	validatePageLinkTarget(caller, referencedRecordId);
+	validateDocumentReferenceTarget(caller, referencedRecordId);
 }
 
 function writeRecordMarkdown(

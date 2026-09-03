@@ -482,6 +482,151 @@ describe('service layer: centralized business rules & side effects', () => {
 		});
 	});
 
+	describe('child_pages block (issue #43)', () => {
+		it("defaults to listing the containing Document's own immediate children when no target/depth is set", () => {
+			const root = createDocument(human, { title: 'Root' });
+			const childA = createDocument(human, { title: 'Child A', parentDocumentId: root.id });
+			createDocument(human, {
+				title: 'Child B',
+				parentDocumentId: root.id,
+				afterDocumentId: childA.id
+			});
+			createDocument(human, { title: 'Grandchild', parentDocumentId: childA.id });
+			createRecord(human, { parentId: root.id, blockType: 'child_pages' });
+
+			const result = getDocument(human, root.id);
+			const record = result?.records.find((r) => r.blockType === 'child_pages');
+			expect(record?.referencedRecordId).toBeUndefined();
+			expect(record?.childPagesDepth).toBeUndefined();
+			expect(record?.markdown).toBe('- [[Child A]]\n- [[Child B]]');
+		});
+
+		it("lists an explicit target Document's children, nested per its configured depth", () => {
+			const other = createDocument(human, { title: 'Other Root' });
+			const child = createDocument(human, { title: 'Other Child', parentDocumentId: other.id });
+			createDocument(human, { title: 'Other Grandchild', parentDocumentId: child.id });
+			const host = createDocument(human, { title: 'Host' });
+			const block = createRecord(human, {
+				parentId: host.id,
+				blockType: 'child_pages',
+				referencedRecordId: other.id,
+				childPagesDepth: 2
+			});
+
+			const result = getDocument(human, host.id);
+			const record = result?.records.find((r) => r.id === block.id);
+			expect(record?.referencedRecordId).toBe(other.id);
+			expect(record?.childPagesDepth).toBe(2);
+			expect(record?.markdown).toBe('- [[Other Child]]\n  - [[Other Grandchild]]');
+		});
+
+		it('emits a placeholder for a target with no sub-pages', () => {
+			const host = createDocument(human, { title: 'Host' });
+			createRecord(human, { parentId: host.id, blockType: 'child_pages' });
+
+			const result = getDocument(human, host.id);
+			const record = result?.records.find((r) => r.blockType === 'child_pages');
+			expect(record?.markdown).toBe('_No sub-pages yet._');
+		});
+
+		it('rejects create_record with childPagesDepth on any other block type', () => {
+			const host = createDocument(human, { title: 'Host' });
+			expect(() =>
+				createRecord(human, { parentId: host.id, blockType: 'paragraph', childPagesDepth: 2 })
+			).toThrow(/childPagesDepth/);
+		});
+
+		it('rejects create_record with a childPagesDepth that is neither a positive integer nor "unlimited"', () => {
+			const host = createDocument(human, { title: 'Host' });
+			expect(() =>
+				createRecord(human, { parentId: host.id, blockType: 'child_pages', childPagesDepth: 0 })
+			).toThrow(/childPagesDepth/);
+			expect(() =>
+				createRecord(human, { parentId: host.id, blockType: 'child_pages', childPagesDepth: 1.5 })
+			).toThrow(/childPagesDepth/);
+		});
+
+		it('rejects create_record with a referencedRecordId pointing at a Collection instead of a Document', () => {
+			const col = createCollection(human, { title: 'Rows' });
+			const host = createDocument(human, { title: 'Host' });
+			expect(() =>
+				createRecord(human, {
+					parentId: host.id,
+					blockType: 'child_pages',
+					referencedRecordId: col.id
+				})
+			).toThrow(/Document/);
+		});
+
+		it('rejects a targetless, default-depth child_pages block under a Collection parent', () => {
+			const col = createCollection(human, { title: 'Rows' });
+			expect(() => createRecord(human, { parentId: col.id, blockType: 'child_pages' })).toThrow(
+				/Document/
+			);
+		});
+
+		it('renders "[child pages: unavailable]" for a deleted target, without distinguishing it from an out-of-scope one', () => {
+			const target = createDocument(human, { title: 'Target' });
+			const host = createDocument(human, { title: 'Host' });
+			const block = createRecord(human, {
+				parentId: host.id,
+				blockType: 'child_pages',
+				referencedRecordId: target.id
+			});
+			deleteDocument(human, target.id);
+
+			const result = getDocument(human, host.id);
+			const record = result?.records.find((r) => r.id === block.id);
+			expect(record?.markdown).toBe('[child pages: unavailable]');
+			expect(record?.linkBroken).toBe(true);
+			// Preserved for recovery even once broken — same rule page_link's
+			// referencedRecordId already follows (mcp-tools.md); only an
+			// out-of-scope target (not a merely-deleted one) is omitted.
+			expect(record?.referencedRecordId).toBe(target.id);
+		});
+
+		it('renders "[child pages: unavailable]" and omits referencedRecordId when the target is outside the caller token scope', () => {
+			const secret = createDocument(human, { title: 'Secret' });
+			const host = createDocument(human, { title: 'Host' });
+			const block = createRecord(human, {
+				parentId: host.id,
+				blockType: 'child_pages',
+				referencedRecordId: secret.id
+			});
+
+			const { record: tokenRecord } = createToken({
+				clientLabel: 'Scoped Child Pages Bot',
+				allowedDocumentIds: [host.id],
+				allowedCollectionIds: []
+			});
+
+			const result = getDocument(tokenRecord, host.id);
+			const record = result?.records.find((r) => r.id === block.id);
+			expect(record?.markdown).toBe('[child pages: unavailable]');
+			expect(record?.referencedRecordId).toBeUndefined();
+		});
+
+		it("silently excludes a child the caller's token was never granted access to, rather than erroring", () => {
+			const root = createDocument(human, { title: 'Root' });
+			const visibleChild = createDocument(human, {
+				title: 'Visible Child',
+				parentDocumentId: root.id
+			});
+			createDocument(human, { title: 'Hidden Child', parentDocumentId: root.id });
+			createRecord(human, { parentId: root.id, blockType: 'child_pages' });
+
+			const { record: tokenRecord } = createToken({
+				clientLabel: 'Scoped Sibling Bot',
+				allowedDocumentIds: [root.id, visibleChild.id],
+				allowedCollectionIds: []
+			});
+
+			const result = getDocument(tokenRecord, root.id);
+			const record = result?.records.find((r) => r.blockType === 'child_pages');
+			expect(record?.markdown).toBe('- [[Visible Child]]');
+		});
+	});
+
 	// Regression coverage for a CodeRabbit finding on #172: an uncataloged
 	// target (no locator row) has no resolved spaceId, so a token relying
 	// solely on a default-Space grant (not a per-id grant) was silently

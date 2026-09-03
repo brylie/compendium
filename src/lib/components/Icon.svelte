@@ -50,7 +50,8 @@
 			| 'star'
 			| 'lightbulb'
 			| 'warning'
-			| 'danger';
+			| 'danger'
+			| 'child-pages';
 		size?: number;
 		class?: string;
 	} = $props();
@@ -202,5 +203,10 @@
 	{:else if name === 'danger'}
 		<path d="M6.5 3.5h7L17 6.5v7L13.5 16.5h-7L3 13.5v-7L6.5 3.5Z" stroke-linejoin="round" />
 		<path d="M10 6.5v4.5m0 3h.01" />
+	{:else if name === 'child-pages'}
+		<rect x="7.5" y="2.5" width="5" height="4" rx="1" />
+		<path d="M10 6.5v2.5M4.5 12.5v-2a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v2" />
+		<rect x="2" y="12.5" width="5" height="4" rx="1" />
+		<rect x="13" y="12.5" width="5" height="4" rx="1" />
 	{/if}
 </svg>

@@ -39,8 +39,11 @@ const blockTypeSchema = z.enum([
 	'table_of_contents',
 	'synced_block',
 	'page_link',
-	'embed'
+	'embed',
+	'child_pages'
 ]);
+
+const childPagesDepthSchema = z.union([z.number().int().positive(), z.literal('unlimited')]);
 
 function textResult(data: unknown): CallToolResult {
 	return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
@@ -328,9 +331,13 @@ export function createMcpServer(): McpServer {
 			afterRecordId: z.string().optional(),
 			blockType: blockTypeSchema.optional(),
 			properties: z.record(z.string(), propertyValueSchema).optional(),
-			referencedRecordId: z.string().optional()
+			referencedRecordId: z.string().optional(),
+			childPagesDepth: childPagesDepthSchema.optional()
 		},
-		async ({ parentId, afterRecordId, blockType, properties, referencedRecordId }, extra) => {
+		async (
+			{ parentId, afterRecordId, blockType, properties, referencedRecordId, childPagesDepth },
+			extra
+		) => {
 			try {
 				const token = requireToken(extra);
 				const record = serviceModules.records.createRecord(token, {
@@ -338,7 +345,8 @@ export function createMcpServer(): McpServer {
 					afterRecordId,
 					blockType: blockType as BlockType | undefined,
 					properties,
-					referencedRecordId
+					referencedRecordId,
+					childPagesDepth
 				});
 				return textResult({ recordId: record.id });
 			} catch (err) {

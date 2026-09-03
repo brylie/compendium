@@ -30,11 +30,13 @@ import {
 	patchRecordViewConfig,
 	previewCollectionPropertyTypeChange,
 	reorderRecord,
+	resolveChildPages,
 	resolvePrimaryField,
 	setBlockType,
 	setPrimaryField,
 	setRecordCalloutStyle,
 	setRecordChecked,
+	setRecordChildPagesConfig,
 	setRecordCollapsed,
 	setRecordReferencedId,
 	setRecordViewConfig,
@@ -151,6 +153,130 @@ describe('document hierarchy and tree', () => {
 
 		deleteDocument(doc, parent.id);
 		expect(listDocuments(doc)).toHaveLength(0);
+	});
+});
+
+describe('resolveChildPages (issue #43)', () => {
+	it('lists only immediate children at the default depth (1)', () => {
+		const doc = new Y.Doc();
+		const root = createDocument(doc, { title: 'Root' });
+		const child1 = createDocument(doc, { title: 'Child 1', parentDocumentId: root.id });
+		const child2 = createDocument(doc, {
+			title: 'Child 2',
+			parentDocumentId: root.id,
+			afterDocumentId: child1.id
+		});
+		createDocument(doc, { title: 'Grandchild', parentDocumentId: child1.id });
+
+		const result = resolveChildPages(listDocuments(doc), root.id, 1);
+		expect(result.map((n) => n.id)).toEqual([child1.id, child2.id]);
+		expect(result[0].children).toEqual([]);
+	});
+
+	it('includes N levels of nesting for a numeric depth', () => {
+		const doc = new Y.Doc();
+		const root = createDocument(doc, { title: 'Root' });
+		const child = createDocument(doc, { title: 'Child', parentDocumentId: root.id });
+		const grandchild = createDocument(doc, {
+			title: 'Grandchild',
+			parentDocumentId: child.id
+		});
+		createDocument(doc, { title: 'Great-grandchild', parentDocumentId: grandchild.id });
+
+		const result = resolveChildPages(listDocuments(doc), root.id, 2);
+		expect(result).toHaveLength(1);
+		expect(result[0].id).toBe(child.id);
+		expect(result[0].children).toHaveLength(1);
+		expect(result[0].children[0].id).toBe(grandchild.id);
+		expect(result[0].children[0].children).toEqual([]);
+	});
+
+	it('walks the whole subtree for depth "unlimited"', () => {
+		const doc = new Y.Doc();
+		const root = createDocument(doc, { title: 'Root' });
+		const child = createDocument(doc, { title: 'Child', parentDocumentId: root.id });
+		const grandchild = createDocument(doc, {
+			title: 'Grandchild',
+			parentDocumentId: child.id
+		});
+		const greatGrandchild = createDocument(doc, {
+			title: 'Great-grandchild',
+			parentDocumentId: grandchild.id
+		});
+
+		const result = resolveChildPages(listDocuments(doc), root.id, 'unlimited');
+		expect(result[0].children[0].children[0].id).toBe(greatGrandchild.id);
+	});
+
+	it('returns an empty list for a target with no children', () => {
+		const doc = new Y.Doc();
+		const root = createDocument(doc, { title: 'Root' });
+		expect(resolveChildPages(listDocuments(doc), root.id, 1)).toEqual([]);
+	});
+
+	it('returns an empty list when the target id is not present in the given documents at all', () => {
+		const doc = new Y.Doc();
+		createDocument(doc, { title: 'Unrelated' });
+		expect(resolveChildPages(listDocuments(doc), 'missing-id', 1)).toEqual([]);
+	});
+});
+
+describe('setRecordChildPagesConfig (issue #43)', () => {
+	it('sets and independently clears the target and depth, defaulting back to undefined', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const other = createDocument(doc, { title: 'Other' });
+		const block = createRecord(doc, { parentId: document.id, blockType: 'child_pages' }, human);
+		expect(getRecord(doc, block.id)?.referencedRecordId).toBeUndefined();
+		expect(getRecord(doc, block.id)?.childPagesDepth).toBeUndefined();
+
+		setRecordChildPagesConfig(doc, block.id, { referencedRecordId: other.id, depth: 3 }, human);
+		expect(getRecord(doc, block.id)?.referencedRecordId).toBe(other.id);
+		expect(getRecord(doc, block.id)?.childPagesDepth).toBe(3);
+
+		setRecordChildPagesConfig(doc, block.id, { depth: 'unlimited' }, human);
+		expect(getRecord(doc, block.id)?.referencedRecordId).toBe(other.id);
+		expect(getRecord(doc, block.id)?.childPagesDepth).toBe('unlimited');
+
+		setRecordChildPagesConfig(doc, block.id, { referencedRecordId: null, depth: null }, human);
+		expect(getRecord(doc, block.id)?.referencedRecordId).toBeUndefined();
+		expect(getRecord(doc, block.id)?.childPagesDepth).toBeUndefined();
+	});
+
+	it('throws NotFoundError for an unknown record', () => {
+		const doc = new Y.Doc();
+		expect(() => setRecordChildPagesConfig(doc, 'missing', { depth: 2 }, human)).toThrow(
+			NotFoundError
+		);
+	});
+
+	it('rejects reconfiguring a record that is not a child_pages block, leaving it untouched', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const target = createDocument(doc, { title: 'Target' });
+		const link = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'page_link', referencedRecordId: target.id },
+			human
+		);
+
+		expect(() =>
+			setRecordChildPagesConfig(doc, link.id, { referencedRecordId: document.id }, human)
+		).toThrow(ValidationError);
+		expect(getRecord(doc, link.id)?.referencedRecordId).toBe(target.id);
+	});
+
+	it('rejects a depth that is not a positive safe integer or "unlimited"', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(doc, { parentId: document.id, blockType: 'child_pages' }, human);
+
+		for (const invalid of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+			expect(() => setRecordChildPagesConfig(doc, block.id, { depth: invalid }, human)).toThrow(
+				ValidationError
+			);
+		}
+		expect(getRecord(doc, block.id)?.childPagesDepth).toBeUndefined();
 	});
 });
 
@@ -1315,6 +1441,29 @@ describe('records: creation ordering, mutation, and not-found edge cases', () =>
 		const targetDoc = new Y.Doc();
 		copyDocumentVerbatim(doc, targetDoc, document.id);
 		expect(getRecord(targetDoc, block.id)?.calloutStyle).toEqual({ kind: 'preset', preset: 'tip' });
+	});
+
+	it('createRecord accepts an initial referencedRecordId/childPagesDepth for a child_pages block, and copyDocumentVerbatim preserves them (issue #43)', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const other = createDocument(doc, { title: 'Other' });
+		const block = createRecord(
+			doc,
+			{
+				parentId: document.id,
+				blockType: 'child_pages',
+				referencedRecordId: other.id,
+				childPagesDepth: 2
+			},
+			human
+		);
+		expect(getRecord(doc, block.id)?.referencedRecordId).toBe(other.id);
+		expect(getRecord(doc, block.id)?.childPagesDepth).toBe(2);
+
+		const targetDoc = new Y.Doc();
+		copyDocumentVerbatim(doc, targetDoc, document.id);
+		expect(getRecord(targetDoc, block.id)?.referencedRecordId).toBe(other.id);
+		expect(getRecord(targetDoc, block.id)?.childPagesDepth).toBe(2);
 	});
 
 	it('setRecordReferencedId points a page_link block at another document and throws NotFoundError for an unknown record', () => {

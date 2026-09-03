@@ -12,6 +12,7 @@ import {
 	Link2,
 	List,
 	ListCollapse,
+	ListTree,
 	ListOrdered,
 	ListTodo,
 	MessageSquareWarning,
@@ -119,6 +120,13 @@ export const TOOLBAR_CONTROLS: readonly ToolbarControl[] = [
 		label: 'Table of contents',
 		icon: TableOfContents,
 		blockType: 'table_of_contents'
+	},
+	{
+		id: 'child-pages',
+		group: 'insert',
+		label: 'Child pages',
+		icon: ListTree,
+		blockType: 'child_pages'
 	},
 	{
 		id: 'synced-block',
