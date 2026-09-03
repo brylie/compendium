@@ -8,11 +8,15 @@ import type {
 	DocumentMeta,
 	DocumentTreeNode,
 	EmbeddedViewConfig,
+	FieldSummaryType,
 	ParentKind,
 	PropertyDefinition,
 	PropertyType,
 	PropertyValue,
 	RichText,
+	ViewFilter,
+	ViewSort,
+	ViewType,
 	WorkspaceRecord
 } from './types';
 import { applyRichTextToYText, yTextToRichText } from './richtext';
@@ -28,6 +32,12 @@ const RECORDS = 'records';
 // different properties of the same row concurrently each merge (Y.Map's
 // per-key LWW) instead of one clobbering the other's unrelated edit.
 const PROP_PREFIX = 'prop:';
+
+// A collection_view block's viewConfig members are likewise stored as
+// individual `viewConfig:<field>` entries rather than one JSON blob, so an
+// edit to `filters` and a concurrent edit to `sort` merge independently
+// instead of one whole-value write silently dropping the other (issue #71).
+const VIEW_CONFIG_PREFIX = 'viewConfig:';
 
 // The known field shape of each top-level Y.Map's entries — the single
 // source of truth TypedYMap uses to give every get/set on these maps a real
@@ -52,7 +62,9 @@ interface CollectionYShape {
 // Collection-row properties aren't part of this shape: they live under
 // dynamic `prop:<key>` entries (see PROP_PREFIX above), read/written via
 // getPropertyValue/setPropertyValue/deletePropertyValue below rather than
-// TypedYMap's fixed-key get/set.
+// TypedYMap's fixed-key get/set. A collection_view block's viewConfig is the
+// same story: dynamic `viewConfig:<field>` entries (see VIEW_CONFIG_PREFIX
+// above), read/written via readViewConfig/writeViewConfigField below.
 interface RecordYShape {
 	id: string;
 	parentId: string;
@@ -63,7 +75,6 @@ interface RecordYShape {
 	checked?: boolean;
 	collapsed?: boolean;
 	referencedRecordId?: string;
-	viewConfig?: EmbeddedViewConfig;
 	createdBy: ActorId;
 	createdAt: number;
 	lastEditedBy: ActorId;
@@ -89,6 +100,49 @@ function setPropertyValue(
 }
 function deletePropertyValue(yrecord: TypedYMap<RecordYShape>, key: string): void {
 	yrecord.raw.delete(PROP_PREFIX + key);
+}
+
+/** Reads one collection_view block's viewConfig back out of its `viewConfig:<field>` entries, or undefined if it isn't configured yet (no `viewType` written). */
+function readViewConfig(yrecord: TypedYMap<RecordYShape>): EmbeddedViewConfig | undefined {
+	const viewType = yrecord.raw.get(VIEW_CONFIG_PREFIX + 'viewType') as ViewType | undefined;
+	if (!viewType) return undefined;
+
+	const filters = yrecord.raw.get(VIEW_CONFIG_PREFIX + 'filters') as ViewFilter[] | undefined;
+	const sort = yrecord.raw.get(VIEW_CONFIG_PREFIX + 'sort') as ViewSort | undefined;
+	const visibleProperties = yrecord.raw.get(VIEW_CONFIG_PREFIX + 'visibleProperties') as
+		string[] | undefined;
+	const groupBy = yrecord.raw.get(VIEW_CONFIG_PREFIX + 'groupBy') as string | undefined;
+	const summaries = yrecord.raw.get(VIEW_CONFIG_PREFIX + 'summaries') as
+		Record<string, FieldSummaryType> | undefined;
+
+	return {
+		viewType,
+		...(filters !== undefined && { filters }),
+		...(sort !== undefined && { sort }),
+		...(visibleProperties !== undefined && { visibleProperties }),
+		...(groupBy !== undefined && { groupBy }),
+		...(summaries !== undefined && { summaries })
+	};
+}
+
+/** Writes (or, given `undefined`, clears) one viewConfig member's `viewConfig:<field>` entry. */
+function writeViewConfigField<K extends keyof EmbeddedViewConfig>(
+	yrecord: TypedYMap<RecordYShape>,
+	field: K,
+	value: EmbeddedViewConfig[K] | undefined
+): void {
+	if (value === undefined) yrecord.raw.delete(VIEW_CONFIG_PREFIX + field);
+	else yrecord.raw.set(VIEW_CONFIG_PREFIX + field, value);
+}
+
+/** Writes every member of a full viewConfig, clearing any member absent from it — for a fresh record or an outright reconfigure (new embed target / view type change), not a partial in-place edit (use patchRecordViewConfig for that). */
+function writeViewConfig(yrecord: TypedYMap<RecordYShape>, config: EmbeddedViewConfig): void {
+	writeViewConfigField(yrecord, 'viewType', config.viewType);
+	writeViewConfigField(yrecord, 'filters', config.filters);
+	writeViewConfigField(yrecord, 'sort', config.sort);
+	writeViewConfigField(yrecord, 'visibleProperties', config.visibleProperties);
+	writeViewConfigField(yrecord, 'groupBy', config.groupBy);
+	writeViewConfigField(yrecord, 'summaries', config.summaries);
 }
 
 /** Thrown when a requested Document, Collection, record, property, or select option doesn't exist. */
@@ -618,28 +672,33 @@ function repairEmbeddedViewsAfterPropertyRemoval(
 	recordsMap(doc).forEach((yrecord) => {
 		if (yrecord.get('blockType') !== 'collection_view') return;
 		if (yrecord.get('referencedRecordId') !== collectionId) return;
-		const config = yrecord.get('viewConfig');
+		const config = readViewConfig(yrecord);
 		if (!config) return;
 
-		const next: EmbeddedViewConfig = { ...config };
-		let changed = false;
-		if (next.filters?.some((f) => f.propertyKey === propertyKey)) {
-			next.filters = next.filters.filter((f) => f.propertyKey !== propertyKey);
-			changed = true;
+		// Each member is rewritten independently (only if it actually
+		// referenced the removed field) so this repair never disturbs a
+		// concurrent edit to an unrelated member — same per-field merge
+		// granularity as the rest of viewConfig (issue #71).
+		if (config.filters?.some((f) => f.propertyKey === propertyKey)) {
+			writeViewConfigField(
+				yrecord,
+				'filters',
+				config.filters.filter((f) => f.propertyKey !== propertyKey)
+			);
 		}
-		if (next.visibleProperties?.includes(propertyKey)) {
-			next.visibleProperties = next.visibleProperties.filter((k) => k !== propertyKey);
-			changed = true;
+		if (config.visibleProperties?.includes(propertyKey)) {
+			writeViewConfigField(
+				yrecord,
+				'visibleProperties',
+				config.visibleProperties.filter((k) => k !== propertyKey)
+			);
 		}
-		if (next.groupBy === propertyKey) {
-			next.groupBy = undefined;
-			changed = true;
+		if (config.groupBy === propertyKey) {
+			writeViewConfigField(yrecord, 'groupBy', undefined);
 		}
-		if (next.sort?.propertyKey === propertyKey) {
-			next.sort = { mode: 'manual' };
-			changed = true;
+		if (config.sort?.propertyKey === propertyKey) {
+			writeViewConfigField(yrecord, 'sort', { mode: 'manual' });
 		}
-		if (changed) yrecord.set('viewConfig', next);
 	});
 }
 
@@ -835,13 +894,13 @@ function repairEmbeddedViewsAfterOptionRemoval(
 	recordsMap(doc).forEach((yrecord) => {
 		if (yrecord.get('blockType') !== 'collection_view') return;
 		if (yrecord.get('referencedRecordId') !== collectionId) return;
-		const config = yrecord.get('viewConfig');
+		const config = readViewConfig(yrecord);
 		if (!config?.filters?.length) return;
 		const nextFilters = config.filters.filter(
 			(f) => !(f.propertyKey === propertyKey && f.value === optionId)
 		);
 		if (nextFilters.length !== config.filters.length) {
-			yrecord.set('viewConfig', { ...config, filters: nextFilters });
+			writeViewConfigField(yrecord, 'filters', nextFilters);
 		}
 	});
 }
@@ -961,7 +1020,7 @@ function readRecord(yrecord: TypedYMap<RecordYShape>): WorkspaceRecord {
 		checked: yrecord.get('checked'),
 		collapsed: yrecord.get('collapsed'),
 		referencedRecordId: yrecord.get('referencedRecordId'),
-		viewConfig: yrecord.get('viewConfig'),
+		viewConfig: readViewConfig(yrecord),
 		createdBy: yrecord.get('createdBy')!,
 		createdAt: yrecord.get('createdAt')!,
 		lastEditedBy: yrecord.get('lastEditedBy')!,
@@ -1017,7 +1076,7 @@ export function createRecord(
 			if (input.checked !== undefined) yrecord.set('checked', input.checked);
 			if (input.collapsed !== undefined) yrecord.set('collapsed', input.collapsed);
 			if (input.referencedRecordId) yrecord.set('referencedRecordId', input.referencedRecordId);
-			if (input.viewConfig) yrecord.set('viewConfig', input.viewConfig);
+			if (input.viewConfig) writeViewConfig(yrecord, input.viewConfig);
 		} else {
 			yrecord.set('isCollectionRow', true);
 			for (const [key, value] of Object.entries(input.properties ?? {})) {
@@ -1131,12 +1190,16 @@ export function setRecordReferencedId(
 }
 
 /**
- * Sets a collection_view block's view type + filters/sort/visible-properties/
- * grouping-property choice — whole-value LWW, same pattern as
- * setRecordReferencedId. One person is expected to be editing a given
- * embed's config at a time, so field-level merge granularity (splitting
- * into prop:-style sub-keys, like Collection row properties do) isn't
- * needed here.
+ * Replaces a collection_view block's entire view type + filters/sort/
+ * visible-properties/grouping-property config — for an outright reconfigure
+ * (a brand new embed, or switching its view type/target), where every member
+ * is legitimately being reset together. For an in-place edit to just one or
+ * two members (e.g. ViewToolbar's filter or sort editor), use
+ * patchRecordViewConfig instead so a concurrent edit to a different member
+ * isn't silently overwritten by this call's stale copy of it (issue #71) —
+ * each member is still stored as its own `viewConfig:<field>` Y.Map entry
+ * (see VIEW_CONFIG_PREFIX above), so per-member merge still applies between
+ * this call and any concurrent patchRecordViewConfig call.
  */
 export function setRecordViewConfig(
 	doc: Y.Doc,
@@ -1147,7 +1210,35 @@ export function setRecordViewConfig(
 	const yrecord = recordsMap(doc).get(id);
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	doc.transact(() => {
-		yrecord.set('viewConfig', viewConfig);
+		writeViewConfig(yrecord, viewConfig);
+		yrecord.set('lastEditedBy', actor);
+		yrecord.set('lastEditedAt', Date.now());
+	});
+}
+
+/**
+ * Merges a partial set of viewConfig member changes into a collection_view
+ * block's config (per-member LWW via Y.Map, mirroring updateRecordProperties
+ * for Collection row properties) — a member named in `patch` (even as
+ * `undefined`, to clear it) is written; every other member is left exactly
+ * as-is. This is what lets one actor's filter edit and another actor's
+ * concurrent sort edit both survive instead of one clobbering the other
+ * (issue #71) — the caller (CollectionViewBlock.svelte) is responsible for
+ * diffing its local draft against the config it started editing from and
+ * passing only the members that actually changed.
+ */
+export function patchRecordViewConfig(
+	doc: Y.Doc,
+	id: string,
+	patch: Partial<EmbeddedViewConfig>,
+	actor: ActorId
+): void {
+	const yrecord = recordsMap(doc).get(id);
+	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
+	doc.transact(() => {
+		for (const field of Object.keys(patch) as (keyof EmbeddedViewConfig)[]) {
+			writeViewConfigField(yrecord, field, patch[field]);
+		}
 		yrecord.set('lastEditedBy', actor);
 		yrecord.set('lastEditedAt', Date.now());
 	});
@@ -1338,7 +1429,7 @@ function copyRecordVerbatim(
 		if (record.checked !== undefined) yrecord.set('checked', record.checked);
 		if (record.collapsed !== undefined) yrecord.set('collapsed', record.collapsed);
 		if (record.referencedRecordId) yrecord.set('referencedRecordId', record.referencedRecordId);
-		if (record.viewConfig) yrecord.set('viewConfig', record.viewConfig);
+		if (record.viewConfig) writeViewConfig(yrecord, record.viewConfig);
 	} else {
 		yrecord.set('isCollectionRow', true);
 		for (const [key, value] of Object.entries(record.properties ?? {})) {

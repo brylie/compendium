@@ -2,8 +2,12 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { CURRENT_USER } from '$lib/client/actor';
-	import { setRecordReferencedId, setRecordViewConfig } from '$lib/data/records';
-	import { viewConfigsEqual } from '$lib/data/views';
+	import {
+		patchRecordViewConfig,
+		setRecordReferencedId,
+		setRecordViewConfig
+	} from '$lib/data/records';
+	import { diffViewConfig, viewConfigsEqual } from '$lib/data/views';
 	import type {
 		CollectionMeta,
 		EmbeddedViewConfig,
@@ -88,6 +92,14 @@
 	// directly here — the $effect below (a tracked context) does the real
 	// initial sync on its first run, so this never observes a stale snapshot.
 	let draftConfig: EmbeddedViewConfig = $state({ viewType: 'table' });
+	// The config this viewer's draft was last synced from — captured
+	// alongside draftConfig every time it's (re)seeded from persistedConfig,
+	// so saveView can diff "what did I actually change" instead of writing
+	// the whole draft back (issue #71: a whole-value write would silently
+	// clobber a member someone else saved concurrently, e.g. this viewer's
+	// stale copy of `sort` overwriting another actor's in-flight sort edit
+	// just because this viewer only meant to change `filters`).
+	let baseConfig: EmbeddedViewConfig = $state({ viewType: 'table' });
 	let isDirty = $state(false);
 	let lastTargetId: string | undefined;
 	let initialized = false;
@@ -99,6 +111,7 @@
 			initialized = true;
 			lastTargetId = targetId;
 			draftConfig = current;
+			baseConfig = current;
 			isDirty = false;
 			return;
 		}
@@ -108,6 +121,7 @@
 		// renderer on every external edit, not just an actual config change.
 		if (!isDirty && !viewConfigsEqual(draftConfig, current)) {
 			draftConfig = current;
+			baseConfig = current;
 		}
 	});
 
@@ -117,12 +131,22 @@
 	}
 
 	function saveView(): void {
-		setRecordViewConfig(ydoc, block.id, draftConfig, CURRENT_USER);
+		const patch = diffViewConfig(baseConfig, draftConfig);
+		if (Object.keys(patch).length > 0) {
+			patchRecordViewConfig(ydoc, block.id, patch, CURRENT_USER);
+		}
+		// draftConfig is now what this viewer believes is persisted — rebase
+		// so a *later* Save only ever diffs members touched since this one,
+		// rather than re-diffing against a growing-stale pre-this-save
+		// snapshot (which would re-write already-saved fields on every
+		// subsequent Save and could clobber a concurrent edit to one of them).
+		baseConfig = draftConfig;
 		isDirty = false;
 	}
 
 	function discardDraft(): void {
 		draftConfig = persistedConfig;
+		baseConfig = persistedConfig;
 		isDirty = false;
 	}
 
