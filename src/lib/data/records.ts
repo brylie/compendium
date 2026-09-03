@@ -605,12 +605,12 @@ function migrateRecordsForPropertyRetype(
 	}
 }
 
-/** Renames and/or retypes one field in a Collection's schema, migrating (or clearing, per `coercePropertyValue`) every record's existing value when `patch.type` changes. */
+/** Renames, retypes, and/or re-targets one field in a Collection's schema, migrating (or clearing, per `coercePropertyValue`) every record's existing value when `patch.type` changes. */
 export function updateCollectionProperty(
 	doc: Y.Doc,
 	collectionId: string,
 	propertyKey: string,
-	patch: { label?: string; type?: PropertyType }
+	patch: { label?: string; type?: PropertyType; targetCollectionId?: string | null }
 ): void {
 	const ymeta = collectionsMap(doc).get(collectionId);
 	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
@@ -628,11 +628,22 @@ export function updateCollectionProperty(
 		if (nextType === 'select') {
 			nextOptions = current.type === 'select' ? current.options : [];
 		}
+		// Same rationale as options above: targetCollectionId only means
+		// anything for 'relation'. An explicit patch.targetCollectionId (`null`
+		// clears it) always wins; otherwise it survives an edit that leaves the
+		// field as 'relation', and is dropped on any retype away from it.
+		let nextTargetCollectionId: string | undefined;
+		if (patch.targetCollectionId !== undefined) {
+			nextTargetCollectionId = patch.targetCollectionId ?? undefined;
+		} else if (nextType === 'relation') {
+			nextTargetCollectionId = current.targetCollectionId;
+		}
 		const next: PropertyDefinition = {
 			...current,
 			label: patch.label ?? current.label,
 			type: nextType,
-			options: nextOptions
+			options: nextOptions,
+			targetCollectionId: nextTargetCollectionId
 		};
 		const nextSchema = [...schema];
 		nextSchema[index] = next;

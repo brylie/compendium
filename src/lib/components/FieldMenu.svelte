@@ -18,7 +18,7 @@
 		ValidationError
 	} from '$lib/data/records';
 	import { SELECT_OPTION_COLORS } from '$lib/data/select-colors';
-	import type { PropertyDefinition, PropertyType } from '$lib/data/types';
+	import type { CollectionMeta, PropertyDefinition, PropertyType } from '$lib/data/types';
 	import Icon from './Icon.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 
@@ -29,6 +29,13 @@
 		property,
 		primaryFieldKey,
 		visible,
+		// The full Collection list (id + title), for a relation field's "target
+		// Collection" picker — a relation's value is meaningless to search/
+		// render without knowing which Collection its record ids point into
+		// (issue #15). Defaults to empty for a caller that hasn't threaded it
+		// through yet; the picker just shows no options in that case rather
+		// than failing.
+		collections = [],
 		onToggleVisible
 	}: {
 		collectionId: string;
@@ -37,6 +44,7 @@
 		property: PropertyDefinition;
 		primaryFieldKey?: string;
 		visible?: boolean;
+		collections?: CollectionMeta[];
 		onToggleVisible?: () => void;
 	} = $props();
 
@@ -56,6 +64,7 @@
 	let mode = $state<'menu' | 'edit'>('menu');
 	let editLabel = $state('');
 	let editType: PropertyType = $state('text');
+	let editTargetCollectionId = $state('');
 	let confirmDeleteOpen = $state(false);
 	let deleteAffectedCount = $state(0);
 	let errorMessage = $state('');
@@ -168,6 +177,7 @@
 	function openEdit(): void {
 		editLabel = property.label;
 		editType = property.type;
+		editTargetCollectionId = property.targetCollectionId ?? '';
 		mode = 'edit';
 	}
 
@@ -178,7 +188,11 @@
 		try {
 			updateCollectionProperty(getShardDoc(shardId), collectionId, property.key, {
 				label: label !== property.label ? label : undefined,
-				type: editType !== property.type ? editType : undefined
+				type: editType !== property.type ? editType : undefined,
+				// Only sent while the field is (or is becoming) 'relation' —
+				// updateCollectionProperty already drops targetCollectionId on
+				// any retype away from it, so there's nothing to send there.
+				targetCollectionId: editType === 'relation' ? editTargetCollectionId || null : undefined
 			});
 			errorMessage = '';
 			closeMenu();
@@ -563,6 +577,20 @@
 							{/each}
 						</select>
 					</label>
+					{#if editType === 'relation'}
+						<label class="block text-xs font-medium text-fg">
+							Target collection
+							<select
+								bind:value={editTargetCollectionId}
+								class="mt-1 w-full rounded border border-border bg-surface px-2 py-1 text-sm text-fg outline-none focus:border-accent"
+							>
+								<option value="">Select a collection…</option>
+								{#each collections as c (c.id)}
+									<option value={c.id}>{c.title || 'Untitled'}</option>
+								{/each}
+							</select>
+						</label>
+					{/if}
 					{#if editType !== property.type && typeChangePreview.affected > 0}
 						<p class="text-xs text-amber-600">
 							Changing type will clear the value on {typeChangePreview.affected} of {typeChangePreview.total}

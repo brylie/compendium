@@ -22,6 +22,7 @@
 	} from '$lib/data/views';
 	import type { ViewConfig } from '$lib/data/views';
 	import type {
+		CollectionMeta,
 		FieldSummaryType,
 		PropertyDefinition,
 		PropertyValue,
@@ -36,11 +37,13 @@
 	let {
 		collectionId,
 		config,
-		onConfigChange
+		onConfigChange,
+		collections = []
 	}: {
 		collectionId: string;
 		config: ViewConfig;
 		onConfigChange: (config: ViewConfig) => void;
+		collections?: CollectionMeta[];
 	} = $props();
 
 	let ydoc: Y.Doc | undefined = $state();
@@ -167,6 +170,7 @@
 		{collectionId}
 		shardId={shardId!}
 		{schema}
+		{collections}
 		bind:config={() => config, onConfigChange}
 	/>
 
@@ -192,6 +196,7 @@
 									{schema}
 									{property}
 									{primaryFieldKey}
+									{collections}
 									visible={true}
 									onToggleVisible={() => hideInThisView(property.key)}
 								/>

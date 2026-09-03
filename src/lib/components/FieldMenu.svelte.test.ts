@@ -358,6 +358,56 @@ describe('FieldMenu', () => {
 		});
 	});
 
+	describe("relation field's target Collection picker (issue #15)", () => {
+		it('sets targetCollectionId when retyping a field to relation and choosing a target', async () => {
+			const people = createCollection(ydoc, { title: 'People', schema: [] });
+			const collection = createCollection(ydoc, {
+				title: 'T',
+				schema: [{ key: 'owner', label: 'Owner', type: 'text' }]
+			});
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				shardId: 'test-shard',
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0],
+				collections: [
+					{ id: people.id, title: 'People', schema: [], recordIds: [] },
+					{ id: collection.id, title: 'T', schema: collection.schema, recordIds: [] }
+				]
+			});
+
+			await user.click(screen.getByRole('button', { name: 'Field options for Owner' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Edit field' }));
+			await user.selectOptions(screen.getByLabelText('Type'), 'relation');
+			await user.selectOptions(screen.getByLabelText('Target collection'), people.id);
+			await user.click(screen.getByRole('button', { name: 'Save' }));
+
+			const saved = getCollection(ydoc, collection.id)?.schema[0];
+			expect(saved?.type).toBe('relation');
+			expect(saved?.targetCollectionId).toBe(people.id);
+		});
+
+		it("doesn't offer a target-collection field for a non-relation type", async () => {
+			const collection = createCollection(ydoc, {
+				title: 'T',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				shardId: 'test-shard',
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await user.click(screen.getByRole('button', { name: 'Field options for Name' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Edit field' }));
+
+			expect(screen.queryByLabelText('Target collection')).not.toBeInTheDocument();
+		});
+	});
+
 	describe('select field option lifecycle (issue #94)', () => {
 		function renderSelectField() {
 			const collection = createCollection(ydoc, {

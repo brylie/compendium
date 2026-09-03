@@ -25,6 +25,7 @@ interface PropertyDefinition {
 	label: string;
 	type: PropertyValue['type'];
 	options?: { id: string; label: string; color?: string }[]; // for 'select'
+	targetCollectionId?: string; // for 'relation' — which Collection its record-id values point into (issue #15)
 }
 
 // A block IS a record — this isn't a separate type, just a record whose

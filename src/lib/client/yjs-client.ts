@@ -70,3 +70,31 @@ export function getShardAwareness(shardId: string): Awareness {
 	getShardDoc(shardId);
 	return shardDocs.get(shardId)!.provider.awareness;
 }
+
+// Memoizes each Collection's shard lookup for the tab's lifetime — a relation
+// property's target Collection is very often *not* the one already being
+// viewed, so resolving and connecting to it is a fresh cross-Collection
+// lookup rather than something already in scope the way a view's own
+// collectionId/shardId props are.
+const collectionShardIds = new Map<string, Promise<string>>();
+
+/**
+ * Resolves an arbitrary Collection's shard and connects to it (memoized per
+ * collectionId), for UI that needs to read a *different* Collection than the
+ * one it's currently viewing — e.g. resolving a relation property's target
+ * records for display or picking (issue #15). Same GET /api/collections/[id]/shard
+ * + {@link getShardDoc} pairing every other Collection-content view already
+ * does before connecting; this just gives that pairing one shared name
+ * instead of every relation-consuming component re-deriving it.
+ */
+export async function resolveCollectionDoc(collectionId: string): Promise<Y.Doc> {
+	let shardIdPromise = collectionShardIds.get(collectionId);
+	if (!shardIdPromise) {
+		shardIdPromise = fetch(`/api/collections/${collectionId}/shard`)
+			.then((res) => res.json())
+			.then((body: { shardId: string }) => body.shardId);
+		collectionShardIds.set(collectionId, shardIdPromise);
+	}
+	const shardId = await shardIdPromise;
+	return getShardDoc(shardId);
+}

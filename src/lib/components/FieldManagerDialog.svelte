@@ -4,7 +4,7 @@
 	import { getShardDoc } from '$lib/client/yjs-client';
 	import { useCollectionView } from '$lib/client/collection-view.svelte';
 	import { resolvePrimaryField, updateCollectionSchema } from '$lib/data/records';
-	import type { PropertyDefinition, PropertyType } from '$lib/data/types';
+	import type { CollectionMeta, PropertyDefinition, PropertyType } from '$lib/data/types';
 	import Icon from './Icon.svelte';
 	import FieldMenu from './FieldMenu.svelte';
 
@@ -12,11 +12,17 @@
 		open,
 		collectionId,
 		shardId,
+		// The full Collection list (id + title) — threaded down to every
+		// FieldMenu below for a relation field's "target Collection" picker
+		// (issue #15). Defaults to empty for a caller that hasn't threaded it
+		// through yet.
+		collections = [],
 		onClose
 	}: {
 		open: boolean;
 		collectionId: string;
 		shardId: string;
+		collections?: CollectionMeta[];
 		onClose: () => void;
 	} = $props();
 
@@ -31,6 +37,7 @@
 
 	let newFieldLabel = $state('');
 	let newFieldType: PropertyType = $state('text');
+	let newFieldTargetCollectionId = $state('');
 	let errorMessage = $state('');
 
 	// Gated on `open`, not a plain `() => getShardDoc(shardId)`: this dialog
@@ -93,12 +100,15 @@
 			key: nanoid(8),
 			label,
 			type: newFieldType,
-			options: newFieldType === 'select' ? [] : undefined
+			options: newFieldType === 'select' ? [] : undefined,
+			targetCollectionId:
+				newFieldType === 'relation' ? newFieldTargetCollectionId || undefined : undefined
 		};
 		try {
 			updateCollectionSchema(getShardDoc(shardId), collectionId, [...schema, field]);
 			newFieldLabel = '';
 			newFieldType = 'text';
+			newFieldTargetCollectionId = '';
 			errorMessage = '';
 		} catch {
 			errorMessage = 'Could not add the field. Please try again.';
@@ -197,7 +207,14 @@
 						>
 							{property.type}
 						</span>
-						<FieldMenu {collectionId} {shardId} {schema} {property} {primaryFieldKey} />
+						<FieldMenu
+							{collectionId}
+							{shardId}
+							{schema}
+							{property}
+							{primaryFieldKey}
+							{collections}
+						/>
 					</li>
 				{:else}
 					<li class="py-4 text-center text-sm text-muted italic">No fields yet.</li>
@@ -223,6 +240,21 @@
 						<option value={t}>{t}</option>
 					{/each}
 				</select>
+				{#if newFieldType === 'relation'}
+					<label class="sr-only" for="field-manager-new-target-{collectionId}"
+						>Target collection</label
+					>
+					<select
+						id="field-manager-new-target-{collectionId}"
+						bind:value={newFieldTargetCollectionId}
+						class="rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg focus:border-accent focus:outline-none"
+					>
+						<option value="">Select a collection…</option>
+						{#each collections as c (c.id)}
+							<option value={c.id}>{c.title || 'Untitled'}</option>
+						{/each}
+					</select>
+				{/if}
 				<button
 					type="submit"
 					disabled={!newFieldLabel.trim()}

@@ -16,7 +16,11 @@ import BoardCollectionViewHarness from './BoardCollectionViewHarness.svelte';
 let ydoc: Y.Doc;
 vi.mock('$lib/client/yjs-client', () => ({
 	getClientDoc: () => ydoc,
-	getShardDoc: () => ydoc
+	getShardDoc: () => ydoc,
+	// A relation field's target Collection resolves through this instead of
+	// getShardDoc directly (RelationPropertyCell, issue #15) — every fixture
+	// in this file already lives in the one shared `ydoc`.
+	resolveCollectionDoc: () => Promise.resolve(ydoc)
 }));
 
 const actor = { kind: 'human' as const, userId: 'local' };
@@ -338,5 +342,46 @@ describe('BoardCollectionView', () => {
 			'High'
 		]);
 		expect(schema.find((p) => p.key === 'status')?.options?.map((o) => o.label)).toEqual(['To do']);
+	});
+
+	it("resolves a relation field's value to the target Collection's record title on a card (issue #15)", async () => {
+		const people = createCollection(ydoc, {
+			title: 'People',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+		const alice = createRecord(
+			ydoc,
+			{ parentId: people.id, properties: { name: { type: 'text', value: 'Alice' } } },
+			actor
+		);
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Board',
+			schema: [
+				{ key: 'title', label: 'Title', type: 'text' },
+				{
+					key: 'status',
+					label: 'Status',
+					type: 'select',
+					options: [{ id: 'todo', label: 'To do' }]
+				},
+				{ key: 'assignee', label: 'Assignee', type: 'relation', targetCollectionId: people.id }
+			]
+		});
+		createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: {
+					title: { type: 'text', value: 'Card one' },
+					status: { type: 'select', value: 'todo' },
+					assignee: { type: 'relation', value: [alice.id] }
+				}
+			},
+			actor
+		);
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
+
+		expect(await screen.findByText('Alice')).toBeInTheDocument();
 	});
 });

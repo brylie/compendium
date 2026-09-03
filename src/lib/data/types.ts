@@ -22,6 +22,7 @@ export interface PropertyDefinition {
 	label: string;
 	type: PropertyType;
 	options?: { id: string; label: string; color?: string }[]; // for 'select'
+	targetCollectionId?: string; // for 'relation' — which Collection its record-id values point into
 }
 
 export type BlockType =
