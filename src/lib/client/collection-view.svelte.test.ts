@@ -1,8 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import * as Y from 'yjs';
 import { createCollection, createRecord, setPrimaryField } from '$lib/data/records';
-import { useCollectionView, type CollectionViewSnapshot } from './collection-view.svelte';
+import type { ViewConfig } from '$lib/data/views';
+import type { PropertyDefinition } from '$lib/data/types';
+import {
+	autoPickGroupBy,
+	useCollectionView,
+	type CollectionViewSnapshot
+} from './collection-view.svelte';
 
 const actor = { kind: 'human' as const, userId: 'local' };
 
@@ -156,5 +162,41 @@ describe('useCollectionView', () => {
 
 		destroy();
 		ydoc.destroy();
+	});
+});
+
+describe('autoPickGroupBy', () => {
+	const schema: PropertyDefinition[] = [
+		{ key: 'a', label: 'Alpha', type: 'text' },
+		{ key: 'b', label: 'Beta', type: 'select', options: [] },
+		{ key: 'c', label: 'Gamma', type: 'select', options: [] }
+	];
+
+	it('picks the first field of the given type when groupBy is unset', () => {
+		const config: ViewConfig = {};
+		const onConfigChange = vi.fn();
+		autoPickGroupBy(schema, 'select', config, onConfigChange);
+		expect(onConfigChange).toHaveBeenCalledWith({ ...config, groupBy: 'b' });
+	});
+
+	it('leaves an already-valid groupBy untouched', () => {
+		const config: ViewConfig = { groupBy: 'c' };
+		const onConfigChange = vi.fn();
+		autoPickGroupBy(schema, 'select', config, onConfigChange);
+		expect(onConfigChange).not.toHaveBeenCalled();
+	});
+
+	it('replaces a groupBy pointing at a field of the wrong type', () => {
+		const config: ViewConfig = { groupBy: 'a' };
+		const onConfigChange = vi.fn();
+		autoPickGroupBy(schema, 'select', config, onConfigChange);
+		expect(onConfigChange).toHaveBeenCalledWith({ ...config, groupBy: 'b' });
+	});
+
+	it('resolves to undefined when no field of the given type exists', () => {
+		const config: ViewConfig = { groupBy: 'a' };
+		const onConfigChange = vi.fn();
+		autoPickGroupBy(schema, 'date', config, onConfigChange);
+		expect(onConfigChange).toHaveBeenCalledWith({ ...config, groupBy: undefined });
 	});
 });
