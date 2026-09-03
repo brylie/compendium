@@ -66,14 +66,14 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 		ui: true,
 		mcpToolName: 'create_record',
 		mcpDescription:
-			'Create a new block (in a Document) or row (in a Collection). No hold needed. `referencedRecordId` sets a page_link or child_pages block\'s target in the same call — only valid when blockType is "page_link" or "child_pages", the parent is a Document, and the target is an accessible Document; for child_pages it is optional (absent defaults to the current Document). `childPagesDepth` (a positive integer, or "unlimited") sets a child_pages block\'s nesting depth — only valid when blockType is "child_pages"; absent defaults to 1 (immediate children only).'
+			'Create a new block (in a Document) or row (in a Collection). No hold needed. `referencedRecordId` sets a page_link, child_pages, or collection_view block\'s target in the same call — only valid when blockType is one of those three, the parent is a Document, and the target is an accessible Document (page_link/child_pages) or Collection (collection_view); for child_pages and page_link it is optional (absent means "current Document"/"unconfigured link"), and so is collection_view\'s target (an unconfigured embed). `viewConfig` sets a collection_view block\'s view type + filters/sort/visible-properties/grouping config in the same call — only valid when blockType is "collection_view"; `viewType` ("table", "board", or "calendar") is required within it. `childPagesDepth` (a positive integer, or "unlimited") sets a child_pages block\'s nesting depth — only valid when blockType is "child_pages"; absent defaults to 1 (immediate children only).'
 	},
 	'records.writeRecord': {
 		mcp: true,
 		ui: true,
 		mcpToolName: 'write_record',
 		mcpDescription:
-			'Write a record. `markdown` overwrites block content (requires an active hold); `properties` merges into a Collection row; `referencedRecordId` retargets an existing page_link block to a new, accessible Document (no hold needed, idempotent).'
+			"Write a record. `markdown` overwrites block content (requires an active hold); `properties` merges into a Collection row; `referencedRecordId` retargets an existing page_link block to a new, accessible Document, or an existing collection_view block to a new, accessible Collection (no hold needed, idempotent); `viewConfig` replaces an existing collection_view block's entire view configuration wholesale (no hold needed) — a member left out of the new value is cleared, not left as-is."
 	},
 	'records.deleteRecord': {
 		mcp: true,

@@ -43,7 +43,7 @@ import {
 	recordCatalogCollectionCreated,
 	resolveShardForRecord
 } from '$lib/server/catalog';
-import type { ActorId } from '$lib/data/types';
+import type { ActorId, EmbeddedViewConfig } from '$lib/data/types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
 
@@ -854,6 +854,187 @@ describe('service layer: MCP authoring and repair of page_link targets (issue #4
 	});
 });
 
+describe('service layer: MCP authoring and validation of collection_view targets (issue #37)', () => {
+	it('creates a collection_view block with a valid, accessible Collection target and viewConfig in one call', () => {
+		const target = createCollection(human, { title: 'Tasks', schema: [] });
+		const source = createDocument(human, { title: 'Source Doc' });
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Embed Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: [target.id]
+		});
+
+		const embed = createRecord(tokenRecord, {
+			parentId: source.id,
+			blockType: 'collection_view',
+			referencedRecordId: target.id,
+			viewConfig: { viewType: 'table' }
+		});
+
+		const result = getDocument(tokenRecord, source.id);
+		const embedRecord = result?.records.find((r) => r.id === embed.id);
+		expect(embedRecord?.referencedRecordId).toBe(target.id);
+		expect(embedRecord?.viewConfig).toEqual({ viewType: 'table' });
+		expect(embedRecord?.markdown).toBe('[collection view: Tasks]');
+	});
+
+	it('rejects referencedRecordId on create_record for a collection_view whose target is a Document, not a Collection', () => {
+		const target = createDocument(human, { title: 'Not A Collection' });
+		const source = createDocument(human, { title: 'Source Doc' });
+
+		expect(() =>
+			createRecord(human, {
+				parentId: source.id,
+				blockType: 'collection_view',
+				referencedRecordId: target.id
+			})
+		).toThrow(/Collection/);
+	});
+
+	it('rejects create_record with a collection_view referencedRecordId the token was never granted access to, without distinguishing "forbidden" from "nonexistent"', () => {
+		const secret = createCollection(human, { title: 'Secret Tasks', schema: [] });
+		const source = createDocument(human, { title: 'Source Doc' });
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Scoped Embed Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: []
+		});
+
+		let forbiddenErr: Error | undefined;
+		try {
+			createRecord(tokenRecord, {
+				parentId: source.id,
+				blockType: 'collection_view',
+				referencedRecordId: secret.id
+			});
+		} catch (err) {
+			forbiddenErr = err as Error;
+		}
+		expect(forbiddenErr).toBeInstanceOf(InvalidLinkTargetError);
+		expect(forbiddenErr!.message).not.toContain('Secret Tasks');
+
+		let missingErr: Error | undefined;
+		try {
+			createRecord(tokenRecord, {
+				parentId: source.id,
+				blockType: 'collection_view',
+				referencedRecordId: 'does-not-exist'
+			});
+		} catch (err) {
+			missingErr = err as Error;
+		}
+		expect(missingErr).toBeInstanceOf(InvalidLinkTargetError);
+
+		expect(forbiddenErr!.message.replace(secret.id, 'X')).toBe(
+			missingErr!.message.replace('does-not-exist', 'X')
+		);
+
+		const result = getDocument(human, source.id);
+		expect(result?.records).toHaveLength(0);
+	});
+
+	it('rejects viewConfig on create_record when blockType is not collection_view', () => {
+		const source = createDocument(human, { title: 'Source Doc' });
+
+		expect(() =>
+			createRecord(human, {
+				parentId: source.id,
+				blockType: 'paragraph',
+				viewConfig: { viewType: 'table' }
+			})
+		).toThrow(/collection_view/);
+	});
+
+	it('rejects viewConfig on create_record with an unrecognized viewType', () => {
+		const target = createCollection(human, { title: 'Tasks', schema: [] });
+		const source = createDocument(human, { title: 'Source Doc' });
+
+		expect(() =>
+			createRecord(human, {
+				parentId: source.id,
+				blockType: 'collection_view',
+				referencedRecordId: target.id,
+				viewConfig: { viewType: 'invalid' } as unknown as EmbeddedViewConfig
+			})
+		).toThrow(/viewType/);
+	});
+
+	it('retargets an existing collection_view via write_record, and rejects a Document-kind or out-of-scope target', () => {
+		const targetA = createCollection(human, { title: 'Tasks A', schema: [] });
+		const targetB = createCollection(human, { title: 'Tasks B', schema: [] });
+		const docTarget = createDocument(human, { title: 'Not A Collection' });
+		const secret = createCollection(human, { title: 'Secret Tasks', schema: [] });
+		const source = createDocument(human, { title: 'Source Doc' });
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Retarget Embed Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: [targetA.id, targetB.id]
+		});
+
+		const embed = createRecord(tokenRecord, {
+			parentId: source.id,
+			blockType: 'collection_view',
+			referencedRecordId: targetA.id
+		});
+
+		writeRecord(tokenRecord, embed.id, { referencedRecordId: targetB.id });
+		let result = getDocument(tokenRecord, source.id);
+		expect(result?.records.find((r) => r.id === embed.id)?.referencedRecordId).toBe(targetB.id);
+
+		expect(() => writeRecord(tokenRecord, embed.id, { referencedRecordId: docTarget.id })).toThrow(
+			InvalidLinkTargetError
+		);
+		expect(() => writeRecord(tokenRecord, embed.id, { referencedRecordId: secret.id })).toThrow(
+			InvalidLinkTargetError
+		);
+
+		// Neither rejected retarget mutated the block.
+		result = getDocument(tokenRecord, source.id);
+		expect(result?.records.find((r) => r.id === embed.id)?.referencedRecordId).toBe(targetB.id);
+	});
+
+	it('rejects retargeting a block that is not a collection_view via referencedRecordId', () => {
+		const target = createCollection(human, { title: 'Tasks', schema: [] });
+		const doc = createDocument(human, { title: 'Doc' });
+		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+
+		expect(() => writeRecord(human, block.id, { referencedRecordId: target.id })).toThrow(
+			/page_link|collection_view/
+		);
+	});
+
+	it('sets viewConfig on an existing collection_view block via write_record, replacing it wholesale', () => {
+		const target = createCollection(human, { title: 'Tasks', schema: [] });
+		const doc = createDocument(human, { title: 'Doc' });
+		const embed = createRecord(human, {
+			parentId: doc.id,
+			blockType: 'collection_view',
+			referencedRecordId: target.id,
+			viewConfig: { viewType: 'table', groupBy: 'status' }
+		});
+
+		writeRecord(human, embed.id, { viewConfig: { viewType: 'board' } });
+
+		const result = getDocument(human, doc.id);
+		// A full replace clears members absent from the new config (groupBy).
+		expect(result?.records.find((r) => r.id === embed.id)?.viewConfig).toEqual({
+			viewType: 'board'
+		});
+	});
+
+	it('rejects viewConfig on write_record for a block that is not collection_view', () => {
+		const doc = createDocument(human, { title: 'Doc' });
+		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+
+		expect(() => writeRecord(human, block.id, { viewConfig: { viewType: 'table' } })).toThrow(
+			/collection_view/
+		);
+	});
+});
+
 describe('service layer: documents — unfiltered listing, delete, and rename', () => {
 	it('listDocuments returns every document, unfiltered, for a human caller', () => {
 		createDocument(human, { title: 'Doc One' });
@@ -1032,7 +1213,7 @@ describe('service layer: records — write validation, delete, and direct read',
 		const doc = createDocument(human, { title: 'Doc' });
 		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
 		expect(() => writeRecord(human, block.id, {})).toThrow(
-			/markdown, properties, or referencedRecordId/
+			/markdown, properties, referencedRecordId, or viewConfig/
 		);
 	});
 

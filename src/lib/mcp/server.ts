@@ -9,7 +9,7 @@ import {
 	PermissionDeniedError,
 	HoldRequiredError
 } from '$lib/services';
-import type { BlockType } from '$lib/data/types';
+import type { BlockType, EmbeddedViewConfig } from '$lib/data/types';
 import { resolvePrimaryField } from '$lib/data/records';
 
 const propertyValueSchema = z.discriminatedUnion('type', [
@@ -40,10 +40,54 @@ const blockTypeSchema = z.enum([
 	'synced_block',
 	'page_link',
 	'embed',
+	'collection_view',
 	'child_pages'
 ]);
 
 const childPagesDepthSchema = z.union([z.number().int().positive(), z.literal('unlimited')]);
+
+// Mirrors EmbeddedViewConfig ($lib/data/types.ts) field-for-field — see
+// collection-views.md §2/§9 for what each member means.
+const viewConfigSchema = z.object({
+	viewType: z.enum(['table', 'board', 'calendar']),
+	filters: z
+		.array(
+			z.object({
+				propertyKey: z.string(),
+				op: z.enum(['is', 'is_not', 'is_empty', 'is_not_empty']),
+				value: z.string().optional()
+			})
+		)
+		.optional(),
+	sort: z
+		.object({
+			mode: z.enum(['manual', 'property']),
+			propertyKey: z.string().optional(),
+			direction: z.enum(['asc', 'desc']).optional()
+		})
+		.optional(),
+	visibleProperties: z.array(z.string()).optional(),
+	groupBy: z.string().optional(),
+	summaries: z
+		.record(
+			z.string(),
+			z.enum([
+				'none',
+				'count_all',
+				'count_values',
+				'count_empty',
+				'sum',
+				'average',
+				'min',
+				'max',
+				'earliest',
+				'latest',
+				'checked',
+				'unchecked'
+			])
+		)
+		.optional()
+});
 
 function textResult(data: unknown): CallToolResult {
 	return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
@@ -305,15 +349,17 @@ export function createMcpServer(): McpServer {
 			recordId: z.string(),
 			markdown: z.string().optional(),
 			properties: z.record(z.string(), propertyValueSchema).optional(),
-			referencedRecordId: z.string().optional()
+			referencedRecordId: z.string().optional(),
+			viewConfig: viewConfigSchema.optional()
 		},
-		async ({ recordId, markdown, properties, referencedRecordId }, extra) => {
+		async ({ recordId, markdown, properties, referencedRecordId, viewConfig }, extra) => {
 			try {
 				const token = requireToken(extra);
 				serviceModules.records.writeRecord(token, recordId, {
 					markdown,
 					properties,
-					referencedRecordId
+					referencedRecordId,
+					viewConfig: viewConfig as EmbeddedViewConfig | undefined
 				});
 				return textResult({ success: true });
 			} catch (err) {
@@ -332,10 +378,19 @@ export function createMcpServer(): McpServer {
 			blockType: blockTypeSchema.optional(),
 			properties: z.record(z.string(), propertyValueSchema).optional(),
 			referencedRecordId: z.string().optional(),
+			viewConfig: viewConfigSchema.optional(),
 			childPagesDepth: childPagesDepthSchema.optional()
 		},
 		async (
-			{ parentId, afterRecordId, blockType, properties, referencedRecordId, childPagesDepth },
+			{
+				parentId,
+				afterRecordId,
+				blockType,
+				properties,
+				referencedRecordId,
+				viewConfig,
+				childPagesDepth
+			},
 			extra
 		) => {
 			try {
@@ -346,6 +401,7 @@ export function createMcpServer(): McpServer {
 					blockType: blockType as BlockType | undefined,
 					properties,
 					referencedRecordId,
+					viewConfig: viewConfig as EmbeddedViewConfig | undefined,
 					childPagesDepth
 				});
 				return textResult({ recordId: record.id });
