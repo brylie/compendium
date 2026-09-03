@@ -82,7 +82,7 @@ This harness is the only thing that should know how to boot a full server instan
 
 ## 4. Tooling and CI placement
 
-- **Tier A** uses Vitest (already the project's test runner — no new dependency for the runner itself; the MCP SDK client and a Yjs client are both already project dependencies via the server-side code). Fast enough (no browser) to run in the normal `npm run test` suite and in CI on every PR.
+- **Tier A and adjacent protocol/integration coverage** use Vitest (already the project's test runner — no new dependency for the runner itself; the MCP SDK client and a Yjs client are both already project dependencies via the server-side code). `npm run test:integration` owns real-listener tests: Tier A, instance isolation, and MCP route transport. It is intentionally separate from `npm run test` and `npm run test:coverage`, so environments that cannot bind a local socket can still run unit and component checks. CI runs it once through `npm run test:e2e`.
 - **Tier B** uses Playwright (new dev dependency). Slower and more flake-prone than Tier A by nature of driving a real browser — run it in CI on every PR too, but keep the tier small (per §2) precisely so this cost stays bounded rather than growing into a full UI-test suite; the PRD's UI is already covered qualitatively by manual dogfooding per the Phase 0/1 success-metrics framing (`prd.md`, "Success Metrics").
 
 ## 5. Relationship to existing and future unit tests
@@ -106,8 +106,9 @@ npm run benchmark:workspace:large  # `large`: manual pre/post-change comparison
 
 The benchmark lives in `tests/benchmark/workspace-capacity.test.ts` and runs
 in its own Vitest project. It is intentionally excluded from `npm run test`
-and coverage: performance work must stay discoverable and repeatable without
-making ordinary correctness checks slow or environment-sensitive. Every run
+and coverage, and CI invokes the bounded `daily` command once: performance
+work must stay discoverable and repeatable without making ordinary correctness
+checks slow or environment-sensitive. Every run
 creates a temporary SQLite database and random local port; it must never point
 at a developer's running workspace database.
 

@@ -13,6 +13,7 @@ import { attachYjsWebSocket } from '$lib/server/attach-ws';
 import { createToken, type AccessToken } from '$lib/mcp/tokens';
 import { closeDb } from '$lib/server/store';
 import { resetWorkspaceStoreForTests } from '$lib/server/workspace-store';
+import { closeTestServer, listenOnLoopback } from './listener';
 
 // adapter-node's built handler (build/handler.js) uses ORIGIN to construct
 // each request's trusted `url.origin` for its CSRF check — not the raw
@@ -187,15 +188,16 @@ export async function createTestHarness(): Promise<TestHarness> {
 
 	const wss = attachYjsWebSocket(server, '/ws');
 
-	await new Promise<void>((resolve) => {
-		server.listen(0, () => {
-			const addr = server.address();
-			if (addr && typeof addr === 'object') {
-				port = addr.port;
-			}
-			resolve();
-		});
-	});
+	try {
+		port = await listenOnLoopback(server);
+	} catch (error) {
+		await new Promise<void>((resolve) => wss.close(() => resolve()));
+		await closeTestServer(server);
+		closeDb();
+		resetWorkspaceStoreForTests();
+		rmSync(tempDir, { recursive: true, force: true });
+		throw error;
+	}
 
 	const httpUrl = `http://localhost:${port}`;
 	const wsUrl = `ws://localhost:${port}/ws`;
@@ -321,9 +323,7 @@ export async function createTestHarness(): Promise<TestHarness> {
 		await new Promise<void>((resolve) => {
 			wss.close(() => resolve());
 		});
-		await new Promise<void>((resolve) => {
-			server.close(() => resolve());
-		});
+		await closeTestServer(server);
 
 		closeDb();
 		resetWorkspaceStoreForTests();

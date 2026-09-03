@@ -35,7 +35,7 @@ describe('Instance isolation: two configured instances never cross-observe (#111
 
 	afterEach(async () => {
 		delete process.env.COMPENDIUM_INSTANCE_ID;
-		await harness.cleanup();
+		await harness?.cleanup();
 	});
 
 	it("list_documents scoped to one instance never returns the other instance's Documents", async () => {

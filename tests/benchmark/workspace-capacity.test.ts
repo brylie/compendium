@@ -91,7 +91,7 @@ describe('CRDT workspace capacity, real shard-aware transport (issue #123)', () 
 	});
 
 	afterEach(async () => {
-		await harness.cleanup();
+		await harness?.cleanup();
 	});
 
 	it('measures per-shard state, sync, fan-out (with cross-shard isolation), catalog size, and restart cost', async () => {
