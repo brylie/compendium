@@ -61,8 +61,6 @@ jobs:
           path: coverage/
           retention-days: 14
 
-      - run: npm run benchmark:workspace
-
       # tests/e2e/harness.ts serves real HTTP responses through
       # build/handler.js — without this, every route 404s and tier-b
       # silently fails to find any DOM element.

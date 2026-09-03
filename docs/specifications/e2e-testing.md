@@ -105,10 +105,10 @@ npm run benchmark:workspace:large  # `large`: manual pre/post-change comparison
 ```
 
 The benchmark lives in `tests/benchmark/workspace-capacity.test.ts` and runs
-in its own Vitest project. It is intentionally excluded from `npm run test`
-and coverage, and CI invokes the bounded `daily` command once: performance
-work must stay discoverable and repeatable without making ordinary correctness
-checks slow or environment-sensitive. Every run
+in its own Vitest project. It is intentionally excluded from `npm run test`,
+coverage, and routine CI: performance work must stay discoverable and
+repeatable without making ordinary correctness checks slow or
+environment-sensitive. Every run
 creates a temporary SQLite database and random local port; it must never point
 at a developer's running workspace database.
 
