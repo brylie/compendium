@@ -1,5 +1,6 @@
 import type * as Y from 'yjs';
 import { getCollectionView } from '$lib/data/views';
+import type { ViewConfig } from '$lib/data/views';
 import type { CollectionMeta, PropertyDefinition, WorkspaceRecord } from '$lib/data/types';
 
 export interface CollectionViewSnapshot {
@@ -89,4 +90,29 @@ export function useCollectionView(
 			return collection;
 		}
 	};
+}
+
+/**
+ * Resolves `config.groupBy` to a schema field of the given `type` — the
+ * current value if it still names an eligible field, otherwise the first
+ * eligible field in schema order — and persists the change via
+ * `onConfigChange` when it differs. Board/Calendar both call this from their
+ * own `useCollectionView` `onSnapshot` callback to auto-pick a default
+ * grouping property (a `select` field for Board, a `date` field for
+ * Calendar) the first time a Collection connects; each still guards the
+ * "once per connect" attempt itself; this only does the resolve-and-write.
+ */
+export function autoPickGroupBy(
+	schema: PropertyDefinition[],
+	type: PropertyDefinition['type'],
+	config: ViewConfig,
+	onConfigChange: (config: ViewConfig) => void
+): void {
+	const resolvedKey =
+		config.groupBy && schema.some((p) => p.key === config.groupBy && p.type === type)
+			? config.groupBy
+			: schema.find((p) => p.type === type)?.key;
+	if (resolvedKey !== config.groupBy) {
+		onConfigChange({ ...config, groupBy: resolvedKey });
+	}
 }

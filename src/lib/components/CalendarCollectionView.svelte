@@ -5,6 +5,7 @@
 	import { getShardDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
 	import {
+		autoPickGroupBy,
 		useCollectionView,
 		type CollectionViewSnapshot
 	} from '$lib/client/collection-view.svelte';
@@ -63,13 +64,7 @@
 	function handleSnapshot(snapshot: CollectionViewSnapshot): void {
 		if (autoGroupByAttempted) return;
 		autoGroupByAttempted = true;
-		const resolvedKey =
-			config.groupBy && snapshot.schema.some((p) => p.key === config.groupBy && p.type === 'date')
-				? config.groupBy
-				: snapshot.schema.find((p) => p.type === 'date')?.key;
-		if (resolvedKey !== config.groupBy) {
-			onConfigChange({ ...config, groupBy: resolvedKey });
-		}
+		autoPickGroupBy(snapshot.schema, 'date', config, onConfigChange);
 	}
 
 	const view = useCollectionView(
