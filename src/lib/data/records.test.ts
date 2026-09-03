@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
+import { DEFAULT_CUSTOM_CALLOUT_COLOR } from './callout-style';
 import {
 	addSelectOption,
 	buildDocumentTree,
@@ -1262,6 +1263,39 @@ describe('records: creation ordering, mutation, and not-found edge cases', () =>
 		expect(() =>
 			setRecordCalloutStyle(doc, 'missing', { kind: 'preset', preset: 'note' }, human)
 		).toThrow(NotFoundError);
+	});
+
+	it('setRecordCalloutStyle and createRecord fall back to the default color for a malformed custom hex value (issue #42)', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(doc, { parentId: document.id, blockType: 'callout' }, human);
+
+		setRecordCalloutStyle(
+			doc,
+			block.id,
+			{ kind: 'custom', icon: 'star', color: 'not-a-color' },
+			human
+		);
+		expect(getRecord(doc, block.id)?.calloutStyle).toEqual({
+			kind: 'custom',
+			icon: 'star',
+			color: DEFAULT_CUSTOM_CALLOUT_COLOR
+		});
+
+		const created = createRecord(
+			doc,
+			{
+				parentId: document.id,
+				blockType: 'callout',
+				calloutStyle: { kind: 'custom', icon: 'lightbulb', color: 'javascript:alert(1)' }
+			},
+			human
+		);
+		expect(getRecord(doc, created.id)?.calloutStyle).toEqual({
+			kind: 'custom',
+			icon: 'lightbulb',
+			color: DEFAULT_CUSTOM_CALLOUT_COLOR
+		});
 	});
 
 	it('createRecord accepts an initial calloutStyle, and copyDocumentVerbatim preserves it (issue #42)', () => {

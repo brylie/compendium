@@ -22,6 +22,7 @@ import type {
 	WorkspaceRecord
 } from './types';
 import { applyRichTextToYText, yTextToRichText } from './richtext';
+import { DEFAULT_CUSTOM_CALLOUT_COLOR, isValidHexColor } from './callout-style';
 import { nextSelectOptionColor } from './select-colors';
 import { type TypedYMap, typedYMap, typedYMapRegistry } from './yjs-typed';
 
@@ -178,6 +179,20 @@ function migrateLegacyViewConfig(yrecord: TypedYMap<RecordYShape>): void {
 }
 
 /**
+ * A custom CalloutStyle's color comes from an `<input type="color">` in the
+ * normal path, but nothing at the type level stops a malformed value from
+ * reaching either persistence call below — falls back to the same neutral
+ * default the picker itself starts from, rather than persisting garbage that
+ * deriveCustomCalloutColors' hex parsing would later choke on.
+ */
+function sanitizeCalloutStyle(calloutStyle: CalloutStyle): CalloutStyle {
+	if (calloutStyle.kind === 'custom' && !isValidHexColor(calloutStyle.color)) {
+		return { ...calloutStyle, color: DEFAULT_CUSTOM_CALLOUT_COLOR };
+	}
+	return calloutStyle;
+}
+
+/**
  * Sets the checked/collapsed/referencedRecordId/viewConfig/calloutStyle
  * group of block-only optional fields — shared by createRecord and
  * copyRecordVerbatim, which otherwise each repeat the same five
@@ -198,7 +213,7 @@ function applyOptionalBlockFields(
 	if (fields.collapsed !== undefined) yrecord.set('collapsed', fields.collapsed);
 	if (fields.referencedRecordId) yrecord.set('referencedRecordId', fields.referencedRecordId);
 	if (fields.viewConfig) writeViewConfig(yrecord, fields.viewConfig);
-	if (fields.calloutStyle) yrecord.set('calloutStyle', fields.calloutStyle);
+	if (fields.calloutStyle) yrecord.set('calloutStyle', sanitizeCalloutStyle(fields.calloutStyle));
 }
 
 /** Thrown when a requested Document, Collection, record, property, or select option doesn't exist. */
@@ -1260,7 +1275,7 @@ export function setRecordCalloutStyle(
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	doc.transact(() => {
 		if (calloutStyle === null) yrecord.raw.delete('calloutStyle');
-		else yrecord.set('calloutStyle', calloutStyle);
+		else yrecord.set('calloutStyle', sanitizeCalloutStyle(calloutStyle));
 		yrecord.set('lastEditedBy', actor);
 		yrecord.set('lastEditedAt', Date.now());
 	});

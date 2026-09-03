@@ -41,6 +41,11 @@ export const CALLOUT_ICONS: { value: CalloutIcon; label: string }[] = [
 
 export const DEFAULT_CUSTOM_CALLOUT_COLOR = '#6b7280'; // a neutral gray starting point, not tied to any preset's hue
 
+/** Whether `hex` is a well-formed 3- or 6-digit `#rgb`/`#rrggbb` color — the only shapes {@link deriveCustomCalloutColors} and the `<input type="color">` picker that feeds it ever produce. */
+export function isValidHexColor(hex: string): boolean {
+	return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex);
+}
+
 function hexToRgb(hex: string): [number, number, number] {
 	const normalized = hex.replace('#', '');
 	const full =
@@ -114,8 +119,13 @@ export interface CustomCalloutColors {
  * unusual hue could in principle need different text choices per theme.
  */
 export function deriveCustomCalloutColors(baseHex: string): CustomCalloutColors {
-	const bgLight = mixHex(baseHex, '#ffffff', 0.82);
-	const bgDark = mixHex(baseHex, '#141414', 0.72);
+	// Malformed input shouldn't reach hexToRgb's parseInt (NaN-derived RGB,
+	// invalid CSS) — records.ts's write paths already validate before
+	// persisting, but this stays defensive for anything persisted before
+	// that validation existed.
+	const base = isValidHexColor(baseHex) ? baseHex : DEFAULT_CUSTOM_CALLOUT_COLOR;
+	const bgLight = mixHex(base, '#ffffff', 0.82);
+	const bgDark = mixHex(base, '#141414', 0.72);
 	return {
 		bgLight,
 		fgLight: contrastTextColor(bgLight),

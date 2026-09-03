@@ -454,7 +454,12 @@ function renderRecordMarkdown(
 	const content = r.content ? richTextToMarkdown(doc, r.content) : '';
 	if (r.blockType === 'callout' && r.calloutStyle?.kind === 'preset') {
 		const keyword = CALLOUT_PRESET_ALERT_KEYWORD[r.calloutStyle.preset];
-		return content ? `> [!${keyword}]\n> ${content}` : `> [!${keyword}]`;
+		if (!content) return `> [!${keyword}]`;
+		const quotedLines = content
+			.split('\n')
+			.map((line) => `> ${line}`)
+			.join('\n');
+		return `> [!${keyword}]\n${quotedLines}`;
 	}
 	return content;
 }

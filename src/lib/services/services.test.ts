@@ -409,6 +409,25 @@ describe('service layer: centralized business rules & side effects', () => {
 			expect(record?.markdown).toBe('> [!DANGER]\n> Handle with care\\.');
 		});
 
+		it('quotes every line of a multi-line preset callout, not just the first', () => {
+			const docPublic = createDocument(human, { title: 'Handbook' });
+			const doc = resolveWorkspaceContext({ shardId: docPublic.id }).doc;
+			const callout = crdtCreateRecord(
+				doc,
+				{
+					parentId: docPublic.id,
+					blockType: 'callout',
+					calloutStyle: { kind: 'preset', preset: 'note' }
+				},
+				human
+			);
+			crdtGetRecordYText(doc, callout.id)!.insert(0, 'First line\nSecond line');
+
+			const result = getDocument(human, docPublic.id);
+			const record = result?.records.find((r) => r.id === callout.id);
+			expect(record?.markdown).toBe('> [!NOTE]\n> First line\n> Second line');
+		});
+
 		it('emits just the alert marker for an empty preset callout', () => {
 			const docPublic = createDocument(human, { title: 'Handbook' });
 			crdtCreateRecord(

@@ -101,6 +101,21 @@ describe('CalloutBlock (issue #42)', () => {
 		expect(getRecord(ydoc, block.id)?.calloutStyle).toBeUndefined();
 	});
 
+	it('closes the style menu on Escape even though focus stays on the trigger button', async () => {
+		const ydoc = new Y.Doc();
+		const document = createDocument(ydoc, { title: 'Notes' });
+		const block = createRecord(ydoc, { parentId: document.id, blockType: 'callout' }, actor);
+		const user = userEvent.setup();
+
+		render(CalloutBlockHarness, { block, ydoc });
+
+		await user.click(screen.getByRole('button', { name: 'Callout style for this callout' }));
+		expect(screen.getByRole('menu', { name: 'Callout style' })).toBeInTheDocument();
+
+		await user.keyboard('{Escape}');
+		expect(screen.queryByRole('menu', { name: 'Callout style' })).not.toBeInTheDocument();
+	});
+
 	it('does not offer "Reset to default" when the callout has no style set yet', async () => {
 		const ydoc = new Y.Doc();
 		const document = createDocument(ydoc, { title: 'Notes' });

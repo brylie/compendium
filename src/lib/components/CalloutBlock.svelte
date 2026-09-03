@@ -88,8 +88,11 @@
 		if (!container.contains(event.target as Node)) open = false;
 	}
 
-	function handleKeydown(event: KeyboardEvent): void {
-		if (event.key === 'Escape') {
+	function handleWindowKeydown(event: KeyboardEvent): void {
+		// Attached to the window (not the menu) because focus stays on the
+		// trigger button after openMenu() — it's never moved into the menu —
+		// so a menu-scoped keydown handler would never see Escape at all.
+		if (open && event.key === 'Escape') {
 			event.stopPropagation();
 			open = false;
 		}
@@ -104,7 +107,7 @@
 	}
 </script>
 
-<svelte:window onclick={handleWindowClick} />
+<svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} />
 
 <div
 	class="flex gap-3 rounded-lg border border-border p-3.5 shadow-xs {wrapperClass}"
@@ -127,7 +130,6 @@
 				role="menu"
 				aria-label="Callout style"
 				tabindex="-1"
-				onkeydown={handleKeydown}
 				class="absolute top-full left-0 z-20 mt-1 w-56 rounded-lg border border-border bg-bg p-2 text-left text-sm text-fg shadow-lg ring-1 ring-black/5"
 			>
 				<p class="px-1 pb-1 text-xs font-medium text-muted">Style</p>

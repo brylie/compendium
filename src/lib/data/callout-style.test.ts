@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { CALLOUT_ICONS, CALLOUT_PRESETS, deriveCustomCalloutColors } from './callout-style';
+import {
+	CALLOUT_ICONS,
+	CALLOUT_PRESETS,
+	DEFAULT_CUSTOM_CALLOUT_COLOR,
+	deriveCustomCalloutColors,
+	isValidHexColor
+} from './callout-style';
 
 describe('CALLOUT_PRESETS', () => {
 	it('defines the four Starlight/Confluence-aligned presets, each with its own icon', () => {
@@ -77,5 +83,25 @@ describe('deriveCustomCalloutColors (issue #42)', () => {
 
 	it('accepts a 3-digit shorthand hex the same as its 6-digit expansion', () => {
 		expect(deriveCustomCalloutColors('#fff')).toEqual(deriveCustomCalloutColors('#ffffff'));
+	});
+
+	it('falls back to the default color instead of producing NaN-derived garbage for malformed input', () => {
+		expect(deriveCustomCalloutColors('not-a-color')).toEqual(
+			deriveCustomCalloutColors(DEFAULT_CUSTOM_CALLOUT_COLOR)
+		);
+	});
+});
+
+describe('isValidHexColor', () => {
+	it('accepts well-formed 3- and 6-digit hex colors', () => {
+		expect(isValidHexColor('#fff')).toBe(true);
+		expect(isValidHexColor('#3366cc')).toBe(true);
+	});
+
+	it('rejects malformed input', () => {
+		expect(isValidHexColor('not-a-color')).toBe(false);
+		expect(isValidHexColor('#gg0000')).toBe(false);
+		expect(isValidHexColor('3366cc')).toBe(false);
+		expect(isValidHexColor('')).toBe(false);
 	});
 });
