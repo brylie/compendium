@@ -8,7 +8,8 @@ import {
 } from './manifest';
 
 describe('service surface manifest', () => {
-	const alphabetically = (values: string[]) => values.toSorted((a, b) => a.localeCompare(b));
+	const alphabetically = <T extends string>(values: T[]) =>
+		values.toSorted((a, b) => a.localeCompare(b));
 
 	it('declares every callable service method exactly once', () => {
 		const callableMethods = Object.entries(serviceModules).flatMap(([moduleName, module]) =>
