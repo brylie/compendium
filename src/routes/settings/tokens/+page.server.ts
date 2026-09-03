@@ -1,27 +1,34 @@
 import { fail } from '@sveltejs/kit';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
-import { listCollections, listDocuments } from '$lib/data/records';
+import { listCollections, listDocuments } from '$lib/services';
 import { listSpaces } from '$lib/server/catalog';
-import { createToken, listTokens, revokeToken } from '$lib/mcp/tokens';
-import { logAudit } from '$lib/server/audit';
+import { listTokens } from '$lib/mcp/tokens';
+import { createToken, revokeToken, UnknownSpaceError } from '$lib/services/tokens';
 import { formString } from '$lib/server/form-data';
 import type { Actions, PageServerLoad } from './$types';
 
-const CURRENT_USER = { kind: 'human', userId: 'local' } as const;
-
-/** Loads existing access tokens plus every Document/Collection/Space so the token-management UI can render its allowlist pickers. */
-export const load: PageServerLoad = () => {
-	const { doc, workspaceId } = resolveWorkspaceContext();
+/**
+ * Loads existing access tokens plus every Document/Collection/Space so the token-management UI
+ * can render its allowlist pickers.
+ *
+ * Routed through the service layer, not the bare CRDT primitives directly (#188): since
+ * #113/#120, service-created Documents/Collections live in their own shards and are discovered
+ * through the catalog plus shard-aware service queries, so a raw default-`Y.Doc` read would
+ * silently omit normal current content from the grant picker. `listTokens` stays a plain,
+ * policy-free lookup called directly, same precedent as `spaces.ts`'s `createSpace` comment.
+ */
+export const load: PageServerLoad = ({ locals }) => {
+	const { workspaceId } = resolveWorkspaceContext();
 	return {
 		tokens: listTokens(),
-		documents: listDocuments(doc),
-		collections: listCollections(doc),
+		documents: listDocuments(locals.requestContext.caller),
+		collections: listCollections(locals.requestContext.caller),
 		spaces: listSpaces(workspaceId)
 	};
 };
 
 export const actions: Actions = {
-	create: async ({ request }) => {
+	create: async ({ request, locals }) => {
 		const data = await request.formData();
 		const clientLabel = formString(data.get('clientLabel')).trim();
 		if (!clientLabel) return fail(400, { error: 'Client label is required' });
@@ -30,33 +37,28 @@ export const actions: Actions = {
 		const allowedCollectionIds = data.getAll('collectionIds').map(String);
 		const allowedSpaceIds = data.getAll('spaceIds').map(String);
 
-		// spaceIds comes directly from the request — validate every submitted id
-		// actually belongs to this workspace before it's persisted onto the
-		// token, since Space membership later authorizes access on its own
-		// (tokenAllowsParent). A crafted request could otherwise grant a token
-		// access to a Space id that merely happens to exist somewhere.
-		const { workspaceId } = resolveWorkspaceContext();
-		const knownSpaceIds = new Set(listSpaces(workspaceId).map((space) => space.id));
-		if (!allowedSpaceIds.every((spaceId) => knownSpaceIds.has(spaceId))) {
-			return fail(400, { error: 'Invalid Space selection' });
+		let token: string;
+		try {
+			({ token } = createToken(locals.requestContext.caller, {
+				clientLabel,
+				allowedDocumentIds,
+				allowedCollectionIds,
+				allowedSpaceIds
+			}));
+		} catch (err) {
+			if (err instanceof UnknownSpaceError) {
+				return fail(400, { error: 'Invalid Space selection' });
+			}
+			throw err;
 		}
-
-		const { token, record } = createToken({
-			clientLabel,
-			allowedDocumentIds,
-			allowedCollectionIds,
-			allowedSpaceIds
-		});
-		logAudit({ actor: CURRENT_USER, action: 'create_token', targetRecordId: record.tokenHash });
 
 		return { createdToken: token, clientLabel };
 	},
-	revoke: async ({ request }) => {
+	revoke: async ({ request, locals }) => {
 		const data = await request.formData();
 		const tokenHash = formString(data.get('tokenHash'));
 		if (!tokenHash) return fail(400, { error: 'Missing token' });
-		revokeToken(tokenHash);
-		logAudit({ actor: CURRENT_USER, action: 'revoke_token', targetRecordId: tokenHash });
+		revokeToken(locals.requestContext.caller, tokenHash);
 		return { revoked: true };
 	}
 };

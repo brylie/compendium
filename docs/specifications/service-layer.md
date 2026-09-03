@@ -66,7 +66,12 @@ src/lib/services/
   collections.ts  createCollection(actor, input) → CollectionMeta
                   queryCollection(actor, collectionId, filter?) → WorkspaceRecord[]
   search.ts       searchWorkspace(actor, query) → { recordId, snippet }[]
+  spaces.ts       createSpace(actor, name) → SpaceMeta
+  tokens.ts       createToken(actor, input) → { token, record }
+                  revokeToken(actor, tokenHash) → void
 ```
+
+`tokens.ts` and `spaces.ts` are UI-only (`settings/tokens`, `/api/spaces`) — no MCP tool exposes minting or revoking a token or creating a Space, so neither is registered in `services/manifest.ts`'s MCP/UI wiring table (that table's job is enforcing MCP-tool ↔ UI-surface parity, which doesn't apply to a use case with no MCP side at all; see `manifest.ts`'s existing `spaces` precedent). `tokens.ts#createToken` still validates `allowedSpaceIds` against the workspace's real Spaces before persisting (#188) — a crafted request could otherwise grant a token access to a Space id that merely happens to exist somewhere else, since Space membership alone later authorizes access (`tokenAllowsParent`). Reading the token list (`listTokens`) stays a plain, policy-free lookup called directly from the route, same precedent as `queryAuditLog`.
 
 Each function's first parameter is whatever identifies the caller for permission purposes — an `AccessToken` for MCP-originated calls, the fixed `CURRENT_USER` `ActorId` for Phase 0/1 UI calls (see `data-model.md` §1's `ActorId` union; this doesn't need to change). Where MCP and UI calls to the "same" use case need different permission rules (e.g. UI writes are currently unscoped, single-tenant; MCP writes are token-scoped), the service function is the one place that branches on that — not duplicated per adapter.
 
