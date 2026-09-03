@@ -12,6 +12,22 @@
 	--color-accent: oklch(58% 0.09 220);
 	--color-accent-fg: oklch(99% 0.004 235);
 
+	/* Callout style presets (issue #42) — note/tip/caution/danger, each a
+	   background+text pair (no separate border/icon token: the icon inherits
+	   the text color via currentColor). A custom callout's colors are instead
+	   computed at render time from one user-picked base color — see
+	   deriveCustomCalloutColors in $lib/data/callout-style.ts and the
+	   .callout-custom rule below, which reads CSS custom properties set
+	   per-record rather than a fixed token. */
+	--color-callout-note-bg: oklch(95% 0.025 230);
+	--color-callout-note-fg: oklch(32% 0.08 230);
+	--color-callout-tip-bg: oklch(95% 0.04 150);
+	--color-callout-tip-fg: oklch(32% 0.09 150);
+	--color-callout-caution-bg: oklch(95% 0.05 85);
+	--color-callout-caution-fg: oklch(35% 0.09 60);
+	--color-callout-danger-bg: oklch(95% 0.035 25);
+	--color-callout-danger-fg: oklch(35% 0.12 25);
+
 	--font-display: 'Lora', Georgia, serif;
 	--font-sans: 'Source Sans 3', system-ui, -apple-system, sans-serif;
 	--font-mono: 'JetBrains Mono', ui-monospace, monospace;
@@ -28,6 +44,30 @@
 	--color-border: oklch(33% 0.016 240);
 	--color-accent: oklch(70% 0.1 215);
 	--color-accent-fg: oklch(15% 0.01 235);
+
+	--color-callout-note-bg: oklch(26% 0.035 230);
+	--color-callout-note-fg: oklch(88% 0.03 230);
+	--color-callout-tip-bg: oklch(26% 0.045 150);
+	--color-callout-tip-fg: oklch(88% 0.035 150);
+	--color-callout-caution-bg: oklch(27% 0.05 70);
+	--color-callout-caution-fg: oklch(88% 0.04 80);
+	--color-callout-danger-bg: oklch(26% 0.05 25);
+	--color-callout-danger-fg: oklch(88% 0.04 20);
+}
+
+/* A custom callout's colors are computed per-record (deriveCustomCalloutColors)
+   and passed in as CSS custom properties on the block's own inline style,
+   since there's no way to pre-define a fixed token for an arbitrary
+   user-picked color the way the presets above are. This still reacts to the
+   .dark class toggle purely via CSS, the same as every token-based color in
+   this file — no JS re-render needed on theme change. */
+.callout-custom {
+	background-color: var(--callout-custom-bg-light);
+	color: var(--callout-custom-fg-light);
+}
+.dark .callout-custom {
+	background-color: var(--callout-custom-bg-dark);
+	color: var(--callout-custom-fg-dark);
 }
 
 :root {

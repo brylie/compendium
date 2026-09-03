@@ -52,6 +52,32 @@ export type BlockType =
 // as a persisted thing; there is deliberately no standalone "view route."
 export type ViewType = 'table' | 'board' | 'calendar';
 
+// The four Starlight/Confluence-aligned semantic callout styles (issue #42) —
+// each maps to a fixed, hand-tuned light/dark background+text token pair (see
+// layout.css's --color-callout-<preset>-{bg,fg}) and a fixed icon
+// (see CALLOUT_PRESETS in $lib/data/callout-style.ts), not a user choice.
+export type CalloutPreset = 'note' | 'tip' | 'caution' | 'danger';
+
+// The icons a callout may use — the four preset icons plus a couple of
+// generic options for a custom callout, not the full Icon.svelte roster
+// (most of which are block-type icons that would look wrong on a callout).
+export type CalloutIcon = 'callout' | 'lightbulb' | 'warning' | 'danger' | 'star';
+
+// A collection_view block's viewConfig and a callout's style share the same
+// storage rationale: a single value replaced atomically as one unit by its
+// own dedicated UI control (the style picker), never independently edited
+// field-by-field the way viewConfig's members are — so this is stored
+// whole-value (see setRecordCalloutStyle in records.ts), no per-member
+// decomposition needed the way issue #71 required for viewConfig.
+export type CalloutStyle =
+	| { kind: 'preset'; preset: CalloutPreset }
+	// `color` is the single base color the user picked (a hex string); the
+	// actual light/dark background+text pairs are derived from it at render
+	// time (deriveCustomCalloutColors in $lib/data/callout-style.ts), not
+	// stored — computed text contrast must never go stale relative to a
+	// separately-stored, independently-editable color.
+	| { kind: 'custom'; icon: CalloutIcon; color: string };
+
 export type ViewFilterOp = 'is' | 'is_not' | 'is_empty' | 'is_not_empty';
 
 export interface ViewFilter {
@@ -128,6 +154,7 @@ export interface WorkspaceRecord {
 	collapsed?: boolean; // for toggle blocks
 	referencedRecordId?: string; // for synced_block, page_link, and collection_view (the target Collection)
 	viewConfig?: EmbeddedViewConfig; // for collection_view blocks only
+	calloutStyle?: CalloutStyle; // for callout blocks only — absent renders the pre-#42 neutral default
 	createdBy: ActorId;
 	createdAt: number;
 	lastEditedBy: ActorId;

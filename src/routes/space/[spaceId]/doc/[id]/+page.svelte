@@ -41,6 +41,7 @@
 	import Toolbar from './Toolbar.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import CollectionViewBlock from '$lib/components/CollectionViewBlock.svelte';
+	import CalloutBlock from '$lib/components/CalloutBlock.svelte';
 	import PromptDialog from '$lib/components/PromptDialog.svelte';
 	import type { PageProps } from './$types';
 
@@ -1087,9 +1088,8 @@
 					{:else if bt === 'divider'}
 						<div class="my-3 border-t border-border"></div>
 					{:else if bt === 'callout'}
-						<div class="flex gap-3 rounded-lg border border-border bg-surface p-3.5 shadow-xs">
-							<Icon name="callout" size={18} class="mt-0.5 flex-shrink-0 text-accent" />
-							<div class="min-w-0 flex-1">
+						{#if ydoc}
+							<CalloutBlock {block} {ydoc}>
 								{#if ytext}
 									<BlockEditor
 										bind:this={blockRefs[block.id]}
@@ -1109,8 +1109,8 @@
 										onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
 									/>
 								{/if}
-							</div>
-						</div>
+							</CalloutBlock>
+						{/if}
 					{:else if bt === 'quote'}
 						<div class="border-l-2 border-accent/60 py-0.5 pl-3.5 text-fg/90 italic">
 							{#if ytext}

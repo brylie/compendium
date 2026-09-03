@@ -96,19 +96,25 @@ A held block (another actor's placeholder — `collaboration.md`) has no mounted
 
 New control categories require an explicit interaction contract before implementation (for example, confirmation, audit attribution, and permissions for an agent-triggered action). They should not be smuggled into a text-format or block-insert registration merely to reuse the UI.
 
-## 7. Slash-command menu
+## 7. Callout style picker (issue #42)
+
+A callout's style (one of the four presets, or a custom icon+color — see `data-model.md` §1 and `design-system.md` §6) is deliberately **not** a `toolbar-controls.ts` registration or a slash-menu sub-choice — it's exactly the kind of new control category §6 asks to be scoped explicitly rather than smuggled into an existing one. The slash-command/toolbar "Insert Callout" control is unchanged: it still just inserts a plain, unstyled callout (`setBlockType`/`createRecord` as normal), matching every other block-insert control's single-action contract.
+
+Styling happens afterward, via a small picker (`CalloutBlock.svelte`) built into the callout block's own rendering — its icon doubles as the picker's trigger button. This covers both "pick a style when inserting" (the picker is visible immediately after insertion, since a fresh callout renders right away) and "pick a style when editing" (the same picker, always available) with one control, rather than adding a second, insert-time-only affordance to the slash menu or toolbar. Choosing a preset or applying a custom icon+color calls `setRecordCalloutStyle` directly against the shared Yjs record — the same direct-UI-mutation pattern `setRecordChecked`/`setRecordCollapsed` already use for other block-level fields, not routed through the service layer (audited generically per `audit-coverage.md`).
+
+## 8. Slash-command menu
 
 Slash commands remain the keyboard-first block conversion/insertion flow. The menu is organized into **Writing**, **Structure**, **Media**, **Data**, and **Reuse** sections rather than a single flat list. Each supported command belongs to exactly one section, has a short one-line description, and declares searchable aliases alongside its label (for example, `toggle`, `collapsible`, and `details` all select Toggle list). Filtering searches both labels and aliases, shows only sections that contain matches, and preserves the rendered category order for arrow-key navigation.
 
 The slash-menu catalog covers every currently supported `BlockType`; adding a block requires its category, aliases, and description in addition to the block-capability contract's icon and label. This keeps the slash menu and persistent toolbar aligned as the block vocabulary expands.
 
-## 8. Relationship to slash commands and collaboration
+## 9. Relationship to slash commands and collaboration
 
 Slash commands remain keyboard-first block conversion/insertion. The toolbar is the persistent, discoverable alternative; neither replaces the other. Both create the same block records and must expose the same supported block vocabulary.
 
 The toolbar does not alter holds, presence, permissions, or attribution. Focusing a block continues to claim the existing human-presence hold, and a remote agent edit continues to be rendered through the same Yjs observer path. This keeps native editing and agent-driven editing on one synchronization model, as required by the PRD.
 
-## 9. Verification contract
+## 10. Verification contract
 
 - A user can apply every supported formatting mark from the toolbar to a selection without literal markup appearing in the editor.
 - The active formatting state follows changes to the current selection/caret.

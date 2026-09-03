@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid';
 import type {
 	ActorId,
 	BlockType,
+	CalloutStyle,
 	CollectionMeta,
 	DocumentMeta,
 	DocumentTreeNode,
@@ -21,6 +22,7 @@ import type {
 	WorkspaceRecord
 } from './types';
 import { applyRichTextToYText, yTextToRichText } from './richtext';
+import { DEFAULT_CUSTOM_CALLOUT_COLOR, isValidHexColor } from './callout-style';
 import { nextSelectOptionColor } from './select-colors';
 import { type TypedYMap, typedYMap, typedYMapRegistry } from './yjs-typed';
 
@@ -85,6 +87,7 @@ interface RecordYShape {
 	checked?: boolean;
 	collapsed?: boolean;
 	referencedRecordId?: string;
+	calloutStyle?: CalloutStyle;
 	createdBy: ActorId;
 	createdAt: number;
 	lastEditedBy: ActorId;
@@ -173,6 +176,44 @@ function migrateLegacyViewConfig(yrecord: TypedYMap<RecordYShape>): void {
 	const legacy = yrecord.raw.get(LEGACY_VIEW_CONFIG_KEY) as EmbeddedViewConfig | undefined;
 	if (!legacy) return;
 	writeViewConfig(yrecord, legacy);
+}
+
+/**
+ * A custom CalloutStyle's color comes from an `<input type="color">` in the
+ * normal path, but nothing at the type level stops a malformed value from
+ * reaching either persistence call below — falls back to the same neutral
+ * default the picker itself starts from, rather than persisting garbage that
+ * deriveCustomCalloutColors' hex parsing would later choke on.
+ */
+function sanitizeCalloutStyle(calloutStyle: CalloutStyle): CalloutStyle {
+	if (calloutStyle.kind === 'custom' && !isValidHexColor(calloutStyle.color)) {
+		return { ...calloutStyle, color: DEFAULT_CUSTOM_CALLOUT_COLOR };
+	}
+	return calloutStyle;
+}
+
+/**
+ * Sets the checked/collapsed/referencedRecordId/viewConfig/calloutStyle
+ * group of block-only optional fields — shared by createRecord and
+ * copyRecordVerbatim, which otherwise each repeat the same five
+ * conditionals inline (pushing both functions' own cognitive complexity
+ * over the lint threshold once calloutStyle was the fifth).
+ */
+function applyOptionalBlockFields(
+	yrecord: TypedYMap<RecordYShape>,
+	fields: {
+		checked?: boolean;
+		collapsed?: boolean;
+		referencedRecordId?: string;
+		viewConfig?: EmbeddedViewConfig;
+		calloutStyle?: CalloutStyle;
+	}
+): void {
+	if (fields.checked !== undefined) yrecord.set('checked', fields.checked);
+	if (fields.collapsed !== undefined) yrecord.set('collapsed', fields.collapsed);
+	if (fields.referencedRecordId) yrecord.set('referencedRecordId', fields.referencedRecordId);
+	if (fields.viewConfig) writeViewConfig(yrecord, fields.viewConfig);
+	if (fields.calloutStyle) yrecord.set('calloutStyle', sanitizeCalloutStyle(fields.calloutStyle));
 }
 
 /** Thrown when a requested Document, Collection, record, property, or select option doesn't exist. */
@@ -1072,6 +1113,7 @@ function readRecord(yrecord: TypedYMap<RecordYShape>): WorkspaceRecord {
 		collapsed: yrecord.get('collapsed'),
 		referencedRecordId: yrecord.get('referencedRecordId'),
 		viewConfig: readViewConfig(yrecord),
+		calloutStyle: yrecord.get('calloutStyle'),
 		createdBy: yrecord.get('createdBy')!,
 		createdAt: yrecord.get('createdAt')!,
 		lastEditedBy: yrecord.get('lastEditedBy')!,
@@ -1089,6 +1131,7 @@ export interface CreateRecordInput {
 	collapsed?: boolean;
 	referencedRecordId?: string;
 	viewConfig?: EmbeddedViewConfig; // for collection_view blocks
+	calloutStyle?: CalloutStyle; // for callout blocks
 }
 
 /** Creates a new record (a block if the parent is a Document, a row if the parent is a Collection) and inserts it into the parent's sibling order via a fresh fractional-index `order`. */
@@ -1124,10 +1167,7 @@ export function createRecord(
 		if (kind === 'document') {
 			yrecord.set('blockType', input.blockType ?? 'paragraph');
 			yrecord.set('content', new Y.Text());
-			if (input.checked !== undefined) yrecord.set('checked', input.checked);
-			if (input.collapsed !== undefined) yrecord.set('collapsed', input.collapsed);
-			if (input.referencedRecordId) yrecord.set('referencedRecordId', input.referencedRecordId);
-			if (input.viewConfig) writeViewConfig(yrecord, input.viewConfig);
+			applyOptionalBlockFields(yrecord, input);
 		} else {
 			yrecord.set('isCollectionRow', true);
 			for (const [key, value] of Object.entries(input.properties ?? {})) {
@@ -1219,6 +1259,23 @@ export function setRecordCollapsed(
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	doc.transact(() => {
 		yrecord.set('collapsed', collapsed);
+		yrecord.set('lastEditedBy', actor);
+		yrecord.set('lastEditedAt', Date.now());
+	});
+}
+
+/** Sets (or, given `null`, clears back to the neutral default) a callout block's style — one of the four presets, or a fully custom icon+color (issue #42). Whole-value, like `setRecordChecked`/`setRecordCollapsed`: a style is always chosen as one coherent unit via its own picker UI, never edited member-by-member the way `viewConfig` is, so there's no per-member merge concern to design around here. */
+export function setRecordCalloutStyle(
+	doc: Y.Doc,
+	id: string,
+	calloutStyle: CalloutStyle | null,
+	actor: ActorId
+): void {
+	const yrecord = recordsMap(doc).get(id);
+	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
+	doc.transact(() => {
+		if (calloutStyle === null) yrecord.raw.delete('calloutStyle');
+		else yrecord.set('calloutStyle', sanitizeCalloutStyle(calloutStyle));
 		yrecord.set('lastEditedBy', actor);
 		yrecord.set('lastEditedAt', Date.now());
 	});
@@ -1494,10 +1551,7 @@ function copyRecordVerbatim(
 		const ytext = new Y.Text();
 		if (record.content) applyRichTextToYText(ytext, record.content);
 		yrecord.set('content', ytext);
-		if (record.checked !== undefined) yrecord.set('checked', record.checked);
-		if (record.collapsed !== undefined) yrecord.set('collapsed', record.collapsed);
-		if (record.referencedRecordId) yrecord.set('referencedRecordId', record.referencedRecordId);
-		if (record.viewConfig) writeViewConfig(yrecord, record.viewConfig);
+		applyOptionalBlockFields(yrecord, record);
 	} else {
 		yrecord.set('isCollectionRow', true);
 		for (const [key, value] of Object.entries(record.properties ?? {})) {
