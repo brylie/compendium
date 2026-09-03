@@ -9,7 +9,7 @@ import {
 	PermissionDeniedError,
 	HoldRequiredError
 } from '$lib/services';
-import type { BlockType, EmbeddedViewConfig } from '$lib/data/types';
+import { blockTypes, type BlockType, type EmbeddedViewConfig } from '$lib/data/types';
 import { resolvePrimaryField } from '$lib/data/records';
 
 const propertyValueSchema = z.discriminatedUnion('type', [
@@ -21,28 +21,7 @@ const propertyValueSchema = z.discriminatedUnion('type', [
 	z.object({ type: z.literal('relation'), value: z.array(z.string()) })
 ]);
 
-const blockTypeSchema = z.enum([
-	'paragraph',
-	'heading_1',
-	'heading_2',
-	'heading_3',
-	'heading_4',
-	'bulleted_list_item',
-	'numbered_list_item',
-	'to_do',
-	'quote',
-	'divider',
-	'callout',
-	'toggle',
-	'table',
-	'code',
-	'table_of_contents',
-	'synced_block',
-	'page_link',
-	'embed',
-	'collection_view',
-	'child_pages'
-]);
+const blockTypeSchema = z.enum(blockTypes);
 
 const childPagesDepthSchema = z.union([z.number().int().positive(), z.literal('unlimited')]);
 

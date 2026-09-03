@@ -3,8 +3,20 @@ import * as records from './records';
 import * as holds from './holds';
 import * as collections from './collections';
 import * as search from './search';
+import * as spaces from './spaces';
+import * as tokens from './tokens';
+import * as audit from './audit';
 
-export const serviceModules = { documents, records, holds, collections, search } as const;
+export const serviceModules = {
+	documents,
+	records,
+	holds,
+	collections,
+	search,
+	spaces,
+	tokens,
+	audit
+} as const;
 
 export type ServiceModuleName = keyof typeof serviceModules;
 
@@ -119,5 +131,59 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 		mcpToolName: 'search_workspace',
 		mcpDescription:
 			'Search all Documents and Collections the caller has access to, returning matching record IDs and short snippets.'
-	}
+	},
+
+	'spaces.createSpace': { mcp: false, ui: true },
+	'spaces.listSpaces': { mcp: false, ui: true },
+	'tokens.createToken': { mcp: false, ui: true },
+	'tokens.revokeToken': { mcp: false, ui: true },
+	'tokens.listTokens': { mcp: false, ui: true },
+	'audit.listAuditHistory': { mcp: false, ui: true }
 };
+
+/**
+ * Concrete adapter ownership. These maps are deliberately separate from
+ * `serviceSurfaces`: a declaration without an adapter is a test failure, and
+ * an adapter that has not declared its service method is equally invalid.
+ */
+export const mcpAdapterBindings = {
+	'documents.createDocument': 'create_document',
+	'documents.moveDocument': 'move_document',
+	'documents.deleteDocument': 'delete_document',
+	'documents.getDocument': 'get_document',
+	'documents.listDocuments': 'list_documents',
+	'records.createRecord': 'create_record',
+	'records.writeRecord': 'write_record',
+	'records.deleteRecord': 'delete_record',
+	'holds.holdRecords': 'hold_records',
+	'holds.releaseRecords': 'release_records',
+	'collections.listCollections': 'list_collections',
+	'collections.queryCollection': 'query_collection',
+	'search.searchWorkspace': 'search_workspace'
+} as const satisfies Partial<Record<ServiceMethod, string>>;
+
+export const uiAdapterBindings = {
+	'documents.createDocument': 'src/routes/api/documents/+server.ts',
+	'documents.deleteDocument': 'src/routes/api/documents/[id]/+server.ts',
+	'documents.updateDocumentTitle': 'src/routes/space/[spaceId]/doc/[id]/+page.server.ts',
+	'documents.getDocument': 'src/routes/space/[spaceId]/doc/[id]/+page.server.ts',
+	'documents.listDocuments': 'src/routes/+layout.server.ts',
+	'records.createRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
+	'records.writeRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
+	'records.deleteRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
+	'records.getRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.server.ts',
+	'holds.holdRecords': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
+	'holds.releaseRecords': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
+	'collections.createCollection': 'src/routes/api/collections/+server.ts',
+	'collections.listCollections': 'src/routes/+layout.server.ts',
+	'collections.queryCollection': 'src/routes/space/[spaceId]/table/[id]/+page.server.ts',
+	'collections.deleteCollection': 'src/routes/api/collections/[id]/+server.ts',
+	'collections.updateCollectionTitle': 'src/routes/space/[spaceId]/table/[id]/+page.svelte',
+	'search.searchWorkspace': 'src/routes/space/[spaceId]/+page.server.ts',
+	'spaces.createSpace': 'src/routes/api/spaces/+server.ts',
+	'spaces.listSpaces': 'src/routes/+layout.server.ts',
+	'tokens.createToken': 'src/routes/settings/tokens/+page.server.ts',
+	'tokens.revokeToken': 'src/routes/settings/tokens/+page.server.ts',
+	'tokens.listTokens': 'src/routes/settings/tokens/+page.server.ts',
+	'audit.listAuditHistory': 'src/routes/audit/+page.server.ts'
+} as const satisfies Partial<Record<ServiceMethod, string>>;

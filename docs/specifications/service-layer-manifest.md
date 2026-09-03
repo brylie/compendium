@@ -53,7 +53,7 @@ The manifest guarantees every method has a recorded _intent_. It cannot, by itse
 1. **Generate the MCP tool table from the manifest, don't hand-write it.** For every `mcp: true` entry, a thin generic wrapper (`(input) => serviceModules[module][method](actor, input)`) registers the tool — there is no second hand-written call site to drift, because there's only one. Reserve hand-written MCP tool definitions for the rare method that needs genuinely custom input shaping beyond what the service function's own parameter type already describes.
 2. **A wiring-check test for the UI side.** SvelteKit's file-based routing means routes/actions can't be generated the same way (each often has form-specific validation, redirects, or multi-step flows). Instead, add a Tier A test (see [`e2e-testing.md`](./e2e-testing.md) §2) that walks `serviceSurfaces`, and for every `ui: true` entry, drives the real route/action through the test harness and asserts the underlying service function actually ran (e.g. by asserting its observable effect — the audit entry, the persisted state — the same way other Tier A tests already assert protocol-boundary correctness). This is the same "second, independent call observes the real effect" pattern already established for the MCP side; applying it to the manifest costs one parametrized test, not N bespoke ones.
 
-Static typing alone gets you "nothing was forgotten from the list." It cannot get you "the thing on the list is wired correctly" — that residual has to be a test, and the manifest is what makes that test parametrized and complete instead of another hand-maintained list.
+Static typing alone gets you "nothing was forgotten from the list." It cannot get you "the thing on the list is wired correctly" — that residual has to be a test, and the manifest is what makes that test parametrized and complete instead of another hand-maintained list. The implemented manifest also owns typed `mcpAdapterBindings` and `uiAdapterBindings`: tests prove both maps match the declared surfaces exactly (no missing adapter and no undeclared adapter).
 
 ## 4. What this fixes, concretely
 
@@ -68,7 +68,7 @@ Additive, and sequenced strictly after `service-layer.md`'s M1 gives it somethin
 1. Once `src/lib/services/documents.ts` exists (service-layer spec §5 step 1), add `src/lib/services/manifest.ts` covering just that module — `ServiceMethod` and `serviceSurfaces` don't need every aggregate populated on day one, only the ones that exist yet.
 2. Regenerate the MCP tool registrations for `documents.*` from the manifest (§3.1) as part of the same work that points `create_document`'s handler at the new service function (service-layer spec §5 step 2) — this is the natural moment, since that handler is already being rewritten.
 3. Add the one parametrized UI wiring-check test (§3.2) to the Tier A suite once `tests/e2e/harness.ts` exists (`e2e-testing.md` §3 / `phase-2-plan.md` M2).
-4. Extend `serviceModules` / `serviceSurfaces` to `records`, `holds`, `collections`, `search` opportunistically, in step with `service-layer.md` §5 step 4's own opportunistic migration — the two migrations track each other module-by-module.
+4. Extend `serviceModules` / `serviceSurfaces` to `records`, `holds`, `collections`, `search`, `spaces`, `tokens`, and audit history in step with the service migration — every exported use case has an explicit surface decision.
 
 ## 6. Testing implications
 
