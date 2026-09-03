@@ -27,7 +27,7 @@ export function createSpace(caller: CallerIdentity, name: string): SpaceMeta {
 }
 
 /** Returns the workspace's catalog Spaces through the application boundary. */
-export function listSpaces(_caller: CallerIdentity): SpaceMeta[] {
+export function listSpaces(): SpaceMeta[] {
 	const { workspaceId } = resolveWorkspaceContext();
 	return catalogListSpaces(workspaceId);
 }

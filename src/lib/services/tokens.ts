@@ -58,6 +58,6 @@ export function revokeToken(caller: CallerIdentity, tokenHash: string): void {
 }
 
 /** Returns token metadata for the settings surface; raw token values are never persisted. */
-export function listTokens(_caller: CallerIdentity): AccessToken[] {
+export function listTokens(): AccessToken[] {
 	return storeListTokens();
 }

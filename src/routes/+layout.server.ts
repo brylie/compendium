@@ -23,7 +23,7 @@ export const load: LayoutServerLoad = ({ params, locals }) => {
 	const { defaultSpaceId } = resolveWorkspaceContext();
 	const activeSpaceId = params.spaceId ?? defaultSpaceId;
 	return {
-		spaces: listSpaces(locals.requestContext.caller),
+		spaces: listSpaces(),
 		activeSpaceId,
 		documents: listDocuments(locals.requestContext.caller, activeSpaceId),
 		collections: listCollections(locals.requestContext.caller, activeSpaceId)

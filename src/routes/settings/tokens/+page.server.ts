@@ -16,10 +16,10 @@ import type { Actions, PageServerLoad } from './$types';
  */
 export const load: PageServerLoad = ({ locals }) => {
 	return {
-		tokens: listTokens(locals.requestContext.caller),
+		tokens: listTokens(),
 		documents: listDocuments(locals.requestContext.caller),
 		collections: listCollections(locals.requestContext.caller),
-		spaces: listSpaces(locals.requestContext.caller)
+		spaces: listSpaces()
 	};
 };
 
