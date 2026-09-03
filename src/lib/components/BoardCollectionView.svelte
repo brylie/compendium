@@ -1,22 +1,19 @@
 <script lang="ts">
 	import { nanoid } from 'nanoid';
-	import type * as Y from 'yjs';
-	import { getShardDoc } from '$lib/client/yjs-client';
-	import { CURRENT_USER } from '$lib/client/actor';
 	import {
 		autoPickGroupBy,
+		useCollectionConnection,
 		useCollectionView,
 		type CollectionViewSnapshot
 	} from '$lib/client/collection-view.svelte';
 	import {
-		addSelectOption as addSelectOptionToSchema,
-		createRecord,
-		deleteRecord,
-		resolvePrimaryField,
-		updateCollectionSchema,
-		updateRecordProperties,
-		ValidationError
-	} from '$lib/data/records';
+		addCollectionSelectOption,
+		appendCollectionField,
+		createCollectionRow,
+		removeCollectionRow,
+		setCollectionCell
+	} from '$lib/client/collection-editor';
+	import { resolvePrimaryField } from '$lib/data/records';
 	import {
 		groupBySelectProperty,
 		primaryFieldDisplayValue,
@@ -49,13 +46,6 @@
 
 	const UNASSIGNED_KEY = '__unassigned__';
 
-	let ydoc: Y.Doc | undefined = $state();
-	let shardId: string | undefined = $state();
-	// Set in lockstep with ydoc (never the raw collectionId prop) below — the
-	// prop can change synchronously on retarget while ydoc only catches up
-	// once the async shard fetch resolves, and useCollectionView must never
-	// see a doc paired with a collectionId it doesn't belong to.
-	let resolvedCollectionId: string | undefined = $state();
 	let manualOrder: Record<string, string[]> = $state({});
 	let draggedRecordId: string | null = $state(null);
 	let newGroupingPropertyLabel = $state('Status');
@@ -76,9 +66,20 @@
 		autoPickGroupBy(snapshot.schema, 'select', config, onConfigChange);
 	}
 
+	// Resolves this Collection's real shard (#120) and (re)connects whenever
+	// collectionId changes — shared by every Collection renderer (issue #189).
+	const connection = useCollectionConnection(
+		() => collectionId,
+		() => {
+			autoGroupByAttempted = false;
+		}
+	);
+	const ydoc = $derived(connection.ydoc);
+	const shardId = $derived(connection.shardId);
+
 	const view = useCollectionView(
 		() => ydoc,
-		() => resolvedCollectionId ?? collectionId,
+		() => connection.resolvedCollectionId ?? collectionId,
 		handleSnapshot
 	);
 	const schema = $derived(view.schema);
@@ -115,56 +116,21 @@
 		groupProperty != null && optionDialogPropertyKey === groupProperty.key
 	);
 
-	// Resolves this Collection's real shard (#120) and (re)connects whenever
-	// collectionId changes — see TableCollectionView's identical pattern for
-	// why this can't just be a one-time onMount now that Collections have
-	// their own shards.
-	$effect(() => {
-		const id = collectionId;
-		autoGroupByAttempted = false;
-		let cancelled = false;
-
-		(async () => {
-			const res = await fetch(`/api/collections/${id}/shard`);
-			const { shardId: resolvedShardId } = await res.json();
-			if (cancelled) return;
-
-			shardId = resolvedShardId;
-			resolvedCollectionId = id;
-			ydoc = getShardDoc(resolvedShardId);
-			// A rejection here (network failure, bad response) previously
-			// vanished as a silent unhandled rejection — this at least
-			// surfaces it, without inventing a toast/error-UI system this
-			// lint pass isn't scoped to add.
-		})().catch((err: unknown) => {
-			console.error(`Failed to resolve shard for collection ${id}:`, err);
-		});
-
-		return () => {
-			cancelled = true;
-		};
-	});
-
 	function addGroupingProperty(): void {
-		if (!ydoc) return;
 		const label = newGroupingPropertyLabel.trim();
 		if (!label) return;
 		const property: PropertyDefinition = { key: nanoid(8), label, type: 'select', options: [] };
-		updateCollectionSchema(ydoc, collectionId, [...schema, property]);
+		appendCollectionField(ydoc, collectionId, schema, property);
 		onConfigChange({ ...config, groupBy: property.key });
 	}
 
 	function addSelectOption(propertyKey: string, rawLabel: string): void {
-		if (!ydoc) return;
-		try {
-			addSelectOptionToSchema(ydoc, collectionId, propertyKey, rawLabel ?? '');
+		const result = addCollectionSelectOption(ydoc, collectionId, propertyKey, rawLabel ?? '');
+		if (result.ok) {
 			optionDialogPropertyKey = null;
 			optionDialogError = '';
-		} catch (err) {
-			optionDialogError =
-				err instanceof ValidationError
-					? err.message
-					: 'Could not add the option. Please try again.';
+		} else {
+			optionDialogError = result.error;
 		}
 	}
 
@@ -180,20 +146,18 @@
 	}
 
 	function addCard(column: BoardColumn): void {
-		if (!ydoc || !groupProperty) return;
+		if (!groupProperty) return;
 		const properties: Record<string, PropertyValue> = {};
 		if (column.optionId) properties[groupProperty.key] = { type: 'select', value: column.optionId };
-		createRecord(ydoc, { parentId: collectionId, properties }, CURRENT_USER);
+		createCollectionRow(ydoc, collectionId, properties);
 	}
 
 	function removeCard(id: string): void {
-		if (!ydoc) return;
-		deleteRecord(ydoc, id);
+		removeCollectionRow(ydoc, id);
 	}
 
 	function setCell(row: WorkspaceRecord, property: PropertyDefinition, value: PropertyValue): void {
-		if (!ydoc) return;
-		updateRecordProperties(ydoc, row.id, { [property.key]: value }, CURRENT_USER);
+		setCollectionCell(ydoc, row.id, { [property.key]: value });
 	}
 
 	function cardTitle(row: WorkspaceRecord): string {
@@ -202,13 +166,10 @@
 	}
 
 	function moveToColumn(column: BoardColumn, recordId: string): void {
-		if (!ydoc || !groupProperty) return;
-		updateRecordProperties(
-			ydoc,
-			recordId,
-			{ [groupProperty.key]: { type: 'select', value: column.optionId ?? '' } },
-			CURRENT_USER
-		);
+		if (!groupProperty) return;
+		setCollectionCell(ydoc, recordId, {
+			[groupProperty.key]: { type: 'select', value: column.optionId ?? '' }
+		});
 	}
 
 	// Scoped by the grouping property too — switching which property drives

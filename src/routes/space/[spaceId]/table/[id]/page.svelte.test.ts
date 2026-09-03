@@ -387,7 +387,10 @@ describe('table/[id] +page', () => {
 			within(screen.getByRole('dialog')).getByRole('button', { name: 'Add option' })
 		);
 
-		const select = within(screen.getByRole('table')).getByRole('combobox');
+		// Scoped to <tbody> — the footer's per-column summary picker (a
+		// combobox too) would otherwise make this ambiguous.
+		const tbody = screen.getByRole('table').querySelector('tbody')!;
+		const select = within(tbody).getByRole('combobox');
 		expect(within(select).getByText('Done')).toBeInTheDocument();
 	});
 
@@ -487,7 +490,10 @@ describe('table/[id] +page', () => {
 		await user.type(dateInput, '2026-02-02');
 		await user.tab();
 
-		const select = within(screen.getByRole('table')).getByRole('combobox');
+		// Scoped to <tbody> — the footer's per-column summary picker (a
+		// combobox too) would otherwise make this ambiguous.
+		const tbody = screen.getByRole('table').querySelector('tbody')!;
+		const select = within(tbody).getByRole('combobox');
 		await user.selectOptions(select, 'opt-2');
 
 		// Relation: replace the resolved "Alice" chip with "Bob" via the

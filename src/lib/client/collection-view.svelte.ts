@@ -1,4 +1,5 @@
 import type * as Y from 'yjs';
+import { getShardDoc } from './yjs-client';
 import { getCollectionView } from '$lib/data/views';
 import type { ViewConfig } from '$lib/data/views';
 import type { CollectionMeta, PropertyDefinition, WorkspaceRecord } from '$lib/data/types';
@@ -88,6 +89,74 @@ export function useCollectionView(
 		},
 		get collection() {
 			return collection;
+		}
+	};
+}
+
+export interface CollectionConnection {
+	readonly ydoc: Y.Doc | undefined;
+	readonly shardId: string | undefined;
+	readonly resolvedCollectionId: string | undefined;
+}
+
+/**
+ * Resolves a Collection's real shard (#120) and (re)connects to it whenever
+ * `getCollectionId()` changes — the identical `$effect` every renderer
+ * (Table, Board, Calendar, and the full-page Table route) used to duplicate
+ * individually (issue #189). `resolvedCollectionId` is set in lockstep with
+ * `ydoc`, never derived from the raw id a caller passed this render — the id
+ * can change synchronously on retarget while `ydoc` only catches up once the
+ * async shard fetch resolves, and `useCollectionView` must never see a doc
+ * paired with a collectionId it doesn't belong to.
+ *
+ * `onReconnect`, when given, runs synchronously at the start of every
+ * (re)connect attempt, before the async fetch — for callers that need to
+ * reset their own per-connection state (e.g. Board/Calendar's "auto-pick a
+ * default groupBy once per connect" guard).
+ */
+export function useCollectionConnection(
+	getCollectionId: () => string,
+	onReconnect?: () => void
+): CollectionConnection {
+	let ydoc: Y.Doc | undefined = $state();
+	let shardId: string | undefined = $state();
+	let resolvedCollectionId: string | undefined = $state();
+
+	$effect(() => {
+		const id = getCollectionId();
+		onReconnect?.();
+		let cancelled = false;
+
+		(async () => {
+			const res = await fetch(`/api/collections/${id}/shard`);
+			const { shardId: resolvedShardId } = await res.json();
+			if (cancelled) return;
+
+			shardId = resolvedShardId;
+			resolvedCollectionId = id;
+			ydoc = getShardDoc(resolvedShardId);
+			// A rejection here (network failure, bad response) previously
+			// vanished as a silent unhandled rejection — this at least
+			// surfaces it, without inventing a toast/error-UI system this
+			// lint pass isn't scoped to add.
+		})().catch((err: unknown) => {
+			console.error(`Failed to resolve shard for collection ${id}:`, err);
+		});
+
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	return {
+		get ydoc() {
+			return ydoc;
+		},
+		get shardId() {
+			return shardId;
+		},
+		get resolvedCollectionId() {
+			return resolvedCollectionId;
 		}
 	};
 }

@@ -1,21 +1,20 @@
 <script lang="ts">
 	import { SvelteMap } from 'svelte/reactivity';
 	import { nanoid } from 'nanoid';
-	import type * as Y from 'yjs';
-	import { getShardDoc } from '$lib/client/yjs-client';
-	import { CURRENT_USER } from '$lib/client/actor';
 	import {
 		autoPickGroupBy,
+		useCollectionConnection,
 		useCollectionView,
 		type CollectionViewSnapshot
 	} from '$lib/client/collection-view.svelte';
 	import {
-		createRecord,
-		deleteRecord,
-		resolvePrimaryField,
-		updateCollectionSchema,
-		updateRecordProperties
-	} from '$lib/data/records';
+		addCollectionSelectOption,
+		appendCollectionField,
+		createCollectionRow,
+		removeCollectionRow,
+		setCollectionCell
+	} from '$lib/client/collection-editor';
+	import { resolvePrimaryField } from '$lib/data/records';
 	import {
 		dateKeyForRecord,
 		primaryFieldDisplayValue,
@@ -48,17 +47,11 @@
 
 	const today = new Date();
 
-	let ydoc: Y.Doc | undefined = $state();
-	let shardId: string | undefined = $state();
-	// Set in lockstep with ydoc (never the raw collectionId prop) below — the
-	// prop can change synchronously on retarget while ydoc only catches up
-	// once the async shard fetch resolves, and useCollectionView must never
-	// see a doc paired with a collectionId it doesn't belong to.
-	let resolvedCollectionId: string | undefined = $state();
 	let viewYear = $state(today.getFullYear());
 	let viewMonth = $state(today.getMonth()); // 0-11
 	let newDatePropertyLabel = $state('Date');
 	let optionDialogPropertyKey: string | null = $state(null);
+	let optionDialogError = $state('');
 
 	// Auto-picking a default groupBy is attempted at most once per
 	// collectionId, not on every refresh — the hook's snapshot callback fires
@@ -74,9 +67,20 @@
 		autoPickGroupBy(snapshot.schema, 'date', config, onConfigChange);
 	}
 
+	// Resolves this Collection's real shard (#120) and (re)connects whenever
+	// collectionId changes — shared by every Collection renderer (issue #189).
+	const connection = useCollectionConnection(
+		() => collectionId,
+		() => {
+			autoGroupByAttempted = false;
+		}
+	);
+	const ydoc = $derived(connection.ydoc);
+	const shardId = $derived(connection.shardId);
+
 	const view = useCollectionView(
 		() => ydoc,
-		() => resolvedCollectionId ?? collectionId,
+		() => connection.resolvedCollectionId ?? collectionId,
 		handleSnapshot
 	);
 	const schema = $derived(view.schema);
@@ -162,42 +166,11 @@
 		return result;
 	});
 
-	// Resolves this Collection's real shard (#120) and (re)connects whenever
-	// collectionId changes — see TableCollectionView's identical pattern for
-	// why this can't just be a one-time onMount now that Collections have
-	// their own shards.
-	$effect(() => {
-		const id = collectionId;
-		autoGroupByAttempted = false;
-		let cancelled = false;
-
-		(async () => {
-			const res = await fetch(`/api/collections/${id}/shard`);
-			const { shardId: resolvedShardId } = await res.json();
-			if (cancelled) return;
-
-			shardId = resolvedShardId;
-			resolvedCollectionId = id;
-			ydoc = getShardDoc(resolvedShardId);
-			// A rejection here (network failure, bad response) previously
-			// vanished as a silent unhandled rejection — this at least
-			// surfaces it, without inventing a toast/error-UI system this
-			// lint pass isn't scoped to add.
-		})().catch((err: unknown) => {
-			console.error(`Failed to resolve shard for collection ${id}:`, err);
-		});
-
-		return () => {
-			cancelled = true;
-		};
-	});
-
 	function addDateProperty(): void {
-		if (!ydoc) return;
 		const label = newDatePropertyLabel.trim();
 		if (!label) return;
 		const property: PropertyDefinition = { key: nanoid(8), label, type: 'date' };
-		updateCollectionSchema(ydoc, collectionId, [...schema, property]);
+		appendCollectionField(ydoc, collectionId, schema, property);
 		onConfigChange({ ...config, groupBy: property.key });
 	}
 
@@ -213,41 +186,33 @@
 	}
 
 	function addEntry(year: number, month: number, day: number): void {
-		if (!ydoc || !dateProperty) return;
-		createRecord(
-			ydoc,
-			{
-				parentId: collectionId,
-				properties: { [dateProperty.key]: { type: 'date', value: dateKey(year, month, day) } }
-			},
-			CURRENT_USER
-		);
+		if (!dateProperty) return;
+		createCollectionRow(ydoc, collectionId, {
+			[dateProperty.key]: { type: 'date', value: dateKey(year, month, day) }
+		});
 	}
 
 	function removeEntry(id: string): void {
-		if (!ydoc) return;
-		deleteRecord(ydoc, id);
+		removeCollectionRow(ydoc, id);
 	}
 
 	function addSelectOption(propertyKey: string, rawLabel: string): void {
-		if (!ydoc) return;
-		const label = rawLabel.trim();
-		if (!label) return;
-		const nextSchema = schema.map((p) =>
-			p.key === propertyKey
-				? { ...p, options: [...(p.options ?? []), { id: nanoid(6), label }] }
-				: p
-		);
-		updateCollectionSchema(ydoc, collectionId, nextSchema);
+		const result = addCollectionSelectOption(ydoc, collectionId, propertyKey, rawLabel);
+		if (result.ok) {
+			optionDialogPropertyKey = null;
+			optionDialogError = '';
+		} else {
+			optionDialogError = result.error;
+		}
 	}
 
 	function openSelectOptionDialog(propertyKey: string): void {
 		optionDialogPropertyKey = propertyKey;
+		optionDialogError = '';
 	}
 
 	function setCell(row: WorkspaceRecord, property: PropertyDefinition, value: PropertyValue): void {
-		if (!ydoc) return;
-		updateRecordProperties(ydoc, row.id, { [property.key]: value }, CURRENT_USER);
+		setCollectionCell(ydoc, row.id, { [property.key]: value });
 	}
 
 	function entryTitle(row: WorkspaceRecord): string {
@@ -461,9 +426,12 @@
 	label="Option name"
 	placeholder="Option name"
 	submitLabel="Add option"
+	errorMessage={optionDialogError}
 	onSubmit={(value) => {
 		if (optionDialogPropertyKey) addSelectOption(optionDialogPropertyKey, value);
-		optionDialogPropertyKey = null;
 	}}
-	onCancel={() => (optionDialogPropertyKey = null)}
+	onCancel={() => {
+		optionDialogPropertyKey = null;
+		optionDialogError = '';
+	}}
 />
