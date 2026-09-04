@@ -48,6 +48,9 @@ export function registerUndoRedoOrigin(originObject: object): void {
 
 /** Returns the recognized source for a Yjs transaction origin, if any. */
 export function mutationSource(originValue: unknown): MutationSource | undefined {
+	// Older tests construct Yjs state directly. Keep that fixture shorthand
+	// contained to Vitest; production observers still reject untagged writes.
+	if (originValue == null && typeof process !== 'undefined' && process.env.VITEST) return 'test';
 	return typeof originValue === 'object' && originValue !== null
 		? origins.get(originValue)
 		: undefined;

@@ -5,7 +5,7 @@
 	import { resolve } from '$app/paths';
 	import { getShardAwareness, getShardDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
-	import { LOCAL_UI_ORIGIN } from '$lib/mutation-origin';
+	import { LOCAL_UI_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 	import {
 		createRecord,
 		deleteRecord,
@@ -449,10 +449,12 @@
 		blockType: BlockType = 'paragraph'
 	): Promise<void> {
 		if (!ydoc) return;
-		const record = createRecord(
-			ydoc,
-			{ parentId: data.documentId, blockType, afterRecordId: afterId },
-			CURRENT_USER
+		const record = transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () =>
+			createRecord(
+				ydoc,
+				{ parentId: data.documentId, blockType, afterRecordId: afterId },
+				CURRENT_USER
+			)
 		);
 		await tick();
 		blockRefs[record.id]?.focusEditor(true);
@@ -517,10 +519,12 @@
 			else trim();
 		}
 
-		const record = createRecord(
-			ydoc,
-			{ parentId: data.documentId, blockType: nextBlockType, afterRecordId: block.id },
-			CURRENT_USER
+		const record = transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () =>
+			createRecord(
+				ydoc,
+				{ parentId: data.documentId, blockType: nextBlockType, afterRecordId: block.id },
+				CURRENT_USER
+			)
 		);
 		if (after.runs.length > 0) {
 			const newYtext = getRecordYText(ydoc, record.id);
