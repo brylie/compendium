@@ -128,7 +128,15 @@ function createContext(workspaceId: string, shardId: string): InternalContext {
 		context.dirty = true;
 	});
 
-	context.saveTimer = setInterval(() => flushContext(context, snapshotStore), SAVE_INTERVAL_MS);
+	context.saveTimer = setInterval(() => {
+		try {
+			flushContext(context, snapshotStore);
+		} catch (error) {
+			// Keep dirty state intact: the next interval retries reconciliation
+			// from the already-persisted authoritative Yjs snapshot.
+			console.error('Failed to flush workspace context; will retry', error);
+		}
+	}, SAVE_INTERVAL_MS);
 	context.saveTimer.unref?.();
 
 	wireShutdownOnce();

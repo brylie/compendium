@@ -530,7 +530,11 @@
 		);
 		if (after.runs.length > 0) {
 			const newYtext = getRecordYText(ydoc, record.id);
-			if (newYtext) applyRichTextToYText(newYtext, after);
+			if (newYtext) {
+				transactWithOrigin(currentDoc, LOCAL_UI_ORIGIN, () =>
+					applyRichTextToYText(newYtext, after)
+				);
+			}
 		}
 		await tick();
 		// Caret at the very start (offset 0): `block` becomes the empty line

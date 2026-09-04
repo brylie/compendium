@@ -26,14 +26,15 @@ import { createToken, verifyToken } from '$lib/mcp/tokens';
 import { queryAuditLog } from '$lib/server/audit';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import {
-	createRecord as crdtCreateRecord,
-	createDocument as crdtCreateDocument,
-	createCollection as crdtCreateCollection,
+	createRecord as rawCrdtCreateRecord,
+	createDocument as rawCrdtCreateDocument,
+	createCollection as rawCrdtCreateCollection,
 	getDocument as crdtGetDocument,
 	getCollection as crdtGetCollection,
 	getRecord as crdtGetRecord,
 	getRecordYText as crdtGetRecordYText
 } from '$lib/data/records';
+import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import {
 	listCatalogCollections,
 	listCatalogDocuments,
@@ -46,6 +47,22 @@ import {
 import type { ActorId, EmbeddedViewConfig } from '$lib/data/types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
+
+function crdtCreateDocument(...args: Parameters<typeof rawCrdtCreateDocument>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateDocument(...args));
+}
+
+function crdtCreateCollection(...args: Parameters<typeof rawCrdtCreateCollection>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateCollection(...args));
+}
+
+function crdtCreateRecord(...args: Parameters<typeof rawCrdtCreateRecord>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateRecord(...args));
+}
+
+function writeTestYText(doc: Parameters<typeof transactWithOrigin>[0], write: () => void): void {
+	transactWithOrigin(doc, TEST_ORIGIN, write);
+}
 
 describe('service layer: centralized business rules & side effects', () => {
 	it('creates documents, logs audit, and persists token grants in SQLite', () => {
@@ -401,7 +418,9 @@ describe('service layer: centralized business rules & side effects', () => {
 				},
 				human
 			);
-			crdtGetRecordYText(doc, callout.id)!.insert(0, 'Handle with care.');
+			writeTestYText(doc, () =>
+				crdtGetRecordYText(doc, callout.id)!.insert(0, 'Handle with care.')
+			);
 
 			const result = getDocument(human, docPublic.id);
 			const record = result?.records.find((r) => r.id === callout.id);
@@ -421,7 +440,9 @@ describe('service layer: centralized business rules & side effects', () => {
 				},
 				human
 			);
-			crdtGetRecordYText(doc, callout.id)!.insert(0, 'First line\nSecond line');
+			writeTestYText(doc, () =>
+				crdtGetRecordYText(doc, callout.id)!.insert(0, 'First line\nSecond line')
+			);
 
 			const result = getDocument(human, docPublic.id);
 			const record = result?.records.find((r) => r.id === callout.id);
@@ -457,7 +478,9 @@ describe('service layer: centralized business rules & side effects', () => {
 				},
 				human
 			);
-			crdtGetRecordYText(doc, callout.id)!.insert(0, 'Plain text, styled cell only.');
+			writeTestYText(doc, () =>
+				crdtGetRecordYText(doc, callout.id)!.insert(0, 'Plain text, styled cell only.')
+			);
 
 			const result = getDocument(human, docPublic.id);
 			const record = result?.records.find((r) => r.id === callout.id);
@@ -473,7 +496,7 @@ describe('service layer: centralized business rules & side effects', () => {
 				{ parentId: docPublic.id, blockType: 'callout' },
 				human
 			);
-			crdtGetRecordYText(doc, callout.id)!.insert(0, 'Careful!');
+			writeTestYText(doc, () => crdtGetRecordYText(doc, callout.id)!.insert(0, 'Careful!'));
 
 			const result = getDocument(human, docPublic.id);
 			const record = result?.records.find((r) => r.id === callout.id);

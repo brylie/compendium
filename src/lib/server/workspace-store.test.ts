@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TEST_ORIGIN, transactWithOrigin } from '../mutation-origin';
 import { closeDb } from './store';
 import { clientIdForToken, requestAgentHold } from './holds';
+import * as catalog from './catalog';
 import {
 	flush,
 	registerConnection,
@@ -24,6 +25,8 @@ describe('workspace-store: snapshot persistence survives a process restart', () 
 
 	afterEach(() => {
 		resetWorkspaceStoreForTests();
+		vi.useRealTimers();
+		vi.restoreAllMocks();
 		closeDb();
 		delete process.env.DATABASE_URL;
 		rmSync(dir, { recursive: true, force: true });
@@ -49,6 +52,28 @@ describe('workspace-store: snapshot persistence survives a process restart', () 
 		resolveWorkspaceContext();
 		flush(); // nothing written yet -> dirty is false
 		expect(() => flush()).not.toThrow();
+	});
+
+	it('logs a transient periodic reconciliation failure and retries it on the next interval', () => {
+		vi.useFakeTimers();
+		const context = resolveWorkspaceContext();
+		const reconcile = vi.spyOn(catalog, 'reconcileCatalogMetadata').mockImplementationOnce(() => {
+			throw new Error('temporary catalog outage');
+		});
+		const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		transactWithOrigin(context.doc, TEST_ORIGIN, () =>
+			context.doc.getMap('workspace').set('needs-reconciliation', true)
+		);
+
+		vi.advanceTimersByTime(30_000);
+		expect(error).toHaveBeenCalledWith(
+			'Failed to flush workspace context; will retry',
+			expect.any(Error)
+		);
+
+		vi.advanceTimersByTime(30_000);
+		expect(reconcile).toHaveBeenCalledTimes(2);
 	});
 });
 

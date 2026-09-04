@@ -16,6 +16,7 @@ import * as Y from 'yjs';
 import { createDocument, createRecord, getDocument, getRecordYText } from '$lib/data/records';
 import { plainText, yTextToRichText } from '$lib/data/richtext';
 import type { ActorId } from '$lib/data/types';
+import { LOCAL_UI_ORIGIN } from '$lib/mutation-origin';
 import Page from './+page.svelte';
 
 vi.mock('$app/state', () => ({
@@ -311,6 +312,8 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 			getRecordYText(ydoc, record.id)!.insert(0, 'Hello world');
 			const { container } = await renderDoc();
+			const splitOrigins: unknown[] = [];
+			ydoc.on('afterTransaction', (transaction) => splitOrigins.push(transaction.origin));
 
 			const editor = container.querySelector('[contenteditable]') as HTMLElement;
 			selectRange(editor, 5, 5); // caret right after "Hello"
@@ -323,6 +326,8 @@ describe('editing conventions: Enter, Backspace, and toolbar block controls', ()
 			expect(recordIds).toHaveLength(2);
 			expect(textOf(record.id)).toBe('Hello');
 			expect(textOf(recordIds[1])).toBe(' world');
+			expect(splitOrigins).toContain(LOCAL_UI_ORIGIN);
+			expect(splitOrigins).not.toContain(null);
 		});
 
 		it.each(['quote', 'callout', 'code'] as const)(
