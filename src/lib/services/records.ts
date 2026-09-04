@@ -177,13 +177,11 @@ export function createRecord(
 
 	requireAccessibleParent(caller, input.parentId, 'create_record');
 
-	// Checked unconditionally, not just when referencedRecordId/childPagesDepth
-	// happen to be supplied — a targetless, default-depth child_pages block
-	// ("list the current Document's own children") is the single most common
-	// call shape, and without this the CRDT layer would otherwise silently
-	// treat a Collection parent as a plain row, ignoring blockType entirely.
-	if (input.blockType === 'child_pages' && !crdtGetDocument(doc, input.parentId)) {
-		throw new Error('child_pages blocks can only be created inside a Document.');
+	// The CRDT layer intentionally stores Collection children as rows, dropping
+	// blockType. Reject every explicitly requested block here instead of
+	// reporting a successful create_record that silently produced a row.
+	if (input.blockType !== undefined && !crdtGetDocument(doc, input.parentId)) {
+		throw new Error('blockType is only valid when creating a record inside a Document.');
 	}
 
 	if (input.referencedRecordId !== undefined) {

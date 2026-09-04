@@ -43,7 +43,7 @@ import {
 	recordCatalogCollectionCreated,
 	resolveShardForRecord
 } from '$lib/server/catalog';
-import type { ActorId, EmbeddedViewConfig } from '$lib/data/types';
+import { blockTypes, type ActorId, type EmbeddedViewConfig } from '$lib/data/types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
 
@@ -707,6 +707,24 @@ describe('service layer: MCP authoring and repair of page_link targets (issue #4
 				referencedRecordId: target.id
 			})
 		).toThrow(/Document/);
+	});
+
+	it('rejects a targetless page_link under a Collection parent without creating a row', () => {
+		const col = createCollection(human, { title: 'Tasks', schema: [] });
+
+		expect(() => createRecord(human, { parentId: col.id, blockType: 'page_link' })).toThrow(
+			/Document/
+		);
+		expect(queryCollection(human, col.id).records).toEqual([]);
+	});
+
+	it('rejects every explicit Document block type under a Collection parent', () => {
+		const col = createCollection(human, { title: 'Tasks', schema: [] });
+
+		for (const blockType of blockTypes) {
+			expect(() => createRecord(human, { parentId: col.id, blockType })).toThrow(/Document/);
+		}
+		expect(queryCollection(human, col.id).records).toEqual([]);
 	});
 
 	it('rejects create_record with a referencedRecordId the token was never granted access to, without distinguishing "forbidden" from "nonexistent"', () => {
