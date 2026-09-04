@@ -211,12 +211,18 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 				const yrecordA = doc.getMap('records').get(sharedId) as Y.Map<unknown>;
 				const yrecordB = docB.getMap('records').get(sharedId) as Y.Map<unknown>;
 
-				doc.transact(() => (yrecordA.get('content') as Y.Text).insert(0, 'from A'), remoteUiOrigin('ws-a'));
+				doc.transact(
+					() => (yrecordA.get('content') as Y.Text).insert(0, 'from A'),
+					remoteUiOrigin('ws-a')
+				);
 				vi.advanceTimersByTime(1_000);
 				// Doc B's edit for the same record id arrives inside doc A's
 				// debounce window. Without per-doc scoping this would reset/steal
 				// the timer keyed by "record:shared-record-id".
-				docB.transact(() => (yrecordB.get('content') as Y.Text).insert(0, 'from B'), remoteUiOrigin('ws-b'));
+				docB.transact(
+					() => (yrecordB.get('content') as Y.Text).insert(0, 'from B'),
+					remoteUiOrigin('ws-b')
+				);
 
 				vi.advanceTimersByTime(3_000);
 				// Both docs' pending updates must have fired on their own schedule —

@@ -411,7 +411,12 @@ export function writeRecord(
 		}
 		if (input.properties) {
 			updateRecordProperties(doc, recordId, input.properties, actor);
-			logAudit({ actor, action: 'write_record', targetRecordId: recordId, diff: { properties: input.properties } });
+			logAudit({
+				actor,
+				action: 'write_record',
+				targetRecordId: recordId,
+				diff: { properties: input.properties }
+			});
 		}
 		if (input.referencedRecordId !== undefined) {
 			applyReferencedRecordIdWrite(doc, record, recordId, actor, input.referencedRecordId);

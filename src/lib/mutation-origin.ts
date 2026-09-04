@@ -2,13 +2,7 @@ import * as Y from 'yjs';
 
 /** Every Yjs write source accepted by Compendium's projection observers. */
 export type MutationSource =
-	| 'local-ui'
-	| 'remote-ui'
-	| 'service'
-	| 'migration'
-	| 'replay'
-	| 'undo-redo'
-	| 'test';
+	'local-ui' | 'remote-ui' | 'service' | 'migration' | 'replay' | 'undo-redo' | 'test';
 
 export interface MutationOrigin {
 	readonly source: MutationSource;

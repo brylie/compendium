@@ -183,7 +183,6 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 		shardId
 	});
 
-
 	// Persist access grant in SQLite so subsequent tool calls from this token succeed
 	if (isAccessToken(caller)) {
 		grantDocumentAccess(caller.tokenHash, document.id);

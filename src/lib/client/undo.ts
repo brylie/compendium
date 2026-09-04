@@ -22,9 +22,12 @@ const SCOPE_MAP_NAMES = ['documents', 'collections', 'records'] as const;
  * scope types themselves.
  */
 export function createUndoManager(doc: Y.Doc): Y.UndoManager {
-	const manager = new Y.UndoManager(SCOPE_MAP_NAMES.map((name) => doc.getMap(name)), {
-		trackedOrigins: new Set([LOCAL_UI_ORIGIN])
-	});
+	const manager = new Y.UndoManager(
+		SCOPE_MAP_NAMES.map((name) => doc.getMap(name)),
+		{
+			trackedOrigins: new Set([LOCAL_UI_ORIGIN])
+		}
+	);
 	registerUndoRedoOrigin(manager);
 	return manager;
 }

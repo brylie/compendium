@@ -140,8 +140,8 @@ describe('catalog-mirror-observer: mirroring direct UI title/hierarchy edits int
 	});
 
 	it('rejects an unrecognized mutation origin', () => {
-		expect(() => doc.transact(() => doc.getMap('documents').set('bad', new Y.Map()), 'legacy')).toThrow(
-			UnknownMutationOriginError
-		);
+		expect(() =>
+			doc.transact(() => doc.getMap('documents').set('bad', new Y.Map()), 'legacy')
+		).toThrow(UnknownMutationOriginError);
 	});
 });
