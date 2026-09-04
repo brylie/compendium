@@ -4,10 +4,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { GET, POST, DELETE } from './+server';
-import { createDocument } from '$lib/data/records';
+import { createDocument as createDocumentRaw } from '$lib/data/records';
 import { createToken } from '$lib/mcp/tokens';
+import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { closeTestServer, listenOnLoopback } from '../../../tests/e2e/listener';
+
+function createDocument(
+	doc: Parameters<typeof createDocumentRaw>[0],
+	input: Parameters<typeof createDocumentRaw>[1]
+) {
+	return transactWithOrigin(doc, TEST_ORIGIN, () => createDocumentRaw(doc, input));
+}
 
 // Mirrors tests/e2e/harness.ts's node-request/web-request bridge, but points
 // at this route's own exported handlers rather than reimplementing MCP

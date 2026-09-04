@@ -22,3 +22,9 @@ repos:
         files: \.(ts|svelte)$
         exclude: ^(node_modules|\.svelte-kit|build)
         pass_filenames: false
+      - id: e2e
+        name: Build and run end-to-end tests
+        language: system
+        entry: sh scripts/pre-push-check.sh
+        pass_filenames: false
+        stages: [pre-push]

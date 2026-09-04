@@ -1,6 +1,7 @@
 import * as Y from 'yjs';
 import { logAudit } from './audit.js';
 import { CURRENT_USER } from './current-user.js';
+import { mutationSource, UnknownMutationOriginError } from '../mutation-origin.js';
 
 // The UI edits the workspace by mutating the client's own Y.Doc directly
 // (src/lib/data/records.ts, called straight from Svelte components — see
@@ -253,7 +254,9 @@ export function attachDocAuditObserver(doc: Y.Doc): void {
 	const maps = topLevelMaps(doc);
 
 	doc.on('afterTransaction', (transaction: Y.Transaction) => {
-		if (transaction.origin == null) return; // service-layer write — already audited itself
+		const source = mutationSource(transaction.origin);
+		if (!source) throw new UnknownMutationOriginError(transaction.origin);
+		if (source !== 'local-ui' && source !== 'remote-ui' && source !== 'test') return;
 
 		const finalized = new Map<string, FinalizedEntry>();
 		collectTopLevelEntryChanges(transaction, maps, finalized);

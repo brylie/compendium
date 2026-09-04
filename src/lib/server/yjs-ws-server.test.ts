@@ -6,6 +6,7 @@ import type { WebSocket } from 'ws';
 import { setupWSConnection } from './yjs-ws-server';
 import { resolveWorkspaceContext, resetWorkspaceStoreForTests } from './workspace-store';
 import { resetHoldsForTests } from './holds';
+import { TEST_ORIGIN, transactWithOrigin } from '../mutation-origin';
 
 // Minimal stand-in for the `ws` library's WebSocket, just enough surface for
 // setupWSConnection: EventEmitter for on/emit, plus the properties/methods it
@@ -84,7 +85,8 @@ describe('yjs-ws-server: disconnect cleanup', () => {
 		ws.sendImpl = sendSpy;
 
 		setupWSConnection(ws as unknown as WebSocket);
-		resolveWorkspaceContext().doc.getMap('workspace').set('key', 'value'); // triggers doc's 'update' event
+		const { doc } = resolveWorkspaceContext();
+		transactWithOrigin(doc, TEST_ORIGIN, () => doc.getMap('workspace').set('key', 'value'));
 
 		expect(sendSpy).not.toHaveBeenCalled();
 	});
@@ -96,8 +98,9 @@ describe('yjs-ws-server: disconnect cleanup', () => {
 		};
 
 		setupWSConnection(ws as unknown as WebSocket);
+		const { doc } = resolveWorkspaceContext();
 		expect(() =>
-			resolveWorkspaceContext().doc.getMap('workspace').set('key2', 'value2')
+			transactWithOrigin(doc, TEST_ORIGIN, () => doc.getMap('workspace').set('key2', 'value2'))
 		).not.toThrow();
 	});
 

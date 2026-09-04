@@ -3,7 +3,29 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpServer } from './server';
 import { createToken } from './tokens';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
-import { createCollection, createDocument, createRecord, setPrimaryField } from '$lib/data/records';
+import {
+	createCollection as rawCreateCollection,
+	createDocument as rawCreateDocument,
+	createRecord as rawCreateRecord,
+	setPrimaryField as rawSetPrimaryField
+} from '$lib/data/records';
+import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
+
+function createDocument(...args: Parameters<typeof rawCreateDocument>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCreateDocument(...args));
+}
+
+function createCollection(...args: Parameters<typeof rawCreateCollection>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCreateCollection(...args));
+}
+
+function createRecord(...args: Parameters<typeof rawCreateRecord>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCreateRecord(...args));
+}
+
+function setPrimaryField(...args: Parameters<typeof rawSetPrimaryField>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawSetPrimaryField(...args));
+}
 
 interface ToolHolder {
 	_registeredTools: Record<

@@ -5,6 +5,7 @@
 	import { resolve } from '$app/paths';
 	import { getShardAwareness, getShardDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
+	import { LOCAL_UI_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 	import {
 		createRecord,
 		deleteRecord,
@@ -448,10 +449,13 @@
 		blockType: BlockType = 'paragraph'
 	): Promise<void> {
 		if (!ydoc) return;
-		const record = createRecord(
-			ydoc,
-			{ parentId: data.documentId, blockType, afterRecordId: afterId },
-			CURRENT_USER
+		const currentDoc = ydoc;
+		const record = transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () =>
+			createRecord(
+				currentDoc,
+				{ parentId: data.documentId, blockType, afterRecordId: afterId },
+				CURRENT_USER
+			)
 		);
 		await tick();
 		blockRefs[record.id]?.focusEditor(true);
@@ -504,6 +508,7 @@
 		nextBlockType: BlockType
 	): Promise<void> {
 		if (!ydoc) return;
+		const currentDoc = ydoc;
 		const ytext = getRecordYText(ydoc, block.id);
 		const richText = ytext ? yTextToRichText(ytext) : { runs: [] };
 		const offset = ytext ? Math.min(Math.max(0, caretOffset), ytext.length) : 0;
@@ -512,18 +517,24 @@
 		if (ytext && offset < ytext.length) {
 			const doc = ytext.doc;
 			const trim = () => ytext.delete(offset, ytext.length - offset);
-			if (doc) doc.transact(trim);
+			if (doc) doc.transact(trim, LOCAL_UI_ORIGIN);
 			else trim();
 		}
 
-		const record = createRecord(
-			ydoc,
-			{ parentId: data.documentId, blockType: nextBlockType, afterRecordId: block.id },
-			CURRENT_USER
+		const record = transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () =>
+			createRecord(
+				currentDoc,
+				{ parentId: data.documentId, blockType: nextBlockType, afterRecordId: block.id },
+				CURRENT_USER
+			)
 		);
 		if (after.runs.length > 0) {
 			const newYtext = getRecordYText(ydoc, record.id);
-			if (newYtext) applyRichTextToYText(newYtext, after);
+			if (newYtext) {
+				transactWithOrigin(currentDoc, LOCAL_UI_ORIGIN, () =>
+					applyRichTextToYText(newYtext, after)
+				);
+			}
 		}
 		await tick();
 		// Caret at the very start (offset 0): `block` becomes the empty line
@@ -809,7 +820,7 @@
 		if (ytext) {
 			const doc = ytext.doc;
 			const clear = () => ytext.delete(0, ytext.length);
-			if (doc) doc.transact(clear);
+			if (doc) doc.transact(clear, LOCAL_UI_ORIGIN);
 			else clear();
 		}
 		setBlockType(ydoc, blockId, blockType, CURRENT_USER);

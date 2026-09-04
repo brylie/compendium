@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { load } from './+page.server';
-import { createDocument } from '$lib/data/records';
+import { createDocument as rawCreateDocument } from '$lib/data/records';
+import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { createDocument as createDocumentService } from '$lib/services';
 import { CURRENT_USER } from '$lib/server/current-user';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { resolveRequestContext } from '$lib/server/request-context';
+
+function createDocument(...args: Parameters<typeof rawCreateDocument>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCreateDocument(...args));
+}
 
 function loadEvent(id: string, spaceId?: string): Parameters<typeof load>[0] {
 	return {

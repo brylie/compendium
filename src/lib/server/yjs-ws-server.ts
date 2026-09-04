@@ -11,6 +11,7 @@ import {
 } from './workspace-store.js';
 import { getInstanceWorkspaceId } from './instance.js';
 import { isKnownShard } from './catalog.js';
+import { remoteUiOrigin } from '../mutation-origin.js';
 
 // y-websocket's npm package ships the browser client only as of v3 — the
 // server side (formerly bin/utils.js) is reimplemented here against the same
@@ -69,6 +70,7 @@ export function setupWSConnection(ws: WebSocket, selector?: WorkspaceSelector): 
 	ws.binaryType = 'arraybuffer';
 
 	const ownedClientIds = new Set<number>();
+	const transactionOrigin = remoteUiOrigin(`ws:${crypto.randomUUID()}`);
 	let closed = false;
 	let pongReceived = true;
 
@@ -144,7 +146,7 @@ export function setupWSConnection(ws: WebSocket, selector?: WorkspaceSelector): 
 				case MESSAGE_SYNC: {
 					const encoder = encoding.createEncoder();
 					encoding.writeVarUint(encoder, MESSAGE_SYNC);
-					syncProtocol.readSyncMessage(decoder, encoder, doc, ws);
+					syncProtocol.readSyncMessage(decoder, encoder, doc, transactionOrigin);
 					if (encoding.length(encoder) > 1) send(encoder);
 					break;
 				}

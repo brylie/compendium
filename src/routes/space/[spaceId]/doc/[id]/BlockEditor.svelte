@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { diffPlainText } from '$lib/client/text-diff';
+	import { LOCAL_UI_ORIGIN } from '$lib/mutation-origin';
 	import {
 		getCaretClientX,
 		getCaretOffset,
@@ -181,7 +182,7 @@
 			if (diff.deleteCount > 0) ytext.delete(diff.start, diff.deleteCount);
 			if (diff.insertText) ytext.insert(diff.start, diff.insertText);
 		};
-		if (doc) doc.transact(apply);
+		if (doc) doc.transact(apply, LOCAL_UI_ORIGIN);
 		else apply();
 		lastPlainText = newText;
 		onInputText();
@@ -354,7 +355,7 @@
 		const doc = ytext.doc;
 		const apply = () =>
 			ytext.format(offsets.start, offsets.end - offsets.start, { [mark]: nextValue });
-		if (doc) doc.transact(apply);
+		if (doc) doc.transact(apply, LOCAL_UI_ORIGIN);
 		else apply();
 	}
 

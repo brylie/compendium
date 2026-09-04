@@ -39,6 +39,7 @@ import type {
 } from '$lib/data/types';
 import type * as Y from 'yjs';
 import { nanoid } from 'nanoid';
+import { SERVICE_ORIGIN, transactWithOrigin } from '../mutation-origin.js';
 import {
 	actorForCaller,
 	isAccessToken,
@@ -159,11 +160,17 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 	);
 	const order = computeSiblingOrder(siblings, input.afterDocumentId);
 
-	const document = crdtCreateDocument(doc, {
-		id,
-		title: input.title,
-		parentDocumentId: input.parentDocumentId,
-		order
+	const document = transactWithOrigin(doc, SERVICE_ORIGIN, () => {
+		const created = crdtCreateDocument(doc, {
+			id,
+			title: input.title,
+			parentDocumentId: input.parentDocumentId,
+			order
+		});
+		if (input.createInitialBlock) {
+			crdtCreateRecord(doc, { parentId: created.id, blockType: 'paragraph' }, actor);
+		}
+		return created;
 	});
 
 	recordCatalogDocumentCreated({
@@ -175,10 +182,6 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 		order: document.order,
 		shardId
 	});
-
-	if (input.createInitialBlock) {
-		crdtCreateRecord(doc, { parentId: document.id, blockType: 'paragraph' }, actor);
-	}
 
 	// Persist access grant in SQLite so subsequent tool calls from this token succeed
 	if (isAccessToken(caller)) {
@@ -243,12 +246,14 @@ export function moveDocument(
 	);
 	const order = computeSiblingOrder(siblings, options.afterDocumentId);
 
-	crdtUpdateDocumentParent(
-		doc,
-		documentId,
-		options.parentDocumentId,
-		options.afterDocumentId,
-		order
+	transactWithOrigin(doc, SERVICE_ORIGIN, () =>
+		crdtUpdateDocumentParent(
+			doc,
+			documentId,
+			options.parentDocumentId,
+			options.afterDocumentId,
+			order
+		)
 	);
 	recordCatalogDocumentMoved(workspaceId, documentId, options.parentDocumentId, order);
 	logAudit({
@@ -295,7 +300,7 @@ export function deleteDocument(caller: CallerIdentity, documentId: string): void
 	const descendantIds = collectDescendantIds(listCatalogDocuments(workspaceId), documentId);
 	for (const id of descendantIds) {
 		const { doc } = resolveParentWorkspaceContext(id);
-		crdtDeleteDocument(doc, id);
+		transactWithOrigin(doc, SERVICE_ORIGIN, () => crdtDeleteDocument(doc, id));
 	}
 
 	// One call cascades the whole subtree — recordCatalogDocumentDeleted
@@ -314,7 +319,7 @@ export function updateDocumentTitle(
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, documentId, 'update_document_title');
-	crdtUpdateDocumentTitle(doc, documentId, title);
+	transactWithOrigin(doc, SERVICE_ORIGIN, () => crdtUpdateDocumentTitle(doc, documentId, title));
 	recordCatalogDocumentTitleChanged(workspaceId, documentId, title);
 	logAudit({
 		actor,
