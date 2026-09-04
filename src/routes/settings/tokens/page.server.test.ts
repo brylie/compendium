@@ -94,6 +94,22 @@ describe('routes/settings/tokens/+page.server', () => {
 		expect(record?.allowedSpaceIds).toEqual([space.id]);
 	});
 
+	it('create action rejects a documentId that does not exist (issue #62)', async () => {
+		const result = await actions.create(
+			formEvent({ clientLabel: 'Document Spoofer', documentIds: ['not-a-real-document-id'] })
+		);
+		expect(result).toEqual({ status: 400, data: { error: 'Invalid Document selection' } });
+		expect(listTokens().some((t) => t.clientLabel === 'Document Spoofer')).toBe(false);
+	});
+
+	it('create action rejects a collectionId that does not exist (issue #62)', async () => {
+		const result = await actions.create(
+			formEvent({ clientLabel: 'Collection Spoofer', collectionIds: ['not-a-real-collection-id'] })
+		);
+		expect(result).toEqual({ status: 400, data: { error: 'Invalid Collection selection' } });
+		expect(listTokens().some((t) => t.clientLabel === 'Collection Spoofer')).toBe(false);
+	});
+
 	it('revoke action fails without a tokenHash', async () => {
 		const result = await actions.revoke(formEvent({}));
 		expect(result).toEqual({ status: 400, data: { error: 'Missing token' } });
