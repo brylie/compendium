@@ -16,6 +16,7 @@ import {
 import {
 	createSpace,
 	ensureCatalogBootstrapped,
+	reconcileCatalogMetadata,
 	listCatalogCollections,
 	listCatalogDocuments,
 	recordCatalogDocumentCreated,
@@ -53,6 +54,25 @@ describe('catalog: record locator uniqueness (#113 Phase A, §3.1)', () => {
 });
 
 describe('catalog: bootstrap and backfill', () => {
+	it('reconciles stale catalog metadata from the authoritative Yjs document idempotently', () => {
+		const { doc, defaultSpaceId } = bootstrap();
+		const document = crdtCreateDocument(doc, { id: 'reconcile-doc', title: 'Authoritative' });
+		reserveDocumentLocator(WS, defaultSpaceId, document.id, SHARD);
+		recordCatalogDocumentCreated({
+			workspaceId: WS,
+			spaceId: defaultSpaceId,
+			id: document.id,
+			title: 'Stale',
+			order: document.order,
+			shardId: SHARD
+		});
+
+		reconcileCatalogMetadata(WS, doc);
+		expect(listCatalogDocuments(WS).find((meta) => meta.id === document.id)?.title).toBe(
+			'Authoritative'
+		);
+	});
+
 	it('creates exactly one default Space, idempotently, even across repeated calls', () => {
 		const doc = new Y.Doc();
 		const first = ensureCatalogBootstrapped(WS, SHARD, doc);

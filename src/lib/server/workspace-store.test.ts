@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { TEST_ORIGIN, transactWithOrigin } from '../mutation-origin';
 import { closeDb } from './store';
 import { clientIdForToken, requestAgentHold } from './holds';
 import {
@@ -30,7 +31,9 @@ describe('workspace-store: snapshot persistence survives a process restart', () 
 
 	it('reloads the last saved state after the in-memory doc is dropped ("restart")', () => {
 		const { doc: doc1 } = resolveWorkspaceContext();
-		doc1.getMap('workspace').set('greeting', 'hello from before restart');
+		transactWithOrigin(doc1, TEST_ORIGIN, () =>
+			doc1.getMap('workspace').set('greeting', 'hello from before restart')
+		);
 		flush();
 
 		// Simulate a process restart: drop the registry and DB handle, force a
@@ -74,8 +77,8 @@ describe('workspace-store: isolation between independently-resolved contexts', (
 		const a = resolveWorkspaceContext({ workspaceId: 'space-a', shardId: 'main' });
 		const b = resolveWorkspaceContext({ workspaceId: 'space-b', shardId: 'main' });
 
-		a.doc.getMap('workspace').set('title', 'Space A');
-		b.doc.getMap('workspace').set('title', 'Space B');
+		transactWithOrigin(a.doc, TEST_ORIGIN, () => a.doc.getMap('workspace').set('title', 'Space A'));
+		transactWithOrigin(b.doc, TEST_ORIGIN, () => b.doc.getMap('workspace').set('title', 'Space B'));
 
 		expect(a.doc.getMap('workspace').get('title')).toBe('Space A');
 		expect(b.doc.getMap('workspace').get('title')).toBe('Space B');
@@ -90,8 +93,8 @@ describe('workspace-store: isolation between independently-resolved contexts', (
 		const a = resolveWorkspaceContext({ workspaceId: 'space::main', shardId: 'primary' });
 		const b = resolveWorkspaceContext({ workspaceId: 'space', shardId: 'main::primary' });
 
-		a.doc.getMap('workspace').set('title', 'A');
-		b.doc.getMap('workspace').set('title', 'B');
+		transactWithOrigin(a.doc, TEST_ORIGIN, () => a.doc.getMap('workspace').set('title', 'A'));
+		transactWithOrigin(b.doc, TEST_ORIGIN, () => b.doc.getMap('workspace').set('title', 'B'));
 
 		expect(a.doc).not.toBe(b.doc);
 		expect(a.doc.getMap('workspace').get('title')).toBe('A');
@@ -116,8 +119,8 @@ describe('workspace-store: isolation between independently-resolved contexts', (
 		const a = resolveWorkspaceContext({ workspaceId: 'space-a', shardId: 'main' });
 		const b = resolveWorkspaceContext({ workspaceId: 'space-b', shardId: 'main' });
 
-		a.doc.getMap('workspace').set('title', 'Space A');
-		b.doc.getMap('workspace').set('title', 'Space B');
+		transactWithOrigin(a.doc, TEST_ORIGIN, () => a.doc.getMap('workspace').set('title', 'Space A'));
+		transactWithOrigin(b.doc, TEST_ORIGIN, () => b.doc.getMap('workspace').set('title', 'Space B'));
 		flush();
 
 		resetWorkspaceStoreForTests();
@@ -209,7 +212,9 @@ describe('workspace-store: isolation between independently-resolved contexts', (
 
 	it('survives an idle-unload-then-reload cycle with content intact', () => {
 		const a = resolveWorkspaceContext({ workspaceId: 'space-a', shardId: 'main' });
-		a.doc.getMap('workspace').set('title', 'Space A content');
+		transactWithOrigin(a.doc, TEST_ORIGIN, () =>
+			a.doc.getMap('workspace').set('title', 'Space A content')
+		);
 
 		const released = releaseContextIfIdle('space-a', 'main');
 		expect(released).toBe(true);

@@ -12,7 +12,7 @@ import {
 	resetCatalogMirrorObserverForTests
 } from './catalog-mirror-observer.js';
 import { aggregateHolds, initHoldEviction, resetHoldEvictionForTests } from './holds.js';
-import { ensureCatalogBootstrapped } from './catalog.js';
+import { ensureCatalogBootstrapped, reconcileCatalogMetadata } from './catalog.js';
 import { getInstanceWorkspaceId } from './instance.js';
 import { REPLAY_ORIGIN } from '../mutation-origin.js';
 
@@ -106,6 +106,7 @@ function createContext(workspaceId: string, shardId: string): InternalContext {
 	// after the snapshot load (so it sees real content) and before the audit
 	// observer attaches (so it never produces a spurious audit trail).
 	const { defaultSpaceId } = ensureCatalogBootstrapped(workspaceId, shardId, doc);
+	reconcileCatalogMetadata(workspaceId, doc);
 	attachDocAuditObserver(doc);
 	attachCatalogMirrorObserver(workspaceId, doc);
 
@@ -160,6 +161,10 @@ function flushContext(
 ): void {
 	if (!context.dirty) return;
 	snapshotStore.save(Y.encodeStateAsUpdate(context.doc));
+	// A direct Yjs update can commit while SQLite is temporarily unavailable.
+	// Keep this context dirty until reconciliation succeeds so the next flush
+	// retries from the authoritative snapshot without duplicating catalog rows.
+	reconcileCatalogMetadata(context.workspaceId, context.doc);
 	context.dirty = false;
 }
 

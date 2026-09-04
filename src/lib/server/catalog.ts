@@ -326,6 +326,38 @@ export function recordCatalogDocumentMetadataChanged(
 }
 
 /**
+ * Repairs catalog metadata from the authoritative Yjs document. It performs
+ * only value-changing writes, making repeated calls safe after a failed
+ * immediate projection or process restart.
+ */
+export function reconcileCatalogMetadata(workspaceId: string, doc: Y.Doc): void {
+	const catalogDocumentsById = new Map(
+		listCatalogDocuments(workspaceId).map((meta) => [meta.id, meta])
+	);
+	for (const meta of crdtListDocuments(doc)) {
+		const catalog = catalogDocumentsById.get(meta.id);
+		if (
+			catalog &&
+			(catalog.title !== meta.title ||
+				catalog.parentDocumentId !== meta.parentDocumentId ||
+				catalog.order !== meta.order)
+		) {
+			recordCatalogDocumentMetadataChanged(workspaceId, meta.id, meta);
+		}
+	}
+
+	const catalogCollectionsById = new Map(
+		listCatalogCollections(workspaceId).map((meta) => [meta.id, meta])
+	);
+	for (const meta of crdtListCollections(doc)) {
+		const catalog = catalogCollectionsById.get(meta.id);
+		if (catalog && catalog.title !== meta.title) {
+			recordCatalogCollectionTitleChanged(workspaceId, meta.id, meta.title);
+		}
+	}
+}
+
+/**
  * Deletes a Document and its descendants from the catalog, mirroring
  * data/records.ts's recursive deleteDocument. Walks the *catalog's own*
  * parent chain (via a recursive CTE — drizzle's typed query builder has no
