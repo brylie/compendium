@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid';
+import { SERVICE_ORIGIN, transactWithOrigin } from '../mutation-origin.js';
 import type * as Y from 'yjs';
 import type { Awareness } from 'y-protocols/awareness';
 import { clientIdForToken, isHeldByClient, releaseAgentHold } from '$lib/server/holds';
@@ -222,19 +223,21 @@ export function createRecord(
 
 	let record: WorkspaceRecord;
 	try {
-		record = crdtCreateRecord(
-			doc,
-			{
-				id,
-				parentId: input.parentId,
-				afterRecordId: input.afterRecordId,
-				blockType: input.blockType,
-				properties: input.properties,
-				referencedRecordId: input.referencedRecordId,
-				viewConfig: input.viewConfig,
-				childPagesDepth: input.childPagesDepth
-			},
-			actor
+		record = transactWithOrigin(doc, SERVICE_ORIGIN, () =>
+			crdtCreateRecord(
+				doc,
+				{
+					id,
+					parentId: input.parentId,
+					afterRecordId: input.afterRecordId,
+					blockType: input.blockType,
+					properties: input.properties,
+					referencedRecordId: input.referencedRecordId,
+					viewConfig: input.viewConfig,
+					childPagesDepth: input.childPagesDepth
+				},
+				actor
+			)
 		);
 	} catch (err) {
 		releaseRecordLocator(workspaceId, id);
@@ -402,27 +405,21 @@ export function writeRecord(
 		validateViewConfig(record.blockType, input.viewConfig);
 	}
 
-	if (input.markdown !== undefined) {
-		writeRecordMarkdown(caller, doc, awareness, recordId, actor, input.markdown);
-	}
-
-	if (input.properties) {
-		updateRecordProperties(doc, recordId, input.properties, actor);
-		logAudit({
-			actor,
-			action: 'write_record',
-			targetRecordId: recordId,
-			diff: { properties: input.properties }
-		});
-	}
-
-	if (input.referencedRecordId !== undefined) {
-		applyReferencedRecordIdWrite(doc, record, recordId, actor, input.referencedRecordId);
-	}
-
-	if (input.viewConfig !== undefined) {
-		applyViewConfigWrite(doc, record, recordId, actor, input.viewConfig);
-	}
+	transactWithOrigin(doc, SERVICE_ORIGIN, () => {
+		if (input.markdown !== undefined) {
+			writeRecordMarkdown(caller, doc, awareness, recordId, actor, input.markdown);
+		}
+		if (input.properties) {
+			updateRecordProperties(doc, recordId, input.properties, actor);
+			logAudit({ actor, action: 'write_record', targetRecordId: recordId, diff: { properties: input.properties } });
+		}
+		if (input.referencedRecordId !== undefined) {
+			applyReferencedRecordIdWrite(doc, record, recordId, actor, input.referencedRecordId);
+		}
+		if (input.viewConfig !== undefined) {
+			applyViewConfigWrite(doc, record, recordId, actor, input.viewConfig);
+		}
+	});
 }
 
 /**
@@ -436,7 +433,7 @@ export function deleteRecord(caller: CallerIdentity, recordId: string): void {
 	const actor = actorForCaller(caller);
 
 	requireAccessibleRecord(caller, recordId, 'delete_record');
-	crdtDeleteRecord(doc, recordId);
+	transactWithOrigin(doc, SERVICE_ORIGIN, () => crdtDeleteRecord(doc, recordId));
 	// The CRDT delete has already committed at this point — a release failure
 	// here must not throw back to the caller as if deletion itself failed. Log
 	// it instead: a stale locator row for a since-deleted record fails safe

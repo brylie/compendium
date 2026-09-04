@@ -5,6 +5,7 @@
 	import { resolve } from '$app/paths';
 	import { getShardAwareness, getShardDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
+	import { LOCAL_UI_ORIGIN } from '$lib/mutation-origin';
 	import {
 		createRecord,
 		deleteRecord,
@@ -512,7 +513,7 @@
 		if (ytext && offset < ytext.length) {
 			const doc = ytext.doc;
 			const trim = () => ytext.delete(offset, ytext.length - offset);
-			if (doc) doc.transact(trim);
+			if (doc) doc.transact(trim, LOCAL_UI_ORIGIN);
 			else trim();
 		}
 
@@ -809,7 +810,7 @@
 		if (ytext) {
 			const doc = ytext.doc;
 			const clear = () => ytext.delete(0, ytext.length);
-			if (doc) doc.transact(clear);
+			if (doc) doc.transact(clear, LOCAL_UI_ORIGIN);
 			else clear();
 		}
 		setBlockType(ydoc, blockId, blockType, CURRENT_USER);

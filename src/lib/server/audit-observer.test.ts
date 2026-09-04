@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import {
-	createRecord as crdtCreateRecord,
+	createRecord as rawCreateRecord,
 	createDocument as crdtCreateDocument,
 	reorderRecord as crdtReorderRecord
 } from '$lib/data/records';
@@ -13,8 +13,14 @@ import {
 	resetAuditObserverForTests
 } from './audit-observer';
 import type { ActorId } from '$lib/data/types';
+import { remoteUiOrigin, SERVICE_ORIGIN, transactWithOrigin } from '../mutation-origin';
 
 const human: ActorId = { kind: 'human', userId: 'local' };
+const REMOTE_UI_ORIGIN = remoteUiOrigin('audit-observer-test');
+
+function crdtCreateRecord(...args: Parameters<typeof rawCreateRecord>) {
+	return transactWithOrigin(args[0], SERVICE_ORIGIN, () => rawCreateRecord(...args));
+}
 
 function recentActions(targetRecordId: string): string[] {
 	return queryAuditLog()
@@ -38,15 +44,15 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 	it('logs create_record for a client-origin transaction that adds a top-level record entry', () => {
 		doc.transact(() => {
 			doc.getMap('records').set('r1', new Y.Map());
-		}, 'fake-ws-connection');
+		}, REMOTE_UI_ORIGIN);
 
 		expect(recentActions('r1')).toContain('create_record');
 	});
 
-	it('does not log anything for a null-origin (service-layer-style) transaction', () => {
+	it('does not log anything for a named service transaction', () => {
 		doc.transact(() => {
 			doc.getMap('records').set('r-service', new Y.Map());
-		});
+		}, SERVICE_ORIGIN);
 
 		expect(recentActions('r-service')).toHaveLength(0);
 	});
@@ -54,11 +60,11 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 	it('logs delete_record for a client-origin transaction that removes a top-level record entry', () => {
 		doc.transact(() => {
 			doc.getMap('records').set('r2', new Y.Map());
-		}, 'fake-ws-connection');
+		}, REMOTE_UI_ORIGIN);
 
 		doc.transact(() => {
 			doc.getMap('records').delete('r2');
-		}, 'fake-ws-connection');
+		}, REMOTE_UI_ORIGIN);
 
 		// queryAuditLog orders newest-first.
 		expect(recentActions('r2')).toEqual(['delete_record', 'create_record']);
@@ -67,24 +73,24 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 	it('logs create_document and delete_document for whole-entry changes on the documents map', () => {
 		doc.transact(() => {
 			doc.getMap('documents').set('d1', new Y.Map());
-		}, 'fake-ws-connection');
+		}, REMOTE_UI_ORIGIN);
 		expect(recentActions('d1')).toContain('create_document');
 
 		doc.transact(() => {
 			doc.getMap('documents').delete('d1');
-		}, 'fake-ws-connection');
+		}, REMOTE_UI_ORIGIN);
 		expect(recentActions('d1')).toContain('delete_document');
 	});
 
 	it('logs create_collection and delete_collection for whole-entry changes on the collections map', () => {
 		doc.transact(() => {
 			doc.getMap('collections').set('c1', new Y.Map());
-		}, 'fake-ws-connection');
+		}, REMOTE_UI_ORIGIN);
 		expect(recentActions('c1')).toContain('create_collection');
 
 		doc.transact(() => {
 			doc.getMap('collections').delete('c1');
-		}, 'fake-ws-connection');
+		}, REMOTE_UI_ORIGIN);
 		expect(recentActions('c1')).toContain('delete_collection');
 	});
 
@@ -106,11 +112,11 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 			const yrecord = doc.getMap('records').get(record.id) as Y.Map<unknown>;
 			const content = yrecord.get('content') as Y.Text;
 
-			doc.transact(() => content.insert(0, 'a'), 'fake-ws-connection');
+			doc.transact(() => content.insert(0, 'a'), REMOTE_UI_ORIGIN);
 			vi.advanceTimersByTime(1_000);
-			doc.transact(() => content.insert(1, 'b'), 'fake-ws-connection');
+			doc.transact(() => content.insert(1, 'b'), REMOTE_UI_ORIGIN);
 			vi.advanceTimersByTime(1_000);
-			doc.transact(() => content.insert(2, 'c'), 'fake-ws-connection');
+			doc.transact(() => content.insert(2, 'c'), REMOTE_UI_ORIGIN);
 
 			// Still inside the debounce window from the most recent edit.
 			expect(recentActions(record.id).filter((a) => a === 'update_record')).toHaveLength(0);
@@ -131,7 +137,7 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 			doc.transact(() => {
 				content.insert(0, 'hello');
 				yrecord.set('checked', true);
-			}, 'fake-ws-connection');
+			}, REMOTE_UI_ORIGIN);
 
 			vi.advanceTimersByTime(3_000);
 			expect(recentActions(record.id).filter((a) => a === 'update_record')).toHaveLength(1);
@@ -146,7 +152,7 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 			const yrecord = doc.getMap('records').get(record.id) as Y.Map<unknown>;
 			const content = yrecord.get('content') as Y.Text;
 
-			doc.transact(() => content.insert(0, 'x'), 'fake-ws-connection');
+			doc.transact(() => content.insert(0, 'x'), REMOTE_UI_ORIGIN);
 			expect(recentActions(record.id).filter((a) => a === 'update_record')).toHaveLength(0);
 
 			flushPendingAuditEvents();
@@ -164,11 +170,11 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 
 			// Edit, then delete moments later — still well inside the 3s debounce
 			// window, so the update event is still only pending, not yet written.
-			doc.transact(() => content.insert(0, 'edited just before deletion'), 'fake-ws-connection');
+			doc.transact(() => content.insert(0, 'edited just before deletion'), REMOTE_UI_ORIGIN);
 			vi.advanceTimersByTime(500);
 			doc.transact(() => {
 				doc.getMap('records').delete(record.id);
-			}, 'fake-ws-connection');
+			}, REMOTE_UI_ORIGIN);
 
 			// Without the fix, the pending update wouldn't surface until the full
 			// debounce window elapses — after the delete already logged — putting
@@ -205,12 +211,12 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 				const yrecordA = doc.getMap('records').get(sharedId) as Y.Map<unknown>;
 				const yrecordB = docB.getMap('records').get(sharedId) as Y.Map<unknown>;
 
-				doc.transact(() => (yrecordA.get('content') as Y.Text).insert(0, 'from A'), 'ws-a');
+				doc.transact(() => (yrecordA.get('content') as Y.Text).insert(0, 'from A'), remoteUiOrigin('ws-a'));
 				vi.advanceTimersByTime(1_000);
 				// Doc B's edit for the same record id arrives inside doc A's
 				// debounce window. Without per-doc scoping this would reset/steal
 				// the timer keyed by "record:shared-record-id".
-				docB.transact(() => (yrecordB.get('content') as Y.Text).insert(0, 'from B'), 'ws-b');
+				docB.transact(() => (yrecordB.get('content') as Y.Text).insert(0, 'from B'), remoteUiOrigin('ws-b'));
 
 				vi.advanceTimersByTime(3_000);
 				// Both docs' pending updates must have fired on their own schedule —
@@ -235,7 +241,7 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 			const yrecord = doc.getMap('records').get(record.id) as Y.Map<unknown>;
 			const content = yrecord.get('content') as Y.Text;
 
-			doc.transact(() => content.insert(0, 'x'), 'fake-ws-connection');
+			doc.transact(() => content.insert(0, 'x'), REMOTE_UI_ORIGIN);
 			expect(recentActions(colonId).filter((a) => a === 'update_record')).toHaveLength(0);
 
 			flushPendingAuditEvents();
@@ -251,7 +257,7 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 			const yrecord = doc.getMap('records').get(record.id) as Y.Map<unknown>;
 			const content = yrecord.get('content') as Y.Text;
 
-			doc.transact(() => content.insert(0, 'x'), 'fake-ws-connection');
+			doc.transact(() => content.insert(0, 'x'), REMOTE_UI_ORIGIN);
 			expect(pendingTimerDocCountForTests()).toBe(1);
 
 			vi.advanceTimersByTime(3_000);
@@ -267,7 +273,7 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 			const yrecord = doc.getMap('records').get(record.id) as Y.Map<unknown>;
 			const content = yrecord.get('content') as Y.Text;
 
-			doc.transact(() => content.insert(0, 'x'), 'fake-ws-connection');
+			doc.transact(() => content.insert(0, 'x'), REMOTE_UI_ORIGIN);
 			expect(pendingTimerDocCountForTests()).toBe(1);
 
 			flushPendingAuditEvents();
@@ -286,7 +292,7 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 				const ids = recordIds.toArray();
 				recordIds.delete(0, ids.length);
 				recordIds.insert(0, [...ids].reverse());
-			}, 'fake-ws-connection');
+			}, REMOTE_UI_ORIGIN);
 
 			vi.advanceTimersByTime(3_000);
 			expect(recentActions(documentId).filter((a) => a === 'update_document')).toHaveLength(1);
@@ -299,7 +305,7 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 			const a = crdtCreateRecord(doc, { parentId: documentId, blockType: 'paragraph' }, human);
 			const b = crdtCreateRecord(doc, { parentId: documentId, blockType: 'paragraph' }, human);
 
-			doc.transact(() => crdtReorderRecord(doc, a.id, b.id), 'fake-ws-connection');
+			doc.transact(() => crdtReorderRecord(doc, a.id, b.id), REMOTE_UI_ORIGIN);
 
 			vi.advanceTimersByTime(3_000);
 			expect(recentActions(documentId).filter((act) => act === 'update_document')).toHaveLength(1);
@@ -325,9 +331,9 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 				'content'
 			) as Y.Text;
 
-			doc.transact(() => contentA.insert(0, 'a'), 'fake-ws-connection');
+			doc.transact(() => contentA.insert(0, 'a'), REMOTE_UI_ORIGIN);
 			vi.advanceTimersByTime(1_000);
-			doc.transact(() => contentB.insert(0, 'b'), 'fake-ws-connection');
+			doc.transact(() => contentB.insert(0, 'b'), REMOTE_UI_ORIGIN);
 
 			// A's timer fires first, alone — B's is still pending for this same
 			// doc, so the doc's own entry in pendingUpdateTimers must survive.
@@ -346,7 +352,7 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 
 		doc.transact(() => {
 			doc.getMap('records').delete(record.id);
-		}, 'fake-ws-connection');
+		}, REMOTE_UI_ORIGIN);
 
 		expect(recentActions(record.id)).toEqual(['delete_record']);
 	});
@@ -364,7 +370,7 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 		doc.transact(() => {
 			content.insert(0, 'edited and deleted together');
 			doc.getMap('records').delete(record.id);
-		}, 'fake-ws-connection');
+		}, REMOTE_UI_ORIGIN);
 
 		expect(recentActions(record.id)).toEqual(['delete_record']);
 	});
@@ -372,6 +378,8 @@ describe('audit-observer: generic UI-mutation audit trail', () => {
 
 /** Creates a bare Document meta entry directly (no service layer, no audit) as a parent for record tests. */
 function makeDoc(doc: Y.Doc): string {
-	const created = crdtCreateDocument(doc, { title: 'Parent' });
+	const created = transactWithOrigin(doc, SERVICE_ORIGIN, () =>
+		crdtCreateDocument(doc, { title: 'Parent' })
+	);
 	return created.id;
 }

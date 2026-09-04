@@ -14,9 +14,9 @@ The fix is a generic observer on the server's own `Y.Doc` (`src/lib/server/audit
 
 ## 2. How the observer attributes without new tagging
 
-y-protocols/sync applies an incoming client update via `Y.applyUpdate(doc, update, ws)` (`yjs-ws-server.ts`), so the resulting transaction's `origin` is that connection's own `ws` object. Every service-layer write, by contrast, calls `doc.transact(fn)` with no origin, which defaults to `null` (yjs's own `transact(doc, f, origin = null)`). That distinction already existed, unmodified, on every write path in this codebase — `attachDocAuditObserver` (called once per resolved `Y.Doc`, from `workspace-store.ts`'s `createContext()`, after the initial snapshot load) just reads it:
+`src/lib/mutation-origin.ts` defines the closed mutation-origin contract. The WebSocket server uses a named `remote-ui` origin, the browser uses `local-ui`, services use `service`, and migration/replay/undo-redo/test paths have their own explicit origins. `attachDocAuditObserver` rejects an unrecognized origin rather than inferring meaning from nullability or object shape.
 
-- `transaction.origin == null` → a service-layer write. Already audited by its own `logAudit` call — the observer does nothing, so nothing is double-counted.
+- `service`, `migration`, `replay`, and `undo-redo` are intentionally not observer-audited. Service calls retain their own `logAudit` operation, preventing duplicates.
 - `transaction.origin` is anything else → a real y-websocket client wrote directly to the doc. The observer resolves what changed and logs it, attributed to `CURRENT_USER` (Phase 0/1 is single-tenant — every live UI connection is the one workspace owner; see `service-layer.md` §3's note that UI writes are currently unscoped).
 
 Resolving _what_ changed walks `transaction.changed` (the Yjs-native per-transaction diff): a key added/removed directly on `documents`/`collections`/`records` (the three top-level maps) is a whole entry created or deleted; anything else is walked up via `.parent` until it reaches one of those three maps, attributing the change to whichever entry owns it — e.g. a record's `content` Y.Text's parent is that record's own `Y.Map`, whose parent is the top-level `records` map. A document's `recordIds` reorder (dragging a block, or a record being added/removed from it) resolves to that _document_, not the moved record — reordering is a structural fact about the document distinct from the record's own content, and is logged as its own `update_document`/`update_collection` event alongside whatever `create_record`/`delete_record` event fired in the same transaction.
@@ -50,12 +50,12 @@ Create and delete are discrete, comparatively rare events — logged immediately
 Two operational details this implies:
 
 - `flushPendingAuditEvents()` (exported from `audit-observer.ts`) writes any pending debounced events immediately instead of waiting out the window — called on process shutdown (`ydoc.ts`'s `SIGINT`/`SIGTERM` handler) so a debounced edit made just before shutdown isn't lost, and available to tests that don't want to wait out real time.
-- The debounce is in-memory and per-process — a pending event is lost (not written) if the process crashes ungracefully before the window elapses or before `flushPendingAuditEvents` runs. Acceptable for Phase 0/1's local-trust, single-process scope; revisit if audit completeness under crash needs a stronger guarantee than "graceful shutdown flushes."
+- The audit debounce is in-memory and per-process; graceful shutdown flushes it. Catalog projection does **not** share this limitation: direct UI metadata changes project synchronously (§3).
 
 Retention itself (pruning old rows) is out of scope for this feature — `queryAuditLog`'s existing `since`/`until`/`limit` filtering (`persistence.md` §1, `src/lib/server/audit.ts`) is the only volume control today beyond the debounce above; see the tracked follow-up issue for periodic pruning.
 
 ## 5. Testing
 
-- `src/lib/server/audit-observer.test.ts` — unit tests against a bare `Y.Doc` (no server, no websocket): create/update/delete for all three entry kinds, the null-origin no-op, debounce coalescing (including a content-edit-plus-field-edit-in-one-transaction case, proving exactly one event per entry per burst, not one per changed Yjs type), `flushPendingAuditEvents`, and the `recordIds`-reorder-attributes-to-the-parent-not-the-record case.
+- `src/lib/server/audit-observer.test.ts` — unit tests cover named remote/service/test origins, rejection of unknown origins, debounce coalescing, explicit flush, and parent record-order attribution.
 - `src/lib/services/services.test.ts` — the new denied-attempt audit tests (`create_record_denied`, `get_document_denied`, no denial logged for a human caller, a denial for a nonexistent record carries no extra metadata).
 - `tests/e2e/tier-a.test.ts` (#11) — a _real_ y-websocket client (the same harness every other Tier A test uses) mutates its own `Y.Doc` directly, with zero MCP/service-layer calls, mirroring exactly what `BlockEditor.svelte`/`Sidebar.svelte` do today; asserts the server's `audit_log` picks up `create_document`, `create_record`, a debounced-then-flushed `update_record`, and `delete_record`, each written exactly once, and that the live record projection carries the editor and newer timestamp.

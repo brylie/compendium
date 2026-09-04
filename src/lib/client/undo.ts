@@ -1,22 +1,14 @@
 import * as Y from 'yjs';
+import { LOCAL_UI_ORIGIN, registerUndoRedoOrigin } from '../mutation-origin.js';
 
 // Local, per-actor undo/redo (#8): each browser tab tracks only its own
 // locally-originated Yjs transactions, never a collaborator's — including a
 // stateless MCP agent's writes, which is exactly the "never a collaborator's
 // intervening work" guarantee the issue asks for.
 //
-// This falls out of Y.UndoManager's own default `trackedOrigins: new
-// Set([null])` combined with how every local write already runs through an
-// untagged `doc.transact(...)` call (or a single untransacted `.set()`,
-// which Yjs auto-wraps the same way) in src/lib/data/records.ts and the
-// block editor — Yjs assigns those the `null` origin. Remote edits, whether
-// from a collaborator's browser tab or an MCP agent, always arrive over this
-// tab's y-websocket connection and are applied by y-protocols' sync handler
-// with the WebsocketProvider instance itself as the transaction origin (see
-// y-websocket's `readSyncMessage` call), which is never `null` and so is
-// never tracked. No extra origin-tagging is needed on either side for that
-// separation to hold — it's a byproduct of the existing transact() calls,
-// not a new convention call sites need to opt into.
+// Local UI writes use LOCAL_UI_ORIGIN. Remote, service, migration, and replay
+// transactions have their own named origins and therefore cannot enter this
+// tab's undo history.
 const SCOPE_MAP_NAMES = ['documents', 'collections', 'records'] as const;
 
 /**
@@ -30,7 +22,11 @@ const SCOPE_MAP_NAMES = ['documents', 'collections', 'records'] as const;
  * scope types themselves.
  */
 export function createUndoManager(doc: Y.Doc): Y.UndoManager {
-	return new Y.UndoManager(SCOPE_MAP_NAMES.map((name) => doc.getMap(name)));
+	const manager = new Y.UndoManager(SCOPE_MAP_NAMES.map((name) => doc.getMap(name)), {
+		trackedOrigins: new Set([LOCAL_UI_ORIGIN])
+	});
+	registerUndoRedoOrigin(manager);
+	return manager;
 }
 
 // Keyed by Y.Doc instance, not a single module-level singleton: each

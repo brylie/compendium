@@ -14,6 +14,7 @@ import {
 import { aggregateHolds, initHoldEviction, resetHoldEvictionForTests } from './holds.js';
 import { ensureCatalogBootstrapped } from './catalog.js';
 import { getInstanceWorkspaceId } from './instance.js';
+import { REPLAY_ORIGIN } from '../mutation-origin.js';
 
 // This is the one place a {workspaceId, shardId} selector resolves to a live
 // Y.Doc/Awareness/persistence/connection bundle. Every boundary that used to
@@ -98,7 +99,7 @@ function createContext(workspaceId: string, shardId: string): InternalContext {
 	const snapshotStore = getSnapshotStore(workspaceId, shardId);
 	const snapshot = snapshotStore.loadLatest();
 	if (snapshot) {
-		Y.applyUpdate(doc, snapshot);
+		Y.applyUpdate(doc, snapshot, REPLAY_ORIGIN);
 	}
 	// Backfills/bootstraps the catalog from this doc's current content the
 	// first time this {workspaceId, shardId} resolves — see catalog.ts. Runs

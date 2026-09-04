@@ -23,6 +23,7 @@ import {
 import { grantCollectionAccess, tokenAllowsParent } from '$lib/server/token-store';
 import type { CollectionMeta, PropertyDefinition, WorkspaceRecord } from '$lib/data/types';
 import { nanoid } from 'nanoid';
+import { SERVICE_ORIGIN, transactWithOrigin } from '../mutation-origin.js';
 import {
 	actorForCaller,
 	isAccessToken,
@@ -84,11 +85,13 @@ export function createCollection(
 	}
 	reserveCollectionLocator(workspaceId, targetSpaceId, id, shardId);
 
-	const collection = crdtCreateCollection(doc, {
-		id,
-		title: input.title,
-		schema: input.schema ?? []
-	});
+	const collection = transactWithOrigin(doc, SERVICE_ORIGIN, () =>
+		crdtCreateCollection(doc, {
+			id,
+			title: input.title,
+			schema: input.schema ?? []
+		})
+	);
 
 	recordCatalogCollectionCreated({
 		workspaceId,
@@ -184,7 +187,7 @@ export function deleteCollection(caller: CallerIdentity, collectionId: string): 
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, collectionId, 'delete_collection');
-	crdtDeleteCollection(doc, collectionId);
+	transactWithOrigin(doc, SERVICE_ORIGIN, () => crdtDeleteCollection(doc, collectionId));
 	recordCatalogCollectionDeleted(workspaceId, collectionId);
 	logAudit({ actor, action: 'delete_collection', targetRecordId: collectionId });
 }
@@ -199,7 +202,9 @@ export function updateCollectionTitle(
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, collectionId, 'update_collection_title');
-	crdtUpdateCollectionTitle(doc, collectionId, title);
+	transactWithOrigin(doc, SERVICE_ORIGIN, () =>
+		crdtUpdateCollectionTitle(doc, collectionId, title)
+	);
 	recordCatalogCollectionTitleChanged(workspaceId, collectionId, title);
 	logAudit({
 		actor,

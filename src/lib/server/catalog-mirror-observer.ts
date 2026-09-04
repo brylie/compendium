@@ -8,6 +8,7 @@ import {
 	recordCatalogDocumentMoved,
 	recordCatalogDocumentTitleChanged
 } from './catalog.js';
+import { mutationSource, UnknownMutationOriginError } from '../mutation-origin.js';
 
 // A direct UI mutation (the title input on /doc/[id] or /table/[id], or a
 // future Sidebar drag-and-drop reorder) writes straight to its own shard's
@@ -19,10 +20,8 @@ import {
 // becomes visible anywhere outside the page that made it — not even after a
 // refresh, since the catalog itself was never updated.
 //
-// Same origin-based distinction audit-observer.ts already established:
-// transaction.origin === null is a service-layer write (services/documents.ts
-// and services/collections.ts already dual-write the catalog themselves), so
-// this observer only needs to act on origin !== null (direct UI) writes.
+// Services have their own authoritative catalog write in the same operation.
+// This observer owns the corresponding projection for direct UI transactions.
 
 type EntryKind = 'document' | 'collection';
 
@@ -63,43 +62,6 @@ function resolveOwningEntry(
 	return undefined;
 }
 
-// Debounced the same way audit-observer.ts debounces content edits — a title
-// input fires on every keystroke, and coalescing into one catalog write per
-// quiet period avoids one SQLite transaction (plus an outbox/revision bump)
-// per character typed.
-const UPDATE_DEBOUNCE_MS = 3_000;
-
-// Keyed by Y.Doc instance for the same reason as audit-observer.ts: more than
-// one shard's Y.Doc can be live in one process, and two shards can perfectly
-// well contain an entry with the same id. workspaceId travels alongside each
-// doc's timer map (not passed into flush separately) so a process-wide
-// shutdown flush needs no external per-doc bookkeeping of its own.
-interface PendingForDoc {
-	workspaceId: string;
-	timers: Map<string, ReturnType<typeof setTimeout>>;
-}
-
-const pendingByDoc = new Map<Y.Doc, PendingForDoc>();
-
-function pendingFor(workspaceId: string, doc: Y.Doc): PendingForDoc {
-	let pending = pendingByDoc.get(doc);
-	if (!pending) {
-		pending = { workspaceId, timers: new Map() };
-		pendingByDoc.set(doc, pending);
-	}
-	return pending;
-}
-
-function pruneIfEmpty(doc: Y.Doc, pending: PendingForDoc): void {
-	if (pending.timers.size === 0) pendingByDoc.delete(doc);
-}
-
-// JSON-encoded, not a template string — same reason as audit-observer.ts's
-// timerKey: entry ids are caller-supplied with no format restriction.
-function timerKey(kind: EntryKind, id: string): string {
-	return JSON.stringify([kind, id]);
-}
-
 function mirrorNow(workspaceId: string, doc: Y.Doc, kind: EntryKind, id: string): void {
 	if (kind === 'document') {
 		const meta = crdtGetDocument(doc, id);
@@ -113,41 +75,17 @@ function mirrorNow(workspaceId: string, doc: Y.Doc, kind: EntryKind, id: string)
 	}
 }
 
-function scheduleMirror(workspaceId: string, doc: Y.Doc, kind: EntryKind, id: string): void {
-	const pending = pendingFor(workspaceId, doc);
-	const key = timerKey(kind, id);
-	const existing = pending.timers.get(key);
-	if (existing) clearTimeout(existing);
-	const timer = setTimeout(() => {
-		pending.timers.delete(key);
-		pruneIfEmpty(doc, pending);
-		mirrorNow(workspaceId, doc, kind, id);
-	}, UPDATE_DEBOUNCE_MS);
-	timer.unref?.();
-	pending.timers.set(key, timer);
-}
-
-/** Test/shutdown hook: write any debounced mirror events immediately instead of waiting out the window, across every doc with a pending timer. */
+/**
+ * Kept as a shutdown compatibility hook. Catalog projections are synchronous,
+ * so there is deliberately no in-memory queue left to flush.
+ */
 export function flushPendingCatalogMirrorEvents(): void {
-	for (const [doc, pending] of pendingByDoc) {
-		for (const key of [...pending.timers.keys()]) {
-			const timer = pending.timers.get(key);
-			if (!timer) continue;
-			clearTimeout(timer);
-			pending.timers.delete(key);
-			pruneIfEmpty(doc, pending);
-			const [kind, id] = JSON.parse(key) as [EntryKind, string];
-			mirrorNow(pending.workspaceId, doc, kind, id);
-		}
-	}
+	// No-op by design.
 }
 
-/** Test-only: drop any pending debounce timers without flushing them. */
+/** Test-only compatibility hook. */
 export function resetCatalogMirrorObserverForTests(): void {
-	for (const pending of pendingByDoc.values()) {
-		for (const timer of pending.timers.values()) clearTimeout(timer);
-	}
-	pendingByDoc.clear();
+	// No-op by design.
 }
 
 /**
@@ -165,19 +103,18 @@ export function attachCatalogMirrorObserver(workspaceId: string, doc: Y.Doc): vo
 	const maps = topLevelMaps(doc);
 
 	doc.on('afterTransaction', (transaction: Y.Transaction) => {
-		if (transaction.origin == null) return; // service-layer write — already mirrors itself
+		const source = mutationSource(transaction.origin);
+		if (!source) throw new UnknownMutationOriginError(transaction.origin);
+		if (source !== 'local-ui' && source !== 'remote-ui' && source !== 'test') return;
 
-		const touched = new Set<string>();
+		const touched = new Map<string, { kind: EntryKind; id: string }>();
 		transaction.changed.forEach((_keys, type) => {
 			if (maps.some((t) => t.map === type)) return; // whole-entry create/delete — not mirrored here
 			const owner = resolveOwningEntry(maps, type);
 			if (!owner) return;
-			touched.add(timerKey(owner.kind, owner.id));
+			touched.set(JSON.stringify([owner.kind, owner.id]), owner);
 		});
 
-		for (const key of touched) {
-			const [kind, id] = JSON.parse(key) as [EntryKind, string];
-			scheduleMirror(workspaceId, doc, kind, id);
-		}
+		for (const { kind, id } of touched.values()) mirrorNow(workspaceId, doc, kind, id);
 	});
 }
