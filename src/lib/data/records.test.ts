@@ -53,7 +53,7 @@ import {
 	ValidationError
 } from './records';
 import { yTextToRichText } from './richtext';
-import type { ActorId } from './types';
+import { blockTypes, type ActorId } from './types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
 const agent: ActorId = { kind: 'agent', agentId: 'a1', name: 'Research Agent' };
@@ -87,6 +87,16 @@ describe('records: unified addressing', () => {
 
 		expect(listDocuments(doc)).toHaveLength(1);
 		expect(listCollections(doc)).toHaveLength(1);
+	});
+
+	it('never persists blockType on a Collection row, regardless of the requested block type', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, { title: 'Tasks', schema: [] });
+
+		for (const blockType of blockTypes) {
+			const row = createRecord(doc, { parentId: collection.id, blockType }, human);
+			expect(getRecord(doc, row.id)?.blockType).toBeUndefined();
+		}
 	});
 
 	it('orders a Document block sequence and keeps it in sync on delete', () => {
