@@ -2,17 +2,18 @@
 	import type * as Y from 'yjs';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { getShardDoc } from '$lib/client/yjs-client';
-	import { CURRENT_USER } from '$lib/client/actor';
-	import { useCollectionView } from '$lib/client/collection-view.svelte';
 	import {
-		addSelectOption as addSelectOptionToSchema,
-		createRecord,
-		deleteRecord,
-		resolvePrimaryField,
-		updateRecordProperties,
-		ValidationError
-	} from '$lib/data/records';
+		useCollectionConnection,
+		useCollectionView,
+		type CollectionViewSnapshot
+	} from '$lib/client/collection-view.svelte';
+	import {
+		addCollectionSelectOption,
+		createCollectionRow,
+		removeCollectionRow,
+		setCollectionCell
+	} from '$lib/client/collection-editor';
+	import { resolvePrimaryField } from '$lib/data/records';
 	import {
 		computeFieldSummary,
 		fieldSummaryLabel,
@@ -38,27 +39,45 @@
 		collectionId,
 		config,
 		onConfigChange,
-		collections = []
+		collections = [],
+		// 'full-page' is used by the /table/[id] route, which composes this
+		// component for its actual data grid (issue #189) and layers its own
+		// title/breadcrumb chrome around it — see that route for what differs:
+		// no "no properties yet, add one from the full table" empty state
+		// (nonsensical when this *is* the full table) and no "Open full
+		// table →" link back to itself.
+		variant = 'embedded',
+		onConnect,
+		onSnapshot
 	}: {
 		collectionId: string;
 		config: ViewConfig;
 		onConfigChange: (config: ViewConfig) => void;
 		collections?: CollectionMeta[];
+		variant?: 'embedded' | 'full-page';
+		onConnect?: (connection: { ydoc: Y.Doc | undefined; shardId: string | undefined }) => void;
+		onSnapshot?: (snapshot: CollectionViewSnapshot) => void;
 	} = $props();
 
-	let ydoc: Y.Doc | undefined = $state();
-	let shardId: string | undefined = $state();
-	// Set in lockstep with ydoc (never the raw collectionId prop) below — the
-	// prop can change synchronously on retarget while ydoc only catches up
-	// once the async shard fetch resolves, and useCollectionView must never
-	// see a doc paired with a collectionId it doesn't belong to.
-	let resolvedCollectionId: string | undefined = $state();
 	let optionDialogPropertyKey: string | null = $state(null);
 	let optionDialogError = $state('');
 
+	// Resolves this Collection's real shard (#120) and (re)connects whenever
+	// collectionId changes (a component instance can be retargeted to a
+	// different Collection without remounting, e.g. via CollectionViewBlock's
+	// change-embed flow) — shared by every Collection renderer (issue #189).
+	const connection = useCollectionConnection(() => collectionId);
+	const ydoc = $derived(connection.ydoc);
+	const shardId = $derived(connection.shardId);
+
+	$effect(() => {
+		onConnect?.({ ydoc: connection.ydoc, shardId: connection.shardId });
+	});
+
 	const view = useCollectionView(
 		() => ydoc,
-		() => resolvedCollectionId ?? collectionId
+		() => connection.resolvedCollectionId ?? collectionId,
+		(snapshot) => onSnapshot?.(snapshot)
 	);
 	const schema = $derived(view.schema);
 	const rows = $derived(view.rows);
@@ -67,63 +86,25 @@
 	const projected = $derived(projectRecords(rows, schema, config));
 	const effectivePrimaryKey = $derived(resolvePrimaryField(schema, primaryFieldKey)?.key);
 
-	// Resolves this Collection's real shard (#120) — never assumed equal to
-	// collectionId, since a Collection created before the shard-assignment
-	// cutover still resolves to the default shard — and (re)connects
-	// whenever collectionId changes (a component instance can be retargeted
-	// to a different Collection without remounting, e.g. via
-	// CollectionViewBlock's change-embed flow).
-	$effect(() => {
-		const id = collectionId;
-		let cancelled = false;
-
-		(async () => {
-			const res = await fetch(`/api/collections/${id}/shard`);
-			const { shardId: resolvedShardId } = await res.json();
-			if (cancelled) return;
-
-			shardId = resolvedShardId;
-			resolvedCollectionId = id;
-			ydoc = getShardDoc(resolvedShardId);
-			// A rejection here (network failure, bad response) previously
-			// vanished as a silent unhandled rejection — this at least
-			// surfaces it, without inventing a toast/error-UI system this
-			// lint pass isn't scoped to add.
-		})().catch((err: unknown) => {
-			console.error(`Failed to resolve shard for collection ${id}:`, err);
-		});
-
-		return () => {
-			cancelled = true;
-		};
-	});
-
 	function addRow(): void {
-		if (!ydoc) return;
-		createRecord(ydoc, { parentId: collectionId, properties: {} }, CURRENT_USER);
+		createCollectionRow(ydoc, collectionId);
 	}
 
 	function removeRow(id: string): void {
-		if (!ydoc) return;
-		deleteRecord(ydoc, id);
+		removeCollectionRow(ydoc, id);
 	}
 
 	function setCell(row: WorkspaceRecord, property: PropertyDefinition, value: PropertyValue): void {
-		if (!ydoc) return;
-		updateRecordProperties(ydoc, row.id, { [property.key]: value }, CURRENT_USER);
+		setCollectionCell(ydoc, row.id, { [property.key]: value });
 	}
 
 	function addSelectOption(propertyKey: string, rawLabel: string): void {
-		if (!ydoc) return;
-		try {
-			addSelectOptionToSchema(ydoc, collectionId, propertyKey, rawLabel);
+		const result = addCollectionSelectOption(ydoc, collectionId, propertyKey, rawLabel);
+		if (result.ok) {
 			optionDialogPropertyKey = null;
 			optionDialogError = '';
-		} catch (err) {
-			optionDialogError =
-				err instanceof ValidationError
-					? err.message
-					: 'Could not add the option. Please try again.';
+		} else {
+			optionDialogError = result.error;
 		}
 	}
 
@@ -152,7 +133,7 @@
 	}
 </script>
 
-{#if schema.length === 0}
+{#if schema.length === 0 && variant === 'embedded'}
 	<p
 		class="rounded-lg border border-dashed border-border bg-surface/50 p-6 text-center text-sm text-muted"
 	>
@@ -285,15 +266,17 @@
 			<Icon name="plus" size={13} />
 			<span>Add row</span>
 		</button>
-		<a
-			href={resolve('/space/[spaceId]/table/[id]', {
-				spaceId: page.params.spaceId!,
-				id: collectionId
-			})}
-			class="text-xs text-muted hover:text-accent hover:underline"
-		>
-			Open full table →
-		</a>
+		{#if variant === 'embedded'}
+			<a
+				href={resolve('/space/[spaceId]/table/[id]', {
+					spaceId: page.params.spaceId!,
+					id: collectionId
+				})}
+				class="text-xs text-muted hover:text-accent hover:underline"
+			>
+				Open full table →
+			</a>
+		{/if}
 	</div>
 {/if}
 

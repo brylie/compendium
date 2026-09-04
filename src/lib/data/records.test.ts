@@ -3,6 +3,7 @@ import * as Y from 'yjs';
 import { DEFAULT_CUSTOM_CALLOUT_COLOR } from './callout-style';
 import {
 	addSelectOption,
+	appendCollectionField,
 	buildDocumentTree,
 	coercePropertyValue,
 	countRecordsWithProperty,
@@ -602,6 +603,28 @@ describe('coercePropertyValue', () => {
 		expect(coercePropertyValue({ type: 'text', value: '2026-01-01' }, 'date')).toBeUndefined();
 		expect(coercePropertyValue({ type: 'text', value: 'x' }, 'select')).toBeUndefined();
 		expect(coercePropertyValue({ type: 'text', value: 'x' }, 'relation')).toBeUndefined();
+	});
+});
+
+describe('appendCollectionField: reads the current Yjs schema atomically (issue #189)', () => {
+	it('two sequential appends from one initial schema snapshot both survive, in submission order', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+
+		// Both calls read the initial `[name]` schema — appendCollectionField
+		// must not trust that snapshot for the second call, or it would
+		// silently drop the first appended field.
+		appendCollectionField(doc, collection.id, { key: 'status', label: 'Status', type: 'select' });
+		appendCollectionField(doc, collection.id, { key: 'due', label: 'Due', type: 'date' });
+
+		expect(getCollection(doc, collection.id)?.schema.map((p) => p.key)).toEqual([
+			'name',
+			'status',
+			'due'
+		]);
 	});
 });
 

@@ -3,6 +3,7 @@
 	import { nanoid } from 'nanoid';
 	import { getShardDoc } from '$lib/client/yjs-client';
 	import { useCollectionView } from '$lib/client/collection-view.svelte';
+	import { appendCollectionField } from '$lib/client/collection-editor';
 	import { resolvePrimaryField, updateCollectionSchema } from '$lib/data/records';
 	import type { CollectionMeta, PropertyDefinition, PropertyType } from '$lib/data/types';
 	import Icon from './Icon.svelte';
@@ -105,7 +106,7 @@
 				newFieldType === 'relation' ? newFieldTargetCollectionId || undefined : undefined
 		};
 		try {
-			updateCollectionSchema(getShardDoc(shardId), collectionId, [...schema, field]);
+			appendCollectionField(getShardDoc(shardId), collectionId, field);
 			newFieldLabel = '';
 			newFieldType = 'text';
 			newFieldTargetCollectionId = '';

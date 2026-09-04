@@ -539,6 +539,16 @@ export function updateCollectionSchema(doc: Y.Doc, id: string, schema: PropertyD
 	ymeta.set('schema', schema);
 }
 
+/** Appends one field to a Collection's schema, reading the current schema from Yjs inside the same transaction rather than trusting a caller-supplied snapshot — two rapid appends from the same reactive snapshot would otherwise race, with the second silently dropping the first. */
+export function appendCollectionField(doc: Y.Doc, id: string, field: PropertyDefinition): void {
+	const ymeta = collectionsMap(doc).get(id);
+	if (!ymeta) throw new NotFoundError(`Collection ${id} not found`);
+	doc.transact(() => {
+		const schema = ymeta.get('schema') ?? [];
+		ymeta.set('schema', [...schema, field]);
+	});
+}
+
 // A `relation` value is a list of record IDs with no inherent display string
 // of its own (data-model.md's PropertyValue — resolving it to a title would
 // mean reaching into other records), so it's the one property type that
