@@ -5,7 +5,6 @@ import { clientIdForToken, isHeldByClient, releaseAgentHold } from '$lib/server/
 import {
 	createRecord as crdtCreateRecord,
 	deleteRecord as crdtDeleteRecord,
-	getCollection as crdtGetCollection,
 	getDocument as crdtGetDocument,
 	getRecordYText,
 	setRecordReferencedId as crdtSetRecordReferencedId,
@@ -13,6 +12,7 @@ import {
 	updateRecordContent,
 	updateRecordProperties
 } from '$lib/data/records';
+import { resolveInternalLinkTarget } from '$lib/data/links';
 import { logAudit } from '$lib/server/audit';
 import { reserveRecordLocator, releaseRecordLocator } from '$lib/server/catalog';
 import { markdownToRichText } from '$lib/mcp/markdown-transcode';
@@ -69,32 +69,57 @@ export class InvalidLinkTargetError extends Error {
 // all; it's optional there) is one too.
 const DOCUMENT_REFERENCE_BLOCK_TYPES: readonly BlockType[] = ['page_link', 'child_pages'];
 
-function validateDocumentReferenceTarget(caller: CallerIdentity, targetId: string): void {
-	// The target is always a Document, which has its own real shard (#120) —
-	// resolveParentWorkspaceContext finds it via the catalog locator, falling
-	// back to the default doc for an untracked/legacy target.
+const REFERENCE_TARGET_ERROR_KIND = { document: 'Document', collection: 'Collection' } as const;
+
+/**
+ * Validates a `referencedRecordId` against the target kind its block type
+ * requires — `document` for page_link/child_pages, `collection` for
+ * collection_view (mirrors the `linkedTarget?.kind === 'collection'` check
+ * the read side already applies, services/documents.ts's resolveRecordLink,
+ * closing the write-side gap tracked by issue #37). Built on
+ * `resolveInternalLinkTarget` (src/lib/data/links.ts) rather than a direct
+ * `crdtGetDocument`/`crdtGetCollection` call, so "does this ID exist, and as
+ * which kind" is answered in one shared place instead of reimplemented per
+ * kind (issue #62).
+ */
+function validateReferenceTarget(
+	caller: CallerIdentity,
+	targetId: string,
+	kind: 'document' | 'collection'
+): void {
+	// The target has its own real shard (#120) — resolveParentWorkspaceContext
+	// finds it via the catalog locator, falling back to the default doc for an
+	// untracked/legacy target.
 	const { doc, parentSpaceId } = resolveParentWorkspaceContext(targetId);
-	const target = crdtGetDocument(doc, targetId);
-	if (!target) throw new InvalidLinkTargetError(targetId);
+	const target = resolveInternalLinkTarget(doc, targetId);
+	const errorKind = REFERENCE_TARGET_ERROR_KIND[kind];
+	if (target?.kind !== kind) throw new InvalidLinkTargetError(targetId, errorKind);
 	if (isAccessToken(caller) && !tokenAllowsParent(caller, targetId, parentSpaceId)) {
-		throw new InvalidLinkTargetError(targetId);
+		throw new InvalidLinkTargetError(targetId, errorKind);
 	}
 }
 
-// A collection_view block's referencedRecordId must resolve to an existing,
-// caller-accessible Collection (never a Document) — mirrors the
-// `linkedTarget?.kind === 'collection'` check the read side already applies
-// (services/documents.ts's resolveRecordLink), closing the write-side gap
-// tracked by issue #37.
-function validateCollectionReferenceTarget(caller: CallerIdentity, targetId: string): void {
-	// A Collection has its own real shard too (#120) — same locator-backed
-	// resolution validateDocumentReferenceTarget uses above.
-	const { doc, parentSpaceId } = resolveParentWorkspaceContext(targetId);
-	const target = crdtGetCollection(doc, targetId);
-	if (!target) throw new InvalidLinkTargetError(targetId, 'Collection');
-	if (isAccessToken(caller) && !tokenAllowsParent(caller, targetId, parentSpaceId)) {
-		throw new InvalidLinkTargetError(targetId, 'Collection');
-	}
+/**
+ * The shared guard shape behind every page_link/child_pages/collection_view
+ * `referencedRecordId` check: the record's own parent must be a Document
+ * (both block types below only ever exist inside one), and the target must
+ * resolve to the given kind and be caller-accessible. `createRecord`'s and
+ * `writeRecord`'s validators (below) differ only in which block types they
+ * accept and their error wording — that difference is real (writeRecord
+ * doesn't support retargeting child_pages, whose target is UI-only post-
+ * creation) and stays in each of them; this is just their shared middle step
+ * (issue #62).
+ */
+function requireParentDocumentThenValidateTarget(
+	caller: CallerIdentity,
+	doc: Y.Doc,
+	parentId: string,
+	targetId: string,
+	kind: 'document' | 'collection',
+	parentErrorMessage: string
+): void {
+	if (!crdtGetDocument(doc, parentId)) throw new Error(parentErrorMessage);
+	validateReferenceTarget(caller, targetId, kind);
 }
 
 const VIEW_TYPES: readonly ViewType[] = ['table', 'board', 'calendar'];
@@ -133,17 +158,25 @@ function validateCreateReferencedRecordId(
 	referencedRecordId: string
 ): void {
 	if (blockType && DOCUMENT_REFERENCE_BLOCK_TYPES.includes(blockType)) {
-		if (!crdtGetDocument(doc, parentId)) {
-			throw new Error('page_link and child_pages blocks can only be created inside a Document.');
-		}
-		validateDocumentReferenceTarget(caller, referencedRecordId);
+		requireParentDocumentThenValidateTarget(
+			caller,
+			doc,
+			parentId,
+			referencedRecordId,
+			'document',
+			'page_link and child_pages blocks can only be created inside a Document.'
+		);
 		return;
 	}
 	if (blockType === 'collection_view') {
-		if (!crdtGetDocument(doc, parentId)) {
-			throw new Error('collection_view blocks can only be created inside a Document.');
-		}
-		validateCollectionReferenceTarget(caller, referencedRecordId);
+		requireParentDocumentThenValidateTarget(
+			caller,
+			doc,
+			parentId,
+			referencedRecordId,
+			'collection',
+			'collection_view blocks can only be created inside a Document.'
+		);
 		return;
 	}
 	throw new Error(
@@ -266,17 +299,25 @@ function validateReferencedRecordIdWrite(
 	referencedRecordId: string
 ): void {
 	if (record.blockType === 'page_link') {
-		if (!crdtGetDocument(doc, record.parentId)) {
-			throw new Error('page_link blocks can only exist inside a Document.');
-		}
-		validateDocumentReferenceTarget(caller, referencedRecordId);
+		requireParentDocumentThenValidateTarget(
+			caller,
+			doc,
+			record.parentId,
+			referencedRecordId,
+			'document',
+			'page_link blocks can only exist inside a Document.'
+		);
 		return;
 	}
 	if (record.blockType === 'collection_view') {
-		if (!crdtGetDocument(doc, record.parentId)) {
-			throw new Error('collection_view blocks can only exist inside a Document.');
-		}
-		validateCollectionReferenceTarget(caller, referencedRecordId);
+		requireParentDocumentThenValidateTarget(
+			caller,
+			doc,
+			record.parentId,
+			referencedRecordId,
+			'collection',
+			'collection_view blocks can only exist inside a Document.'
+		);
 		return;
 	}
 	throw new Error(

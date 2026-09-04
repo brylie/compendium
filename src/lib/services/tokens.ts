@@ -7,7 +7,8 @@ import {
 	type AccessToken
 } from '$lib/server/token-store';
 import { logAudit } from '$lib/server/audit';
-import { actorForCaller, type CallerIdentity } from './permissions';
+import { resolveInternalLinkTarget } from '$lib/data/links';
+import { actorForCaller, resolveParentWorkspaceContext, type CallerIdentity } from './permissions';
 
 /** Thrown when a token-creation request names a Space id that isn't a real Space in this workspace. */
 export class UnknownSpaceError extends Error {
@@ -15,6 +16,50 @@ export class UnknownSpaceError extends Error {
 		super(`${spaceId} is not a Space in this workspace.`);
 		this.name = 'UnknownSpaceError';
 	}
+}
+
+/** Thrown when a token-creation request names a Document id that isn't a real, existing Document. */
+export class UnknownDocumentError extends Error {
+	constructor(documentId: string) {
+		super(`${documentId} is not a Document in this workspace.`);
+		this.name = 'UnknownDocumentError';
+	}
+}
+
+/** Thrown when a token-creation request names a Collection id that isn't a real, existing Collection. */
+export class UnknownCollectionError extends Error {
+	constructor(collectionId: string) {
+		super(`${collectionId} is not a Collection in this workspace.`);
+		this.name = 'UnknownCollectionError';
+	}
+}
+
+/**
+ * Throws `new ErrorClass(id)` for the first `id` in `ids` that `existsFn` rejects — the shared
+ * shape behind every one of `createToken`'s grant-existence checks (Space/Document/Collection
+ * id lists), so "does every ID in this list exist" is answered once instead of reimplemented
+ * per list (issue #62).
+ */
+function validateEvery(
+	ids: string[],
+	existsFn: (id: string) => boolean,
+	ErrorClass: new (id: string) => Error
+): void {
+	for (const id of ids) {
+		if (!existsFn(id)) throw new ErrorClass(id);
+	}
+}
+
+/** A Document id naming a real, existing Document — a token grant needs no permission check of its own here (Phase 0 has no membership model gating who a caller may grant a *future* token access to), just existence and kind. */
+function documentExists(id: string): boolean {
+	const { doc } = resolveParentWorkspaceContext(id);
+	return resolveInternalLinkTarget(doc, id)?.kind === 'document';
+}
+
+/** A Collection id naming a real, existing Collection — see {@link documentExists}. */
+function collectionExists(id: string): boolean {
+	const { doc } = resolveParentWorkspaceContext(id);
+	return resolveInternalLinkTarget(doc, id)?.kind === 'collection';
 }
 
 export interface CreateTokenInput {
@@ -28,10 +73,11 @@ export interface CreateTokenInput {
  * Creates a new access token — the service-layer wrapper around `mcp/tokens.ts`'s
  * `createToken` (validate → mutate → audit, in one place, per `service-layer.md`).
  * Phase 0 permission: any caller may mint a token, matching `createSpace`/`createDocument`'s
- * "single-tenant, no membership model yet" posture. `allowedSpaceIds` is validated against the
- * workspace's real Spaces before persisting — a crafted request could otherwise grant a token
- * access to a Space id that merely happens to exist somewhere else, since Space membership
- * alone later authorizes access (`tokenAllowsParent`).
+ * "single-tenant, no membership model yet" posture. Every grant list — Spaces, Documents,
+ * Collections — is validated against what actually exists before persisting: a crafted
+ * request could otherwise grant a token access to an id that merely happens to exist
+ * somewhere else, or one that doesn't exist at all, since a dead grant only becomes
+ * apparent (never matching anything via `tokenAllowsParent`) rather than rejected up front.
  */
 export function createToken(
 	caller: CallerIdentity,
@@ -41,9 +87,9 @@ export function createToken(
 	const actor = actorForCaller(caller);
 
 	const knownSpaceIds = new Set(listSpaces(workspaceId).map((space) => space.id));
-	for (const spaceId of input.allowedSpaceIds) {
-		if (!knownSpaceIds.has(spaceId)) throw new UnknownSpaceError(spaceId);
-	}
+	validateEvery(input.allowedSpaceIds, (id) => knownSpaceIds.has(id), UnknownSpaceError);
+	validateEvery(input.allowedDocumentIds, documentExists, UnknownDocumentError);
+	validateEvery(input.allowedCollectionIds, collectionExists, UnknownCollectionError);
 
 	const result = storeCreateToken(input);
 	logAudit({ actor, action: 'create_token', targetRecordId: result.record.tokenHash });

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { createToken, revokeToken, UnknownSpaceError } from './tokens';
+import {
+	createToken,
+	revokeToken,
+	UnknownCollectionError,
+	UnknownDocumentError,
+	UnknownSpaceError
+} from './tokens';
+import { createCollection, createDocument } from './index';
 import { CURRENT_USER } from '$lib/server/current-user';
 import { createToken as createRawToken, listTokens } from '$lib/mcp/tokens';
 import { queryAuditLog } from '$lib/server/audit';
@@ -74,6 +81,74 @@ describe('service layer: createToken (#188)', () => {
 		).toThrow(UnknownSpaceError);
 
 		expect(listTokens()).toHaveLength(before);
+	});
+
+	it('grants access to a real Document and a real Collection (issue #62)', () => {
+		const document = createDocument(CURRENT_USER, { title: 'Real Doc For Token Test' });
+		const collection = createCollection(CURRENT_USER, { title: 'Real Collection For Token Test' });
+
+		const { record } = createToken(CURRENT_USER, {
+			clientLabel: 'Reference Grant Client',
+			allowedDocumentIds: [document.id],
+			allowedCollectionIds: [collection.id],
+			allowedSpaceIds: []
+		});
+
+		expect(record.allowedDocumentIds).toEqual([document.id]);
+		expect(record.allowedCollectionIds).toEqual([collection.id]);
+	});
+
+	it('rejects a Document id that does not exist, without persisting a token (issue #62)', () => {
+		const before = listTokens().length;
+
+		expect(() =>
+			createToken(CURRENT_USER, {
+				clientLabel: 'Document Spoofer',
+				allowedDocumentIds: ['not-a-real-document-id'],
+				allowedCollectionIds: [],
+				allowedSpaceIds: []
+			})
+		).toThrow(UnknownDocumentError);
+
+		expect(listTokens()).toHaveLength(before);
+	});
+
+	it('rejects a Collection id that does not exist, without persisting a token (issue #62)', () => {
+		const before = listTokens().length;
+
+		expect(() =>
+			createToken(CURRENT_USER, {
+				clientLabel: 'Collection Spoofer',
+				allowedDocumentIds: [],
+				allowedCollectionIds: ['not-a-real-collection-id'],
+				allowedSpaceIds: []
+			})
+		).toThrow(UnknownCollectionError);
+
+		expect(listTokens()).toHaveLength(before);
+	});
+
+	it('rejects a Document id naming a real Collection, and vice versa (issue #62)', () => {
+		const document = createDocument(CURRENT_USER, { title: 'Doc Not A Collection' });
+		const collection = createCollection(CURRENT_USER, { title: 'Collection Not A Doc' });
+
+		expect(() =>
+			createToken(CURRENT_USER, {
+				clientLabel: 'Kind Mismatch A',
+				allowedDocumentIds: [collection.id],
+				allowedCollectionIds: [],
+				allowedSpaceIds: []
+			})
+		).toThrow(UnknownDocumentError);
+
+		expect(() =>
+			createToken(CURRENT_USER, {
+				clientLabel: 'Kind Mismatch B',
+				allowedDocumentIds: [],
+				allowedCollectionIds: [document.id],
+				allowedSpaceIds: []
+			})
+		).toThrow(UnknownCollectionError);
 	});
 });
 

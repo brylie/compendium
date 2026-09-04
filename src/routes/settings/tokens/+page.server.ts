@@ -1,6 +1,12 @@
 import { fail } from '@sveltejs/kit';
 import { listCollections, listDocuments, listSpaces, listTokens } from '$lib/services';
-import { createToken, revokeToken, UnknownSpaceError } from '$lib/services/tokens';
+import {
+	createToken,
+	revokeToken,
+	UnknownCollectionError,
+	UnknownDocumentError,
+	UnknownSpaceError
+} from '$lib/services/tokens';
 import { formString } from '$lib/server/form-data';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -44,6 +50,12 @@ export const actions: Actions = {
 		} catch (err) {
 			if (err instanceof UnknownSpaceError) {
 				return fail(400, { error: 'Invalid Space selection' });
+			}
+			if (err instanceof UnknownDocumentError) {
+				return fail(400, { error: 'Invalid Document selection' });
+			}
+			if (err instanceof UnknownCollectionError) {
+				return fail(400, { error: 'Invalid Collection selection' });
 			}
 			throw err;
 		}
