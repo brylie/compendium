@@ -449,9 +449,10 @@
 		blockType: BlockType = 'paragraph'
 	): Promise<void> {
 		if (!ydoc) return;
+		const currentDoc = ydoc;
 		const record = transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () =>
 			createRecord(
-				ydoc,
+				currentDoc,
 				{ parentId: data.documentId, blockType, afterRecordId: afterId },
 				CURRENT_USER
 			)
@@ -507,6 +508,7 @@
 		nextBlockType: BlockType
 	): Promise<void> {
 		if (!ydoc) return;
+		const currentDoc = ydoc;
 		const ytext = getRecordYText(ydoc, block.id);
 		const richText = ytext ? yTextToRichText(ytext) : { runs: [] };
 		const offset = ytext ? Math.min(Math.max(0, caretOffset), ytext.length) : 0;
@@ -521,7 +523,7 @@
 
 		const record = transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () =>
 			createRecord(
-				ydoc,
+				currentDoc,
 				{ parentId: data.documentId, blockType: nextBlockType, afterRecordId: block.id },
 				CURRENT_USER
 			)
