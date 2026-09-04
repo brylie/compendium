@@ -129,7 +129,11 @@ export function useCollectionConnection(
 
 		(async () => {
 			const res = await fetch(`/api/collections/${id}/shard`);
+			if (!res.ok) throw new Error(`Shard lookup for collection ${id} failed: ${res.status}`);
 			const { shardId: resolvedShardId } = await res.json();
+			if (typeof resolvedShardId !== 'string' || !resolvedShardId) {
+				throw new Error(`Shard lookup for collection ${id} returned no shardId`);
+			}
 			if (cancelled) return;
 
 			shardId = resolvedShardId;

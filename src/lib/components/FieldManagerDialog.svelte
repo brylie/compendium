@@ -106,7 +106,7 @@
 				newFieldType === 'relation' ? newFieldTargetCollectionId || undefined : undefined
 		};
 		try {
-			appendCollectionField(getShardDoc(shardId), collectionId, schema, field);
+			appendCollectionField(getShardDoc(shardId), collectionId, field);
 			newFieldLabel = '';
 			newFieldType = 'text';
 			newFieldTargetCollectionId = '';

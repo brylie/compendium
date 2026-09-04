@@ -35,7 +35,7 @@ describe('TableCollectionView', () => {
 		// same test doc.
 		vi.stubGlobal(
 			'fetch',
-			vi.fn(async () => ({ json: async () => ({ shardId: 'test-shard' }) }))
+			vi.fn(async () => ({ ok: true, json: async () => ({ shardId: 'test-shard' }) }))
 		);
 	});
 

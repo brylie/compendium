@@ -170,8 +170,9 @@
 		const label = newDatePropertyLabel.trim();
 		if (!label) return;
 		const property: PropertyDefinition = { key: nanoid(8), label, type: 'date' };
-		appendCollectionField(ydoc, collectionId, schema, property);
-		onConfigChange({ ...config, groupBy: property.key });
+		if (appendCollectionField(ydoc, collectionId, property)) {
+			onConfigChange({ ...config, groupBy: property.key });
+		}
 	}
 
 	function goToMonth(delta: number): void {

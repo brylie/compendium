@@ -38,7 +38,7 @@ describe('table/[id] +page', () => {
 		ydoc = new Y.Doc();
 		vi.stubGlobal(
 			'fetch',
-			vi.fn(async () => ({ json: async () => ({ shardId: 'test-shard' }) }))
+			vi.fn(async () => ({ ok: true, json: async () => ({ shardId: 'test-shard' }) }))
 		);
 	});
 

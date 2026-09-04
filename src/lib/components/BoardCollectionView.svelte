@@ -120,8 +120,9 @@
 		const label = newGroupingPropertyLabel.trim();
 		if (!label) return;
 		const property: PropertyDefinition = { key: nanoid(8), label, type: 'select', options: [] };
-		appendCollectionField(ydoc, collectionId, schema, property);
-		onConfigChange({ ...config, groupBy: property.key });
+		if (appendCollectionField(ydoc, collectionId, property)) {
+			onConfigChange({ ...config, groupBy: property.key });
+		}
 	}
 
 	function addSelectOption(propertyKey: string, rawLabel: string): void {

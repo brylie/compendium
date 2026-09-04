@@ -2,9 +2,9 @@ import type * as Y from 'yjs';
 import { CURRENT_USER } from './actor';
 import {
 	addSelectOption,
+	appendCollectionField as appendCollectionFieldToSchema,
 	createRecord,
 	deleteRecord,
-	updateCollectionSchema,
 	updateRecordProperties,
 	ValidationError
 } from '$lib/data/records';
@@ -78,14 +78,19 @@ export function addCollectionSelectOption(
 /**
  * Appends one field to a Collection's schema — the shared path for Board's
  * "add a select property" and Calendar's "add a date property" first-run
- * prompts, and FieldManagerDialog's "Add field" form.
+ * prompts, and FieldManagerDialog's "Add field" form. Reads the current
+ * schema from Yjs itself (`records.ts`'s `appendCollectionField`), not from
+ * a caller-supplied snapshot, so two rapid appends never race. Returns
+ * whether the field was actually written — `false` when `doc` isn't
+ * connected yet — so a caller doesn't persist a config referencing a field
+ * (e.g. `groupBy`) that was never added.
  */
 export function appendCollectionField(
 	doc: Y.Doc | undefined,
 	collectionId: string,
-	currentSchema: PropertyDefinition[],
 	field: PropertyDefinition
-): void {
-	if (!doc) return;
-	updateCollectionSchema(doc, collectionId, [...currentSchema, field]);
+): boolean {
+	if (!doc) return false;
+	appendCollectionFieldToSchema(doc, collectionId, field);
+	return true;
 }

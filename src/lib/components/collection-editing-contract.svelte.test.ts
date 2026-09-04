@@ -47,7 +47,7 @@ describe('cross-surface select-option contract (issue #189)', () => {
 		ydoc = new Y.Doc();
 		vi.stubGlobal(
 			'fetch',
-			vi.fn(async () => ({ json: async () => ({ shardId: 'test-shard' }) }))
+			vi.fn(async () => ({ ok: true, json: async () => ({ shardId: 'test-shard' }) }))
 		);
 	});
 
@@ -210,7 +210,7 @@ describe('cross-surface row attribution contract (issue #189)', () => {
 		ydoc = new Y.Doc();
 		vi.stubGlobal(
 			'fetch',
-			vi.fn(async () => ({ json: async () => ({ shardId: 'test-shard' }) }))
+			vi.fn(async () => ({ ok: true, json: async () => ({ shardId: 'test-shard' }) }))
 		);
 	});
 
