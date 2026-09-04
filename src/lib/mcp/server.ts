@@ -5,44 +5,29 @@ import { verifyToken, type AccessToken } from './tokens';
 import {
 	serviceModules,
 	serviceSurfaces,
+	mcpAdapterBindings,
 	type ServiceMethod,
 	PermissionDeniedError,
 	HoldRequiredError
 } from '$lib/services';
-import type { BlockType, EmbeddedViewConfig } from '$lib/data/types';
+import {
+	blockTypes,
+	propertyTypes,
+	type BlockType,
+	type EmbeddedViewConfig
+} from '$lib/data/types';
 import { resolvePrimaryField } from '$lib/data/records';
 
 const propertyValueSchema = z.discriminatedUnion('type', [
-	z.object({ type: z.literal('text'), value: z.string() }),
-	z.object({ type: z.literal('number'), value: z.number() }),
-	z.object({ type: z.literal('date'), value: z.string() }),
-	z.object({ type: z.literal('select'), value: z.string() }),
-	z.object({ type: z.literal('checkbox'), value: z.boolean() }),
-	z.object({ type: z.literal('relation'), value: z.array(z.string()) })
+	z.object({ type: z.literal(propertyTypes[0]), value: z.string() }),
+	z.object({ type: z.literal(propertyTypes[1]), value: z.number() }),
+	z.object({ type: z.literal(propertyTypes[2]), value: z.string() }),
+	z.object({ type: z.literal(propertyTypes[3]), value: z.string() }),
+	z.object({ type: z.literal(propertyTypes[4]), value: z.boolean() }),
+	z.object({ type: z.literal(propertyTypes[5]), value: z.array(z.string()) })
 ]);
 
-const blockTypeSchema = z.enum([
-	'paragraph',
-	'heading_1',
-	'heading_2',
-	'heading_3',
-	'heading_4',
-	'bulleted_list_item',
-	'numbered_list_item',
-	'to_do',
-	'quote',
-	'divider',
-	'callout',
-	'toggle',
-	'table',
-	'code',
-	'table_of_contents',
-	'synced_block',
-	'page_link',
-	'embed',
-	'collection_view',
-	'child_pages'
-]);
+const blockTypeSchema = z.enum(blockTypes);
 
 const childPagesDepthSchema = z.union([z.number().int().positive(), z.literal('unlimited')]);
 
@@ -112,6 +97,9 @@ function registerFromManifest<Args extends z.ZodRawShape>(
 		throw new Error(
 			`Service method "${method}" is not declared as an MCP tool with valid name and description in manifest`
 		);
+	}
+	if (mcpAdapterBindings[method as keyof typeof mcpAdapterBindings] !== surface.mcpToolName) {
+		throw new Error(`MCP adapter binding for service method "${method}" is missing or mismatched`);
 	}
 	const register = server.registerTool.bind(server) as (
 		name: string,

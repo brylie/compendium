@@ -11,7 +11,7 @@ import {
 	listCatalogDocuments,
 	resolveShardForParent
 } from '$lib/server/catalog';
-import { tokenAllowsParent } from '$lib/mcp/tokens';
+import { tokenAllowsParent } from '$lib/server/token-store';
 import { richTextToMarkdown } from '$lib/mcp/markdown-transcode';
 import { actorForCaller, isAccessToken, type CallerIdentity } from './permissions';
 

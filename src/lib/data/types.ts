@@ -7,7 +7,9 @@ export type ActorId =
 	| { kind: 'agent'; agentId: string; name: string }
 	| { kind: 'human-via-client'; userId: string; client: string }; // "Brylie · via Claude Desktop"
 
-export type PropertyType = 'text' | 'number' | 'date' | 'select' | 'checkbox' | 'relation';
+/** Canonical runtime discriminator list shared by data validation and adapters. */
+export const propertyTypes = ['text', 'number', 'date', 'select', 'checkbox', 'relation'] as const;
+export type PropertyType = (typeof propertyTypes)[number];
 
 export type PropertyValue =
 	| { type: 'text'; value: string }
@@ -25,27 +27,30 @@ export interface PropertyDefinition {
 	targetCollectionId?: string; // for 'relation' — which Collection its record-id values point into
 }
 
-export type BlockType =
-	| 'paragraph'
-	| 'heading_1'
-	| 'heading_2'
-	| 'heading_3'
-	| 'heading_4'
-	| 'bulleted_list_item'
-	| 'numbered_list_item'
-	| 'to_do'
-	| 'quote'
-	| 'divider'
-	| 'callout'
-	| 'toggle'
-	| 'table'
-	| 'code'
-	| 'table_of_contents'
-	| 'synced_block'
-	| 'page_link'
-	| 'embed'
-	| 'collection_view' // embeds a Table/Board/Calendar view of a Collection inline in a Document — see collection-views.md
-	| 'child_pages'; // live listing of a Document's sub-pages (Confluence-style page tree) — issue #43
+/** Canonical runtime discriminator list for Document blocks. */
+export const blockTypes = [
+	'paragraph',
+	'heading_1',
+	'heading_2',
+	'heading_3',
+	'heading_4',
+	'bulleted_list_item',
+	'numbered_list_item',
+	'to_do',
+	'quote',
+	'divider',
+	'callout',
+	'toggle',
+	'table',
+	'code',
+	'table_of_contents',
+	'synced_block',
+	'page_link',
+	'embed',
+	'collection_view',
+	'child_pages'
+] as const;
+export type BlockType = (typeof blockTypes)[number];
 
 // "View" here means a Collection/database view (Table/Board/Calendar — a
 // rendering + configuration over a Collection's records), never an MVC-style

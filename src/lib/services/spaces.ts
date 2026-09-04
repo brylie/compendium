@@ -1,5 +1,8 @@
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
-import { createSpace as catalogCreateSpace } from '$lib/server/catalog';
+import {
+	createSpace as catalogCreateSpace,
+	listSpaces as catalogListSpaces
+} from '$lib/server/catalog';
 import { logAudit } from '$lib/server/audit';
 import type { SpaceMeta } from '$lib/data/types';
 import { actorForCaller, type CallerIdentity } from './permissions';
@@ -21,4 +24,10 @@ export function createSpace(caller: CallerIdentity, name: string): SpaceMeta {
 	const space = catalogCreateSpace(workspaceId, name);
 	logAudit({ actor, action: 'create_space', targetRecordId: space.id });
 	return space;
+}
+
+/** Returns the workspace's catalog Spaces through the application boundary. */
+export function listSpaces(): SpaceMeta[] {
+	const { workspaceId } = resolveWorkspaceContext();
+	return catalogListSpaces(workspaceId);
 }

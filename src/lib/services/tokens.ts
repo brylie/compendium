@@ -2,9 +2,10 @@ import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { listSpaces } from '$lib/server/catalog';
 import {
 	createToken as storeCreateToken,
+	listTokens as storeListTokens,
 	revokeToken as storeRevokeToken,
 	type AccessToken
-} from '$lib/mcp/tokens';
+} from '$lib/server/token-store';
 import { logAudit } from '$lib/server/audit';
 import { actorForCaller, type CallerIdentity } from './permissions';
 
@@ -54,4 +55,9 @@ export function revokeToken(caller: CallerIdentity, tokenHash: string): void {
 	const actor = actorForCaller(caller);
 	storeRevokeToken(tokenHash);
 	logAudit({ actor, action: 'revoke_token', targetRecordId: tokenHash });
+}
+
+/** Returns token metadata for the settings surface; raw token values are never persisted. */
+export function listTokens(): AccessToken[] {
+	return storeListTokens();
 }

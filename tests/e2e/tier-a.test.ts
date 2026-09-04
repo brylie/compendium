@@ -829,6 +829,51 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					expect(log.some((e) => e.action === 'search_workspace')).toBe(true);
 					break;
 				}
+				case 'spaces.createSpace': {
+					const space = serviceModules.spaces.createSpace(human, 'Manifest Wiring Space');
+					expect(space.id).toBeDefined();
+					const log = queryAuditLog().filter((e) => e.targetRecordId === space.id);
+					expect(log.some((e) => e.action === 'create_space')).toBe(true);
+					break;
+				}
+				case 'spaces.listSpaces': {
+					const spaces = serviceModules.spaces.listSpaces();
+					expect(Array.isArray(spaces)).toBe(true);
+					break;
+				}
+				case 'tokens.createToken': {
+					const { record } = serviceModules.tokens.createToken(human, {
+						clientLabel: 'Manifest Wiring Token',
+						allowedDocumentIds: [],
+						allowedCollectionIds: [],
+						allowedSpaceIds: []
+					});
+					const log = queryAuditLog().filter((e) => e.targetRecordId === record.tokenHash);
+					expect(log.some((e) => e.action === 'create_token')).toBe(true);
+					break;
+				}
+				case 'tokens.revokeToken': {
+					const { record } = serviceModules.tokens.createToken(human, {
+						clientLabel: 'Manifest Wiring Token To Revoke',
+						allowedDocumentIds: [],
+						allowedCollectionIds: [],
+						allowedSpaceIds: []
+					});
+					serviceModules.tokens.revokeToken(human, record.tokenHash);
+					const log = queryAuditLog().filter((e) => e.targetRecordId === record.tokenHash);
+					expect(log.some((e) => e.action === 'revoke_token')).toBe(true);
+					break;
+				}
+				case 'tokens.listTokens': {
+					const tokens = serviceModules.tokens.listTokens();
+					expect(Array.isArray(tokens)).toBe(true);
+					break;
+				}
+				case 'audit.listAuditHistory': {
+					const history = serviceModules.audit.listAuditHistory();
+					expect(history.length).toBeGreaterThan(0);
+					break;
+				}
 				default:
 					throw new Error(`Unhandled ui: true manifest entry: ${method}`);
 			}

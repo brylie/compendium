@@ -1,8 +1,5 @@
 import { fail } from '@sveltejs/kit';
-import { resolveWorkspaceContext } from '$lib/server/workspace-store';
-import { listCollections, listDocuments } from '$lib/services';
-import { listSpaces } from '$lib/server/catalog';
-import { listTokens } from '$lib/mcp/tokens';
+import { listCollections, listDocuments, listSpaces, listTokens } from '$lib/services';
 import { createToken, revokeToken, UnknownSpaceError } from '$lib/services/tokens';
 import { formString } from '$lib/server/form-data';
 import type { Actions, PageServerLoad } from './$types';
@@ -18,12 +15,11 @@ import type { Actions, PageServerLoad } from './$types';
  * policy-free lookup called directly, same precedent as `spaces.ts`'s `createSpace` comment.
  */
 export const load: PageServerLoad = ({ locals }) => {
-	const { workspaceId } = resolveWorkspaceContext();
 	return {
 		tokens: listTokens(),
 		documents: listDocuments(locals.requestContext.caller),
 		collections: listCollections(locals.requestContext.caller),
-		spaces: listSpaces(workspaceId)
+		spaces: listSpaces()
 	};
 };
 

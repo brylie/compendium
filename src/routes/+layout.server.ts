@@ -1,5 +1,4 @@
-import { listDocuments, listCollections } from '$lib/services';
-import { listSpaces } from '$lib/server/catalog';
+import { listDocuments, listCollections, listSpaces } from '$lib/services';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import type { LayoutServerLoad } from './$types';
 
@@ -21,10 +20,10 @@ import type { LayoutServerLoad } from './$types';
  * deferred scope) — those pages always show the default.
  */
 export const load: LayoutServerLoad = ({ params, locals }) => {
-	const { workspaceId, defaultSpaceId } = resolveWorkspaceContext();
+	const { defaultSpaceId } = resolveWorkspaceContext();
 	const activeSpaceId = params.spaceId ?? defaultSpaceId;
 	return {
-		spaces: listSpaces(workspaceId),
+		spaces: listSpaces(),
 		activeSpaceId,
 		documents: listDocuments(locals.requestContext.caller, activeSpaceId),
 		collections: listCollections(locals.requestContext.caller, activeSpaceId)
