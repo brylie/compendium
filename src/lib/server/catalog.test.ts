@@ -71,6 +71,21 @@ describe('catalog: bootstrap and backfill', () => {
 		expect(listCatalogDocuments(WS).find((meta) => meta.id === document.id)?.title).toBe(
 			'Authoritative'
 		);
+		const revisionAfterRepair =
+			getDb()
+				.select({ revision: catalogRevisions.revision })
+				.from(catalogRevisions)
+				.where(eq(catalogRevisions.workspaceId, WS))
+				.get()?.revision ?? 0;
+
+		reconcileCatalogMetadata(WS, doc);
+		expect(
+			getDb()
+				.select({ revision: catalogRevisions.revision })
+				.from(catalogRevisions)
+				.where(eq(catalogRevisions.workspaceId, WS))
+				.get()?.revision
+		).toBe(revisionAfterRepair);
 	});
 
 	it('creates exactly one default Space, idempotently, even across repeated calls', () => {
