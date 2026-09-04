@@ -47,11 +47,11 @@ the work directly revealed a new, evidenced consequence.
 
 Classify each valid observation before presenting it:
 
-| Classification | Use when |
-| --- | --- |
+| Classification     | Use when                                                                                                                                                                           |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Current-PR finding | It violates the intended contract, creates a credible regression, or is necessary for a supported surface. Keep it out of the backlog list and raise it in the active review/work. |
-| Backlog candidate | It is valuable, concrete, and can be delivered independently after this PR. |
-| Note only | It lacks enough evidence, duplicates existing work, or has no meaningful outcome. |
+| Backlog candidate  | It is valuable, concrete, and can be delivered independently after this PR.                                                                                                        |
+| Note only          | It lacks enough evidence, duplicates existing work, or has no meaningful outcome.                                                                                                  |
 
 ## Check that the work is not already tracked
 
