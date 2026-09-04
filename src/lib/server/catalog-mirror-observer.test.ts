@@ -20,11 +20,13 @@ import {
 	resetCatalogMirrorObserverForTests
 } from './catalog-mirror-observer';
 import {
+	LOCAL_UI_ORIGIN,
 	remoteUiOrigin,
 	SERVICE_ORIGIN,
 	transactWithOrigin,
 	UnknownMutationOriginError
 } from '../mutation-origin';
+import { createUndoManager } from '../client/undo';
 
 const WS = 'default';
 const SHARD = 'default';
@@ -135,13 +137,32 @@ describe('catalog-mirror-observer: mirroring direct UI title/hierarchy edits int
 		expect(catalogDocTitle(document.id)).toBe('Third');
 	});
 
+	it('projects undo and redo of a local UI title change', () => {
+		const document = seedDocument(doc, spaceId);
+		const undoManager = createUndoManager(doc);
+		undoManager.stopCapturing();
+
+		transactWithOrigin(doc, LOCAL_UI_ORIGIN, () =>
+			crdtUpdateDocumentTitle(doc, document.id, 'Renamed From The UI')
+		);
+		expect(catalogDocTitle(document.id)).toBe('Renamed From The UI');
+
+		undoManager.undo();
+		expect(catalogDocTitle(document.id)).toBe('Original Title');
+
+		undoManager.redo();
+		expect(catalogDocTitle(document.id)).toBe('Renamed From The UI');
+	});
+
 	it('has no pending projection for shutdown to flush', () => {
 		expect(() => flushPendingCatalogMirrorEvents()).not.toThrow();
 	});
 
-	it('rejects an unrecognized mutation origin', () => {
+	it('rejects an unregistered origin even when it has a recognized source name', () => {
 		expect(() =>
-			doc.transact(() => doc.getMap('documents').set('bad', new Y.Map()), 'legacy')
+			doc.transact(() => doc.getMap('documents').set('bad', new Y.Map()), {
+				source: 'service'
+			})
 		).toThrow(UnknownMutationOriginError);
 	});
 });

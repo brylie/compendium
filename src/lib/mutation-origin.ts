@@ -9,8 +9,12 @@ export interface MutationOrigin {
 	readonly detail?: string;
 }
 
+const origins = new WeakMap<object, MutationSource>();
+
 function origin(source: MutationSource, detail?: string): MutationOrigin {
-	return Object.freeze({ source, detail });
+	const value = Object.freeze({ source, detail });
+	origins.set(value, source);
+	return value;
 }
 
 export const LOCAL_UI_ORIGIN = origin('local-ui');
@@ -37,28 +41,15 @@ export function transactWithOrigin<T>(
 	return result;
 }
 
-const undoRedoOrigins = new WeakSet<object>();
-
 /** Registers a Y.UndoManager's internal transaction origin with the shared classifier. */
 export function registerUndoRedoOrigin(originObject: object): void {
-	undoRedoOrigins.add(originObject);
+	origins.set(originObject, 'undo-redo');
 }
 
 /** Returns the recognized source for a Yjs transaction origin, if any. */
 export function mutationSource(originValue: unknown): MutationSource | undefined {
-	if (
-		typeof originValue === 'object' &&
-		originValue !== null &&
-		'source' in originValue &&
-		typeof originValue.source === 'string' &&
-		['local-ui', 'remote-ui', 'service', 'migration', 'replay', 'undo-redo', 'test'].includes(
-			originValue.source
-		)
-	) {
-		return originValue.source as MutationSource;
-	}
-	return typeof originValue === 'object' && originValue !== null && undoRedoOrigins.has(originValue)
-		? 'undo-redo'
+	return typeof originValue === 'object' && originValue !== null
+		? origins.get(originValue)
 		: undefined;
 }
 

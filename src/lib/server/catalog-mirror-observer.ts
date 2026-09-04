@@ -105,7 +105,13 @@ export function attachCatalogMirrorObserver(workspaceId: string, doc: Y.Doc): vo
 	doc.on('afterTransaction', (transaction: Y.Transaction) => {
 		const source = mutationSource(transaction.origin);
 		if (!source) throw new UnknownMutationOriginError(transaction.origin);
-		if (source !== 'local-ui' && source !== 'remote-ui' && source !== 'test') return;
+		if (
+			source !== 'local-ui' &&
+			source !== 'remote-ui' &&
+			source !== 'undo-redo' &&
+			source !== 'test'
+		)
+			return;
 
 		const touched = new Map<string, { kind: EntryKind; id: string }>();
 		transaction.changed.forEach((_keys, type) => {
