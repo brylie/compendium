@@ -44,6 +44,7 @@ export function registerUndoRedoOrigin(originObject: object): void {
 	undoRedoOrigins.add(originObject);
 }
 
+/** Returns the recognized source for a Yjs transaction origin, if any. */
 export function mutationSource(originValue: unknown): MutationSource | undefined {
 	if (
 		typeof originValue === 'object' &&
@@ -61,6 +62,7 @@ export function mutationSource(originValue: unknown): MutationSource | undefined
 		: undefined;
 }
 
+/** Raised when an observer sees a mutation that bypasses the origin contract. */
 export class UnknownMutationOriginError extends Error {
 	constructor(originValue: unknown) {
 		super(`Yjs mutation used an unrecognized origin: ${String(originValue)}`);
