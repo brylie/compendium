@@ -1,0 +1,27 @@
+# This file is shared by Codex desktop local environments.
+version = 1
+
+name = "compendium"
+
+[setup]
+script = '''
+set -euo pipefail
+
+npm ci
+mise x prek@0.4.8 -- prek install
+'''
+
+[[actions]]
+name = "Pre-commit"
+icon = "check"
+command = "mise x prek@0.4.8 -- prek run --all-files"
+
+[[actions]]
+name = "Type check"
+icon = "check"
+command = "npm run check"
+
+[[actions]]
+name = "Coverage"
+icon = "test"
+command = "npm run test:coverage"
