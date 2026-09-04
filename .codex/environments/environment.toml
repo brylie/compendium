@@ -7,6 +7,10 @@ name = "compendium"
 script = '''
 set -euo pipefail
 
+# Codex creates each agent worktree at a new path. This repository is
+# explicitly trusted, so register only its checked-in mise configuration
+# before using mise to install the local quality gates.
+mise trust --yes mise.toml
 npm ci
 mise x prek@0.4.8 -- prek install --hook-type pre-commit --hook-type pre-push
 '''
