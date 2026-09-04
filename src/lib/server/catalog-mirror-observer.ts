@@ -5,8 +5,7 @@ import {
 } from '../data/records.js';
 import {
 	recordCatalogCollectionTitleChanged,
-	recordCatalogDocumentMoved,
-	recordCatalogDocumentTitleChanged
+	recordCatalogDocumentMetadataChanged
 } from './catalog.js';
 import { mutationSource, UnknownMutationOriginError } from '../mutation-origin.js';
 
@@ -66,8 +65,7 @@ function mirrorNow(workspaceId: string, doc: Y.Doc, kind: EntryKind, id: string)
 	if (kind === 'document') {
 		const meta = crdtGetDocument(doc, id);
 		if (!meta) return; // deleted since this was scheduled — nothing to mirror
-		recordCatalogDocumentTitleChanged(workspaceId, id, meta.title);
-		recordCatalogDocumentMoved(workspaceId, id, meta.parentDocumentId, meta.order);
+		recordCatalogDocumentMetadataChanged(workspaceId, id, meta);
 	} else {
 		const meta = crdtGetCollection(doc, id);
 		if (!meta) return;

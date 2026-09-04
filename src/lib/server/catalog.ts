@@ -303,6 +303,29 @@ export function recordCatalogDocumentMoved(
 }
 
 /**
+ * Projects a document's catalog-owned metadata in one SQLite transaction.
+ * Used for direct Yjs edits, where title and hierarchy can change together.
+ */
+export function recordCatalogDocumentMetadataChanged(
+	workspaceId: string,
+	id: string,
+	metadata: { title: string; parentDocumentId?: string; order: string }
+): void {
+	getDb().transaction((tx) => {
+		tx.update(catalogDocuments)
+			.set({
+				title: metadata.title,
+				parentDocumentId: metadata.parentDocumentId ?? null,
+				order: metadata.order,
+				updatedAt: Date.now()
+			})
+			.where(and(eq(catalogDocuments.workspaceId, workspaceId), eq(catalogDocuments.id, id)))
+			.run();
+		bumpRevisionAndAppendOutbox(tx, workspaceId, { documents: [id], op: 'update' });
+	});
+}
+
+/**
  * Deletes a Document and its descendants from the catalog, mirroring
  * data/records.ts's recursive deleteDocument. Walks the *catalog's own*
  * parent chain (via a recursive CTE — drizzle's typed query builder has no
