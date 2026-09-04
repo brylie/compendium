@@ -119,6 +119,15 @@ export function attachCatalogMirrorObserver(workspaceId: string, doc: Y.Doc): vo
 			touched.set(JSON.stringify([owner.kind, owner.id]), owner);
 		});
 
-		for (const { kind, id } of touched.values()) mirrorNow(workspaceId, doc, kind, id);
+		for (const { kind, id } of touched.values()) {
+			try {
+				mirrorNow(workspaceId, doc, kind, id);
+			} catch (error) {
+				// The Yjs mutation is authoritative and must still reach the
+				// context's update listener, which marks it dirty for the durable
+				// flush/load reconciliation path.
+				console.error('Catalog projection deferred until reconciliation', error);
+			}
+		}
 	});
 }
