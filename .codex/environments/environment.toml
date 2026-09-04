@@ -8,7 +8,7 @@ script = '''
 set -euo pipefail
 
 npm ci
-mise x prek@0.4.8 -- prek install
+mise x prek@0.4.8 -- prek install --hook-type pre-commit --hook-type pre-push
 '''
 
 [[actions]]
@@ -25,3 +25,8 @@ command = "npm run check"
 name = "Coverage"
 icon = "test"
 command = "npm run test:coverage"
+
+[[actions]]
+name = "End-to-end tests"
+icon = "test"
+command = "sh scripts/pre-push-check.sh"

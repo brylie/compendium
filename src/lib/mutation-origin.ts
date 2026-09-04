@@ -9,7 +9,21 @@ export interface MutationOrigin {
 	readonly detail?: string;
 }
 
-const origins = new WeakMap<object, MutationSource>();
+// The E2E browser harness loads the WebSocket server from source and the
+// SvelteKit request handler from `build/handler.js`. Those module graphs each
+// evaluate this module, but their Yjs transactions meet in the same Node
+// process. Keep the identity registry on globalThis so an origin registered
+// by one graph remains recognizable by observers in the other. A plain object
+// carrying a matching `source` property is still rejected: only objects added
+// to this shared WeakMap are accepted.
+const ORIGIN_REGISTRY = Symbol.for('compendium.mutation-origin-registry');
+
+type GlobalWithOriginRegistry = typeof globalThis & {
+	[ORIGIN_REGISTRY]?: WeakMap<object, MutationSource>;
+};
+
+const originRegistry = globalThis as GlobalWithOriginRegistry;
+const origins = (originRegistry[ORIGIN_REGISTRY] ??= new WeakMap<object, MutationSource>());
 
 function origin(source: MutationSource, detail?: string): MutationOrigin {
 	const value = Object.freeze({ source, detail });
