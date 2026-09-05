@@ -8,7 +8,7 @@ import {
 import { logAudit } from '$lib/server/audit';
 import { listCatalogCollections, listCatalogDocuments } from '$lib/server/catalog';
 import { tokenAllowsParent } from '$lib/server/token-store';
-import { richTextToMarkdown } from '$lib/mcp/markdown-transcode';
+import { richTextToMarkdown } from '$lib/data/markdown-transcode';
 import { fanOutCatalogedAndUncataloged } from '$lib/server/workspace-repository';
 import { actorForCaller, isAccessToken, type CallerIdentity } from './permissions';
 

@@ -6,7 +6,7 @@ import {
 	deleteCollection,
 	deleteDocument,
 	deleteRecord,
-	getDocument,
+	getDocument as servicesGetDocument,
 	getRecord,
 	holdRecords,
 	listCollections,
@@ -22,6 +22,20 @@ import {
 	HoldRequiredError,
 	InvalidLinkTargetError
 } from './index';
+import { projectDocument } from '$lib/mcp/document-projection';
+
+/**
+ * `services/documents.ts#getDocument` returns protocol-neutral data with no
+ * markdown rendering (#191) — that now happens in
+ * `$lib/mcp/document-projection.ts`, the same place the real `get_document`
+ * MCP tool renders it. This test file's assertions were all written against
+ * the old markdown-shaped result, so this composes the two back together
+ * once here rather than rewriting every call site below.
+ */
+function getDocument(...args: Parameters<typeof servicesGetDocument>) {
+	const result = servicesGetDocument(...args);
+	return result ? projectDocument(args[1], result) : null;
+}
 import { createToken, verifyToken } from '$lib/mcp/tokens';
 import { queryAuditLog } from '$lib/server/audit';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';

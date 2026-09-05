@@ -5,6 +5,7 @@ import {
 	getCollection as crdtGetCollection,
 	getDocument as crdtGetDocument,
 	listRecordsForParent as crdtListRecordsForParent,
+	resolvePrimaryField,
 	updateCollectionTitle as crdtUpdateCollectionTitle
 } from '$lib/data/records';
 import { logAudit } from '$lib/server/audit';
@@ -126,6 +127,22 @@ export function listCollections(caller: CallerIdentity, spaceId?: string): Colle
 		!isAccessToken(caller) || tokenAllowsParent(caller, id, collectionSpaceId);
 
 	return listWorkspaceCollections({ workspaceId, spaceId, defaultSpaceId, defaultDoc, allowed });
+}
+
+/**
+ * Resolves a Collection's schema + explicit primaryFieldKey down to the
+ * actual field key a caller should treat as primary — the same fallback
+ * `resolvePrimaryField` (`$lib/data/records`) applies everywhere else,
+ * exposed at the service layer so the MCP tool handlers don't need their own
+ * import of the data layer directly (#191: `service-layer.md` already says
+ * MCP tool handlers must not call `records.ts` directly; this closed the one
+ * remaining call site that did).
+ */
+export function resolvePrimaryFieldKey(
+	schema: PropertyDefinition[],
+	primaryFieldKey: string | undefined
+): string | undefined {
+	return resolvePrimaryField(schema, primaryFieldKey)?.key;
 }
 
 /** Returns a Collection's metadata and all its rows, after checking `caller` may access it. */
