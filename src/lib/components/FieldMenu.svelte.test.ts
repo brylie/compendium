@@ -653,6 +653,100 @@ describe('FieldMenu', () => {
 		});
 	});
 
+	describe('select field option lifecycle (issue #94): default option for newly created records (issue #100)', () => {
+		function renderSelectField(defaultOptionId?: string) {
+			const collection = createCollection(ydoc, {
+				title: 'T',
+				schema: [
+					{
+						key: 'status',
+						label: 'Status',
+						type: 'select',
+						options: [
+							{ id: 'todo', label: 'To do', color: 'oklch(60% 0.01 250)' },
+							{ id: 'done', label: 'Done', color: 'oklch(65% 0.14 145)' }
+						],
+						defaultOptionId
+					}
+				]
+			});
+			return { collection };
+		}
+
+		async function openOptionsEditor(user: ReturnType<typeof userEvent.setup>) {
+			await user.click(screen.getByRole('button', { name: 'Field options for Status' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Edit field' }));
+		}
+
+		it('sets an option as default', async () => {
+			const { collection } = renderSelectField();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				shardId: 'test-shard',
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			await user.click(screen.getByRole('button', { name: 'Set To do as default' }));
+
+			expect(getCollection(ydoc, collection.id)?.schema[0].defaultOptionId).toBe('todo');
+		});
+
+		it('unsets the current default option', async () => {
+			const { collection } = renderSelectField('todo');
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				shardId: 'test-shard',
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			await user.click(screen.getByRole('button', { name: 'Unset To do as default' }));
+
+			expect(getCollection(ydoc, collection.id)?.schema[0].defaultOptionId).toBeUndefined();
+		});
+
+		it('switching the default to a different option replaces the previous one', async () => {
+			const { collection } = renderSelectField('todo');
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				shardId: 'test-shard',
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			await user.click(screen.getByRole('button', { name: 'Set Done as default' }));
+
+			expect(getCollection(ydoc, collection.id)?.schema[0].defaultOptionId).toBe('done');
+		});
+
+		it('a new collection row picks up the configured default via createRecord', async () => {
+			const { collection } = renderSelectField();
+			const user = userEvent.setup();
+			render(FieldMenu, {
+				shardId: 'test-shard',
+				collectionId: collection.id,
+				schema: collection.schema,
+				property: collection.schema[0]
+			});
+
+			await openOptionsEditor(user);
+			await user.click(screen.getByRole('button', { name: 'Set Done as default' }));
+
+			const row = createRecord(ydoc, { parentId: collection.id }, human);
+			expect(getRecord(ydoc, row.id)?.properties?.status).toEqual({
+				type: 'select',
+				value: 'done'
+			});
+		});
+	});
+
 	// Regression coverage for two real bugs found in manual testing: the panel
 	// used to be `position: absolute` inside the field's own header cell,
 	// which (a) got clipped by Table's `overflow-x-auto` wrapper whenever the

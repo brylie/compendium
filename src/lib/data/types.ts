@@ -24,6 +24,7 @@ export interface PropertyDefinition {
 	label: string;
 	type: PropertyType;
 	options?: { id: string; label: string; color?: string }[]; // for 'select'
+	defaultOptionId?: string; // for 'select' — pre-filled on every newly created record (issue #100), unless the caller supplies its own value for this field
 	targetCollectionId?: string; // for 'relation' — which Collection its record-id values point into
 }
 

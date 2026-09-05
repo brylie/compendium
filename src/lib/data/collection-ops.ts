@@ -250,8 +250,10 @@ export function updateCollectionProperty(
 		// away from 'select' drops options entirely (not meaningful for any
 		// other type).
 		let nextOptions: PropertyDefinition['options'];
+		let nextDefaultOptionId: string | undefined;
 		if (nextType === 'select') {
 			nextOptions = current.type === 'select' ? current.options : [];
+			nextDefaultOptionId = current.type === 'select' ? current.defaultOptionId : undefined;
 		}
 		// Same rationale as options above: targetCollectionId only means
 		// anything for 'relation'. Checked on nextType first, not merely
@@ -276,6 +278,7 @@ export function updateCollectionProperty(
 			label: patch.label ?? current.label,
 			type: nextType,
 			options: nextOptions,
+			defaultOptionId: nextDefaultOptionId,
 			targetCollectionId: nextTargetCollectionId
 		};
 		const nextSchema = [...schema];
@@ -425,9 +428,11 @@ export function deleteCollectionProperty(
 
 // ---------------------------------------------------------------------------
 // Select field option lifecycle (issue #94) — add/rename/recolor/reorder/
-// delete one option within a `select` field's `options` array. Distinct from
-// updateCollectionProperty/deleteCollectionProperty above, which operate on
-// the field itself; these operate one level down, inside `options`.
+// delete one option within a `select` field's `options` array, plus (issue
+// #100) choosing which one of those options defaults onto every newly
+// created record. Distinct from updateCollectionProperty/
+// deleteCollectionProperty above, which operate on the field itself; these
+// operate one level down, inside `options`.
 // ---------------------------------------------------------------------------
 
 function getSelectPropertyForMutation(
@@ -612,7 +617,14 @@ export function deleteSelectOption(
 		if (nextOptions.length === options.length) return;
 		removed = true;
 		const nextSchema = [...schema];
-		nextSchema[index] = { ...property, options: nextOptions };
+		nextSchema[index] = {
+			...property,
+			options: nextOptions,
+			// A deleted default option can no longer pre-fill new records —
+			// same "clear the stale reference" rule primaryFieldKey already gets
+			// on field deletion (deleteCollectionProperty above).
+			defaultOptionId: property.defaultOptionId === optionId ? undefined : property.defaultOptionId
+		};
 		ymeta.set('schema', nextSchema);
 
 		for (const record of listRecordsForParent(doc, collectionId)) {
@@ -624,6 +636,34 @@ export function deleteSelectOption(
 	});
 	if (removed)
 		repairEmbeddedViewsAfterOptionRemoval(documentsDoc, collectionId, propertyKey, optionId);
+}
+
+/**
+ * Sets (or, with `optionId: null`, clears) which option a `select` field
+ * pre-fills onto every newly created record's value (issue #100) — honored
+ * uniformly by `createRecord` (`record-ops.ts`) across every creation path
+ * (Table's "+ Add row", Board's "+ Add card", Calendar's day-cell "+", and
+ * MCP's `create_record`), skipped only when the caller already supplies its
+ * own value for this field.
+ */
+export function setDefaultSelectOption(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string,
+	optionId: string | null
+): void {
+	const ymeta = collectionsMap(doc).get(collectionId);
+	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
+	doc.transact(() => {
+		const schema = ymeta.get('schema') ?? [];
+		const { index, property, options } = getSelectPropertyForMutation(schema, propertyKey);
+		if (optionId !== null && !options.some((o) => o.id === optionId)) {
+			throw new NotFoundError(`Option ${optionId} not found`);
+		}
+		const nextSchema = [...schema];
+		nextSchema[index] = { ...property, defaultOptionId: optionId ?? undefined };
+		ymeta.set('schema', nextSchema);
+	});
 }
 
 /** Deletes a Collection and all of its records. */

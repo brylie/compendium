@@ -8,6 +8,7 @@ import type {
 	ChildPagesDepth,
 	EmbeddedViewConfig,
 	ParentKind,
+	PropertyDefinition,
 	PropertyValue,
 	RichText,
 	ViewConfig,
@@ -151,7 +152,9 @@ export function createRecord(
 			applyOptionalBlockFields(yrecord, input);
 		} else {
 			yrecord.set('isCollectionRow', true);
-			for (const [key, value] of Object.entries(input.properties ?? {})) {
+			const schema = collectionsMap(doc).get(input.parentId)?.get('schema') ?? [];
+			const properties = applyDefaultSelectValues(schema, input.properties);
+			for (const [key, value] of Object.entries(properties ?? {})) {
 				setPropertyValue(yrecord, key, value);
 			}
 		}
@@ -161,6 +164,36 @@ export function createRecord(
 
 		return readRecord(yrecord);
 	});
+}
+
+// Fills in a `select` field's configured default (issue #100) for every
+// property the caller didn't already supply a value for — read from the
+// Collection's schema inside createRecord's own transaction, not a
+// caller-supplied snapshot, so it can never seed from a schema that's since
+// changed underneath a concurrent field edit. A caller's own value for that
+// key always wins (Board's "+ Add card"/Calendar's day-cell "+" pre-seed the
+// grouping/date field this same way — an explicit value must never be
+// overridden by a schema default), and a defaultOptionId that's gone stale
+// (its option was since deleted, which normally clears it via
+// deleteSelectOption, but this stays defensive against any schema written by
+// another path) is silently skipped rather than seeding a dangling option id.
+function applyDefaultSelectValues(
+	schema: PropertyDefinition[],
+	properties: Record<string, PropertyValue> | undefined
+): Record<string, PropertyValue> | undefined {
+	const defaults = schema.filter(
+		(p): p is PropertyDefinition & { defaultOptionId: string } =>
+			p.type === 'select' &&
+			p.defaultOptionId !== undefined &&
+			properties?.[p.key] === undefined &&
+			(p.options ?? []).some((o) => o.id === p.defaultOptionId)
+	);
+	if (defaults.length === 0) return properties;
+	const next = { ...properties };
+	for (const property of defaults) {
+		next[property.key] = { type: 'select', value: property.defaultOptionId };
+	}
+	return next;
 }
 
 function recordOrder(doc: Y.Doc, id: string): string | null {
