@@ -186,8 +186,20 @@ export default defineConfig(
 		// separate, larger cleanup) apply cleanly here with zero findings.
 		// Scoped rather than repo-wide so this file's contract stays enforced
 		// without forcing that unrelated cleanup as part of this change; add a
-		// file here if it's migrated onto the wrapper too.
-		files: ['src/lib/data/records.ts', 'src/lib/data/yjs-typed.ts'],
+		// file here if it's migrated onto the wrapper too. Covers every module
+		// records.ts (now a re-export facade, #191) was split into — they all
+		// follow the same TypedYMap pattern, not just the facade's old single
+		// file.
+		files: [
+			'src/lib/data/records.ts',
+			'src/lib/data/yjs-typed.ts',
+			'src/lib/data/yjs-shapes.ts',
+			'src/lib/data/view-config.ts',
+			'src/lib/data/document-ops.ts',
+			'src/lib/data/collection-ops.ts',
+			'src/lib/data/record-ops.ts',
+			'src/lib/data/migration-copy.ts'
+		],
 		rules: {
 			'@typescript-eslint/no-unsafe-assignment': 'error',
 			'@typescript-eslint/no-unsafe-member-access': 'error',
