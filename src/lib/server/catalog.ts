@@ -303,6 +303,61 @@ export function recordCatalogDocumentMoved(
 }
 
 /**
+ * Projects a document's catalog-owned metadata in one SQLite transaction.
+ * Used for direct Yjs edits, where title and hierarchy can change together.
+ */
+export function recordCatalogDocumentMetadataChanged(
+	workspaceId: string,
+	id: string,
+	metadata: { title: string; parentDocumentId?: string; order: string }
+): void {
+	getDb().transaction((tx) => {
+		tx.update(catalogDocuments)
+			.set({
+				title: metadata.title,
+				parentDocumentId: metadata.parentDocumentId ?? null,
+				order: metadata.order,
+				updatedAt: Date.now()
+			})
+			.where(and(eq(catalogDocuments.workspaceId, workspaceId), eq(catalogDocuments.id, id)))
+			.run();
+		bumpRevisionAndAppendOutbox(tx, workspaceId, { documents: [id], op: 'update' });
+	});
+}
+
+/**
+ * Repairs catalog metadata from the authoritative Yjs document. It performs
+ * only value-changing writes, making repeated calls safe after a failed
+ * immediate projection or process restart.
+ */
+export function reconcileCatalogMetadata(workspaceId: string, doc: Y.Doc): void {
+	const catalogDocumentsById = new Map(
+		listCatalogDocuments(workspaceId).map((meta) => [meta.id, meta])
+	);
+	for (const meta of crdtListDocuments(doc)) {
+		const catalog = catalogDocumentsById.get(meta.id);
+		if (
+			catalog &&
+			(catalog.title !== meta.title ||
+				catalog.parentDocumentId !== meta.parentDocumentId ||
+				catalog.order !== meta.order)
+		) {
+			recordCatalogDocumentMetadataChanged(workspaceId, meta.id, meta);
+		}
+	}
+
+	const catalogCollectionsById = new Map(
+		listCatalogCollections(workspaceId).map((meta) => [meta.id, meta])
+	);
+	for (const meta of crdtListCollections(doc)) {
+		const catalog = catalogCollectionsById.get(meta.id);
+		if (catalog && catalog.title !== meta.title) {
+			recordCatalogCollectionTitleChanged(workspaceId, meta.id, meta.title);
+		}
+	}
+}
+
+/**
  * Deletes a Document and its descendants from the catalog, mirroring
  * data/records.ts's recursive deleteDocument. Walks the *catalog's own*
  * parent chain (via a recursive CTE — drizzle's typed query builder has no

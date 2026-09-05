@@ -7,15 +7,28 @@ import {
 	writeRecord
 } from './index';
 import {
-	createCollection as crdtCreateCollection,
-	createDocument as crdtCreateDocument,
-	createRecord as crdtCreateRecord
+	createCollection as rawCrdtCreateCollection,
+	createDocument as rawCrdtCreateDocument,
+	createRecord as rawCrdtCreateRecord
 } from '$lib/data/records';
+import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { createToken } from '$lib/mcp/tokens';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import type { ActorId } from '$lib/data/types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
+
+function crdtCreateDocument(...args: Parameters<typeof rawCrdtCreateDocument>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateDocument(...args));
+}
+
+function crdtCreateCollection(...args: Parameters<typeof rawCrdtCreateCollection>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateCollection(...args));
+}
+
+function crdtCreateRecord(...args: Parameters<typeof rawCrdtCreateRecord>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateRecord(...args));
+}
 
 describe('searchWorkspace: snippet boundaries', () => {
 	it('omits the leading ellipsis when the match is at the very start of the text', () => {

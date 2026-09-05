@@ -21,6 +21,7 @@ import {
 	listDocuments as crdtListDocuments
 } from '../data/records.js';
 import type { CollectionMeta, DocumentMeta } from '../data/types.js';
+import { MIGRATION_ORIGIN, transactWithOrigin } from '../mutation-origin.js';
 
 // Moves every legacy Document/Collection — content still living in the
 // shared default shard because it predates the catalog/shard system (#113)
@@ -140,9 +141,13 @@ function migrateTarget(
 	});
 
 	if (target.kind === 'document') {
-		copyDocumentVerbatim(legacyDoc, shardDoc, target.legacyId);
+		transactWithOrigin(shardDoc, MIGRATION_ORIGIN, () =>
+			copyDocumentVerbatim(legacyDoc, shardDoc, target.legacyId)
+		);
 	} else {
-		copyCollectionVerbatim(legacyDoc, shardDoc, target.legacyId);
+		transactWithOrigin(shardDoc, MIGRATION_ORIGIN, () =>
+			copyCollectionVerbatim(legacyDoc, shardDoc, target.legacyId)
+		);
 	}
 
 	const snapshotStore = getSnapshotStore(workspaceId, shardId);

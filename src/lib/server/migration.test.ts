@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import {
-	createCollection as crdtCreateCollection,
-	createDocument as crdtCreateDocument,
-	createRecord as crdtCreateRecord,
+	createCollection as rawCrdtCreateCollection,
+	createDocument as rawCrdtCreateDocument,
+	createRecord as rawCrdtCreateRecord,
 	getCollection as crdtGetCollection,
 	getDocument as crdtGetDocument,
 	getRecord as crdtGetRecord
 } from '$lib/data/records';
+import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { CURRENT_USER } from './current-user';
 import { listDocuments } from '../services/documents';
 import { listCatalogDocuments } from './catalog';
@@ -18,6 +19,18 @@ import { migrateWorkspace } from './migration';
 
 const WS = 'migration-test-ws';
 const actor = CURRENT_USER;
+
+function crdtCreateDocument(...args: Parameters<typeof rawCrdtCreateDocument>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateDocument(...args));
+}
+
+function crdtCreateCollection(...args: Parameters<typeof rawCrdtCreateCollection>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateCollection(...args));
+}
+
+function crdtCreateRecord(...args: Parameters<typeof rawCrdtCreateRecord>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateRecord(...args));
+}
 
 describe('migration: lossless content migration (#114/#132, workspace-sharding.md §7)', () => {
 	it('migrates a Document hierarchy, a page-link reference, and a Collection with a relation, preserving every id/order/content field exactly', () => {

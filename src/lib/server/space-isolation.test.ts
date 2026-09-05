@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-	createCollection as crdtCreateCollection,
-	createDocument as crdtCreateDocument,
-	createRecord as crdtCreateRecord,
-	updateRecordContent
+	createCollection as rawCrdtCreateCollection,
+	createDocument as rawCrdtCreateDocument,
+	createRecord as rawCrdtCreateRecord,
+	updateRecordContent as rawUpdateRecordContent
 } from '$lib/data/records';
+import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { CURRENT_USER } from './current-user';
 import {
 	createDocument,
@@ -28,6 +29,22 @@ import { PermissionDeniedError } from '../services/permissions';
 import type { AccessToken } from '$lib/mcp/tokens';
 
 const actor = CURRENT_USER;
+
+function crdtCreateDocument(...args: Parameters<typeof rawCrdtCreateDocument>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateDocument(...args));
+}
+
+function crdtCreateCollection(...args: Parameters<typeof rawCrdtCreateCollection>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateCollection(...args));
+}
+
+function crdtCreateRecord(...args: Parameters<typeof rawCrdtCreateRecord>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateRecord(...args));
+}
+
+function updateRecordContent(...args: Parameters<typeof rawUpdateRecordContent>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawUpdateRecordContent(...args));
+}
 
 // Two-Space fixture (#114/#133, workspace-sharding.md §9): Space A content
 // goes through the real service layer (which always writes to

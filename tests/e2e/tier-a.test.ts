@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
 import {
 	createCollection,
-	createDocument,
+	createDocument as createDocumentRaw,
 	createRecord,
 	getRecord,
 	getRecordYText,
@@ -22,8 +22,19 @@ import { serviceModules, serviceSurfaces } from '$lib/services/manifest';
 import { flushPendingAuditEvents } from '$lib/server/audit-observer';
 import { deleteRecord as crdtDeleteRecord } from '$lib/data/records';
 import type { ActorId } from '$lib/data/types';
+import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
+
+// The server-side workspace contexts used by the cross-space tests have
+// projection observers attached. Keep direct fixture mutations explicit so
+// they exercise the same origin contract as every other test write.
+function createDocument(
+	doc: Parameters<typeof createDocumentRaw>[0],
+	input: Parameters<typeof createDocumentRaw>[1]
+) {
+	return transactWithOrigin(doc, TEST_ORIGIN, () => createDocumentRaw(doc, input));
+}
 
 // A generic assertion-sugar helper: T is used only once in the
 // signature (this rule's own "replace with the constraint" fix would
@@ -300,16 +311,16 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 			order: docB.order,
 			shardId: docBShard.shardId
 		});
-		const recordB = createRecord(
-			docBShard.doc,
-			{ parentId: docB.id, blockType: 'paragraph' },
-			human
+		const recordB = transactWithOrigin(docBShard.doc, TEST_ORIGIN, () =>
+			createRecord(docBShard.doc, { parentId: docB.id, blockType: 'paragraph' }, human)
 		);
-		updateRecordContent(
-			docBShard.doc,
-			recordB.id,
-			{ runs: [{ text: 'unicornsparkle', marks: {} }] },
-			human
+		transactWithOrigin(docBShard.doc, TEST_ORIGIN, () =>
+			updateRecordContent(
+				docBShard.doc,
+				recordB.id,
+				{ runs: [{ text: 'unicornsparkle', marks: {} }] },
+				human
+			)
 		);
 
 		// Grant this same token access to docB too — otherwise the pre-existing

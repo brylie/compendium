@@ -12,8 +12,9 @@ import {
 	resetCatalogMirrorObserverForTests
 } from './catalog-mirror-observer.js';
 import { aggregateHolds, initHoldEviction, resetHoldEvictionForTests } from './holds.js';
-import { ensureCatalogBootstrapped } from './catalog.js';
+import { ensureCatalogBootstrapped, reconcileCatalogMetadata } from './catalog.js';
 import { getInstanceWorkspaceId } from './instance.js';
+import { REPLAY_ORIGIN } from '../mutation-origin.js';
 
 // This is the one place a {workspaceId, shardId} selector resolves to a live
 // Y.Doc/Awareness/persistence/connection bundle. Every boundary that used to
@@ -98,13 +99,14 @@ function createContext(workspaceId: string, shardId: string): InternalContext {
 	const snapshotStore = getSnapshotStore(workspaceId, shardId);
 	const snapshot = snapshotStore.loadLatest();
 	if (snapshot) {
-		Y.applyUpdate(doc, snapshot);
+		Y.applyUpdate(doc, snapshot, REPLAY_ORIGIN);
 	}
 	// Backfills/bootstraps the catalog from this doc's current content the
 	// first time this {workspaceId, shardId} resolves — see catalog.ts. Runs
 	// after the snapshot load (so it sees real content) and before the audit
 	// observer attaches (so it never produces a spurious audit trail).
 	const { defaultSpaceId } = ensureCatalogBootstrapped(workspaceId, shardId, doc);
+	reconcileCatalogMetadata(workspaceId, doc);
 	attachDocAuditObserver(doc);
 	attachCatalogMirrorObserver(workspaceId, doc);
 
@@ -126,7 +128,15 @@ function createContext(workspaceId: string, shardId: string): InternalContext {
 		context.dirty = true;
 	});
 
-	context.saveTimer = setInterval(() => flushContext(context, snapshotStore), SAVE_INTERVAL_MS);
+	context.saveTimer = setInterval(() => {
+		try {
+			flushContext(context, snapshotStore);
+		} catch (error) {
+			// Keep dirty state intact: the next interval retries reconciliation
+			// from the already-persisted authoritative Yjs snapshot.
+			console.error('Failed to flush workspace context; will retry', error);
+		}
+	}, SAVE_INTERVAL_MS);
 	context.saveTimer.unref?.();
 
 	wireShutdownOnce();
@@ -159,6 +169,10 @@ function flushContext(
 ): void {
 	if (!context.dirty) return;
 	snapshotStore.save(Y.encodeStateAsUpdate(context.doc));
+	// A direct Yjs update can commit while SQLite is temporarily unavailable.
+	// Keep this context dirty until reconciliation succeeds so the next flush
+	// retries from the authoritative snapshot without duplicating catalog rows.
+	reconcileCatalogMetadata(context.workspaceId, context.doc);
 	context.dirty = false;
 }
 

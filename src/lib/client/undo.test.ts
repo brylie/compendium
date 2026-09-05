@@ -12,6 +12,7 @@ import {
 } from '$lib/data/records';
 import type { ActorId } from '$lib/data/types';
 import { createUndoManager, redo, subscribeUndoRedoState, undo } from './undo';
+import { LOCAL_UI_ORIGIN, remoteUiOrigin } from '../mutation-origin';
 
 // createUndoManager(doc) is exercised directly against real Y.Doc instances
 // here — these are the tests that prove the actual CRDT-level guarantees the
@@ -26,23 +27,30 @@ const REMOTE_ACTOR: ActorId = { kind: 'human', userId: 'collaborator' };
 
 /**
  * Applies `sourceDoc`'s current state to `doc` as a single incoming update,
- * with a non-null object identity as the transaction origin — standing in
- * for the WebsocketProvider instance that origin would be on a real client
- * (see undo.ts's module comment). This is the same mechanism a real second
- * browser tab's edit — or an MCP agent's edit relayed through the shared
- * Y.Doc — arrives by, so it's the right way to simulate "a collaborator's
- * intervening work" in a unit test without booting a real server/websocket.
+ * with the named remote-UI origin used by the WebSocket server. This is the
+ * same transaction class a collaborator's browser edit arrives as.
  */
 function deliverAsRemoteUpdate(doc: Y.Doc, sourceDoc: Y.Doc): void {
 	const update = Y.encodeStateAsUpdate(sourceDoc, Y.encodeStateVector(doc));
-	Y.applyUpdate(doc, update, {});
+	Y.applyUpdate(doc, update, remoteUiOrigin('undo-test-peer'));
+}
+
+/** Legacy data helpers intentionally omit an origin; make their test-side
+ * direct calls model the browser boundary, where every local action is named. */
+function makeTestDoc(): Y.Doc {
+	const doc = new Y.Doc();
+	const transact = doc.transact.bind(doc);
+	vi.spyOn(doc, 'transact').mockImplementation((fn, origin) =>
+		transact(fn, origin ?? LOCAL_UI_ORIGIN)
+	);
+	return doc;
 }
 
 describe('createUndoManager: scope', () => {
 	let doc: Y.Doc;
 
 	beforeEach(() => {
-		doc = new Y.Doc();
+		doc = makeTestDoc();
 	});
 
 	afterEach(() => {
@@ -177,7 +185,7 @@ describe('createUndoManager: per-actor isolation', () => {
 	let doc: Y.Doc;
 
 	beforeEach(() => {
-		doc = new Y.Doc();
+		doc = makeTestDoc();
 	});
 
 	afterEach(() => {
@@ -328,8 +336,8 @@ describe('undo/redo per-doc manager cache', () => {
 	let docB: Y.Doc;
 
 	beforeEach(() => {
-		docA = new Y.Doc();
-		docB = new Y.Doc();
+		docA = makeTestDoc();
+		docB = makeTestDoc();
 	});
 
 	afterEach(() => {
