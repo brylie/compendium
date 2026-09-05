@@ -1,10 +1,55 @@
 <script lang="ts">
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { resolve } from '$app/paths';
 	import { formatTimestamp } from '$lib/data/format';
+	import { buildDocumentTree } from '$lib/data/document-ops';
+	import type { DocumentMeta, DocumentTreeNode } from '$lib/data/types';
 	import Icon from '$lib/components/Icon.svelte';
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
+
+	// The flat "Allowed Documents" checkbox list gave no way to tell apart two
+	// same-titled Documents, or even two Documents from different Spaces
+	// entirely (issue #78) — this allowlist spans every Space in the workspace,
+	// so a plain title is genuinely ambiguous here in a way it isn't in the
+	// sidebar (which already shows a Document in its real tree position). Fixed
+	// by rendering the actual page tree, grouped by Space, instead of a bare
+	// list — the surrounding structure is the disambiguating context, not a
+	// synthesized label.
+	let documentsBySpaceId = $derived.by(() => {
+		const groups = new SvelteMap<string, DocumentMeta[]>();
+		for (const document of data.documents) {
+			const key = document.spaceId ?? '';
+			const list = groups.get(key);
+			if (list) list.push(document);
+			else groups.set(key, [document]);
+		}
+		return groups;
+	});
+	let uncatalogedDocuments = $derived(documentsBySpaceId.get('') ?? []);
+
+	let expandedDocIds = new SvelteSet<string>();
+	let checkedDocumentIds = new SvelteSet<string>();
+
+	function toggleExpanded(id: string): void {
+		if (expandedDocIds.has(id)) expandedDocIds.delete(id);
+		else expandedDocIds.add(id);
+	}
+
+	function checkDocument(id: string): void {
+		checkedDocumentIds.add(id);
+	}
+
+	function uncheckDocument(id: string): void {
+		checkedDocumentIds.delete(id);
+	}
+
+	/** Checks `node` and every one of its current descendants — an explicit, visible convenience for granting a whole subtree, not an implicit "parent covers children" permission rule (the token's actual grant stays the plain, exact-id list it always was). */
+	function selectSubtree(node: DocumentTreeNode): void {
+		checkedDocumentIds.add(node.id);
+		for (const child of node.children) selectSubtree(child);
+	}
 </script>
 
 <svelte:head>
@@ -151,22 +196,87 @@
 
 				<fieldset class="rounded-md border border-border bg-bg/50 p-3">
 					<legend class="px-1 text-xs font-semibold text-muted uppercase">Allowed Documents</legend>
-					<div class="mt-2 max-h-40 space-y-1.5 overflow-y-auto">
-						{#each data.documents as document (document.id)}
-							<label
-								class="flex cursor-pointer items-center gap-2 text-sm text-fg hover:text-accent"
+					<div class="mt-2 max-h-56 space-y-0.5 overflow-y-auto">
+						{#snippet renderDocumentNode(node: DocumentTreeNode)}
+							{@const hasChildren = node.children.length > 0}
+							{@const isExpanded = expandedDocIds.has(node.id)}
+							<div
+								class="group/doc flex items-center gap-1"
+								style="padding-left: {node.level * 14}px;"
 							>
-								<input
-									type="checkbox"
-									name="documentIds"
-									value={document.id}
-									class="rounded border-border text-accent focus:ring-accent"
-								/>
-								<span class="truncate">{document.title || 'Untitled'}</span>
-							</label>
-						{:else}
-							<p class="text-xs text-muted italic">No documents available.</p>
+								{#if hasChildren}
+									<button
+										type="button"
+										onclick={() => toggleExpanded(node.id)}
+										class="p-0.5 text-muted hover:text-fg"
+										aria-label={isExpanded ? 'Collapse sub-pages' : 'Expand sub-pages'}
+									>
+										<Icon name={isExpanded ? 'chevron-down' : 'chevron-right'} size={12} />
+									</button>
+								{:else}
+									<span class="w-[18px]"></span>
+								{/if}
+								<label
+									class="flex flex-1 cursor-pointer items-center gap-2 truncate py-0.5 text-sm text-fg hover:text-accent"
+								>
+									<input
+										type="checkbox"
+										name="documentIds"
+										value={node.id}
+										checked={checkedDocumentIds.has(node.id)}
+										onchange={(e) =>
+											e.currentTarget.checked ? checkDocument(node.id) : uncheckDocument(node.id)}
+										class="rounded border-border text-accent focus:ring-accent"
+									/>
+									<span class="truncate">{node.title || 'Untitled'}</span>
+								</label>
+								{#if hasChildren}
+									<button
+										type="button"
+										onclick={() => selectSubtree(node)}
+										class="p-0.5 text-muted opacity-0 group-hover/doc:opacity-100 hover:text-accent"
+										title="Select this page and its sub-pages"
+										aria-label="Select this page and its sub-pages"
+									>
+										<Icon name="child-pages" size={12} />
+									</button>
+								{/if}
+							</div>
+							{#if hasChildren && isExpanded}
+								{#each node.children as child (child.id)}
+									{@render renderDocumentNode(child)}
+								{/each}
+							{/if}
+						{/snippet}
+
+						{#each data.spaces as space (space.id)}
+							{@const spaceDocs = documentsBySpaceId.get(space.id) ?? []}
+							{#if spaceDocs.length > 0}
+								<div
+									class="mt-2 px-0.5 text-[10px] font-semibold tracking-wide text-muted uppercase first:mt-0"
+								>
+									{space.name}
+								</div>
+								{#each buildDocumentTree(spaceDocs) as root (root.id)}
+									{@render renderDocumentNode(root)}
+								{/each}
+							{/if}
 						{/each}
+
+						{#if uncatalogedDocuments.length > 0}
+							<div
+								class="mt-2 px-0.5 text-[10px] font-semibold tracking-wide text-muted uppercase first:mt-0"
+							>
+								Uncataloged
+							</div>
+							{#each buildDocumentTree(uncatalogedDocuments) as root (root.id)}
+								{@render renderDocumentNode(root)}
+							{/each}
+						{/if}
+
+						{#if data.documents.length === 0}
+							<p class="text-xs text-muted italic">No documents available.</p>
+						{/if}
 					</div>
 				</fieldset>
 
@@ -174,7 +284,7 @@
 					<legend class="px-1 text-xs font-semibold text-muted uppercase"
 						>Allowed Collections</legend
 					>
-					<div class="mt-2 max-h-40 space-y-1.5 overflow-y-auto">
+					<div class="mt-2 max-h-56 space-y-1.5 overflow-y-auto">
 						{#each data.collections as collection (collection.id)}
 							<label
 								class="flex cursor-pointer items-center gap-2 text-sm text-fg hover:text-accent"

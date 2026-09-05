@@ -3,6 +3,7 @@ import { resolve } from '$app/paths';
 import {
 	createCollection,
 	createDocument,
+	DuplicateCollectionTitleError,
 	listCollections,
 	listDocuments,
 	SpaceMismatchError
@@ -56,11 +57,19 @@ export const actions: Actions = {
 		const title = formString(data.get('title')).trim();
 		if (!title) return fail(400, { error: 'Title is required' });
 
-		const collection = createCollection(locals.requestContext.caller, {
-			title,
-			schema: [],
-			spaceId: params.spaceId
-		});
+		let collection;
+		try {
+			collection = createCollection(locals.requestContext.caller, {
+				title,
+				schema: [],
+				spaceId: params.spaceId
+			});
+		} catch (err) {
+			if (err instanceof DuplicateCollectionTitleError) {
+				return fail(400, { error: err.message });
+			}
+			throw err;
+		}
 		redirect(
 			303,
 			resolve('/space/[spaceId]/table/[id]', { spaceId: params.spaceId, id: collection.id })

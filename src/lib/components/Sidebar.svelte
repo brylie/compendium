@@ -225,7 +225,11 @@
 					resolve('/space/[spaceId]/table/[id]', { spaceId: activeSpaceId, id: newCol.id })
 				);
 			} else {
-				errorMessage = 'Failed to create collection.';
+				// A validation failure (e.g. issue #78's per-Space Collection title
+				// uniqueness check) sends a specific `message` — surface it instead
+				// of a generic failure notice when it's there.
+				const body = await res.json().catch(() => null);
+				errorMessage = body?.message ?? 'Failed to create collection.';
 			}
 		} catch {
 			errorMessage = 'Failed to create collection. Check your connection and try again.';

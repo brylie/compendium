@@ -112,4 +112,36 @@ describe('home +page', () => {
 		expect(forms[0]).toHaveAttribute('action', '?/createDocument');
 		expect(forms[1]).toHaveAttribute('action', '?/createCollection');
 	});
+
+	it('shows a form error banner (e.g. a duplicate-title rejection, issue #78) when the last action failed', () => {
+		render(Page, {
+			params: { spaceId: 'space-1' },
+			form: { error: 'A Collection titled "Sprint Tasks" already exists in this Space' },
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: []
+			}
+		});
+		expect(
+			screen.getByText('A Collection titled "Sprint Tasks" already exists in this Space')
+		).toBeInTheDocument();
+	});
+
+	it('shows no error banner when there is no form result', () => {
+		render(Page, {
+			params: { spaceId: 'space-1' },
+			form: null,
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: []
+			}
+		});
+		expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+	});
 });
