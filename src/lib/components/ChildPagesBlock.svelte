@@ -2,7 +2,8 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { CURRENT_USER } from '$lib/client/actor';
-	import { resolveChildPages, setRecordChildPagesConfig } from '$lib/data/records';
+	import { resolveChildPages } from '$lib/data/document-ops';
+	import { setRecordChildPagesConfig } from '$lib/data/record-ops';
 	import type {
 		ChildPageNode,
 		ChildPagesDepth,

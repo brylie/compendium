@@ -1,7 +1,8 @@
 import { remark } from 'remark';
 import remarkGfm from 'remark-gfm';
 import type * as Y from 'yjs';
-import { listCollections, listDocuments } from '$lib/data/records';
+import { listDocuments } from '$lib/data/document-ops';
+import { listCollections } from '$lib/data/collection-ops';
 import { RECORD_LINK_SCHEME, resolveInternalLinkTarget } from '$lib/data/links';
 import { resolveParentWorkspaceContext } from '$lib/services/permissions';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';

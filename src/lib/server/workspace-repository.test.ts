@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-	createCollection as rawCrdtCreateCollection,
-	createDocument as rawCrdtCreateDocument
-} from '$lib/data/records';
+import { createDocument as rawCrdtCreateDocument } from '$lib/data/document-ops';
+import { createCollection as rawCrdtCreateCollection } from '$lib/data/collection-ops';
 import { createDocument, createCollection } from '$lib/services';
 import type { ActorId } from '$lib/data/types';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';

@@ -1,6 +1,6 @@
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { clientIdForToken, releaseAgentHold, requestAgentHold } from '$lib/server/holds';
-import { getRecord } from '$lib/data/records';
+import { getRecord } from '$lib/data/record-ops';
 import { logAudit } from '$lib/server/audit';
 import { tokenAllowsParent } from '$lib/server/token-store';
 import { resolveShardForParent } from '$lib/server/catalog';

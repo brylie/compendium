@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { load } from './+page.server';
-import { createDocument as rawCreateDocument } from '$lib/data/records';
+import { createDocument as rawCreateDocument } from '$lib/data/document-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { createDocument as createDocumentService } from '$lib/services';
 import { CURRENT_USER } from '$lib/server/current-user';

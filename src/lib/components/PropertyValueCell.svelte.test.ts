@@ -3,7 +3,8 @@ import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import PropertyValueCell from './PropertyValueCell.svelte';
-import { createCollection, createRecord } from '$lib/data/records';
+import { createCollection } from '$lib/data/collection-ops';
+import { createRecord } from '$lib/data/record-ops';
 import type { ActorId, PropertyDefinition } from '$lib/data/types';
 
 // RelationPropertyCell (rendered for property.type === 'relation') resolves

@@ -8,7 +8,7 @@
 
 ## 1. Problem
 
-`src/lib/data/records.ts` is, by design, the shared low-level data-access layer both the SvelteKit UI and the MCP server call into (`architecture.md` §2). That part of the architecture is correct and should stay. What's missing is a layer _above_ it: today, every call site that performs a write is individually responsible for remembering to also (a) check permissions, (b) log the action to the audit trail, and (c) do whatever else that specific write implies (e.g. a token that creates a document needs its own access grant updated). There is no enforcement that a given use case always does all of its required side effects — it's up to whoever writes that call site to remember, correctly, every time.
+`src/lib/data/document-ops.ts`, `collection-ops.ts`, and `record-ops.ts` are, by design, the shared low-level data-access layer both the SvelteKit UI and the MCP server call into (`architecture.md` §2). That part of the architecture is correct and should stay. What's missing is a layer _above_ it: today, every call site that performs a write is individually responsible for remembering to also (a) check permissions, (b) log the action to the audit trail, and (c) do whatever else that specific write implies (e.g. a token that creates a document needs its own access grant updated). There is no enforcement that a given use case always does all of its required side effects — it's up to whoever writes that call site to remember, correctly, every time.
 
 Concretely, as of the M2 (Sidebar + hierarchy) milestone, "create a document" is implemented three separate times, with three different completeness levels:
 
@@ -23,21 +23,19 @@ Three of four call sites silently diverge from what "create a document" is suppo
 
 ## 2. Decision
 
-Introduce a **service layer** between `records.ts` (pure CRDT primitives, no policy) and the two thin adapters (SvelteKit routes/actions, MCP tool handlers). Each use case — "create a document," "move a document," "write a record," "hold records" — gets exactly one implementation, in the service layer, that owns its full contract: permission check, mutation, audit log, and any other required side effect, all called from one place, in a fixed order.
+Introduce a **service layer** between the low-level data-operation modules (pure CRDT primitives, no policy) and the two thin adapters (SvelteKit routes/actions, MCP tool handlers). Each use case — "create a document," "move a document," "write a record," "hold records" — gets exactly one implementation, in the service layer, that owns its full contract: permission check, mutation, audit log, and any other required side effect, all called from one place, in a fixed order.
 
 **Not a literal atomic transaction.** The Y.Doc mutation and the SQLite writes (access grant, audit log) are two different storage engines with no shared transaction boundary — a service function that mutates the CRDT successfully and then throws on the SQLite step (e.g. `grantDocumentAccess`) leaves the document created but its grant/audit entry missing, with no automatic rollback or retry. "One transaction" in the sense meant here is "one function is the single owner of the full contract, called synchronously end-to-end" — not a cross-engine ACID guarantee. If that gap matters in practice (e.g. `createDocument` partially failing leaves an inaccessible orphan document), it needs an explicit compensation step or a change to the persistence boundary (see [`persistence.md`](./persistence.md)); Phase 0/1 accepts the gap as-is, consistent with single-tenant, local-trust scope.
 
 ```
-src/lib/data/records.ts        — a re-export facade (#191) over cohesive per-aggregate pure
-                                  Yjs/CRDT modules (document-ops.ts, collection-ops.ts,
-                                  record-ops.ts, migration-copy.ts, plus the internal-only
-                                  yjs-shapes.ts/view-config.ts/errors.ts foundations). No
-                                  permission checks, no audit calls, no actor-awareness beyond
-                                  stamping createdBy/lastEditedBy — unchanged in spirit from
-                                  the original single-file design; every existing importer
-                                  (57 files, including client `.svelte` components reading
-                                  Yjs directly per `architecture.md` §2) keeps importing
-                                  `$lib/data/records` under the same names.
+src/lib/data/document-ops.ts   — Document hierarchy and tree primitives
+src/lib/data/collection-ops.ts — Collection schema and select-option primitives
+src/lib/data/record-ops.ts     — block and row CRUD primitives
+src/lib/data/migration-copy.ts — cross-document migration-copy primitives
+                                  (plus internal-only yjs-shapes.ts, view-config.ts, and
+                                  errors.ts foundations). These modules have no policy,
+                                  database access, HTTP, auth, or audit dependencies; each
+                                  caller imports its primitive from the owning module.
         ↓
 src/lib/server/workspace-repository.ts — the one owner of the "catalog-first, then
                                   uncataloged-default-fallback" fan-out (#191) that Document
@@ -49,7 +47,7 @@ src/lib/services/*.ts          — one module per aggregate (documents, records,
                                   token and validated input, and is the ONLY place that:
                                     1. checks permission (reuses tokenAllowsParent /
                                        requireAccessibleParent style helpers, moved here)
-                                    2. calls into records.ts to mutate the Y.Doc
+                                    2. calls into the appropriate data-operation module to mutate the Y.Doc
                                     3. calls logAudit
                                     4. performs any other required side effect
                                        (e.g. persisting a token's new document grant)
@@ -68,7 +66,7 @@ src/lib/mcp/server.ts          src/routes/**/+page.server.ts, +server.ts
 
 Markdown/MCP response rendering lives in the MCP/presentation adapter, not the service layer, for the same reason: `src/lib/mcp/document-projection.ts` turns `getDocument`'s protocol-neutral `DocumentRecordData` into the markdown-shaped `DocumentRecordView` `get_document` actually returns — the service layer produces data, the adapter shapes it for its protocol. This is also why `src/lib/data/markdown-transcode.ts` (the `Y.Text`⇄Markdown codec) lives under `data/`, not `mcp/`, despite MCP being its main caller today: it's a plain codec with no MCP-specific dependency, reusable from a UI paste-handler exactly as easily as from the MCP layer.
 
-**Rule going forward: MCP tool handlers and SvelteKit route/action handlers must not call `records.ts` or `logAudit` directly.** If a handler needs to do either, that's a sign the operation belongs in the service layer, not inline in the handler. The reverse direction is enforced by lint (#191): `eslint.config.js` restricts `src/lib/data/**`, `src/lib/server/**`, and `src/lib/services/**` from importing anything under `$lib/mcp/*`, so a data/repository/service module can't grow a dependency on the MCP layer the way `services/documents.ts`/`services/records.ts` once did on `markdown-transcode.ts` before it was relocated out of `mcp/`.
+**Rule going forward: MCP tool handlers and SvelteKit route/action handlers must not call the data-operation modules or `logAudit` directly.** If a handler needs to do either, that's a sign the operation belongs in the service layer, not inline in the handler. The reverse direction is enforced by lint (#191): `eslint.config.js` restricts `src/lib/data/**`, `src/lib/server/**`, and `src/lib/services/**` from importing anything under `$lib/mcp/*`, so a data/repository/service module can't grow a dependency on the MCP layer the way `services/documents.ts`/`services/records.ts` once did on `markdown-transcode.ts` before it was relocated out of `mcp/`.
 
 `Sidebar.svelte`'s client-side CRDT calls (`createDocument(ydoc, ...)`, `deleteDocument(ydoc, ...)`, etc., used for the _live-reactive_ read path and legitimate direct-to-Yjs UI writes) are a separate, already-correct pattern per `architecture.md` §2 ("Shared `lib/yjs-client.ts`... UI and MCP code share one data-access layer") — those stay. What changed is specifically the _fallback_ path that used to bypass the network API (and therefore the audit log) on a fetch failure: that fallback has been removed (see §4) — a failed `/api/documents` or `/api/collections` request now surfaces as an error to the user instead of silently falling through to an unaudited direct `Y.Doc` write.
 

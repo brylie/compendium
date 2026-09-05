@@ -3,12 +3,12 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpServer } from './server';
 import { createToken } from './tokens';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import { createDocument as rawCreateDocument } from '$lib/data/document-ops';
 import {
 	createCollection as rawCreateCollection,
-	createDocument as rawCreateDocument,
-	createRecord as rawCreateRecord,
 	setPrimaryField as rawSetPrimaryField
-} from '$lib/data/records';
+} from '$lib/data/collection-ops';
+import { createRecord as rawCreateRecord } from '$lib/data/record-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 
 function createDocument(...args: Parameters<typeof rawCreateDocument>) {

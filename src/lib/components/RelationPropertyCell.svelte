@@ -3,7 +3,7 @@
 	import type * as Y from 'yjs';
 	import { resolveCollectionDoc } from '$lib/client/yjs-client';
 	import { useCollectionView } from '$lib/client/collection-view.svelte';
-	import { resolvePrimaryField } from '$lib/data/records';
+	import { resolvePrimaryField } from '$lib/data/collection-ops';
 	import { primaryFieldDisplayValue } from '$lib/data/views';
 	import type { PropertyDefinition, PropertyValue } from '$lib/data/types';
 	import Icon from './Icon.svelte';

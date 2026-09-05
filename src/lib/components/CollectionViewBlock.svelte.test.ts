@@ -2,15 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import {
-	createCollection,
-	createDocument,
-	createRecord,
-	deleteCollection,
-	getRecord,
-	listCollections,
-	setRecordViewConfig
-} from '$lib/data/records';
+import { createDocument } from '$lib/data/document-ops';
+import { createCollection, deleteCollection, listCollections } from '$lib/data/collection-ops';
+import { createRecord, getRecord, setRecordViewConfig } from '$lib/data/record-ops';
 import CollectionViewBlock from './CollectionViewBlock.svelte';
 
 vi.mock('$app/state', () => ({

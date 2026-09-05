@@ -2,13 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import {
-	createCollection,
-	createRecord,
-	deleteCollection,
-	getCollection,
-	getRecord
-} from '$lib/data/records';
+import { createCollection, deleteCollection, getCollection } from '$lib/data/collection-ops';
+import { createRecord, getRecord } from '$lib/data/record-ops';
 import FieldMenu from './FieldMenu.svelte';
 
 let ydoc: Y.Doc;

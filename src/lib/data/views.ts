@@ -19,7 +19,8 @@
 // here mutates or persists anything.
 
 import type * as Y from 'yjs';
-import { getCollection, listRecordsForParent } from './records';
+import { getCollection } from './collection-ops';
+import { listRecordsForParent } from './record-ops';
 import type {
 	CollectionMeta,
 	FieldSummaryType,

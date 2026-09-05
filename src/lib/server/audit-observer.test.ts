@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
+import { createDocument as crdtCreateDocument } from '$lib/data/document-ops';
 import {
 	createRecord as rawCreateRecord,
-	createDocument as crdtCreateDocument,
 	reorderRecord as crdtReorderRecord
-} from '$lib/data/records';
+} from '$lib/data/record-ops';
 import { queryAuditLog } from './audit';
 import {
 	attachDocAuditObserver,

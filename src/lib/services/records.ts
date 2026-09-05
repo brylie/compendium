@@ -3,16 +3,16 @@ import { SERVICE_ORIGIN, transactWithOrigin } from '../mutation-origin.js';
 import type * as Y from 'yjs';
 import type { Awareness } from 'y-protocols/awareness';
 import { clientIdForToken, isHeldByClient, releaseAgentHold } from '$lib/server/holds';
+import { getDocument as crdtGetDocument } from '$lib/data/document-ops';
 import {
 	createRecord as crdtCreateRecord,
 	deleteRecord as crdtDeleteRecord,
-	getDocument as crdtGetDocument,
 	getRecordYText,
 	setRecordReferencedId as crdtSetRecordReferencedId,
 	setRecordViewConfig as crdtSetRecordViewConfig,
 	updateRecordContent,
 	updateRecordProperties
-} from '$lib/data/records';
+} from '$lib/data/record-ops';
 import { resolveInternalLinkTarget } from '$lib/data/links';
 import { logAudit } from '$lib/server/audit';
 import { reserveRecordLocator, releaseRecordLocator } from '$lib/server/catalog';

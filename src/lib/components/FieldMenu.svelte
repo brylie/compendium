@@ -14,9 +14,9 @@
 		setPrimaryField,
 		updateCollectionProperty,
 		updateCollectionSchema,
-		updateSelectOption,
-		ValidationError
-	} from '$lib/data/records';
+		updateSelectOption
+	} from '$lib/data/collection-ops';
+	import { ValidationError } from '$lib/data/errors';
 	import { SELECT_OPTION_COLORS } from '$lib/data/select-colors';
 	import type { CollectionMeta, PropertyDefinition, PropertyType } from '$lib/data/types';
 	import Icon from './Icon.svelte';

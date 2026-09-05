@@ -4,7 +4,7 @@
 	import { getShardDoc } from '$lib/client/yjs-client';
 	import { useCollectionView } from '$lib/client/collection-view.svelte';
 	import { appendCollectionField } from '$lib/client/collection-editor';
-	import { resolvePrimaryField, updateCollectionSchema } from '$lib/data/records';
+	import { resolvePrimaryField, updateCollectionSchema } from '$lib/data/collection-ops';
 	import type { CollectionMeta, PropertyDefinition, PropertyType } from '$lib/data/types';
 	import Icon from './Icon.svelte';
 	import FieldMenu from './FieldMenu.svelte';

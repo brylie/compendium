@@ -6,10 +6,10 @@
 	import { getShardAwareness, getShardDoc } from '$lib/client/yjs-client';
 	import { CURRENT_USER } from '$lib/client/actor';
 	import { LOCAL_UI_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
+	import { getDocument, updateDocumentTitle } from '$lib/data/document-ops';
 	import {
 		createRecord,
 		deleteRecord,
-		getDocument,
 		getRecord,
 		getRecordYText,
 		listRecordsForParent,
@@ -18,9 +18,8 @@
 		setRecordChecked,
 		setRecordCollapsed,
 		setRecordReferencedId,
-		touchRecordEditor,
-		updateDocumentTitle
-	} from '$lib/data/records';
+		touchRecordEditor
+	} from '$lib/data/record-ops';
 	import { RECORD_LINK_SCHEME, type InternalLinkTarget } from '$lib/data/links';
 	import {
 		appendRichTextToYText,

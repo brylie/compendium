@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/svelte';
 import * as Y from 'yjs';
-import { createDocument, deleteDocument, updateDocumentTitle } from '$lib/data/records';
+import { createDocument, deleteDocument, updateDocumentTitle } from '$lib/data/document-ops';
 import BlockEditor from './BlockEditor.svelte';
 
 vi.mock('$app/state', () => ({

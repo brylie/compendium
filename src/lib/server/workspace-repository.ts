@@ -1,11 +1,11 @@
 import type * as Y from 'yjs';
 import { resolveWorkspaceContext } from './workspace-store';
 import { resolveShardForParent, listCatalogCollections, listCatalogDocuments } from './catalog';
+import { listDocuments as crdtListDocuments } from '$lib/data/document-ops';
 import {
 	getCollection as crdtGetCollection,
-	listCollections as crdtListCollections,
-	listDocuments as crdtListDocuments
-} from '$lib/data/records';
+	listCollections as crdtListCollections
+} from '$lib/data/collection-ops';
 import type { CollectionMeta, DocumentMeta } from '$lib/data/types';
 
 /** One fanned-out catalog/uncataloged item, paired with the `Y.Doc` it actually lives in. */

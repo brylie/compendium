@@ -14,12 +14,9 @@ import {
 	migrationTargets,
 	recordLocator
 } from './db/schema.js';
-import {
-	copyCollectionVerbatim,
-	copyDocumentVerbatim,
-	listCollections as crdtListCollections,
-	listDocuments as crdtListDocuments
-} from '../data/records.js';
+import { listDocuments as crdtListDocuments } from '../data/document-ops.js';
+import { listCollections as crdtListCollections } from '../data/collection-ops.js';
+import { copyCollectionVerbatim, copyDocumentVerbatim } from '../data/migration-copy.js';
 import type { CollectionMeta, DocumentMeta } from '../data/types.js';
 import { MIGRATION_ORIGIN, transactWithOrigin } from '../mutation-origin.js';
 

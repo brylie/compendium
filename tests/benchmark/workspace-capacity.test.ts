@@ -2,7 +2,7 @@ import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { createTestHarness, type TestHarness } from '../e2e/harness';
-import { getRecordYText } from '$lib/data/records';
+import { getRecordYText } from '$lib/data/record-ops';
 import { plainText, yTextToRichText } from '$lib/data/richtext';
 import { closeDb, getDb, getSnapshotStore } from '$lib/server/store';
 import {

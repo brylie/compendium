@@ -1,11 +1,7 @@
 import type * as Y from 'yjs';
-import {
-	getCollection,
-	getDocument,
-	getRecord,
-	listDocuments,
-	listRecordsForParent
-} from './records';
+import { getDocument, listDocuments } from './document-ops';
+import { getCollection } from './collection-ops';
+import { getRecord, listRecordsForParent } from './record-ops';
 import { plainText } from './richtext';
 
 // The one canonical internal-link representation, shared by `page_link`

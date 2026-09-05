@@ -1,10 +1,8 @@
 import type * as Y from 'yjs';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
-import {
-	listCollections as crdtListCollections,
-	listDocuments as crdtListDocuments,
-	listRecordsForParent
-} from '$lib/data/records';
+import { listDocuments as crdtListDocuments } from '$lib/data/document-ops';
+import { listCollections as crdtListCollections } from '$lib/data/collection-ops';
+import { listRecordsForParent } from '$lib/data/record-ops';
 import { logAudit } from '$lib/server/audit';
 import { listCatalogCollections, listCatalogDocuments } from '$lib/server/catalog';
 import { tokenAllowsParent } from '$lib/server/token-store';

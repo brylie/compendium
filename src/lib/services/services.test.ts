@@ -40,14 +40,18 @@ import { createToken, verifyToken } from '$lib/mcp/tokens';
 import { queryAuditLog } from '$lib/server/audit';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import {
-	createRecord as rawCrdtCreateRecord,
 	createDocument as rawCrdtCreateDocument,
+	getDocument as crdtGetDocument
+} from '$lib/data/document-ops';
+import {
 	createCollection as rawCrdtCreateCollection,
-	getDocument as crdtGetDocument,
-	getCollection as crdtGetCollection,
+	getCollection as crdtGetCollection
+} from '$lib/data/collection-ops';
+import {
+	createRecord as rawCrdtCreateRecord,
 	getRecord as crdtGetRecord,
 	getRecordYText as crdtGetRecordYText
-} from '$lib/data/records';
+} from '$lib/data/record-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import {
 	listCatalogCollections,

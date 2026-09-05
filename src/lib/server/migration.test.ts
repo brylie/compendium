@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import {
-	createCollection as rawCrdtCreateCollection,
 	createDocument as rawCrdtCreateDocument,
+	getDocument as crdtGetDocument
+} from '$lib/data/document-ops';
+import {
+	createCollection as rawCrdtCreateCollection,
+	getCollection as crdtGetCollection
+} from '$lib/data/collection-ops';
+import {
 	createRecord as rawCrdtCreateRecord,
-	getCollection as crdtGetCollection,
-	getDocument as crdtGetDocument,
 	getRecord as crdtGetRecord
-} from '$lib/data/records';
+} from '$lib/data/record-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { CURRENT_USER } from './current-user';
 import { listDocuments } from '../services/documents';
