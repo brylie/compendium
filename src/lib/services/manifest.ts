@@ -85,7 +85,7 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 		ui: true,
 		mcpToolName: 'write_record',
 		mcpDescription:
-			"Write a record. `markdown` overwrites block content (requires an active hold); `properties` merges into a Collection row; `referencedRecordId` retargets an existing page_link block to a new, accessible Document, or an existing collection_view block to a new, accessible Collection (no hold needed, idempotent); `viewConfig` replaces an existing collection_view block's entire view configuration wholesale (no hold needed) — a member left out of the new value is cleared, not left as-is."
+			"Write a record. `markdown` overwrites block content (requires an active hold); `properties` merges into a Collection row; `referencedRecordId` retargets an existing page_link block to a new, accessible Document, or an existing collection_view block to a new, accessible Collection (no hold needed, idempotent); `viewConfig` replaces an existing collection_view block's entire view configuration wholesale (no hold needed) — a member left out of the new value is cleared, not left as-is; `viewConfigPatch` instead merges only the named members into an already-configured collection_view block's view configuration, leaving every other member exactly as-is (no hold needed) — send a member as `null` to explicitly clear it, or omit it to leave it untouched; provide either `viewConfig` or `viewConfigPatch`, never both."
 	},
 	'records.deleteRecord': {
 		mcp: true,

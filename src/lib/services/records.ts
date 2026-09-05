@@ -8,6 +8,7 @@ import {
 	createRecord as crdtCreateRecord,
 	deleteRecord as crdtDeleteRecord,
 	getRecordYText,
+	patchRecordViewConfig as crdtPatchRecordViewConfig,
 	setRecordReferencedId as crdtSetRecordReferencedId,
 	setRecordViewConfig as crdtSetRecordViewConfig,
 	updateRecordContent,
@@ -24,6 +25,7 @@ import type {
 	ChildPagesDepth,
 	EmbeddedViewConfig,
 	PropertyValue,
+	ViewConfig,
 	ViewType,
 	WorkspaceRecord
 } from '$lib/data/types';
@@ -135,6 +137,30 @@ function validateViewConfig(
 	}
 	if (!VIEW_TYPES.includes(viewConfig.viewType)) {
 		throw new Error('viewConfig.viewType must be "table", "board", or "calendar".');
+	}
+}
+
+/**
+ * Validates a `collection_view` block's `viewConfigPatch` (issue #195) — same block-type
+ * restriction as `viewConfig`, plus a check `viewConfig` doesn't need: the block must already be
+ * configured (have a `viewType`), since patching an unconfigured block would silently write
+ * orphaned `filters`/`sort`/etc. entries that `readViewConfig` won't surface until a `viewType`
+ * is eventually set (see view-config.ts's `readViewConfig`). Use `viewConfig` for the initial
+ * configure. `viewType` itself can't appear in a patch — enforced at the MCP schema boundary
+ * (`viewConfigPatchSchema` has no `viewType` field) and again at runtime by
+ * `patchRecordViewConfig`, so not re-checked here.
+ */
+function validateViewConfigPatch(
+	blockType: BlockType | undefined,
+	existingViewConfig: EmbeddedViewConfig | undefined
+): void {
+	if (blockType !== 'collection_view') {
+		throw new Error('viewConfigPatch is only valid on a collection_view block.');
+	}
+	if (!existingViewConfig) {
+		throw new Error(
+			'viewConfigPatch requires the collection_view block to already be configured — use viewConfig for the initial configure.'
+		);
 	}
 }
 
@@ -284,6 +310,7 @@ interface WriteRecordInput {
 	properties?: Record<string, PropertyValue>;
 	referencedRecordId?: string;
 	viewConfig?: EmbeddedViewConfig;
+	viewConfigPatch?: Partial<ViewConfig>;
 }
 
 // Validated up front, before any mutation in writeRecord below: a call
@@ -393,11 +420,11 @@ function applyViewConfigWrite(
 	actor: ReturnType<typeof actorForCaller>,
 	viewConfig: EmbeddedViewConfig
 ): void {
-	// A full replace, mirroring create_record's initial value — not the UI's
-	// per-member patchRecordViewConfig (issue #71), which exists to let two
-	// draft-editing collaborators' concurrent member edits both survive. An
-	// MCP write always supplies a whole EmbeddedViewConfig, the same "outright
-	// reconfigure" shape setRecordViewConfig is for (see its own doc comment).
+	// A full replace, mirroring create_record's initial value — for an agent
+	// caller that means "outright reconfigure" (same shape setRecordViewConfig
+	// is for; see its own doc comment). A caller that only wants to change a
+	// subset of members without clobbering the rest should use
+	// viewConfigPatch (applyViewConfigPatchWrite below, issue #195) instead.
 	const before = record.viewConfig;
 	crdtSetRecordViewConfig(doc, recordId, viewConfig, actor);
 	logAudit({
@@ -409,12 +436,51 @@ function applyViewConfigWrite(
 }
 
 /**
- * Applies one or more of `input.markdown`/`properties`/`referencedRecordId`/`viewConfig` to a
- * record, after checking the caller may access it. Each part is validated up front — an
- * invalid `referencedRecordId`/`viewConfig` rejects before any mutation, content write, or
- * hold release commits — and each applied part is audited separately. A markdown write
- * additionally requires an agent caller to already hold the record (see writeRecordMarkdown),
- * releasing that hold on success.
+ * Merges a partial set of viewConfig member changes into an existing collection_view block —
+ * the MCP-facing counterpart to the UI's per-member `patchRecordViewConfig` (issue #71), added
+ * so an agent that only means to change e.g. `filters` doesn't have to round-trip and resupply
+ * every other member via a whole-value `viewConfig` write, silently clobbering whatever another
+ * actor concurrently set on a member it never touched (issue #195). Audited as the incoming
+ * patch itself (cleared members re-encoded as JSON `null`, see below), the same "log what was
+ * supplied" convention `properties`' merge-write uses below — not a before/after pair, since a
+ * member absent from the patch was deliberately left alone.
+ */
+function applyViewConfigPatchWrite(
+	doc: Y.Doc,
+	recordId: string,
+	actor: ReturnType<typeof actorForCaller>,
+	viewConfigPatch: Partial<ViewConfig>
+): void {
+	crdtPatchRecordViewConfig(doc, recordId, viewConfigPatch, actor);
+	// The audit_log's diff column round-trips through JSON.stringify (Drizzle's
+	// `mode: 'json'`, see src/lib/server/db/schema.ts), which drops any
+	// property whose value is `undefined` entirely — so a cleared member
+	// (present in viewConfigPatch as an explicit `undefined`, per
+	// patchRecordViewConfig's own contract) would otherwise vanish from the
+	// persisted diff instead of recording that it was cleared. Map it to
+	// `null` here, for the audit record only — crdtPatchRecordViewConfig above
+	// already received the real `undefined`-keyed patch it needs.
+	const auditablePatch: Record<string, unknown> = {};
+	for (const key of Object.keys(viewConfigPatch) as (keyof ViewConfig)[]) {
+		auditablePatch[key] = viewConfigPatch[key] ?? null;
+	}
+	logAudit({
+		actor,
+		action: 'write_record',
+		targetRecordId: recordId,
+		diff: { viewConfigPatch: auditablePatch }
+	});
+}
+
+/**
+ * Applies one or more of `input.markdown`/`properties`/`referencedRecordId`/`viewConfig`/
+ * `viewConfigPatch` to a record, after checking the caller may access it. Each part is
+ * validated up front — an invalid `referencedRecordId`/`viewConfig`/`viewConfigPatch` rejects
+ * before any mutation, content write, or hold release commits — and each applied part is
+ * audited separately. A markdown write additionally requires an agent caller to already hold
+ * the record (see writeRecordMarkdown), releasing that hold on success. `viewConfig` and
+ * `viewConfigPatch` are mutually exclusive (whole-replace vs. per-member merge — see
+ * applyViewConfigWrite/applyViewConfigPatchWrite) rather than one silently overriding the other.
  */
 export function writeRecord(
 	caller: CallerIdentity,
@@ -425,11 +491,16 @@ export function writeRecord(
 		input.markdown === undefined &&
 		!input.properties &&
 		input.referencedRecordId === undefined &&
-		input.viewConfig === undefined
+		input.viewConfig === undefined &&
+		input.viewConfigPatch === undefined
 	) {
 		throw new Error(
-			'write_record requires markdown, properties, referencedRecordId, or viewConfig'
+			'write_record requires markdown, properties, referencedRecordId, viewConfig, or viewConfigPatch'
 		);
+	}
+
+	if (input.viewConfig !== undefined && input.viewConfigPatch !== undefined) {
+		throw new Error('write_record accepts either viewConfig or viewConfigPatch, not both.');
 	}
 
 	const { doc, awareness } = resolveRecordWorkspaceContext(recordId);
@@ -442,6 +513,10 @@ export function writeRecord(
 
 	if (input.viewConfig !== undefined) {
 		validateViewConfig(record.blockType, input.viewConfig);
+	}
+
+	if (input.viewConfigPatch !== undefined) {
+		validateViewConfigPatch(record.blockType, record.viewConfig);
 	}
 
 	transactWithOrigin(doc, SERVICE_ORIGIN, () => {
@@ -462,6 +537,9 @@ export function writeRecord(
 		}
 		if (input.viewConfig !== undefined) {
 			applyViewConfigWrite(doc, record, recordId, actor, input.viewConfig);
+		}
+		if (input.viewConfigPatch !== undefined) {
+			applyViewConfigPatchWrite(doc, recordId, actor, input.viewConfigPatch);
 		}
 	});
 }

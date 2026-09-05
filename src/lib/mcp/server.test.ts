@@ -619,11 +619,11 @@ describe('mcp server: full tool surface', () => {
 		);
 		const blockId = JSON.parse(getTextContent(createBlockResult)).recordId;
 
-		// write_record with none of markdown/properties/referencedRecordId/viewConfig throws a plain Error.
+		// write_record with none of markdown/properties/referencedRecordId/viewConfig/viewConfigPatch throws a plain Error.
 		const writeResult = await invokeTool(mcpServer, 'write_record', { recordId: blockId }, token);
 		expect(writeResult.isError).toBe(true);
 		expect(getTextContent(writeResult)).toContain(
-			'markdown, properties, referencedRecordId, or viewConfig'
+			'markdown, properties, referencedRecordId, viewConfig, or viewConfigPatch'
 		);
 	});
 });

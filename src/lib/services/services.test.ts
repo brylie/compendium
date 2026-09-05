@@ -50,7 +50,8 @@ import {
 import {
 	createRecord as rawCrdtCreateRecord,
 	getRecord as crdtGetRecord,
-	getRecordYText as crdtGetRecordYText
+	getRecordYText as crdtGetRecordYText,
+	patchRecordViewConfig as crdtPatchRecordViewConfig
 } from '$lib/data/record-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import {
@@ -1094,6 +1095,106 @@ describe('service layer: MCP authoring and validation of collection_view targets
 	});
 });
 
+describe('service layer: write_record viewConfigPatch — per-member merge without clobbering untouched members (issue #195)', () => {
+	it('merges only the named members, leaving a concurrently-set member untouched', () => {
+		const target = createCollection(human, { title: 'Tasks', schema: [] });
+		const doc = createDocument(human, { title: 'Doc' });
+		const embed = createRecord(human, {
+			parentId: doc.id,
+			blockType: 'collection_view',
+			referencedRecordId: target.id,
+			viewConfig: { viewType: 'board', groupBy: 'status', visibleProperties: ['status'] }
+		});
+
+		// Simulates a concurrent actor (another agent call, or a human's Save)
+		// setting `sort` in between — the bug this issue fixes is a whole-value
+		// viewConfig write silently discarding this.
+		const shardDoc = resolveWorkspaceContext({ shardId: doc.id }).doc;
+		writeTestYText(shardDoc, () =>
+			crdtPatchRecordViewConfig(shardDoc, embed.id, { sort: { mode: 'manual' } }, human)
+		);
+
+		writeRecord(human, embed.id, { viewConfigPatch: { groupBy: 'priority' } });
+
+		const result = getDocument(human, doc.id);
+		expect(result?.records.find((r) => r.id === embed.id)?.viewConfig).toEqual({
+			viewType: 'board',
+			groupBy: 'priority',
+			visibleProperties: ['status'],
+			sort: { mode: 'manual' }
+		});
+	});
+
+	it('clears a member explicitly set to undefined in the patch, leaving the rest untouched', () => {
+		const target = createCollection(human, { title: 'Tasks', schema: [] });
+		const doc = createDocument(human, { title: 'Doc' });
+		const embed = createRecord(human, {
+			parentId: doc.id,
+			blockType: 'collection_view',
+			referencedRecordId: target.id,
+			viewConfig: { viewType: 'board', groupBy: 'status', visibleProperties: ['status'] }
+		});
+
+		writeRecord(human, embed.id, { viewConfigPatch: { groupBy: undefined } });
+
+		const result = getDocument(human, doc.id);
+		expect(result?.records.find((r) => r.id === embed.id)?.viewConfig).toEqual({
+			viewType: 'board',
+			visibleProperties: ['status']
+		});
+
+		// The persisted audit diff must record the clear as JSON `null`, not
+		// silently drop the key — the audit_log.diff column round-trips
+		// through JSON.stringify (Drizzle's `mode: 'json'`), which would
+		// otherwise erase any property left as an actual `undefined` value.
+		const entry = queryAuditLog().find(
+			(a) => a.action === 'write_record' && a.targetRecordId === embed.id
+		);
+		expect(entry?.diff).toEqual({ viewConfigPatch: { groupBy: null } });
+	});
+
+	it('rejects viewConfigPatch on a block that is not collection_view', () => {
+		const doc = createDocument(human, { title: 'Doc' });
+		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+
+		expect(() => writeRecord(human, block.id, { viewConfigPatch: { groupBy: 'status' } })).toThrow(
+			/collection_view/
+		);
+	});
+
+	it('rejects viewConfigPatch on a collection_view block that has no viewConfig yet', () => {
+		const target = createCollection(human, { title: 'Tasks', schema: [] });
+		const doc = createDocument(human, { title: 'Doc' });
+		const embed = createRecord(human, {
+			parentId: doc.id,
+			blockType: 'collection_view',
+			referencedRecordId: target.id
+		});
+
+		expect(() => writeRecord(human, embed.id, { viewConfigPatch: { groupBy: 'status' } })).toThrow(
+			/already be configured/
+		);
+	});
+
+	it('rejects a write_record call that supplies both viewConfig and viewConfigPatch', () => {
+		const target = createCollection(human, { title: 'Tasks', schema: [] });
+		const doc = createDocument(human, { title: 'Doc' });
+		const embed = createRecord(human, {
+			parentId: doc.id,
+			blockType: 'collection_view',
+			referencedRecordId: target.id,
+			viewConfig: { viewType: 'table' }
+		});
+
+		expect(() =>
+			writeRecord(human, embed.id, {
+				viewConfig: { viewType: 'board' },
+				viewConfigPatch: { groupBy: 'status' }
+			})
+		).toThrow(/either viewConfig or viewConfigPatch/);
+	});
+});
+
 describe('service layer: documents — unfiltered listing, delete, and rename', () => {
 	it('listDocuments returns every document, unfiltered, for a human caller', () => {
 		createDocument(human, { title: 'Doc One' });
@@ -1272,7 +1373,7 @@ describe('service layer: records — write validation, delete, and direct read',
 		const doc = createDocument(human, { title: 'Doc' });
 		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
 		expect(() => writeRecord(human, block.id, {})).toThrow(
-			/markdown, properties, referencedRecordId, or viewConfig/
+			/markdown, properties, referencedRecordId, viewConfig, or viewConfigPatch/
 		);
 	});
 
