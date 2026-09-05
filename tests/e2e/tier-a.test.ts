@@ -1212,4 +1212,94 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		});
 		expect(bothRes.isError).toBe(true);
 	});
+
+	it("15. MCP create_record/write_record set, whole-value-clear, patch, and patch-clear a collection_view block's swimlaneBy, round-tripping through get_document the same way groupBy already does (issue #219)", async () => {
+		const yjs = harness.getYjsClient();
+		const target = createCollection(yjs.doc, { title: 'Tasks', schema: [] });
+		const source = createDocument(yjs.doc, { title: 'Source Doc' });
+
+		const { token } = harness.createToken({
+			clientLabel: 'Swimlane Agent',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: [target.id]
+		});
+
+		const mcp = await harness.getMcpClient(token);
+
+		async function readViewConfig(blockId: string) {
+			const res = await mcp.callTool({
+				name: 'get_document',
+				arguments: { documentId: source.id }
+			});
+			const data = parseMcpText<{
+				records: { id: string; viewConfig?: Record<string, unknown> }[];
+			}>(res);
+			return data.records.find((r) => r.id === blockId)?.viewConfig;
+		}
+
+		// create_record's viewConfig accepts swimlaneBy alongside groupBy in the
+		// same call — before issue #219 the MCP schema silently stripped it.
+		const createRes = await mcp.callTool({
+			name: 'create_record',
+			arguments: {
+				parentId: source.id,
+				blockType: 'collection_view',
+				referencedRecordId: target.id,
+				viewConfig: { viewType: 'board', groupBy: 'status', swimlaneBy: 'priority' }
+			}
+		});
+		expect(createRes.isError).toBeFalsy();
+		const blockId = parseMcpText<{ recordId: string }>(createRes).recordId;
+
+		await harness.waitForCondition(
+			async () => (await readViewConfig(blockId))?.swimlaneBy === 'priority'
+		);
+
+		// write_record's whole-value viewConfig clears swimlaneBy when the new
+		// value omits it, same as any other member.
+		const clearWholeRes = await mcp.callTool({
+			name: 'write_record',
+			arguments: {
+				recordId: blockId,
+				viewConfig: { viewType: 'board', groupBy: 'status' }
+			}
+		});
+		expect(clearWholeRes.isError).toBeFalsy();
+
+		await harness.waitForCondition(
+			async () => (await readViewConfig(blockId))?.swimlaneBy === undefined
+		);
+
+		// viewConfigPatch sets swimlaneBy without disturbing groupBy.
+		const patchSetRes = await mcp.callTool({
+			name: 'write_record',
+			arguments: {
+				recordId: blockId,
+				viewConfigPatch: { swimlaneBy: 'assignee' }
+			}
+		});
+		expect(patchSetRes.isError).toBeFalsy();
+
+		await harness.waitForCondition(
+			async () => (await readViewConfig(blockId))?.swimlaneBy === 'assignee'
+		);
+		expect((await readViewConfig(blockId))?.groupBy).toBe('status');
+
+		// viewConfigPatch's `swimlaneBy: null` clears it explicitly, leaving
+		// groupBy untouched — the same omitted-vs-undefined convention
+		// normalizeViewConfigPatch already applies to groupBy.
+		const patchClearRes = await mcp.callTool({
+			name: 'write_record',
+			arguments: {
+				recordId: blockId,
+				viewConfigPatch: { swimlaneBy: null }
+			}
+		});
+		expect(patchClearRes.isError).toBeFalsy();
+
+		await harness.waitForCondition(
+			async () => (await readViewConfig(blockId))?.swimlaneBy === undefined
+		);
+		expect((await readViewConfig(blockId))?.groupBy).toBe('status');
+	});
 });

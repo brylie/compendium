@@ -74,6 +74,7 @@ const viewConfigSchema = z.object({
 	sort: viewSortSchema.optional(),
 	visibleProperties: z.array(z.string()).optional(),
 	groupBy: z.string().optional(),
+	swimlaneBy: z.string().optional(),
 	summaries: viewSummariesSchema.optional()
 });
 
@@ -90,6 +91,7 @@ const viewConfigPatchSchema = z.object({
 	sort: viewSortSchema.nullable().optional(),
 	visibleProperties: z.array(z.string()).nullable().optional(),
 	groupBy: z.string().nullable().optional(),
+	swimlaneBy: z.string().nullable().optional(),
 	summaries: viewSummariesSchema.nullable().optional()
 });
 
@@ -111,6 +113,7 @@ function normalizeViewConfigPatch(
 	if ('visibleProperties' in patch)
 		normalized.visibleProperties = patch.visibleProperties ?? undefined;
 	if ('groupBy' in patch) normalized.groupBy = patch.groupBy ?? undefined;
+	if ('swimlaneBy' in patch) normalized.swimlaneBy = patch.swimlaneBy ?? undefined;
 	if ('summaries' in patch) normalized.summaries = patch.summaries ?? undefined;
 	return normalized;
 }
