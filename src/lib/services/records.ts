@@ -16,7 +16,7 @@ import {
 import { resolveInternalLinkTarget } from '$lib/data/links';
 import { logAudit } from '$lib/server/audit';
 import { reserveRecordLocator, releaseRecordLocator } from '$lib/server/catalog';
-import { markdownToRichText } from '$lib/mcp/markdown-transcode';
+import { markdownToRichText } from '$lib/data/markdown-transcode';
 import { yTextToRichText } from '$lib/data/richtext';
 import { tokenAllowsParent } from '$lib/server/token-store';
 import type {

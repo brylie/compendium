@@ -186,8 +186,20 @@ export default defineConfig(
 		// separate, larger cleanup) apply cleanly here with zero findings.
 		// Scoped rather than repo-wide so this file's contract stays enforced
 		// without forcing that unrelated cleanup as part of this change; add a
-		// file here if it's migrated onto the wrapper too.
-		files: ['src/lib/data/records.ts', 'src/lib/data/yjs-typed.ts'],
+		// file here if it's migrated onto the wrapper too. Covers every module
+		// records.ts (now a re-export facade, #191) was split into — they all
+		// follow the same TypedYMap pattern, not just the facade's old single
+		// file.
+		files: [
+			'src/lib/data/records.ts',
+			'src/lib/data/yjs-typed.ts',
+			'src/lib/data/yjs-shapes.ts',
+			'src/lib/data/view-config.ts',
+			'src/lib/data/document-ops.ts',
+			'src/lib/data/collection-ops.ts',
+			'src/lib/data/record-ops.ts',
+			'src/lib/data/migration-copy.ts'
+		],
 		rules: {
 			'@typescript-eslint/no-unsafe-assignment': 'error',
 			'@typescript-eslint/no-unsafe-member-access': 'error',
@@ -254,6 +266,35 @@ export default defineConfig(
 			'jsdoc/require-jsdoc': 'off',
 			'jsdoc/check-tag-names': 'off',
 			'tsdoc/syntax': 'off'
+		}
+	},
+	{
+		// Dependency-boundary enforcement (#191): the data/repository and
+		// service layers must stay protocol-neutral — service-layer.md already
+		// said MCP tool handlers must not call records.ts directly, but nothing
+		// stopped the reverse: services/documents.ts and services/records.ts
+		// both imported richTextToMarkdown/markdownToRichText from
+		// src/lib/mcp/markdown-transcode.ts (since relocated to
+		// src/lib/data/markdown-transcode.ts, a plain Y.Text<->Markdown codec
+		// with no MCP-specific dependency of its own) before this rule existed
+		// to catch it. No eslint-plugin-boundaries/import/no-restricted-paths
+		// dependency needed — built-in no-restricted-imports, scoped by `files`
+		// the same way the Yjs-typed-map override above is, is enough.
+		files: ['src/lib/data/**/*.ts', 'src/lib/server/**/*.ts', 'src/lib/services/**/*.ts'],
+		ignores: ['**/*.test.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						{
+							group: ['$lib/mcp/*', '$lib/mcp'],
+							message:
+								'Data/repository/service modules must stay protocol-neutral (#191) — do not import from the MCP layer. If both sides need this logic, it belongs in $lib/data or $lib/server instead.'
+						}
+					]
+				}
+			]
 		}
 	},
 	{

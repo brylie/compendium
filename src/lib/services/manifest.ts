@@ -124,6 +124,11 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 	},
 	'collections.deleteCollection': { mcp: false, ui: true },
 	'collections.updateCollectionTitle': { mcp: false, ui: true },
+	// A pure computation helper, not a command/query of its own — not bound to
+	// any MCP tool or UI route, just callable directly (#191, so the MCP
+	// handler for list_collections/query_collection doesn't need its own
+	// import of $lib/data/records to resolve a Collection's primary field).
+	'collections.resolvePrimaryFieldKey': { mcp: false, ui: false },
 
 	'search.searchWorkspace': {
 		mcp: true,

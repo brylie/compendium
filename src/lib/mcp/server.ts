@@ -6,6 +6,7 @@ import {
 	serviceModules,
 	serviceSurfaces,
 	mcpAdapterBindings,
+	resolvePrimaryFieldKey,
 	type ServiceMethod,
 	PermissionDeniedError,
 	HoldRequiredError
@@ -16,7 +17,7 @@ import {
 	type BlockType,
 	type EmbeddedViewConfig
 } from '$lib/data/types';
-import { resolvePrimaryField } from '$lib/data/records';
+import { projectDocument } from './document-projection';
 
 const propertyValueSchema = z.discriminatedUnion('type', [
 	z.object({ type: z.literal(propertyTypes[0]), value: z.string() }),
@@ -147,7 +148,7 @@ export function createMcpServer(): McpServer {
 				const token = requireToken(extra);
 				const result = serviceModules.documents.getDocument(token, documentId);
 				if (!result) return errorResult(`Document ${documentId} not found`);
-				return textResult(result);
+				return textResult(projectDocument(documentId, result));
 			} catch (err) {
 				return handleToolError(err);
 			}
@@ -231,7 +232,7 @@ export function createMcpServer(): McpServer {
 				id: c.id,
 				title: c.title,
 				schema: c.schema,
-				primaryFieldKey: resolvePrimaryField(c.schema, c.primaryFieldKey)?.key
+				primaryFieldKey: resolvePrimaryFieldKey(c.schema, c.primaryFieldKey)
 			}));
 			return textResult(collections);
 		} catch (err) {
@@ -264,7 +265,7 @@ export function createMcpServer(): McpServer {
 					id: collection.id,
 					title: collection.title,
 					schema: collection.schema,
-					primaryFieldKey: resolvePrimaryField(collection.schema, collection.primaryFieldKey)?.key,
+					primaryFieldKey: resolvePrimaryFieldKey(collection.schema, collection.primaryFieldKey),
 					rows
 				});
 			} catch (err) {
