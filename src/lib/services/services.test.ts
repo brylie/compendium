@@ -1142,6 +1142,15 @@ describe('service layer: write_record viewConfigPatch — per-member merge witho
 			viewType: 'board',
 			visibleProperties: ['status']
 		});
+
+		// The persisted audit diff must record the clear as JSON `null`, not
+		// silently drop the key — the audit_log.diff column round-trips
+		// through JSON.stringify (Drizzle's `mode: 'json'`), which would
+		// otherwise erase any property left as an actual `undefined` value.
+		const entry = queryAuditLog().find(
+			(a) => a.action === 'write_record' && a.targetRecordId === embed.id
+		);
+		expect(entry?.diff).toEqual({ viewConfigPatch: { groupBy: null } });
 	});
 
 	it('rejects viewConfigPatch on a block that is not collection_view', () => {

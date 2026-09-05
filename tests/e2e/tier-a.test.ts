@@ -1142,6 +1142,24 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		// discarding a member like this one that it never meant to touch.
 		patchRecordViewConfig(yjs.doc, blockId, { sort: { mode: 'manual' } }, human);
 
+		// `yjs.doc` is this test's own y-websocket client, a separate replica
+		// from the server's Y.Doc the MCP call below actually mutates — the
+		// edit above is only local until it syncs over the wire. Without
+		// waiting for the server to have observed it first, the write_record
+		// call below could race ahead of that sync, making the assertion below
+		// pass on eventual CRDT convergence alone rather than actually proving
+		// this patch call left a concurrently-set member untouched.
+		await harness.waitForCondition(async () => {
+			const res = await mcp.callTool({
+				name: 'get_document',
+				arguments: { documentId: source.id }
+			});
+			const data = parseMcpText<{
+				records: { id: string; viewConfig?: { sort?: { mode: string } } }[];
+			}>(res);
+			return data.records.find((r) => r.id === blockId)?.viewConfig?.sort?.mode === 'manual';
+		});
+
 		const patchRes = await mcp.callTool({
 			name: 'write_record',
 			arguments: {

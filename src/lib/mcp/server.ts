@@ -105,10 +105,13 @@ function normalizeViewConfigPatch(
 	patch: z.infer<typeof viewConfigPatchSchema> | undefined
 ): Partial<ViewConfig> | undefined {
 	if (!patch) return undefined;
-	const normalized: Record<string, unknown> = {};
-	for (const [key, value] of Object.entries(patch)) {
-		normalized[key] = value ?? undefined;
-	}
+	const normalized: Partial<ViewConfig> = {};
+	if ('filters' in patch) normalized.filters = patch.filters ?? undefined;
+	if ('sort' in patch) normalized.sort = patch.sort ?? undefined;
+	if ('visibleProperties' in patch)
+		normalized.visibleProperties = patch.visibleProperties ?? undefined;
+	if ('groupBy' in patch) normalized.groupBy = patch.groupBy ?? undefined;
+	if ('summaries' in patch) normalized.summaries = patch.summaries ?? undefined;
 	return normalized;
 }
 

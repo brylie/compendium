@@ -441,8 +441,9 @@ function applyViewConfigWrite(
  * so an agent that only means to change e.g. `filters` doesn't have to round-trip and resupply
  * every other member via a whole-value `viewConfig` write, silently clobbering whatever another
  * actor concurrently set on a member it never touched (issue #195). Audited as the incoming
- * patch itself, the same "log what was supplied" convention `properties`' merge-write uses below
- * — not a before/after pair, since a member absent from the patch was deliberately left alone.
+ * patch itself (cleared members re-encoded as JSON `null`, see below), the same "log what was
+ * supplied" convention `properties`' merge-write uses below — not a before/after pair, since a
+ * member absent from the patch was deliberately left alone.
  */
 function applyViewConfigPatchWrite(
 	doc: Y.Doc,
@@ -451,11 +452,23 @@ function applyViewConfigPatchWrite(
 	viewConfigPatch: Partial<ViewConfig>
 ): void {
 	crdtPatchRecordViewConfig(doc, recordId, viewConfigPatch, actor);
+	// The audit_log's diff column round-trips through JSON.stringify (Drizzle's
+	// `mode: 'json'`, see src/lib/server/db/schema.ts), which drops any
+	// property whose value is `undefined` entirely — so a cleared member
+	// (present in viewConfigPatch as an explicit `undefined`, per
+	// patchRecordViewConfig's own contract) would otherwise vanish from the
+	// persisted diff instead of recording that it was cleared. Map it to
+	// `null` here, for the audit record only — crdtPatchRecordViewConfig above
+	// already received the real `undefined`-keyed patch it needs.
+	const auditablePatch: Record<string, unknown> = {};
+	for (const key of Object.keys(viewConfigPatch) as (keyof ViewConfig)[]) {
+		auditablePatch[key] = viewConfigPatch[key] ?? null;
+	}
 	logAudit({
 		actor,
 		action: 'write_record',
 		targetRecordId: recordId,
-		diff: { viewConfigPatch }
+		diff: { viewConfigPatch: auditablePatch }
 	});
 }
 
