@@ -235,4 +235,25 @@ describe('searchWorkspace: token scoping', () => {
 		const results = searchWorkspace(token, 'iota');
 		expect(results.some((r) => r.recordId === block.id)).toBe(true);
 	});
+
+	// Regression coverage for #191: searchWorkspace's own catalog-fan-out copy
+	// had drifted from listDocuments'/listCollections' identical logic — its
+	// uncataloged-fallback guard skipped on *any* explicit spaceId, not just a
+	// non-default one, so passing the workspace's own defaultSpaceId silently
+	// omitted uncataloged content that listDocuments/listCollections would
+	// still include for the same input. Now routed through the same shared
+	// fan-out (`$lib/server/workspace-repository`), so this must find it.
+	it('includes uncataloged content when the requested spaceId is the workspace default', () => {
+		const { doc, defaultSpaceId } = resolveWorkspaceContext();
+		const uncataloged = crdtCreateDocument(doc, { title: 'Uncataloged Default-Space Search' });
+		const block = crdtCreateRecord(
+			doc,
+			{ parentId: uncataloged.id, blockType: 'paragraph' },
+			human
+		);
+		writeRecord(human, block.id, { markdown: 'kappa keyword' });
+
+		const results = searchWorkspace(human, 'kappa', defaultSpaceId);
+		expect(results.some((r) => r.recordId === block.id)).toBe(true);
+	});
 });

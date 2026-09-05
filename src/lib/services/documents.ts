@@ -6,7 +6,6 @@ import {
 	deleteDocument as crdtDeleteDocument,
 	getCollection as crdtGetCollection,
 	getDocument as crdtGetDocument,
-	listDocuments as crdtListDocuments,
 	listRecordsForParent as crdtListRecordsForParent,
 	resolveChildPages,
 	updateDocumentParent as crdtUpdateDocumentParent,
@@ -26,6 +25,7 @@ import {
 	resolveShardForParent
 } from '$lib/server/catalog';
 import { grantDocumentAccess, tokenAllowsParent } from '$lib/server/token-store';
+import { listWorkspaceDocuments } from '$lib/server/workspace-repository';
 import { richTextToMarkdown } from '$lib/mcp/markdown-transcode';
 import { resolveInternalLinkTarget, type InternalLinkTarget } from '$lib/data/links';
 import type {
@@ -650,31 +650,16 @@ export function getDocument(
  * exactly there, not to a genuinely ambiguous Space — treating it as absent
  * from the default Space's own view would silently drop legacy/direct-Yjs
  * content from the sidebar (#140 CodeRabbit finding).
+ *
+ * The actual catalog-plus-fallback fan-out is owned by
+ * `$lib/server/workspace-repository` (#191) — shared with
+ * `collections.ts#listCollections` and `search.ts#searchWorkspace` rather
+ * than each re-implementing it.
  */
 export function listDocuments(caller: CallerIdentity, spaceId?: string): DocumentMeta[] {
 	const { workspaceId, defaultSpaceId, doc: defaultDoc } = resolveWorkspaceContext();
 	const allowed = (id: string, docSpaceId?: string) =>
 		!isAccessToken(caller) || tokenAllowsParent(caller, id, docSpaceId);
 
-	const catalogDocs = listCatalogDocuments(workspaceId, spaceId);
-	const catalogDocumentIds = new Set(catalogDocs.map((d) => d.id));
-	const results = catalogDocs.filter((d) => allowed(d.id, d.spaceId));
-
-	if (spaceId !== undefined && spaceId !== defaultSpaceId) return results;
-
-	// Then any Document written directly to the Y.Doc, bypassing the service
-	// layer entirely (and therefore uncataloged) — mirrors listCollections'
-	// identical catalog-then-uncataloged-fallback union pattern.
-	for (const document of crdtListDocuments(defaultDoc)) {
-		if (catalogDocumentIds.has(document.id)) continue;
-		// Uncataloged content is classified as belonging to defaultSpaceId (see
-		// this function's own doc comment) — passing it here too, not just
-		// omitting it, so a token whose only grant is a Space-level allowlist
-		// for the default Space (no per-Document grant) can actually see it
-		// (CodeRabbit finding on #141's merge with #140).
-		if (!allowed(document.id, defaultSpaceId)) continue;
-		results.push(document);
-	}
-
-	return results;
+	return listWorkspaceDocuments({ workspaceId, spaceId, defaultSpaceId, defaultDoc, allowed });
 }

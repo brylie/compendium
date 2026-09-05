@@ -4,7 +4,6 @@ import {
 	deleteCollection as crdtDeleteCollection,
 	getCollection as crdtGetCollection,
 	getDocument as crdtGetDocument,
-	listCollections as crdtListCollections,
 	listRecordsForParent as crdtListRecordsForParent,
 	updateCollectionTitle as crdtUpdateCollectionTitle
 } from '$lib/data/records';
@@ -13,14 +12,13 @@ import {
 	RecordIdConflictError,
 	UnknownSpaceError,
 	isKnownSpace,
-	listCatalogCollections,
 	recordCatalogCollectionCreated,
 	recordCatalogCollectionDeleted,
 	recordCatalogCollectionTitleChanged,
-	reserveCollectionLocator,
-	resolveShardForParent
+	reserveCollectionLocator
 } from '$lib/server/catalog';
 import { grantCollectionAccess, tokenAllowsParent } from '$lib/server/token-store';
+import { listWorkspaceCollections } from '$lib/server/workspace-repository';
 import type { CollectionMeta, PropertyDefinition, WorkspaceRecord } from '$lib/data/types';
 import { nanoid } from 'nanoid';
 import {
@@ -115,48 +113,19 @@ export function createCollection(
  * catalog-scoped to it, skipping the uncataloged fallback; passed the
  * workspace's own defaultSpaceId, the fallback still runs, since uncataloged
  * content belongs there by definition (#140 CodeRabbit finding).
+ *
+ * The actual catalog-plus-fallback fan-out, including each catalog-listed
+ * Collection's own-shard resolution (its full CollectionMeta — schema,
+ * primaryFieldKey — isn't carried by the catalog row itself), is owned by
+ * `$lib/server/workspace-repository` (#191) — shared with
+ * `documents.ts#listDocuments` and `search.ts#searchWorkspace`.
  */
 export function listCollections(caller: CallerIdentity, spaceId?: string): CollectionMeta[] {
 	const { workspaceId, defaultSpaceId, doc: defaultDoc } = resolveWorkspaceContext();
 	const allowed = (id: string, collectionSpaceId?: string) =>
 		!isAccessToken(caller) || tokenAllowsParent(caller, id, collectionSpaceId);
 
-	// Catalog-listed Collections first — each one's own shard resolved from
-	// the locator, since a sharded Collection's own meta entry (not just its
-	// rows) can live outside the default doc's collections map. Full
-	// CollectionMeta (schema, primaryFieldKey — not carried by the catalog
-	// itself) is read from its real resolved shard, mirroring search.ts's
-	// catalog-then-per-shard-fanout.
-	const catalogCollectionIds = new Set<string>();
-	const results: CollectionMeta[] = [];
-	for (const meta of listCatalogCollections(workspaceId, spaceId)) {
-		catalogCollectionIds.add(meta.id);
-		if (!allowed(meta.id, meta.spaceId)) continue;
-		const shard = resolveShardForParent(workspaceId, meta.id);
-		const collectionDoc = shard
-			? resolveWorkspaceContext({ workspaceId, shardId: shard.shardId }).doc
-			: defaultDoc;
-		const fullMeta = crdtGetCollection(collectionDoc, meta.id);
-		results.push(fullMeta ? { ...fullMeta, spaceId: meta.spaceId } : meta);
-	}
-
-	if (spaceId !== undefined && spaceId !== defaultSpaceId) return results;
-
-	// Then any Collection written directly to the Y.Doc, bypassing the
-	// service layer entirely (and therefore uncataloged) — the catalog loop
-	// above can't see these; they're only findable in the default doc.
-	for (const collection of crdtListCollections(defaultDoc)) {
-		if (catalogCollectionIds.has(collection.id)) continue;
-		// Uncataloged content is classified as belonging to defaultSpaceId (see
-		// this function's own doc comment) — passing it here too, not just
-		// omitting it, so a token whose only grant is a Space-level allowlist
-		// for the default Space (no per-Collection grant) can actually see it
-		// (CodeRabbit finding on #141's merge with #140).
-		if (!allowed(collection.id, defaultSpaceId)) continue;
-		results.push(collection);
-	}
-
-	return results;
+	return listWorkspaceCollections({ workspaceId, spaceId, defaultSpaceId, defaultDoc, allowed });
 }
 
 /** Returns a Collection's metadata and all its rows, after checking `caller` may access it. */
