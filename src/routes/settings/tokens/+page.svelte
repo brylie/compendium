@@ -221,7 +221,6 @@
 								>
 									<input
 										type="checkbox"
-										name="documentIds"
 										value={node.id}
 										checked={checkedDocumentIds.has(node.id)}
 										onchange={(e) =>
@@ -234,7 +233,7 @@
 									<button
 										type="button"
 										onclick={() => selectSubtree(node)}
-										class="p-0.5 text-muted opacity-0 group-hover/doc:opacity-100 hover:text-accent"
+										class="p-0.5 text-muted opacity-0 group-hover/doc:opacity-100 hover:text-accent focus-visible:opacity-100"
 										title="Select this page and its sub-pages"
 										aria-label="Select this page and its sub-pages"
 									>
@@ -278,6 +277,12 @@
 							<p class="text-xs text-muted italic">No documents available.</p>
 						{/if}
 					</div>
+					<!-- Submitted independently of the tree's expand/collapse state — a
+					     checkbox for a collapsed descendant checked via "select subtree"
+					     below has no rendered <input> of its own to submit. -->
+					{#each [...checkedDocumentIds] as id (id)}
+						<input type="hidden" name="documentIds" value={id} />
+					{/each}
 				</fieldset>
 
 				<fieldset class="rounded-md border border-border bg-bg/50 p-3">

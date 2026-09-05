@@ -125,9 +125,9 @@ describe('home +page', () => {
 				collections: []
 			}
 		});
-		expect(
-			screen.getByText('A Collection titled "Sprint Tasks" already exists in this Space')
-		).toBeInTheDocument();
+		expect(screen.getByRole('alert')).toHaveTextContent(
+			'A Collection titled "Sprint Tasks" already exists in this Space'
+		);
 	});
 
 	it('shows no error banner when there is no form result', () => {

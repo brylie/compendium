@@ -114,7 +114,8 @@ describe('settings/tokens +page', () => {
 		expect(screen.queryByText(/copy it now/)).not.toBeInTheDocument();
 	});
 
-	it('lists selectable documents and collections for scoping a new token', () => {
+	it('lists selectable documents, submitting a checked one via a hidden documentIds input', async () => {
+		const user = userEvent.setup();
 		render(Page, {
 			params: {},
 			data: {
@@ -127,8 +128,12 @@ describe('settings/tokens +page', () => {
 			form: null
 		});
 		const checkbox = screen.getByText('Design Notes').closest('label')!.querySelector('input')!;
-		expect(checkbox).toHaveAttribute('name', 'documentIds');
 		expect(checkbox).toHaveAttribute('value', 'd1');
+		expect(checkbox).not.toHaveAttribute('name');
+
+		await user.click(checkbox);
+		const form = screen.getByLabelText('Client Label').closest('form')!;
+		expect(form.querySelector('input[type="hidden"][name="documentIds"]')).toHaveValue('d1');
 	});
 
 	it('includes the space count in the scope summary when a token has Space grants', () => {
@@ -296,6 +301,43 @@ describe('settings/tokens +page', () => {
 		await user.click(screen.getByRole('button', { name: 'Expand sub-pages' }));
 		const childCheckbox = screen.getByText('Child Page').closest('label')!.querySelector('input')!;
 		expect(childCheckbox).toBeChecked();
+	});
+
+	it('submits a sub-page selected via "select subtree" even while its parent stays collapsed', async () => {
+		// Regression test: a checked descendant with no rendered <input
+		// name="documentIds"> (because its parent row is still collapsed) must
+		// still be submitted — via a hidden input keyed off checkedDocumentIds,
+		// not the tree's own visible checkboxes.
+		const user = userEvent.setup();
+		render(Page, {
+			params: {},
+			data: {
+				spaces: [{ id: 'space-a', workspaceId: 'default', name: 'Marketing' }],
+				activeSpaceId: 'space-1',
+				tokens: [],
+				documents: [
+					{ id: 'parent', title: 'Parent Page', order: 'a0', recordIds: [], spaceId: 'space-a' },
+					{
+						id: 'child',
+						title: 'Child Page',
+						order: 'a0',
+						recordIds: [],
+						parentDocumentId: 'parent',
+						spaceId: 'space-a'
+					}
+				],
+				collections: []
+			},
+			form: null
+		});
+		await user.click(screen.getByRole('button', { name: 'Select this page and its sub-pages' }));
+		expect(screen.queryByText('Child Page')).not.toBeInTheDocument();
+
+		const form = screen.getByLabelText('Client Label').closest('form')!;
+		const hiddenInputs = Array.from(
+			form.querySelectorAll<HTMLInputElement>('input[type="hidden"][name="documentIds"]')
+		).map((input) => input.value);
+		expect(hiddenInputs).toEqual(expect.arrayContaining(['parent', 'child']));
 	});
 
 	it('submits the connect-client form to the create action', () => {
