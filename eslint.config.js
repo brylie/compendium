@@ -269,6 +269,35 @@ export default defineConfig(
 		}
 	},
 	{
+		// Dependency-boundary enforcement (#191): the data/repository and
+		// service layers must stay protocol-neutral — service-layer.md already
+		// said MCP tool handlers must not call records.ts directly, but nothing
+		// stopped the reverse: services/documents.ts and services/records.ts
+		// both imported richTextToMarkdown/markdownToRichText from
+		// src/lib/mcp/markdown-transcode.ts (since relocated to
+		// src/lib/data/markdown-transcode.ts, a plain Y.Text<->Markdown codec
+		// with no MCP-specific dependency of its own) before this rule existed
+		// to catch it. No eslint-plugin-boundaries/import/no-restricted-paths
+		// dependency needed — built-in no-restricted-imports, scoped by `files`
+		// the same way the Yjs-typed-map override above is, is enough.
+		files: ['src/lib/data/**/*.ts', 'src/lib/server/**/*.ts', 'src/lib/services/**/*.ts'],
+		ignores: ['**/*.test.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						{
+							group: ['$lib/mcp/*', '$lib/mcp'],
+							message:
+								'Data/repository/service modules must stay protocol-neutral (#191) — do not import from the MCP layer. If both sides need this logic, it belongs in $lib/data or $lib/server instead.'
+						}
+					]
+				}
+			]
+		}
+	},
+	{
 		// Override or add rule settings here, such as:
 		// 'svelte/button-has-type': 'error'
 		rules: {}
