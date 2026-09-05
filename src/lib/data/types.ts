@@ -138,6 +138,10 @@ export interface ViewConfig {
 	sort?: ViewSort;
 	visibleProperties?: string[]; // property keys; undefined = all visible
 	groupBy?: string; // property key driving the layout: select for Board, date for Calendar
+	// Board-only, optional second grouping dimension (issue #67/#165): a
+	// `select` property distinct from `groupBy`, rendering as swimlane rows
+	// crossing the existing columns. Unused by Table/Calendar.
+	swimlaneBy?: string;
 	summaries?: Record<string, FieldSummaryType>; // property key -> footer aggregation (Table only)
 }
 

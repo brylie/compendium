@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import {
@@ -382,5 +382,141 @@ describe('BoardCollectionView', () => {
 		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
 		expect(await screen.findByText('Alice')).toBeInTheDocument();
+	});
+
+	it('renders swimlane rows crossing the existing columns, preserving an empty swimlane (issue #67/#165)', async () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Board',
+			schema: [
+				{ key: 'title', label: 'Title', type: 'text' },
+				{
+					key: 'status',
+					label: 'Status',
+					type: 'select',
+					options: [
+						{ id: 'todo', label: 'To do' },
+						{ id: 'done', label: 'Done' }
+					]
+				},
+				{
+					key: 'priority',
+					label: 'Priority',
+					type: 'select',
+					options: [
+						{ id: 'high', label: 'High' },
+						{ id: 'low', label: 'Low' }
+					]
+				}
+			]
+		});
+		createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: {
+					title: { type: 'text', value: 'Urgent task' },
+					status: { type: 'select', value: 'todo' },
+					priority: { type: 'select', value: 'high' }
+				}
+			},
+			actor
+		);
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status', swimlaneBy: 'priority' });
+
+		expect(await screen.findByRole('group', { name: 'High swimlane' })).toBeInTheDocument();
+		const lowSwimlane = screen.getByRole('group', { name: 'Low swimlane' });
+
+		// The Low swimlane has zero matching records, but both columns still
+		// render inside it — issue #9's "preserve empty groups, never create
+		// placeholder records" guarantee, now crossed at the swimlane dimension.
+		expect(within(lowSwimlane).getByRole('group', { name: 'To do column' })).toBeInTheDocument();
+		expect(within(lowSwimlane).getByRole('group', { name: 'Done column' })).toBeInTheDocument();
+		expect(within(lowSwimlane).getAllByText('No cards.')).toHaveLength(3); // To do, Done, No Status
+	});
+
+	it('moves a card to a different swimlane via the keyboard-accessible "Move to swimlane" select, leaving its column untouched (issue #67/#165)', async () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Board',
+			schema: [
+				{ key: 'title', label: 'Title', type: 'text' },
+				{
+					key: 'status',
+					label: 'Status',
+					type: 'select',
+					options: [{ id: 'todo', label: 'To do' }]
+				},
+				{
+					key: 'priority',
+					label: 'Priority',
+					type: 'select',
+					options: [
+						{ id: 'high', label: 'High' },
+						{ id: 'low', label: 'Low' }
+					]
+				}
+			]
+		});
+		const record = createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: {
+					title: { type: 'text', value: 'Movable' },
+					status: { type: 'select', value: 'todo' },
+					priority: { type: 'select', value: 'high' }
+				}
+			},
+			actor
+		);
+		const user = userEvent.setup();
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status', swimlaneBy: 'priority' });
+
+		const moveSelect = await screen.findByLabelText('Move Movable to swimlane');
+		await user.selectOptions(moveSelect, 'low');
+
+		expect(getRecord(ydoc, record.id)?.properties?.priority).toEqual({
+			type: 'select',
+			value: 'low'
+		});
+		expect(getRecord(ydoc, record.id)?.properties?.status).toEqual({
+			type: 'select',
+			value: 'todo'
+		});
+	});
+
+	it('offers "Swimlane by" only once a second select property exists, and setting it renders swimlane rows', async () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Board',
+			schema: [
+				{
+					key: 'status',
+					label: 'Status',
+					type: 'select',
+					options: [{ id: 'todo', label: 'To do' }]
+				}
+			]
+		});
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
+		await screen.findByText('To do');
+		expect(screen.queryByLabelText('Swimlane by')).not.toBeInTheDocument();
+
+		updateCollectionSchema(ydoc, 'col-1', [
+			...(getCollection(ydoc, 'col-1')?.schema ?? []),
+			{
+				key: 'priority',
+				label: 'Priority',
+				type: 'select',
+				options: [{ id: 'high', label: 'High' }]
+			}
+		]);
+
+		const user = userEvent.setup();
+		const swimlaneSelect = await screen.findByLabelText('Swimlane by');
+		await user.selectOptions(swimlaneSelect, 'priority');
+
+		expect(await screen.findByRole('group', { name: 'High swimlane' })).toBeInTheDocument();
 	});
 });

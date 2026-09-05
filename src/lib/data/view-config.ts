@@ -38,6 +38,7 @@ export function readViewConfig(yrecord: TypedYMap<RecordYShape>): EmbeddedViewCo
 	const visibleProperties = yrecord.raw.get(VIEW_CONFIG_PREFIX + 'visibleProperties') as
 		string[] | undefined;
 	const groupBy = yrecord.raw.get(VIEW_CONFIG_PREFIX + 'groupBy') as string | undefined;
+	const swimlaneBy = yrecord.raw.get(VIEW_CONFIG_PREFIX + 'swimlaneBy') as string | undefined;
 	const summaries = yrecord.raw.get(VIEW_CONFIG_PREFIX + 'summaries') as
 		Record<string, FieldSummaryType> | undefined;
 
@@ -47,6 +48,7 @@ export function readViewConfig(yrecord: TypedYMap<RecordYShape>): EmbeddedViewCo
 		...(sort !== undefined && { sort }),
 		...(visibleProperties !== undefined && { visibleProperties }),
 		...(groupBy !== undefined && { groupBy }),
+		...(swimlaneBy !== undefined && { swimlaneBy }),
 		...(summaries !== undefined && { summaries })
 	};
 }
@@ -71,6 +73,7 @@ export function writeViewConfig(
 	writeViewConfigField(yrecord, 'sort', config.sort);
 	writeViewConfigField(yrecord, 'visibleProperties', config.visibleProperties);
 	writeViewConfigField(yrecord, 'groupBy', config.groupBy);
+	writeViewConfigField(yrecord, 'swimlaneBy', config.swimlaneBy);
 	writeViewConfigField(yrecord, 'summaries', config.summaries);
 	yrecord.raw.delete(LEGACY_VIEW_CONFIG_KEY);
 }

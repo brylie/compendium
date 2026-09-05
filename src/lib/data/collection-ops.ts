@@ -334,10 +334,11 @@ export function countRecordsWithProperty(
 
 // Strips a deleted field out of any collection_view block's persisted
 // viewConfig that still references it (filters/visibleProperties/groupBy/
-// sort), across every Document — a stale propertyKey there would otherwise
-// silently break that embed's filtering/grouping/sort the next time it
-// renders. Manual per-column Board order isn't touched: it's session-local
-// state, never persisted to viewConfig in the first place (collection-views.md §6).
+// swimlaneBy/sort), across every Document — a stale propertyKey there would
+// otherwise silently break that embed's filtering/grouping/sort the next
+// time it renders. Manual per-column Board order isn't touched: it's
+// session-local state, never persisted to viewConfig in the first place
+// (collection-views.md §6).
 function repairEmbeddedViewsAfterPropertyRemoval(
 	doc: Y.Doc,
 	collectionId: string,
@@ -370,6 +371,9 @@ function repairEmbeddedViewsAfterPropertyRemoval(
 		}
 		if (config.groupBy === propertyKey) {
 			writeViewConfigField(yrecord, 'groupBy', undefined);
+		}
+		if (config.swimlaneBy === propertyKey) {
+			writeViewConfigField(yrecord, 'swimlaneBy', undefined);
 		}
 		if (config.sort?.propertyKey === propertyKey) {
 			writeViewConfigField(yrecord, 'sort', { mode: 'manual' });

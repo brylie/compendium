@@ -198,12 +198,26 @@ export interface BoardColumn {
 	records: WorkspaceRecord[];
 }
 
+// The `select` option id a record currently holds for `property`, or `null`
+// for "no value" — shared by groupBySelectProperty and
+// groupBySwimlaneAndColumn below, both of which bucket records by this same
+// lookup (one for columns, one for swimlane rows).
+function selectOptionIdForRecord(
+	record: WorkspaceRecord,
+	property: PropertyDefinition
+): string | null {
+	const value = record.properties?.[property.key];
+	return value?.type === 'select' ? value.value : null;
+}
+
 /**
  * Groups by a `select` property's own defined options, in schema order, so
  * an option with zero current records still renders as an empty column
  * (issue #9: "preserve empty groups ... do not create placeholder records").
  * A trailing catch-all column holds records with no value set for this
- * property; it is never created for an option itself, only for "no value".
+ * property, or an option id no longer present in `property.options` (deleted,
+ * or a stale reference); it is never created for a live option itself, only
+ * for "no (valid) value".
  */
 export function groupBySelectProperty(
 	records: WorkspaceRecord[],
@@ -219,18 +233,64 @@ export function groupBySelectProperty(
 	const unassigned: BoardColumn = { optionId: null, label: `No ${property.label}`, records: [] };
 
 	for (const record of records) {
-		const value = record.properties?.[property.key];
 		// null, not undefined, to match BoardColumn.optionId's own type —
 		// `columns` here never actually contains a null entry (only the
 		// separate `unassigned` column below does), so this doesn't change
 		// which column a record lands in; it just keeps both sides of the
 		// comparison the same nullable type.
-		const optionId = value?.type === 'select' ? value.value : null;
+		const optionId = selectOptionIdForRecord(record, property);
 		const column = columns.find((c) => c.optionId === optionId);
 		(column ?? unassigned).records.push(record);
 	}
 
 	return [...columns, unassigned];
+}
+
+export interface BoardSwimlane {
+	optionId: string | null; // null = the "No <property>" catch-all swimlane
+	label: string;
+	color?: string;
+	columns: BoardColumn[];
+}
+
+/**
+ * Crosses an independent second `select` property (the swimlane) with the existing column
+ * grouping (issue #67/#165) — one `BoardSwimlane` per `swimlaneProperty` option, in schema
+ * order, plus a trailing catch-all, mirroring groupBySelectProperty's own "preserve empty
+ * groups, never create placeholder records" rule at this second dimension too: each swimlane's
+ * `columns` is computed via groupBySelectProperty over only the records in that swimlane, so
+ * every column still renders inside every swimlane (including an otherwise-empty one) rather
+ * than collapsing empty swimlane/column intersections. `columnProperty` and `swimlaneProperty`
+ * are expected to be distinct properties — Board itself enforces that when offering the
+ * swimlane-by picker, since grouping and cross-grouping by the same property would be redundant.
+ */
+export function groupBySwimlaneAndColumn(
+	records: WorkspaceRecord[],
+	columnProperty: PropertyDefinition,
+	swimlaneProperty: PropertyDefinition
+): BoardSwimlane[] {
+	const options = swimlaneProperty.options ?? [];
+	const swimlanes: BoardSwimlane[] = options.map((option) => ({
+		optionId: option.id,
+		label: option.label,
+		color: option.color,
+		columns: groupBySelectProperty(
+			records.filter((record) => selectOptionIdForRecord(record, swimlaneProperty) === option.id),
+			columnProperty
+		)
+	}));
+
+	const unassignedRecords = records.filter((record) => {
+		const optionId = selectOptionIdForRecord(record, swimlaneProperty);
+		return optionId === null || !options.some((option) => option.id === optionId);
+	});
+	const unassigned: BoardSwimlane = {
+		optionId: null,
+		label: `No ${swimlaneProperty.label}`,
+		columns: groupBySelectProperty(unassignedRecords, columnProperty)
+	};
+
+	return [...swimlanes, unassigned];
 }
 
 /**
@@ -326,6 +386,7 @@ export function viewConfigsEqual(a: ViewConfig, b: ViewConfig): boolean {
 		sortEqual(a.sort, b.sort) &&
 		stringSetEqual(a.visibleProperties, b.visibleProperties) &&
 		a.groupBy === b.groupBy &&
+		a.swimlaneBy === b.swimlaneBy &&
 		summariesEqual(a.summaries, b.summaries)
 	);
 }
@@ -357,6 +418,7 @@ export function diffViewConfig(base: ViewConfig, next: ViewConfig): Partial<View
 			: !stringSetEqual(base.visibleProperties, next.visibleProperties);
 	if (visibilityChanged) patch.visibleProperties = next.visibleProperties;
 	if (base.groupBy !== next.groupBy) patch.groupBy = next.groupBy;
+	if (base.swimlaneBy !== next.swimlaneBy) patch.swimlaneBy = next.swimlaneBy;
 	if (!summariesEqual(base.summaries, next.summaries)) patch.summaries = next.summaries;
 	return patch;
 }
