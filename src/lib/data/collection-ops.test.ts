@@ -16,6 +16,7 @@ import {
 	moveSelectOption,
 	previewCollectionPropertyTypeChange,
 	resolvePrimaryField,
+	setDefaultSelectOption,
 	setPrimaryField,
 	updateCollectionProperty,
 	updateCollectionSchema,
@@ -826,5 +827,81 @@ describe('select option lifecycle: add, rename, recolor, reorder, delete (issue 
 		const { collection } = setupSelectCollection(doc);
 		expect(() => deleteSelectOption(doc, 'missing', 'status', 'todo')).toThrow(NotFoundError);
 		expect(() => deleteSelectOption(doc, collection.id, 'missing', 'todo')).toThrow(NotFoundError);
+	});
+
+	describe('default option for newly created records (issue #100)', () => {
+		it('sets and clears defaultOptionId', () => {
+			const doc = new Y.Doc();
+			const { collection } = setupSelectCollection(doc);
+
+			setDefaultSelectOption(doc, collection.id, 'status', 'todo');
+			expect(getCollection(doc, collection.id)?.schema[0].defaultOptionId).toBe('todo');
+
+			setDefaultSelectOption(doc, collection.id, 'status', null);
+			expect(getCollection(doc, collection.id)?.schema[0].defaultOptionId).toBeUndefined();
+		});
+
+		it('replaces a previous default rather than allowing more than one', () => {
+			const doc = new Y.Doc();
+			const { collection } = setupSelectCollection(doc);
+
+			setDefaultSelectOption(doc, collection.id, 'status', 'todo');
+			setDefaultSelectOption(doc, collection.id, 'status', 'doing');
+			expect(getCollection(doc, collection.id)?.schema[0].defaultOptionId).toBe('doing');
+		});
+
+		it('throws NotFoundError for an unknown collection, field, or option id', () => {
+			const doc = new Y.Doc();
+			const { collection } = setupSelectCollection(doc);
+			expect(() => setDefaultSelectOption(doc, 'missing', 'status', 'todo')).toThrow(NotFoundError);
+			expect(() => setDefaultSelectOption(doc, collection.id, 'missing', 'todo')).toThrow(
+				NotFoundError
+			);
+			expect(() => setDefaultSelectOption(doc, collection.id, 'status', 'ghost')).toThrow(
+				NotFoundError
+			);
+		});
+
+		it('deleteSelectOption clears a stale defaultOptionId when the default option itself is deleted', () => {
+			const doc = new Y.Doc();
+			const { collection } = setupSelectCollection(doc);
+			setDefaultSelectOption(doc, collection.id, 'status', 'todo');
+
+			deleteSelectOption(doc, collection.id, 'status', 'todo');
+
+			expect(getCollection(doc, collection.id)?.schema[0].defaultOptionId).toBeUndefined();
+		});
+
+		it('deleteSelectOption leaves defaultOptionId untouched when a different option is deleted', () => {
+			const doc = new Y.Doc();
+			const { collection } = setupSelectCollection(doc);
+			setDefaultSelectOption(doc, collection.id, 'status', 'todo');
+
+			deleteSelectOption(doc, collection.id, 'status', 'doing');
+
+			expect(getCollection(doc, collection.id)?.schema[0].defaultOptionId).toBe('todo');
+		});
+
+		it('updateCollectionProperty carries defaultOptionId forward across a same-select-type edit, and drops it on retype away from select', () => {
+			const doc = new Y.Doc();
+			const { collection } = setupSelectCollection(doc);
+			setDefaultSelectOption(doc, collection.id, 'status', 'todo');
+
+			updateCollectionProperty(doc, collection.id, 'status', { label: 'State' });
+			expect(getCollection(doc, collection.id)?.schema[0].defaultOptionId).toBe('todo');
+
+			updateCollectionProperty(doc, collection.id, 'status', { type: 'text' });
+			expect(getCollection(doc, collection.id)?.schema[0].defaultOptionId).toBeUndefined();
+		});
+
+		it('createRecord seeds the configured default onto a new row in this collection', () => {
+			const doc = new Y.Doc();
+			const { collection } = setupSelectCollection(doc);
+			setDefaultSelectOption(doc, collection.id, 'status', 'todo');
+
+			const row = createRecord(doc, { parentId: collection.id }, human);
+
+			expect(getRecord(doc, row.id)?.properties?.status).toEqual({ type: 'select', value: 'todo' });
+		});
 	});
 });

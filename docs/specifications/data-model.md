@@ -25,6 +25,7 @@ interface PropertyDefinition {
 	label: string;
 	type: PropertyValue['type'];
 	options?: { id: string; label: string; color?: string }[]; // for 'select'
+	defaultOptionId?: string; // for 'select' — pre-fills onto every newly created record (issue #100), unless the caller already supplies its own value for this field; see collection-views.md §6
 	targetCollectionId?: string; // for 'relation' — which Collection its record-id values point into (issue #15)
 }
 
