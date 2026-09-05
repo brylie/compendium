@@ -1,13 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import {
-	createCollection,
-	createDocument,
-	createRecord,
-	deleteDocument,
-	updateDocumentTitle,
-	updateRecordContent
-} from './records';
+import { createDocument, deleteDocument, updateDocumentTitle } from './document-ops';
+import { createCollection } from './collection-ops';
+import { createRecord, updateRecordContent } from './record-ops';
 import {
 	RECORD_LINK_SCHEME,
 	isLinkBroken,

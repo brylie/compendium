@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
-import { getRecordYText } from '$lib/data/records';
+import { getRecordYText } from '$lib/data/record-ops';
 
 // Proves #111/#138's core guarantee through the real MCP + Yjs protocol
 // boundary: two differently-configured instances (COMPENDIUM_INSTANCE_ID

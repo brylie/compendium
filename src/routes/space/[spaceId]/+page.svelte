@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
-	import { buildDocumentTree } from '$lib/data/records';
+	import { buildDocumentTree } from '$lib/data/document-ops';
 	import type { DocumentTreeNode } from '$lib/data/types';
 	import Icon from '$lib/components/Icon.svelte';
 	import type { PageProps } from './$types';

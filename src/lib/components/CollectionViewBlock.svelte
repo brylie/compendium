@@ -6,7 +6,7 @@
 		patchRecordViewConfig,
 		setRecordReferencedId,
 		setRecordViewConfig
-	} from '$lib/data/records';
+	} from '$lib/data/record-ops';
 	import { diffViewConfig, viewConfigsEqual } from '$lib/data/views';
 	import type {
 		CollectionMeta,

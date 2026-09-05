@@ -1,15 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
+import { createDocument, getDocument } from '$lib/data/document-ops';
+import { createCollection } from '$lib/data/collection-ops';
 import {
-	createCollection,
-	createDocument,
 	createRecord,
 	deleteRecord,
-	getDocument,
 	getRecord,
 	getRecordYText,
 	updateRecordProperties
-} from '$lib/data/records';
+} from '$lib/data/record-ops';
 import type { ActorId } from '$lib/data/types';
 import { createUndoManager, redo, subscribeUndoRedoState, undo } from './undo';
 import { LOCAL_UI_ORIGIN, remoteUiOrigin } from '../mutation-origin';

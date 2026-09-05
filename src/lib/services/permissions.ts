@@ -1,6 +1,6 @@
 import type { ActorId } from '$lib/data/types';
 import { resolveWorkspaceContext, type WorkspaceContext } from '$lib/server/workspace-store';
-import { getRecord } from '$lib/data/records';
+import { getRecord } from '$lib/data/record-ops';
 import { tokenAllowsParent, type AccessToken } from '$lib/server/token-store';
 import { logAudit } from '$lib/server/audit';
 import { resolveShardForParent, resolveShardForRecord } from '$lib/server/catalog';

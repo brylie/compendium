@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import { createDocument, createRecord, getRecord, listDocuments } from '$lib/data/records';
+import { createDocument, listDocuments } from '$lib/data/document-ops';
+import { createRecord, getRecord } from '$lib/data/record-ops';
 import type { ActorId } from '$lib/data/types';
 import ChildPagesBlock from './ChildPagesBlock.svelte';
 

@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
+import { createCollection } from '$lib/data/collection-ops';
+import { createDocument as createDocumentRaw } from '$lib/data/document-ops';
 import {
-	createCollection,
-	createDocument as createDocumentRaw,
 	createRecord,
+	deleteRecord as crdtDeleteRecord,
 	getRecord,
 	getRecordYText,
 	touchRecordEditor,
 	updateRecordContent
-} from '$lib/data/records';
+} from '$lib/data/record-ops';
 import { queryAuditLog } from '$lib/server/audit';
 import {
 	createSpace,
@@ -20,7 +21,6 @@ import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { plainText, yTextToRichText } from '$lib/data/richtext';
 import { serviceModules, serviceSurfaces } from '$lib/services/manifest';
 import { flushPendingAuditEvents } from '$lib/server/audit-observer';
-import { deleteRecord as crdtDeleteRecord } from '$lib/data/records';
 import type { ActorId } from '$lib/data/types';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 

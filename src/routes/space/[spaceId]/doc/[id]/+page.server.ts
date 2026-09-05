@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
-import { getDocument } from '$lib/data/records';
+import { getDocument } from '$lib/data/document-ops';
 import { listDocuments, listCollections } from '$lib/services';
 import { resolveParentWorkspaceContext } from '$lib/services/permissions';
 import type { PageServerLoad } from './$types';

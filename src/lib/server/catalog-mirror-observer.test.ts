@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import {
 	createDocument as crdtCreateDocument,
-	createCollection as crdtCreateCollection,
 	updateDocumentTitle as crdtUpdateDocumentTitle,
-	updateDocumentParent as crdtUpdateDocumentParent,
+	updateDocumentParent as crdtUpdateDocumentParent
+} from '$lib/data/document-ops';
+import {
+	createCollection as crdtCreateCollection,
 	updateCollectionTitle as crdtUpdateCollectionTitle
-} from '$lib/data/records';
+} from '$lib/data/collection-ops';
 import {
 	ensureCatalogBootstrapped,
 	listCatalogCollections,

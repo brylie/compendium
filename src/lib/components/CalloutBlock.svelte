@@ -2,7 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import type * as Y from 'yjs';
 	import { CURRENT_USER } from '$lib/client/actor';
-	import { setRecordCalloutStyle } from '$lib/data/records';
+	import { setRecordCalloutStyle } from '$lib/data/record-ops';
 	import {
 		CALLOUT_ICONS,
 		CALLOUT_PRESETS,

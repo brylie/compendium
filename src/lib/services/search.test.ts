@@ -6,11 +6,9 @@ import {
 	searchWorkspace,
 	writeRecord
 } from './index';
-import {
-	createCollection as rawCrdtCreateCollection,
-	createDocument as rawCrdtCreateDocument,
-	createRecord as rawCrdtCreateRecord
-} from '$lib/data/records';
+import { createDocument as rawCrdtCreateDocument } from '$lib/data/document-ops';
+import { createCollection as rawCrdtCreateCollection } from '$lib/data/collection-ops';
+import { createRecord as rawCrdtCreateRecord } from '$lib/data/record-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { createToken } from '$lib/mcp/tokens';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';

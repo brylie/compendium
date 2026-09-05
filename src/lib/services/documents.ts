@@ -2,15 +2,17 @@ import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import {
 	computeSiblingOrder,
 	createDocument as crdtCreateDocument,
-	createRecord as crdtCreateRecord,
 	deleteDocument as crdtDeleteDocument,
-	getCollection as crdtGetCollection,
 	getDocument as crdtGetDocument,
-	listRecordsForParent as crdtListRecordsForParent,
 	resolveChildPages,
 	updateDocumentParent as crdtUpdateDocumentParent,
 	updateDocumentTitle as crdtUpdateDocumentTitle
-} from '$lib/data/records';
+} from '$lib/data/document-ops';
+import { getCollection as crdtGetCollection } from '$lib/data/collection-ops';
+import {
+	createRecord as crdtCreateRecord,
+	listRecordsForParent as crdtListRecordsForParent
+} from '$lib/data/record-ops';
 import { logAudit } from '$lib/server/audit';
 import {
 	RecordIdConflictError,

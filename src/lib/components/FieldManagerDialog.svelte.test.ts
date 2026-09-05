@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import { createCollection, deleteCollection, getCollection } from '$lib/data/records';
+import { createCollection, deleteCollection, getCollection } from '$lib/data/collection-ops';
 import FieldManagerDialog from './FieldManagerDialog.svelte';
 
 let ydoc: Y.Doc;

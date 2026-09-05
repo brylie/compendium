@@ -2,12 +2,10 @@ import type * as Y from 'yjs';
 import { CURRENT_USER } from './actor';
 import {
 	addSelectOption,
-	appendCollectionField as appendCollectionFieldToSchema,
-	createRecord,
-	deleteRecord,
-	updateRecordProperties,
-	ValidationError
-} from '$lib/data/records';
+	appendCollectionField as appendCollectionFieldToSchema
+} from '$lib/data/collection-ops';
+import { createRecord, deleteRecord, updateRecordProperties } from '$lib/data/record-ops';
+import { ValidationError } from '$lib/data/errors';
 import type { PropertyDefinition, PropertyValue, WorkspaceRecord } from '$lib/data/types';
 
 /**

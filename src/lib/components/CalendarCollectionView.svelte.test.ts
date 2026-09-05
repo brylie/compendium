@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import { createCollection, createRecord, getCollection, getRecord } from '$lib/data/records';
+import { createCollection, getCollection } from '$lib/data/collection-ops';
+import { createRecord, getRecord } from '$lib/data/record-ops';
 import type { ViewConfig } from '$lib/data/views';
 import CalendarCollectionViewHarness from './CalendarCollectionViewHarness.svelte';
 

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import { createDocument, createRecord, getRecord } from '$lib/data/records';
+import { createDocument } from '$lib/data/document-ops';
+import { createRecord, getRecord } from '$lib/data/record-ops';
 import type { ActorId } from '$lib/data/types';
 import CalloutBlockHarness from './CalloutBlockHarness.svelte';
 

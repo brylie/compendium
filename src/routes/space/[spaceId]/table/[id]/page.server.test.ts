@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { load } from './+page.server';
-import { createCollection as rawCreateCollection } from '$lib/data/records';
+import { createCollection as rawCreateCollection } from '$lib/data/collection-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { createCollection as createCollectionService } from '$lib/services';
 import { CURRENT_USER } from '$lib/server/current-user';

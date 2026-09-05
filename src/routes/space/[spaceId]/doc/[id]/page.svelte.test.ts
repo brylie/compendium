@@ -3,13 +3,9 @@ import { tick } from 'svelte';
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import {
-	createCollection,
-	createDocument,
-	createRecord,
-	getDocument,
-	getRecordYText
-} from '$lib/data/records';
+import { createDocument, getDocument } from '$lib/data/document-ops';
+import { createCollection } from '$lib/data/collection-ops';
+import { createRecord, getRecordYText } from '$lib/data/record-ops';
 import type { ActorId } from '$lib/data/types';
 import Page from './+page.svelte';
 

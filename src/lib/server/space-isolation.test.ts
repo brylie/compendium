@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { createDocument as rawCrdtCreateDocument } from '$lib/data/document-ops';
+import { createCollection as rawCrdtCreateCollection } from '$lib/data/collection-ops';
 import {
-	createCollection as rawCrdtCreateCollection,
-	createDocument as rawCrdtCreateDocument,
 	createRecord as rawCrdtCreateRecord,
 	updateRecordContent as rawUpdateRecordContent
-} from '$lib/data/records';
+} from '$lib/data/record-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { CURRENT_USER } from './current-user';
 import {

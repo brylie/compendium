@@ -1,8 +1,6 @@
 import * as Y from 'yjs';
-import {
-	getCollection as crdtGetCollection,
-	getDocument as crdtGetDocument
-} from '../data/records.js';
+import { getDocument as crdtGetDocument } from '../data/document-ops.js';
+import { getCollection as crdtGetCollection } from '../data/collection-ops.js';
 import {
 	recordCatalogCollectionTitleChanged,
 	recordCatalogDocumentMetadataChanged

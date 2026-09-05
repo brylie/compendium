@@ -4,7 +4,7 @@
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { buildDocumentTree } from '$lib/data/records';
+	import { buildDocumentTree } from '$lib/data/document-ops';
 	import { isDark, toggleTheme } from '$lib/client/theme';
 	import type { CollectionMeta, DocumentMeta, DocumentTreeNode, SpaceMeta } from '$lib/data/types';
 	import Icon from './Icon.svelte';

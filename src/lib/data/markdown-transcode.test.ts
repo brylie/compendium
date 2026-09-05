@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { createCollection, createDocument, deleteDocument } from '$lib/data/records';
+import { createDocument, deleteDocument } from '$lib/data/document-ops';
+import { createCollection } from '$lib/data/collection-ops';
 import { createDocument as serviceCreateDocument } from '$lib/services';
 import { CURRENT_USER } from '$lib/server/current-user';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';

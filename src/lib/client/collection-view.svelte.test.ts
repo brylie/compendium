@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
 import * as Y from 'yjs';
-import { createCollection, createRecord, setPrimaryField } from '$lib/data/records';
+import { createCollection, setPrimaryField } from '$lib/data/collection-ops';
+import { createRecord } from '$lib/data/record-ops';
 import type { ViewConfig } from '$lib/data/views';
 import type { PropertyDefinition } from '$lib/data/types';
 import {

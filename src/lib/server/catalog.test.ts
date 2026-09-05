@@ -9,10 +9,8 @@ import {
 	recordLocator,
 	spaces
 } from './db/schema';
-import {
-	createDocument as crdtCreateDocument,
-	createCollection as crdtCreateCollection
-} from '$lib/data/records';
+import { createDocument as crdtCreateDocument } from '$lib/data/document-ops';
+import { createCollection as crdtCreateCollection } from '$lib/data/collection-ops';
 import {
 	createSpace,
 	ensureCatalogBootstrapped,

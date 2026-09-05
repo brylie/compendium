@@ -13,7 +13,7 @@
 		removeCollectionRow,
 		setCollectionCell
 	} from '$lib/client/collection-editor';
-	import { resolvePrimaryField } from '$lib/data/records';
+	import { resolvePrimaryField } from '$lib/data/collection-ops';
 	import {
 		groupBySelectProperty,
 		primaryFieldDisplayValue,

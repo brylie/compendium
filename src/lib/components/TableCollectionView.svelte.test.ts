@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import { createCollection, createRecord, getRecord, setPrimaryField } from '$lib/data/records';
+import { createCollection, setPrimaryField } from '$lib/data/collection-ops';
+import { createRecord, getRecord } from '$lib/data/record-ops';
 import TableCollectionViewHarness from './TableCollectionViewHarness.svelte';
 
 vi.mock('$app/state', () => ({

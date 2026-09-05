@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import type * as Y from 'yjs';
 	import { resolve } from '$app/paths';
-	import { updateCollectionTitle } from '$lib/data/records';
+	import { updateCollectionTitle } from '$lib/data/collection-ops';
 	import type { ViewConfig } from '$lib/data/views';
 	import TableCollectionView from '$lib/components/TableCollectionView.svelte';
 	import type { PageProps } from './$types';

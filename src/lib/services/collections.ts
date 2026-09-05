@@ -1,13 +1,13 @@
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import { getDocument as crdtGetDocument } from '$lib/data/document-ops';
 import {
 	createCollection as crdtCreateCollection,
 	deleteCollection as crdtDeleteCollection,
 	getCollection as crdtGetCollection,
-	getDocument as crdtGetDocument,
-	listRecordsForParent as crdtListRecordsForParent,
 	resolvePrimaryField,
 	updateCollectionTitle as crdtUpdateCollectionTitle
-} from '$lib/data/records';
+} from '$lib/data/collection-ops';
+import { listRecordsForParent as crdtListRecordsForParent } from '$lib/data/record-ops';
 import { logAudit } from '$lib/server/audit';
 import {
 	RecordIdConflictError,

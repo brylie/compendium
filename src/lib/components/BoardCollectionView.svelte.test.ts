@@ -4,12 +4,11 @@ import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import {
 	createCollection,
-	createRecord,
 	getCollection,
-	getRecord,
 	setPrimaryField,
 	updateCollectionSchema
-} from '$lib/data/records';
+} from '$lib/data/collection-ops';
+import { createRecord, getRecord } from '$lib/data/record-ops';
 import type { ViewConfig } from '$lib/data/views';
 import BoardCollectionViewHarness from './BoardCollectionViewHarness.svelte';
 

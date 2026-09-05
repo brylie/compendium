@@ -11,10 +11,8 @@ import {
 	recordLocator,
 	spaces
 } from './db/schema.js';
-import {
-	listCollections as crdtListCollections,
-	listDocuments as crdtListDocuments
-} from '../data/records.js';
+import { listDocuments as crdtListDocuments } from '../data/document-ops.js';
+import { listCollections as crdtListCollections } from '../data/collection-ops.js';
 import type { CollectionMeta, DocumentMeta, ParentKind, SpaceMeta } from '../data/types.js';
 
 // The transaction handle drizzle's better-sqlite3 driver passes into a
