@@ -6,7 +6,7 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import type { PageProps } from './$types';
 
-	let { data }: PageProps = $props();
+	let { data, form }: PageProps = $props();
 	let docTree = $derived(buildDocumentTree(data.documents));
 	let spaceId = $derived(page.params.spaceId!);
 </script>
@@ -22,6 +22,15 @@
 			Unified CRDT workspace for human notes and real-time MCP agent collaboration.
 		</p>
 	</header>
+
+	{#if form?.error}
+		<div
+			class="mb-6 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2.5 text-sm text-red-700 dark:text-red-300"
+			role="alert"
+		>
+			{form.error}
+		</div>
+	{/if}
 
 	<div class="grid grid-cols-1 gap-8 md:grid-cols-2">
 		<!-- Documents Card -->

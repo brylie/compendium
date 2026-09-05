@@ -13,6 +13,7 @@ import {
 	RecordIdConflictError,
 	UnknownSpaceError,
 	isKnownSpace,
+	listCatalogCollections,
 	recordCatalogCollectionCreated,
 	recordCatalogCollectionDeleted,
 	recordCatalogCollectionTitleChanged,
@@ -36,6 +37,41 @@ export interface CreateCollectionInput {
 	title: string;
 	schema?: PropertyDefinition[];
 	spaceId?: string;
+}
+
+/**
+ * Thrown by createCollection/updateCollectionTitle when another Collection already in the
+ * same Space has this title (case-insensitive, trimmed). Collections are flat (no parent
+ * hierarchy to disambiguate by, unlike Documents — see documentAncestorPath in
+ * document-ops.ts), so issue #78 resolves their duplicate-title ambiguity by preventing it
+ * at write time instead of only surfacing it in list UIs. Scoped per-Space, not
+ * workspace-wide: two Spaces each having their own "Sprint Tasks" is a normal, intended
+ * pattern. Pre-existing duplicate titles (from before this check existed) are left alone —
+ * this only guards new creates/renames going forward.
+ */
+export class DuplicateCollectionTitleError extends Error {
+	constructor(title: string) {
+		super(`A Collection titled "${title.trim()}" already exists in this Space`);
+		this.name = 'DuplicateCollectionTitleError';
+	}
+}
+
+function normalizeCollectionTitleKey(title: string): string {
+	return (title || 'Untitled').trim().toLowerCase();
+}
+
+/** Throws DuplicateCollectionTitleError if another Collection in `spaceId` already has this title. Catalog-scoped only — see the class doc comment. */
+function assertUniqueCollectionTitleInSpace(
+	workspaceId: string,
+	spaceId: string,
+	title: string,
+	excludeId?: string
+): void {
+	const key = normalizeCollectionTitleKey(title);
+	const collides = listCatalogCollections(workspaceId, spaceId).some(
+		(existing) => existing.id !== excludeId && normalizeCollectionTitleKey(existing.title) === key
+	);
+	if (collides) throw new DuplicateCollectionTitleError(title);
 }
 
 /**
@@ -63,6 +99,7 @@ export function createCollection(
 	if (input.spaceId !== undefined && !isKnownSpace(workspaceId, input.spaceId)) {
 		throw new UnknownSpaceError(input.spaceId);
 	}
+	assertUniqueCollectionTitleInSpace(workspaceId, targetSpaceId, input.title);
 
 	// See documents.ts's createDocument for why this also checks the live
 	// Y.Doc, not just the catalog locator: a caller-supplied id could collide
@@ -184,10 +221,16 @@ export function updateCollectionTitle(
 	collectionId: string,
 	title: string
 ): void {
-	const { doc, workspaceId } = resolveParentWorkspaceContext(collectionId);
+	const { doc, workspaceId, parentSpaceId } = resolveParentWorkspaceContext(collectionId);
 	const actor = actorForCaller(caller);
 
 	requireAccessibleParent(caller, collectionId, 'update_collection_title');
+	// parentSpaceId is undefined only for a legacy/uncataloged Collection (no
+	// locator row) — nothing to scope the uniqueness check to in that case,
+	// consistent with pre-existing duplicates being left alone (issue #78).
+	if (parentSpaceId !== undefined) {
+		assertUniqueCollectionTitleInSpace(workspaceId, parentSpaceId, title, collectionId);
+	}
 	transactWithOrigin(doc, SERVICE_ORIGIN, () =>
 		crdtUpdateCollectionTitle(doc, collectionId, title)
 	);

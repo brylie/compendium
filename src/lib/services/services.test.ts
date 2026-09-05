@@ -20,7 +20,8 @@ import {
 	writeRecord,
 	PermissionDeniedError,
 	HoldRequiredError,
-	InvalidLinkTargetError
+	InvalidLinkTargetError,
+	DuplicateCollectionTitleError
 } from './index';
 import { projectDocument } from '$lib/mcp/document-projection';
 
@@ -55,6 +56,7 @@ import {
 } from '$lib/data/record-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import {
+	createSpace as catalogCreateSpace,
 	listCatalogCollections,
 	listCatalogDocuments,
 	RecordIdConflictError,
@@ -1314,6 +1316,47 @@ describe('service layer: collections — grants, listing, query, delete, rename'
 		updateCollectionTitle(human, collection.id, 'After');
 		const { collection: updated } = queryCollection(human, collection.id);
 		expect(updated?.title).toBe('After');
+	});
+
+	describe('Collection titles are unique per-Space (issue #78)', () => {
+		it('createCollection rejects a title already used by another Collection in the same Space', () => {
+			createCollection(human, { title: 'Sprint Tasks' });
+			expect(() => createCollection(human, { title: 'Sprint Tasks' })).toThrow(
+				DuplicateCollectionTitleError
+			);
+		});
+
+		it('createCollection treats a colliding title as case-insensitive and trims whitespace', () => {
+			createCollection(human, { title: 'Sprint Tasks' });
+			expect(() => createCollection(human, { title: '  sprint tasks  ' })).toThrow(
+				DuplicateCollectionTitleError
+			);
+		});
+
+		it('createCollection allows the same title in a different Space', () => {
+			const { workspaceId } = resolveWorkspaceContext();
+			const otherSpace = catalogCreateSpace(workspaceId, 'Other Space');
+
+			createCollection(human, { title: 'Sprint Tasks' });
+			const inOtherSpace = createCollection(human, {
+				title: 'Sprint Tasks',
+				spaceId: otherSpace.id
+			});
+			expect(inOtherSpace.title).toBe('Sprint Tasks');
+		});
+
+		it('updateCollectionTitle rejects renaming to a title already used by another Collection in the same Space', () => {
+			createCollection(human, { title: 'Sprint Tasks' });
+			const other = createCollection(human, { title: 'Launch Tracker' });
+			expect(() => updateCollectionTitle(human, other.id, 'Sprint Tasks')).toThrow(
+				DuplicateCollectionTitleError
+			);
+		});
+
+		it('updateCollectionTitle allows renaming a Collection to its own current title unchanged', () => {
+			const collection = createCollection(human, { title: 'Sprint Tasks' });
+			expect(() => updateCollectionTitle(human, collection.id, 'Sprint Tasks')).not.toThrow();
+		});
 	});
 
 	it('deleteCollection removes a collection a caller can access', () => {

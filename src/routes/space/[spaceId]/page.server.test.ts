@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { load, actions } from './+page.server';
-import { createDocument } from '$lib/services';
+import { createCollection, createDocument } from '$lib/services';
 import { CURRENT_USER } from '$lib/server/current-user';
 import { resolveRequestContext } from '$lib/server/request-context';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
@@ -64,5 +64,14 @@ describe('routes/+page.server: workspace home', () => {
 		await expect(actions.createCollection(formEvent({ title: 'New Table' }))).rejects.toMatchObject(
 			{ status: 303, location: expect.stringMatching(/^\/space\/.+\/table\//) }
 		);
+	});
+
+	it('createCollection action fails with a 400 when the title collides with an existing Collection in the same Space (issue #78)', async () => {
+		createCollection(CURRENT_USER, { title: 'Sprint Tasks', spaceId: spaceId() });
+		const result = await actions.createCollection(formEvent({ title: 'Sprint Tasks' }));
+		expect(result).toMatchObject({
+			status: 400,
+			data: { error: expect.stringContaining('Sprint Tasks') }
+		});
 	});
 });

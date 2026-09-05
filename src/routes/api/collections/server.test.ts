@@ -24,4 +24,11 @@ describe('routes/api/collections', () => {
 		const data = await response.json();
 		expect(data.title).toBe('Untitled Collection');
 	});
+
+	it('returns a 400 error when the title collides with an existing Collection in the same Space (issue #78)', async () => {
+		await POST(jsonRequest({ title: 'Sprint Tasks' }));
+		await expect(POST(jsonRequest({ title: 'Sprint Tasks' }))).rejects.toMatchObject({
+			status: 400
+		});
+	});
 });
