@@ -15,7 +15,8 @@ import {
 	blockTypes,
 	propertyTypes,
 	type BlockType,
-	type EmbeddedViewConfig
+	type EmbeddedViewConfig,
+	type ViewConfig
 } from '$lib/data/types';
 import { projectDocument } from './document-projection';
 
@@ -32,48 +33,84 @@ const blockTypeSchema = z.enum(blockTypes);
 
 const childPagesDepthSchema = z.union([z.number().int().positive(), z.literal('unlimited')]);
 
+// Mirrors ViewConfig's own members ($lib/data/types.ts) — shared between
+// viewConfigSchema (whole-value, viewType required) and viewConfigPatchSchema
+// (per-member merge, issue #195) below.
+const viewFiltersSchema = z.array(
+	z.object({
+		propertyKey: z.string(),
+		op: z.enum(['is', 'is_not', 'is_empty', 'is_not_empty']),
+		value: z.string().optional()
+	})
+);
+const viewSortSchema = z.object({
+	mode: z.enum(['manual', 'property']),
+	propertyKey: z.string().optional(),
+	direction: z.enum(['asc', 'desc']).optional()
+});
+const viewSummariesSchema = z.record(
+	z.string(),
+	z.enum([
+		'none',
+		'count_all',
+		'count_values',
+		'count_empty',
+		'sum',
+		'average',
+		'min',
+		'max',
+		'earliest',
+		'latest',
+		'checked',
+		'unchecked'
+	])
+);
+
 // Mirrors EmbeddedViewConfig ($lib/data/types.ts) field-for-field — see
 // collection-views.md §2/§9 for what each member means.
 const viewConfigSchema = z.object({
 	viewType: z.enum(['table', 'board', 'calendar']),
-	filters: z
-		.array(
-			z.object({
-				propertyKey: z.string(),
-				op: z.enum(['is', 'is_not', 'is_empty', 'is_not_empty']),
-				value: z.string().optional()
-			})
-		)
-		.optional(),
-	sort: z
-		.object({
-			mode: z.enum(['manual', 'property']),
-			propertyKey: z.string().optional(),
-			direction: z.enum(['asc', 'desc']).optional()
-		})
-		.optional(),
+	filters: viewFiltersSchema.optional(),
+	sort: viewSortSchema.optional(),
 	visibleProperties: z.array(z.string()).optional(),
 	groupBy: z.string().optional(),
-	summaries: z
-		.record(
-			z.string(),
-			z.enum([
-				'none',
-				'count_all',
-				'count_values',
-				'count_empty',
-				'sum',
-				'average',
-				'min',
-				'max',
-				'earliest',
-				'latest',
-				'checked',
-				'unchecked'
-			])
-		)
-		.optional()
+	summaries: viewSummariesSchema.optional()
 });
+
+// write_record's per-member counterpart to viewConfigSchema (issue #195): no
+// `viewType` (a patch can't change it — see patchRecordViewConfig's own doc
+// comment in $lib/data/record-ops.ts), and each member is nullable so a
+// caller can explicitly clear it (`null`) as distinct from leaving it
+// untouched (omitted) — JSON has no way to send "the key undefined", the
+// distinction patchRecordViewConfig's Partial<ViewConfig> patch relies on, so
+// `null` stands in for it here and normalizeViewConfigPatch below converts it
+// back before this reaches the service layer.
+const viewConfigPatchSchema = z.object({
+	filters: viewFiltersSchema.nullable().optional(),
+	sort: viewSortSchema.nullable().optional(),
+	visibleProperties: z.array(z.string()).nullable().optional(),
+	groupBy: z.string().nullable().optional(),
+	summaries: viewSummariesSchema.nullable().optional()
+});
+
+/**
+ * Converts a parsed viewConfigPatchSchema object into the `Partial<ViewConfig>` the service
+ * layer expects — a member explicitly sent as `null` becomes `undefined` (clear it), a member
+ * omitted from the call stays absent from the result entirely (leave it untouched). Relies on
+ * `Object.keys`/spread preserving an explicitly-assigned `undefined` value as a present key,
+ * which is what lets patchRecordViewConfig ($lib/data/record-ops.ts) tell "clear this member"
+ * apart from "don't mention it".
+ */
+function normalizeViewConfigPatch(
+	patch: z.infer<typeof viewConfigPatchSchema> | undefined
+): Partial<ViewConfig> | undefined {
+	if (!patch) return undefined;
+	const normalized: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(patch)) {
+		normalized[key] = value ?? undefined;
+	}
+	return normalized;
+}
 
 function textResult(data: unknown): CallToolResult {
 	return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
@@ -339,16 +376,21 @@ export function createMcpServer(): McpServer {
 			markdown: z.string().optional(),
 			properties: z.record(z.string(), propertyValueSchema).optional(),
 			referencedRecordId: z.string().optional(),
-			viewConfig: viewConfigSchema.optional()
+			viewConfig: viewConfigSchema.optional(),
+			viewConfigPatch: viewConfigPatchSchema.optional()
 		},
-		async ({ recordId, markdown, properties, referencedRecordId, viewConfig }, extra) => {
+		async (
+			{ recordId, markdown, properties, referencedRecordId, viewConfig, viewConfigPatch },
+			extra
+		) => {
 			try {
 				const token = requireToken(extra);
 				serviceModules.records.writeRecord(token, recordId, {
 					markdown,
 					properties,
 					referencedRecordId,
-					viewConfig: viewConfig as EmbeddedViewConfig | undefined
+					viewConfig: viewConfig as EmbeddedViewConfig | undefined,
+					viewConfigPatch: normalizeViewConfigPatch(viewConfigPatch)
 				});
 				return textResult({ success: true });
 			} catch (err) {
