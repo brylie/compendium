@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-	createCollection as crdtCreateCollection,
-	createDocument as crdtCreateDocument
+	createCollection as rawCrdtCreateCollection,
+	createDocument as rawCrdtCreateDocument
 } from '$lib/data/records';
 import { createDocument, createCollection } from '$lib/services';
 import type { ActorId } from '$lib/data/types';
+import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { resolveWorkspaceContext } from './workspace-store';
 import { createSpace, listCatalogDocuments } from './catalog';
 import {
@@ -15,6 +16,14 @@ import {
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
 const allowAll = () => true;
+
+function crdtCreateDocument(...args: Parameters<typeof rawCrdtCreateDocument>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateDocument(...args));
+}
+
+function crdtCreateCollection(...args: Parameters<typeof rawCrdtCreateCollection>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateCollection(...args));
+}
 
 describe('listWorkspaceDocuments', () => {
 	it('includes both catalog-listed and uncataloged Documents when spaceId is omitted', () => {
