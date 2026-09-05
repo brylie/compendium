@@ -102,11 +102,13 @@
 
 	// swimlaneBy (issue #67/#165): an optional second grouping dimension,
 	// restricted to a select property distinct from groupBy — candidates
-	// exclude whichever property already drives columns. If config.swimlaneBy
-	// names a property that's since been deleted, or now collides with
-	// groupBy (the user retargeted "Group by" onto it), swimlaneProperty
-	// resolves to undefined and the board falls back to the flat column view
-	// below, the same graceful-degradation pattern groupProperty already has.
+	// exclude whichever property already drives columns (changeGroupBy below
+	// clears swimlaneBy outright when a retarget would collide with it, so
+	// this exclusion is mostly belt-and-suspenders). If config.swimlaneBy
+	// names a property that's since been deleted out from under it,
+	// swimlaneProperty resolves to undefined and the board falls back to the
+	// flat column view below, the same graceful-degradation pattern
+	// groupProperty already has.
 	const swimlaneCandidates = $derived(
 		schema.filter((p) => p.type === 'select' && p.key !== config.groupBy)
 	);
@@ -142,6 +144,20 @@
 		if (appendCollectionField(ydoc, collectionId, property)) {
 			onConfigChange({ ...config, groupBy: property.key });
 		}
+	}
+
+	// Retargeting "Group by" onto the property currently driving swimlanes
+	// clears swimlaneBy rather than leaving it pointing at what's now the
+	// column property too — otherwise the persisted config would silently
+	// keep a stale swimlaneBy that can never resolve (swimlaneCandidates
+	// always excludes the current groupBy), quietly dropping into the flat
+	// column view instead of reflecting that the swimlane dimension is gone.
+	function changeGroupBy(newGroupBy: string): void {
+		onConfigChange({
+			...config,
+			groupBy: newGroupBy,
+			swimlaneBy: config.swimlaneBy === newGroupBy ? undefined : config.swimlaneBy
+		});
 	}
 
 	function addSelectOption(propertyKey: string, rawLabel: string): void {
@@ -321,8 +337,7 @@
 			<select
 				id="board-group-property-{collectionId}"
 				value={config.groupBy}
-				onchange={(e) =>
-					onConfigChange({ ...config, groupBy: (e.target as HTMLSelectElement).value })}
+				onchange={(e) => changeGroupBy((e.target as HTMLSelectElement).value)}
 				class="rounded-md border border-border bg-bg px-2 py-1 text-sm text-fg focus:border-accent focus:outline-none"
 			>
 				{#each selectProperties as property (property.key)}

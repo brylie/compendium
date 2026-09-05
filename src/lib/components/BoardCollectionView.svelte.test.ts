@@ -26,9 +26,10 @@ const actor = { kind: 'human' as const, userId: 'local' };
 
 function renderBoard(
 	collectionId: string,
-	initialConfig: ViewConfig = { sort: { mode: 'manual' } }
+	initialConfig: ViewConfig = { sort: { mode: 'manual' } },
+	onConfigChange?: (config: ViewConfig) => void
 ) {
-	return render(BoardCollectionViewHarness, { collectionId, initialConfig });
+	return render(BoardCollectionViewHarness, { collectionId, initialConfig, onConfigChange });
 }
 
 describe('BoardCollectionView', () => {
@@ -518,5 +519,54 @@ describe('BoardCollectionView', () => {
 		await user.selectOptions(swimlaneSelect, 'priority');
 
 		expect(await screen.findByRole('group', { name: 'High swimlane' })).toBeInTheDocument();
+	});
+
+	it('clears swimlaneBy when "Group by" is retargeted onto the same property, leaving a different retarget untouched', async () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Board',
+			schema: [
+				{
+					key: 'status',
+					label: 'Status',
+					type: 'select',
+					options: [{ id: 'todo', label: 'To do' }]
+				},
+				{
+					key: 'priority',
+					label: 'Priority',
+					type: 'select',
+					options: [{ id: 'high', label: 'High' }]
+				},
+				{
+					key: 'assignee',
+					label: 'Assignee',
+					type: 'select',
+					options: [{ id: 'alice', label: 'Alice' }]
+				}
+			]
+		});
+		let latestConfig: ViewConfig = { sort: { mode: 'manual' }, groupBy: 'status' };
+		const user = userEvent.setup();
+		renderBoard('col-1', latestConfig, (next) => {
+			latestConfig = next;
+		});
+
+		const swimlaneSelect = await screen.findByLabelText('Swimlane by');
+		await user.selectOptions(swimlaneSelect, 'priority');
+		expect(latestConfig.swimlaneBy).toBe('priority');
+
+		// Retargeting "Group by" onto a property distinct from the current
+		// swimlaneBy must leave swimlaneBy exactly as-is.
+		const groupSelect = screen.getByLabelText('Group by');
+		await user.selectOptions(groupSelect, 'assignee');
+		expect(latestConfig).toMatchObject({ groupBy: 'assignee', swimlaneBy: 'priority' });
+
+		// Retargeting "Group by" onto the property currently driving
+		// swimlanes must clear swimlaneBy — otherwise it would silently
+		// point at what's now the column property too, a duplicate-
+		// dimension state swimlaneCandidates can never resolve back to.
+		await user.selectOptions(groupSelect, 'priority');
+		expect(latestConfig).toMatchObject({ groupBy: 'priority', swimlaneBy: undefined });
 	});
 });
