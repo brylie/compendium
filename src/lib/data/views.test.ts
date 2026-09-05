@@ -7,6 +7,7 @@ import {
 	diffViewConfig,
 	fieldSummaryLabel,
 	groupBySelectProperty,
+	groupBySwimlaneAndColumn,
 	primaryFieldDisplayValue,
 	projectRecords,
 	summaryOptionsForType,
@@ -391,6 +392,91 @@ describe('groupBySelectProperty', () => {
 	});
 });
 
+describe('groupBySwimlaneAndColumn (issue #67/#165)', () => {
+	const priorityProperty: PropertyDefinition = {
+		key: 'priority',
+		label: 'Priority',
+		type: 'select',
+		options: [
+			{ id: 'high', label: 'High', color: 'red' },
+			{ id: 'low', label: 'Low', color: 'blue' }
+		]
+	};
+
+	it('creates one swimlane per schema option (plus a catch-all), each with the full set of columns, even when empty', () => {
+		const swimlanes = groupBySwimlaneAndColumn([], statusProperty, priorityProperty);
+		expect(swimlanes.map((s) => s.optionId)).toEqual(['high', 'low', null]);
+		for (const swimlane of swimlanes) {
+			expect(swimlane.columns.map((c) => c.optionId)).toEqual(['todo', 'done', null]);
+			expect(swimlane.columns.every((c) => c.records.length === 0)).toBe(true);
+		}
+	});
+
+	it('crosses swimlane and column membership — a record lands in exactly one cell', () => {
+		const records = [
+			record('a', {
+				status: { type: 'select', value: 'todo' },
+				priority: { type: 'select', value: 'high' }
+			}),
+			record('b', {
+				status: { type: 'select', value: 'done' },
+				priority: { type: 'select', value: 'high' }
+			}),
+			record('c', {
+				status: { type: 'select', value: 'todo' },
+				priority: { type: 'select', value: 'low' }
+			})
+		];
+		const swimlanes = groupBySwimlaneAndColumn(records, statusProperty, priorityProperty);
+
+		const high = swimlanes.find((s) => s.optionId === 'high')!;
+		expect(high.columns.find((c) => c.optionId === 'todo')?.records.map((r) => r.id)).toEqual([
+			'a'
+		]);
+		expect(high.columns.find((c) => c.optionId === 'done')?.records.map((r) => r.id)).toEqual([
+			'b'
+		]);
+
+		const low = swimlanes.find((s) => s.optionId === 'low')!;
+		expect(low.columns.find((c) => c.optionId === 'todo')?.records.map((r) => r.id)).toEqual(['c']);
+		expect(low.columns.find((c) => c.optionId === 'done')?.records).toEqual([]);
+	});
+
+	it('preserves an empty swimlane — every column still renders inside it, with zero records', () => {
+		const records = [
+			record('a', {
+				status: { type: 'select', value: 'todo' },
+				priority: { type: 'select', value: 'high' }
+			})
+		];
+		const swimlanes = groupBySwimlaneAndColumn(records, statusProperty, priorityProperty);
+
+		const low = swimlanes.find((s) => s.optionId === 'low')!;
+		expect(low.columns.map((c) => c.optionId)).toEqual(['todo', 'done', null]);
+		expect(low.columns.every((c) => c.records.length === 0)).toBe(true);
+	});
+
+	it('buckets records with no swimlane value, or a stale swimlane option id, into the catch-all swimlane', () => {
+		const records = [
+			record('a', { status: { type: 'select', value: 'todo' } }),
+			record('b', {
+				status: { type: 'select', value: 'todo' },
+				priority: { type: 'select', value: 'archived-option' }
+			})
+		];
+		const swimlanes = groupBySwimlaneAndColumn(records, statusProperty, priorityProperty);
+
+		const unassigned = swimlanes.find((s) => s.optionId === null)!;
+		expect(unassigned.label).toBe('No Priority');
+		expect(
+			unassigned.columns
+				.find((c) => c.optionId === 'todo')
+				?.records.map((r) => r.id)
+				.sort()
+		).toEqual(['a', 'b']);
+	});
+});
+
 describe('primaryFieldDisplayValue', () => {
 	it('returns an empty string when there is no value or no property', () => {
 		expect(primaryFieldDisplayValue(undefined, titleProperty)).toBe('');
@@ -500,6 +586,12 @@ describe('viewConfigsEqual', () => {
 		expect(viewConfigsEqual({ groupBy: 'status' }, { groupBy: 'status' })).toBe(true);
 	});
 
+	it('detects a swimlaneBy difference (issue #67/#165)', () => {
+		expect(viewConfigsEqual({ swimlaneBy: 'priority' }, { swimlaneBy: 'assignee' })).toBe(false);
+		expect(viewConfigsEqual({ swimlaneBy: 'priority' }, { swimlaneBy: 'priority' })).toBe(true);
+		expect(viewConfigsEqual({ swimlaneBy: 'priority' }, {})).toBe(false);
+	});
+
 	it('detects a summaries difference, ignoring key order', () => {
 		expect(
 			viewConfigsEqual(
@@ -533,6 +625,12 @@ describe('diffViewConfig', () => {
 
 	it('includes a member reset back to undefined, so the patch clears it', () => {
 		expect(diffViewConfig({ groupBy: 'status' }, {})).toEqual({ groupBy: undefined });
+	});
+
+	it('includes a swimlaneBy change (issue #67/#165), same as groupBy', () => {
+		expect(diffViewConfig({}, { swimlaneBy: 'priority' })).toEqual({ swimlaneBy: 'priority' });
+		expect(diffViewConfig({ swimlaneBy: 'priority' }, {})).toEqual({ swimlaneBy: undefined });
+		expect(diffViewConfig({ swimlaneBy: 'priority' }, { swimlaneBy: 'priority' })).toEqual({});
 	});
 
 	// Issue #183 review: undefined (show every property) and [] (show none)
