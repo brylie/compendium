@@ -13,16 +13,8 @@ repos:
         entry: npx eslint --max-warnings 0
         files: \.(ts|svelte|js)$
         exclude: ^(node_modules|\.svelte-kit|build)
-      - id: svelte-check
-        name: Typecheck (svelte-check)
-        language: system
-        entry: npm run check
-        files: \.(ts|svelte)$
-        exclude: ^(node_modules|\.svelte-kit|build)
-        pass_filenames: false
-        stages: [pre-push]
       - id: e2e
-        name: Build and run end-to-end tests
+        name: Run pre-push quality checks
         language: system
         entry: sh scripts/pre-push-check.sh
         pass_filenames: false

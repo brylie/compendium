@@ -27,7 +27,6 @@ import { NotFoundError, ValidationError } from './errors';
 import { type ActorId } from './types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
-const agent: ActorId = { kind: 'agent', agentId: 'a1', name: 'Research Agent' };
 
 describe('collections: title, schema, and delete edge cases', () => {
 	it('updateCollectionTitle renames a collection', () => {

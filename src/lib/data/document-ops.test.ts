@@ -15,7 +15,6 @@ import { NotFoundError, ValidationError } from './errors';
 import { type ActorId } from './types';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
-const agent: ActorId = { kind: 'agent', agentId: 'a1', name: 'Research Agent' };
 
 describe('document hierarchy and tree', () => {
 	it('creates nested documents and builds tree hierarchy correctly', () => {
