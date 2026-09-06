@@ -52,7 +52,9 @@
 			| 'warning'
 			| 'danger'
 			| 'child-pages'
-			| 'columns';
+			| 'columns'
+			| 'convert'
+			| 'list-view';
 		size?: number;
 		class?: string;
 	} = $props();
@@ -212,5 +214,13 @@
 	{:else if name === 'columns'}
 		<rect x="3" y="3.5" width="14" height="13" rx="1.5" />
 		<path d="M10 3.5v13" />
+	{:else if name === 'convert'}
+		<path d="M4 7h9.5M13.5 7 10.5 4M13.5 7l-3 3" />
+		<path d="M16 13H6.5M6.5 13l3 3M6.5 13l3-3" />
+	{:else if name === 'list-view'}
+		<circle cx="4" cy="5.5" r="1" fill="currentColor" stroke="none" />
+		<circle cx="4" cy="10" r="1" fill="currentColor" stroke="none" />
+		<circle cx="4" cy="14.5" r="1" fill="currentColor" stroke="none" />
+		<path d="M7.5 5.5h9M7.5 10h9M7.5 14.5h6" />
 	{/if}
 </svg>

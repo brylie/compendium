@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/svelte';
+import { render, screen, fireEvent, within } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import { createDocument } from '$lib/data/document-ops';
 import {
@@ -23,10 +24,19 @@ function baseProps(ydoc: Y.Doc, block: ReturnType<typeof createColumnsBlock>) {
 		draggingBlockId: null,
 		dropIndicatorParentId: null,
 		dropIndicatorIndex: null,
+		selectedBlockIds: new Set<string>(),
+		justNavigatedBlockId: null,
+		convertOptions: [],
 		onFocusBlock: vi.fn(),
 		onInputText: vi.fn(),
 		onDragHandlePointerDown: vi.fn(),
-		onDragHandleKeydown: vi.fn()
+		onDragHandleKeydown: vi.fn(),
+		onDuplicateBlock: vi.fn(),
+		onDeleteBlock: vi.fn(),
+		onConvertBlock: vi.fn(),
+		onCopyBlockLink: vi.fn(),
+		onMoveBlockUp: vi.fn(),
+		onMoveBlockDown: vi.fn()
 	};
 }
 
@@ -331,5 +341,98 @@ describe('ColumnsBlock (#148)', () => {
 		await fireEvent.input(editor);
 
 		expect(props.onInputText).toHaveBeenCalledWith(blockId);
+	});
+
+	describe('block action menu (#152)', () => {
+		const convertOptions = [
+			{ type: 'paragraph' as const, label: 'Text' },
+			{ type: 'heading_1' as const, label: 'Heading 1' }
+		];
+
+		it('offers a per-block action menu that calls the passed-down callbacks', async () => {
+			const ydoc = new Y.Doc();
+			const doc = createDocument(ydoc, { title: 'D' });
+			const columns = createColumnsBlock(ydoc, { parentId: doc.id }, actor);
+			const [columnId] = columns.childRecordIds!;
+			const [blockId] = getRecord(ydoc, columnId)!.childRecordIds!;
+			const props = { ...baseProps(ydoc, columns), convertOptions };
+			const user = userEvent.setup();
+
+			render(ColumnsBlock, props);
+			const row = document.getElementById(`block-${blockId}`) as HTMLElement;
+
+			await user.click(within(row).getByRole('button', { name: 'Block actions' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Duplicate' }));
+			expect(props.onDuplicateBlock).toHaveBeenCalledWith(blockId);
+
+			await user.click(within(row).getByRole('button', { name: 'Block actions' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Convert to…' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Heading 1' }));
+			expect(props.onConvertBlock).toHaveBeenCalledWith(blockId, 'heading_1');
+
+			await user.click(within(row).getByRole('button', { name: 'Block actions' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Copy link to block' }));
+			expect(props.onCopyBlockLink).toHaveBeenCalledWith(blockId);
+
+			await user.click(within(row).getByRole('button', { name: 'Block actions' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+			expect(props.onDeleteBlock).toHaveBeenCalledWith(blockId);
+		});
+
+		it('disables Move up on the first block and Move down on the last, and calls onMoveBlockDown/Up otherwise', async () => {
+			const ydoc = new Y.Doc();
+			const doc = createDocument(ydoc, { title: 'D' });
+			const columns = createColumnsBlock(ydoc, { parentId: doc.id }, actor);
+			const [columnId] = columns.childRecordIds!;
+			const [firstId] = getRecord(ydoc, columnId)!.childRecordIds!;
+			// Give this column a second block so "first" also has a valid
+			// "move down" target to exercise the enabled callback path.
+			createRecord(ydoc, { parentId: columnId, blockType: 'paragraph' }, actor);
+			const props = { ...baseProps(ydoc, getRecord(ydoc, columns.id)!), convertOptions };
+			const user = userEvent.setup();
+
+			render(ColumnsBlock, props);
+			const row = document.getElementById(`block-${firstId}`) as HTMLElement;
+
+			await user.click(within(row).getByRole('button', { name: 'Block actions' }));
+			expect(screen.getByRole('menuitem', { name: 'Move up' })).toBeDisabled();
+
+			await user.click(screen.getByRole('menuitem', { name: 'Move down' }));
+			expect(props.onMoveBlockDown).toHaveBeenCalledWith(firstId);
+		});
+
+		it('does not offer "Convert to…" when convertOptions excludes the block’s own type', async () => {
+			const ydoc = new Y.Doc();
+			const doc = createDocument(ydoc, { title: 'D' });
+			const columns = createColumnsBlock(ydoc, { parentId: doc.id }, actor);
+			const [columnId] = columns.childRecordIds!;
+			const [blockId] = getRecord(ydoc, columnId)!.childRecordIds!;
+			const props = { ...baseProps(ydoc, columns), convertOptions: [] };
+			const user = userEvent.setup();
+
+			render(ColumnsBlock, props);
+			const row = document.getElementById(`block-${blockId}`) as HTMLElement;
+
+			await user.click(within(row).getByRole('button', { name: 'Block actions' }));
+
+			expect(screen.queryByRole('menuitem', { name: 'Convert to…' })).not.toBeInTheDocument();
+		});
+
+		it('highlights a selected or just-navigated column block row', () => {
+			const ydoc = new Y.Doc();
+			const doc = createDocument(ydoc, { title: 'D' });
+			const columns = createColumnsBlock(ydoc, { parentId: doc.id }, actor);
+			const [columnId] = columns.childRecordIds!;
+			const [blockId] = getRecord(ydoc, columnId)!.childRecordIds!;
+			const props = {
+				...baseProps(ydoc, columns),
+				selectedBlockIds: new Set([blockId])
+			};
+
+			render(ColumnsBlock, props);
+			const row = document.getElementById(`block-${blockId}`) as HTMLElement;
+
+			expect(row.className).toContain('bg-surface');
+		});
 	});
 });

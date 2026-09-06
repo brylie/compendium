@@ -16,6 +16,7 @@
 	import type { InternalLinkTarget } from '$lib/data/links';
 	import type { BlockType, WorkspaceRecord } from '$lib/data/types';
 	import BlockEditor from './BlockEditor.svelte';
+	import BlockActionMenu from './BlockActionMenu.svelte';
 	import Icon from './Icon.svelte';
 
 	interface BlockEditorHandle {
@@ -31,10 +32,19 @@
 		draggingBlockId,
 		dropIndicatorParentId,
 		dropIndicatorIndex,
+		selectedBlockIds,
+		justNavigatedBlockId,
+		convertOptions,
 		onFocusBlock,
 		onInputText,
 		onDragHandlePointerDown,
-		onDragHandleKeydown
+		onDragHandleKeydown,
+		onDuplicateBlock,
+		onDeleteBlock,
+		onConvertBlock,
+		onCopyBlockLink,
+		onMoveBlockUp,
+		onMoveBlockDown
 	}: {
 		block: WorkspaceRecord;
 		ydoc: Y.Doc;
@@ -43,6 +53,9 @@
 		draggingBlockId: string | null;
 		dropIndicatorParentId: string | null;
 		dropIndicatorIndex: number | null;
+		selectedBlockIds: Set<string>;
+		justNavigatedBlockId: string | null;
+		convertOptions: { type: BlockType; label: string }[];
 		onFocusBlock: (blockId: string) => void;
 		onInputText: (blockId: string) => void;
 		onDragHandlePointerDown: (
@@ -52,6 +65,12 @@
 			index: number
 		) => void;
 		onDragHandleKeydown: (event: KeyboardEvent, blockId: string) => void;
+		onDuplicateBlock: (blockId: string) => void;
+		onDeleteBlock: (blockId: string) => void;
+		onConvertBlock: (blockId: string, blockType: BlockType) => void;
+		onCopyBlockLink: (blockId: string) => void;
+		onMoveBlockUp: (blockId: string) => void;
+		onMoveBlockDown: (blockId: string) => void;
 	} = $props();
 
 	// A column is a deliberately curated subset of Document block types
@@ -202,6 +221,12 @@
 					<div
 						class="group relative flex items-start py-0.5"
 						class:opacity-50={draggingBlockId === columnRecord.id}
+						class:bg-surface={selectedBlockIds.has(columnRecord.id)}
+						class:rounded={selectedBlockIds.has(columnRecord.id) ||
+							justNavigatedBlockId === columnRecord.id}
+						class:outline={justNavigatedBlockId === columnRecord.id}
+						class:outline-2={justNavigatedBlockId === columnRecord.id}
+						class:outline-accent={justNavigatedBlockId === columnRecord.id}
 						id="block-{columnRecord.id}"
 						data-block-row
 						data-block-parent={column.id}
@@ -210,13 +235,27 @@
 							type="button"
 							class="mt-1 mr-1 flex h-5 w-5 flex-shrink-0 cursor-grab items-center justify-center rounded text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:bg-surface hover:text-fg focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent active:cursor-grabbing"
 							aria-label="Move block in column {columnIndex +
-								1}. Drag, or use Arrow Up, Arrow Down, Home, End, Arrow Left (previous column), and Arrow Right (next column)."
+								1}. Drag, or use Arrow Up, Arrow Down, Home, End, Arrow Left (previous column), and Arrow Right (next column). Shift-click, Ctrl-click, or Shift-Arrow to select multiple blocks."
 							data-drag-handle={columnRecord.id}
 							onpointerdown={(e) => onDragHandlePointerDown(e, columnRecord.id, column.id, index)}
 							onkeydown={(e) => onDragHandleKeydown(e, columnRecord.id)}
 						>
 							<Icon name="grip" size={14} />
 						</button>
+
+						<BlockActionMenu
+							blockType={columnRecord.blockType}
+							canMoveUp={index > 0}
+							canMoveDown={index < siblings.length - 1}
+							isConvertible={convertOptions.some((c) => c.type === bt)}
+							{convertOptions}
+							onDuplicate={() => onDuplicateBlock(columnRecord.id)}
+							onDelete={() => onDeleteBlock(columnRecord.id)}
+							onConvert={(blockType) => onConvertBlock(columnRecord.id, blockType)}
+							onCopyLink={() => onCopyBlockLink(columnRecord.id)}
+							onMoveUp={() => onMoveBlockUp(columnRecord.id)}
+							onMoveDown={() => onMoveBlockDown(columnRecord.id)}
+						/>
 
 						{#if bt === 'to_do'}
 							<button

@@ -7,6 +7,8 @@ import {
 	createColumnsBlock,
 	createRecord,
 	deleteRecord,
+	duplicateRecord,
+	flattenDocumentBlocks,
 	getRecord,
 	getRecordYText,
 	listRecordsForParent,
@@ -1146,5 +1148,151 @@ describe('columns: container block nesting (#148)', () => {
 		// only one.
 		expect(listRecordsForParent(target, winner).map((r) => r.id)).toContain(blockInA);
 		expect(listRecordsForParent(target, loser).map((r) => r.id)).not.toContain(blockInA);
+	});
+});
+
+describe('duplicateRecord: block action menu duplicate (#152)', () => {
+	it('inserts the copy immediately after the source with a fresh id', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const a = createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+		const b = createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+
+		const copy = duplicateRecord(doc, a.id, human);
+
+		expect(copy.id).not.toBe(a.id);
+		expect(listRecordsForParent(doc, document.id).map((r) => r.id)).toEqual([a.id, copy.id, b.id]);
+	});
+
+	it('copies content, blockType, and block-level fields without touching the source', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const source = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'to_do', checked: true },
+			human
+		);
+		const ytext = getRecordYText(doc, source.id)!;
+		doc.transact(() => ytext.insert(0, 'Buy milk'));
+
+		const copy = duplicateRecord(doc, source.id, human);
+
+		expect(copy.blockType).toBe('to_do');
+		expect(copy.checked).toBe(true);
+		expect(yTextToRichText(getRecordYText(doc, copy.id)!)).toEqual(yTextToRichText(ytext));
+		// The source is untouched.
+		expect(getRecord(doc, source.id)!.checked).toBe(true);
+		expect(
+			yTextToRichText(getRecordYText(doc, source.id)!)
+				.runs.map((r) => r.text)
+				.join('')
+		).toBe('Buy milk');
+	});
+
+	it('stamps fresh provenance under the acting actor rather than copying the source’s', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const source = createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+
+		const copy = duplicateRecord(doc, source.id, agent);
+
+		expect(copy.createdBy).toEqual(agent);
+		expect(copy.lastEditedBy).toEqual(agent);
+		expect(getRecord(doc, source.id)!.createdBy).toEqual(human);
+	});
+
+	it('recursively duplicates a columns block’s children with new ids, discarding the auto-seeded placeholder', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const columns = createColumnsBlock(doc, { parentId: document.id }, human, 2);
+		const [columnA, columnB] = columns.childRecordIds!;
+		const [seededA] = getRecord(doc, columnA)!.childRecordIds!;
+		const ytext = getRecordYText(doc, seededA)!;
+		doc.transact(() => ytext.insert(0, 'left column text'));
+
+		const copy = duplicateRecord(doc, columns.id, human);
+
+		expect(copy.id).not.toBe(columns.id);
+		expect(copy.childRecordIds).toHaveLength(2);
+		const [copyColumnA, copyColumnB] = copy.childRecordIds!;
+		expect(copyColumnA).not.toBe(columnA);
+		expect(copyColumnB).not.toBe(columnB);
+
+		// Exactly one child in the duplicated column — the auto-seeded blank
+		// paragraph createRecord adds for every new `column` was discarded, not
+		// left sitting ahead of the copied real content.
+		const copiedChildren = getRecord(doc, copyColumnA)!.childRecordIds!;
+		expect(copiedChildren).toHaveLength(1);
+		expect(copiedChildren[0]).not.toBe(seededA);
+		expect(
+			yTextToRichText(getRecordYText(doc, copiedChildren[0])!)
+				.runs.map((r) => r.text)
+				.join('')
+		).toBe('left column text');
+
+		// The original is untouched.
+		expect(getRecord(doc, columnA)!.childRecordIds).toEqual([seededA]);
+	});
+
+	it('throws NotFoundError for an unknown record id', () => {
+		const doc = new Y.Doc();
+		expect(() => duplicateRecord(doc, 'missing', human)).toThrow(NotFoundError);
+	});
+});
+
+describe('flattenDocumentBlocks: full document order for the List View outline (#152)', () => {
+	it('returns top-level blocks in order with depth 0 when there is no nesting', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const a = createRecord(doc, { parentId: document.id, blockType: 'heading_1' }, human);
+		const b = createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+
+		const flat = flattenDocumentBlocks(doc, document.id);
+
+		expect(flat.map((f) => [f.record.id, f.depth])).toEqual([
+			[a.id, 0],
+			[b.id, 0]
+		]);
+	});
+
+	it('walks into a columns block’s children in document order, one depth level deeper', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const before = createRecord(doc, { parentId: document.id, blockType: 'heading_1' }, human);
+		const columns = createColumnsBlock(doc, { parentId: document.id }, human, 2);
+		const after = createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+		const [columnA, columnB] = columns.childRecordIds!;
+		const [seededA] = getRecord(doc, columnA)!.childRecordIds!;
+		const [seededB] = getRecord(doc, columnB)!.childRecordIds!;
+
+		const flat = flattenDocumentBlocks(doc, document.id);
+
+		expect(flat.map((f) => [f.record.id, f.depth])).toEqual([
+			[before.id, 0],
+			[columns.id, 0],
+			[columnA, 1],
+			[seededA, 2],
+			[columnB, 1],
+			[seededB, 2],
+			[after.id, 0]
+		]);
+	});
+
+	it('skips a stale child-array entry left by a concurrent cross-container move', () => {
+		const source = new Y.Doc();
+		const document = createDocument(source, { title: 'Notes' });
+		const columns = createColumnsBlock(source, { parentId: document.id }, human, 2);
+		const [columnA, columnB] = columns.childRecordIds!;
+		const [blockInA] = getRecord(source, columnA)!.childRecordIds!;
+
+		const replica = new Y.Doc();
+		Y.applyUpdate(replica, Y.encodeStateAsUpdate(source));
+		moveRecordToParent(source, blockInA, columnB);
+		Y.applyUpdate(replica, Y.encodeStateAsUpdate(source));
+
+		const flat = flattenDocumentBlocks(replica, document.id);
+		const occurrences = flat.filter((f) => f.record.id === blockInA);
+		expect(occurrences).toHaveLength(1);
+		expect(occurrences[0].depth).toBe(2); // columns(0) -> columnB(1) -> block(2)
 	});
 });

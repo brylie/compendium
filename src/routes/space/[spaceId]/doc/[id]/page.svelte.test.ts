@@ -6,12 +6,20 @@ import * as Y from 'yjs';
 import { createDocument, getDocument } from '$lib/data/document-ops';
 import { createCollection } from '$lib/data/collection-ops';
 import { createColumnsBlock, createRecord, getRecord, getRecordYText } from '$lib/data/record-ops';
+import { plainText, yTextToRichText } from '$lib/data/richtext';
 import type { ActorId } from '$lib/data/types';
 import Page from './+page.svelte';
 
+// A mutable ref (not a plain module-scope `let`, which vi.mock's hoisted
+// factory can't close over) so a test can point `page.url` at a
+// `#block-<id>` deep link before rendering — see the "Copy link to block"
+// deep-link suite below.
+const pageUrl = vi.hoisted(() => ({
+	current: new URL('http://localhost/space/space-1/doc/d1')
+}));
 vi.mock('$app/state', () => ({
 	get page() {
-		return { params: { spaceId: 'space-1' } };
+		return { params: { spaceId: 'space-1' }, url: pageUrl.current };
 	}
 }));
 
@@ -21,6 +29,14 @@ vi.mock('$app/state', () => ({
 // non-editing-convention UI flows (slash menu, synced/page-link targets).
 
 const HUMAN: ActorId = { kind: 'human', userId: 'local' };
+
+// Shared by the block-reordering, block-action-menu, and multi-select suites
+// below — the rendered top-level block order, read straight off the DOM.
+function orderedBlockIds(): string[] {
+	return Array.from(document.querySelectorAll<HTMLElement>('[data-block-row]')).map((row) =>
+		row.id.replace(/^block-/, '')
+	);
+}
 
 function selectEditorText(element: HTMLElement, start: number, end: number): void {
 	const textNode = document.createTreeWalker(element, NodeFilter.SHOW_TEXT).nextNode() as Text;
@@ -83,6 +99,7 @@ describe('doc/[id] +page', () => {
 	afterEach(() => {
 		ydoc.destroy();
 		vi.unstubAllGlobals();
+		pageUrl.current = new URL('http://localhost/space/space-1/doc/d1');
 	});
 
 	it('shows a prompt to start writing when the document has no blocks', async () => {
@@ -315,12 +332,6 @@ describe('doc/[id] +page', () => {
 			return { first, second, third };
 		}
 
-		function orderedBlockIds(): string[] {
-			return Array.from(document.querySelectorAll<HTMLElement>('[data-block-row]')).map((row) =>
-				row.id.replace(/^block-/, '')
-			);
-		}
-
 		it('exposes a move handle on every block, focusable and labeled for keyboard use', async () => {
 			const { first } = renderThreeBlocks();
 			const { container } = render(Page, {
@@ -537,6 +548,382 @@ describe('doc/[id] +page', () => {
 
 			expect(container.querySelector('.drop-indicator')).not.toBeInTheDocument();
 			expect(orderedBlockIds()).toEqual(before);
+		});
+	});
+
+	describe('block action menu (#152)', () => {
+		const pageData = {
+			spaces: [],
+			spaceId: 'space-1',
+			activeSpaceId: 'space-1',
+			documents: [],
+			collections: [],
+			documentId: 'doc-1',
+			title: 'D'
+		};
+
+		async function renderWithParagraph(text: string) {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, record.id)!.insert(0, text);
+			const result = render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: pageData
+			});
+			await flushShardResolution();
+			return { ...result, record };
+		}
+
+		it('duplicates a block via the menu, inserting an identical copy immediately after it', async () => {
+			const user = userEvent.setup();
+			const { container, record } = await renderWithParagraph('Buy milk');
+			const row = container.querySelector(`#block-${record.id}`) as HTMLElement;
+
+			await user.click(within(row).getByRole('button', { name: 'Block actions' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Duplicate' }));
+
+			const ids = orderedBlockIds();
+			expect(ids).toHaveLength(2);
+			expect(ids[0]).toBe(record.id);
+			const copyText = plainText(yTextToRichText(getRecordYText(ydoc, ids[1])!));
+			expect(copyText).toBe('Buy milk');
+		});
+
+		it('deletes a block via the menu', async () => {
+			const user = userEvent.setup();
+			const { container, record } = await renderWithParagraph('Buy milk');
+			const row = container.querySelector(`#block-${record.id}`) as HTMLElement;
+
+			await user.click(within(row).getByRole('button', { name: 'Block actions' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
+
+			expect(getRecord(ydoc, record.id)).toBeUndefined();
+		});
+
+		it('converts a block to a different type via the menu, preserving its text', async () => {
+			const user = userEvent.setup();
+			const { container, record } = await renderWithParagraph('Buy milk');
+			const row = container.querySelector(`#block-${record.id}`) as HTMLElement;
+
+			await user.click(within(row).getByRole('button', { name: 'Block actions' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Convert to…' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Heading 1' }));
+
+			const updated = getRecord(ydoc, record.id)!;
+			expect(updated.blockType).toBe('heading_1');
+			expect(plainText(yTextToRichText(getRecordYText(ydoc, record.id)!))).toBe('Buy milk');
+		});
+
+		it('copies a link to the block onto the clipboard', async () => {
+			const user = userEvent.setup();
+			const { container, record } = await renderWithParagraph('Buy milk');
+			const row = container.querySelector(`#block-${record.id}`) as HTMLElement;
+			// Defined after userEvent.setup(), which installs its own clipboard
+			// stub for copy/paste emulation — defining this afterward, right
+			// before the click that triggers it, is what makes this mock win.
+			const writeText = vi.fn().mockResolvedValue(undefined);
+			Object.defineProperty(navigator, 'clipboard', {
+				value: { writeText },
+				configurable: true
+			});
+
+			await user.click(within(row).getByRole('button', { name: 'Block actions' }));
+			await user.click(screen.getByRole('menuitem', { name: 'Copy link to block' }));
+
+			expect(writeText).toHaveBeenCalledWith(expect.stringContaining(`#block-${record.id}`));
+		});
+
+		it('does not offer "Convert to…" for a structural block type', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const record = createRecord(ydoc, { parentId: 'doc-1', blockType: 'divider' }, HUMAN);
+			const { container } = render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: pageData
+			});
+			await flushShardResolution();
+			const user = userEvent.setup();
+			const row = container.querySelector(`#block-${record.id}`) as HTMLElement;
+
+			await user.click(within(row).getByRole('button', { name: 'Block actions' }));
+
+			expect(screen.queryByRole('menuitem', { name: 'Convert to…' })).not.toBeInTheDocument();
+		});
+	});
+
+	describe('multi-select and group actions (#152)', () => {
+		const pageData = {
+			spaces: [],
+			spaceId: 'space-1',
+			activeSpaceId: 'space-1',
+			documents: [],
+			collections: [],
+			documentId: 'doc-1',
+			title: 'D'
+		};
+
+		async function renderThreeBlocks() {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const first = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, first.id)!.insert(0, 'First');
+			const second = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, second.id)!.insert(0, 'Second');
+			const third = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, third.id)!.insert(0, 'Third');
+			const result = render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: pageData
+			});
+			await flushShardResolution();
+			return { ...result, first, second, third };
+		}
+
+		it('Ctrl-clicking two move handles selects both and shows the bulk action bar', async () => {
+			const { container, first, third } = await renderThreeBlocks();
+			const firstHandle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLElement;
+			const thirdHandle = container.querySelector(
+				`[data-drag-handle="${third.id}"]`
+			) as HTMLElement;
+
+			await fireEvent.pointerDown(firstHandle, { button: 0, ctrlKey: true, pointerId: 1 });
+			await fireEvent.pointerDown(thirdHandle, { button: 0, ctrlKey: true, pointerId: 1 });
+			await tick();
+
+			expect(screen.getByText('2 selected')).toBeInTheDocument();
+		});
+
+		it('deletes every selected block via the bulk action bar', async () => {
+			const { container, first, second, third } = await renderThreeBlocks();
+			const firstHandle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLElement;
+			const thirdHandle = container.querySelector(
+				`[data-drag-handle="${third.id}"]`
+			) as HTMLElement;
+			await fireEvent.pointerDown(firstHandle, { button: 0, ctrlKey: true, pointerId: 1 });
+			await fireEvent.pointerDown(thirdHandle, { button: 0, ctrlKey: true, pointerId: 1 });
+			await tick();
+			const user = userEvent.setup();
+
+			await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+			expect(orderedBlockIds()).toEqual([second.id]);
+		});
+
+		it('Shift-clicking selects a contiguous range, and Move up shifts the whole group as a unit', async () => {
+			const { container, first, second, third } = await renderThreeBlocks();
+			const secondHandle = container.querySelector(
+				`[data-drag-handle="${second.id}"]`
+			) as HTMLElement;
+			const thirdHandle = container.querySelector(
+				`[data-drag-handle="${third.id}"]`
+			) as HTMLElement;
+			// Anchor the range on `second` first (a plain click), then extend it
+			// to `third` with Shift — mirrors how a real Shift-click range select
+			// works relative to whatever was last interacted with.
+			await fireEvent.pointerDown(secondHandle, { button: 0, ctrlKey: true, pointerId: 1 });
+			await fireEvent.pointerDown(thirdHandle, { button: 0, shiftKey: true, pointerId: 1 });
+			await tick();
+			expect(screen.getByText('2 selected')).toBeInTheDocument();
+			const user = userEvent.setup();
+
+			await user.click(screen.getByRole('button', { name: 'Move up' }));
+
+			expect(orderedBlockIds()).toEqual([second.id, third.id, first.id]);
+		});
+
+		it('duplicates every selected block via the bulk action bar', async () => {
+			const { container, first, second, third } = await renderThreeBlocks();
+			const firstHandle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLElement;
+			const secondHandle = container.querySelector(
+				`[data-drag-handle="${second.id}"]`
+			) as HTMLElement;
+			await fireEvent.pointerDown(firstHandle, { button: 0, ctrlKey: true, pointerId: 1 });
+			await fireEvent.pointerDown(secondHandle, { button: 0, shiftKey: true, pointerId: 1 });
+			await tick();
+			const user = userEvent.setup();
+
+			await user.click(screen.getByRole('button', { name: 'Duplicate' }));
+
+			// Each selected block's copy lands immediately after its own source
+			// (duplicateRecord's normal single-block placement), so the group
+			// interleaves rather than the two copies landing together: first,
+			// first's copy, second, second's copy, third (untouched).
+			const ids = orderedBlockIds();
+			expect(ids).toHaveLength(5);
+			expect(ids[0]).toBe(first.id);
+			expect(ids[2]).toBe(second.id);
+			expect(ids[4]).toBe(third.id);
+		});
+
+		it('clears the selection on Escape', async () => {
+			const { container, first } = await renderThreeBlocks();
+			const firstHandle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLElement;
+			await fireEvent.pointerDown(firstHandle, { button: 0, ctrlKey: true, pointerId: 1 });
+			await tick();
+			expect(screen.getByText('1 selected')).toBeInTheDocument();
+
+			await fireEvent.keyDown(document, { key: 'Escape' });
+			await tick();
+
+			expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
+		});
+
+		it('clears the selection when Escape is pressed on a focused move handle', async () => {
+			const { container, first } = await renderThreeBlocks();
+			const firstHandle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLElement;
+			await fireEvent.pointerDown(firstHandle, { button: 0, ctrlKey: true, pointerId: 1 });
+			await tick();
+			expect(screen.getByText('1 selected')).toBeInTheDocument();
+
+			firstHandle.focus();
+			await fireEvent.keyDown(firstHandle, { key: 'Escape' });
+			await tick();
+
+			expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
+		});
+
+		it('disables the group Move up/down buttons for a non-contiguous selection', async () => {
+			const { container, first, third } = await renderThreeBlocks();
+			const firstHandle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLElement;
+			const thirdHandle = container.querySelector(
+				`[data-drag-handle="${third.id}"]`
+			) as HTMLElement;
+
+			await fireEvent.pointerDown(firstHandle, { button: 0, ctrlKey: true, pointerId: 1 });
+			await fireEvent.pointerDown(thirdHandle, { button: 0, ctrlKey: true, pointerId: 1 });
+			await tick();
+
+			expect(screen.getByRole('button', { name: 'Move up' })).toBeDisabled();
+			expect(screen.getByRole('button', { name: 'Move down' })).toBeDisabled();
+		});
+
+		it('Shift+ArrowDown on a focused move handle extends the selection to the next block', async () => {
+			const { container, first, second } = await renderThreeBlocks();
+			const firstHandle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLElement;
+
+			firstHandle.focus();
+			await fireEvent.keyDown(firstHandle, { key: 'ArrowDown', shiftKey: true });
+			await tick();
+
+			expect(screen.getByText('2 selected')).toBeInTheDocument();
+			expect(document.activeElement?.getAttribute('data-drag-handle')).toBe(second.id);
+			const user = userEvent.setup();
+			await user.click(screen.getByRole('button', { name: 'Delete' }));
+			expect(orderedBlockIds()).not.toContain(first.id);
+			expect(orderedBlockIds()).not.toContain(second.id);
+		});
+
+		it('Shift+ArrowUp after extending down shrinks the selection back by one', async () => {
+			const { container, first } = await renderThreeBlocks();
+			const firstHandle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLElement;
+
+			firstHandle.focus();
+			await fireEvent.keyDown(firstHandle, { key: 'ArrowDown', shiftKey: true });
+			await tick();
+			await fireEvent.keyDown(document.activeElement as HTMLElement, {
+				key: 'ArrowUp',
+				shiftKey: true
+			});
+			await tick();
+
+			expect(screen.getByText('1 selected')).toBeInTheDocument();
+		});
+	});
+
+	describe('List View / document outline (#152)', () => {
+		const pageData = {
+			spaces: [],
+			spaceId: 'space-1',
+			activeSpaceId: 'space-1',
+			documents: [],
+			collections: [],
+			documentId: 'doc-1',
+			title: 'D'
+		};
+
+		it('opens from its toolbar toggle and lists every block', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const heading = createRecord(ydoc, { parentId: 'doc-1', blockType: 'heading_1' }, HUMAN);
+			getRecordYText(ydoc, heading.id)!.insert(0, 'Overview');
+			createRecord(ydoc, { parentId: 'doc-1', blockType: 'divider' }, HUMAN);
+			render(Page, { params: { spaceId: 'space-1', id: 'doc-1' }, form: null, data: pageData });
+			await flushShardResolution();
+			const user = userEvent.setup();
+
+			await user.click(screen.getByRole('button', { name: 'Open document List View' }));
+
+			const outline = screen.getByRole('region', { name: 'Document outline' });
+			expect(within(outline).getByRole('button', { name: 'Overview' })).toBeInTheDocument();
+			expect(within(outline).getByRole('button', { name: 'Divider' })).toBeInTheDocument();
+		});
+
+		it('clicking an outline entry scrolls to and focuses the corresponding block', async () => {
+			const scrollIntoView = vi.fn();
+			Element.prototype.scrollIntoView = scrollIntoView;
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const heading = createRecord(ydoc, { parentId: 'doc-1', blockType: 'heading_1' }, HUMAN);
+			getRecordYText(ydoc, heading.id)!.insert(0, 'Overview');
+			render(Page, { params: { spaceId: 'space-1', id: 'doc-1' }, form: null, data: pageData });
+			await flushShardResolution();
+			const user = userEvent.setup();
+			await user.click(screen.getByRole('button', { name: 'Open document List View' }));
+
+			await user.click(screen.getByRole('button', { name: 'Overview' }));
+			await tick();
+
+			expect(scrollIntoView).toHaveBeenCalled();
+			const editor = document.querySelector(
+				`#block-${heading.id} [contenteditable]`
+			) as HTMLElement;
+			expect(document.activeElement).toBe(editor);
+		});
+	});
+
+	describe('copy-link-to-block deep link (#152)', () => {
+		const pageData = {
+			spaces: [],
+			spaceId: 'space-1',
+			activeSpaceId: 'space-1',
+			documents: [],
+			collections: [],
+			documentId: 'doc-1',
+			title: 'D'
+		};
+
+		it('focuses the block named by a #block-<id> URL fragment once the document loads', async () => {
+			const scrollIntoView = vi.fn();
+			Element.prototype.scrollIntoView = scrollIntoView;
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const first = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, first.id)!.insert(0, 'First');
+			const target = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, target.id)!.insert(0, 'Target');
+			pageUrl.current = new URL(`http://localhost/space/space-1/doc/d1#block-${target.id}`);
+
+			render(Page, { params: { spaceId: 'space-1', id: 'doc-1' }, form: null, data: pageData });
+			await flushShardResolution();
+			await tick();
+
+			expect(scrollIntoView).toHaveBeenCalled();
+			const editor = document.querySelector(`#block-${target.id} [contenteditable]`) as HTMLElement;
+			expect(document.activeElement).toBe(editor);
 		});
 	});
 

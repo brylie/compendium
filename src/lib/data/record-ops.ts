@@ -801,3 +801,115 @@ export function moveRecordToParent(
 		yrecord.set('parentId', newParentId);
 	});
 }
+
+/**
+ * Creates a sibling copy of a record immediately after the original — fresh
+ * ids throughout, its content and fields copied verbatim, and (for a
+ * container block, i.e. `columns`/`column`, issue #148) every descendant
+ * duplicated recursively along with it, since a container has no independent
+ * meaning once its children are gone (mirrors deleteRecordAndChildren's own
+ * recursion, run forward instead of as a teardown). Duplicating a `columns`
+ * block therefore duplicates its `column` children and every block inside
+ * them, all with new ids, in the same relative order.
+ *
+ * Provenance (createdBy/createdAt/lastEditedBy/lastEditedAt) is stamped
+ * fresh under `actor` on every duplicated record, like any other newly
+ * created one — a duplicate is new content, not a historical copy with
+ * borrowed authorship.
+ */
+export function duplicateRecord(doc: Y.Doc, id: string, actor: ActorId): WorkspaceRecord {
+	const source = getRecord(doc, id);
+	if (!source) throw new NotFoundError(`Record ${id} not found`);
+	return doc.transact(() => duplicateRecordInto(doc, id, source.parentId, id, actor));
+}
+
+// `afterRecordId` is the source's own id purely as a convenient "insert right
+// after this sibling" marker at the top call — createRecord resolves it
+// against `parentId`'s *actual* current siblings, and the real source block
+// is always one of them at the top level (recursive calls instead pass the
+// *previous copy's* id, so children land in the same relative order as the
+// source's).
+function duplicateRecordInto(
+	doc: Y.Doc,
+	sourceId: string,
+	parentId: string,
+	afterRecordId: string | undefined,
+	actor: ActorId
+): WorkspaceRecord {
+	const source = getRecord(doc, sourceId)!;
+	const copy = createRecord(
+		doc,
+		{
+			parentId,
+			afterRecordId,
+			blockType: source.blockType,
+			properties: source.properties,
+			checked: source.checked,
+			collapsed: source.collapsed,
+			referencedRecordId: source.referencedRecordId,
+			viewConfig: source.viewConfig,
+			calloutStyle: source.calloutStyle,
+			childPagesDepth: source.childPagesDepth,
+			fullWidth: source.fullWidth
+		},
+		actor
+	);
+
+	const sourceText = getRecordYText(doc, sourceId);
+	const copyText = getRecordYText(doc, copy.id);
+	if (sourceText && copyText) {
+		applyRichTextToYText(copyText, yTextToRichText(sourceText));
+	}
+
+	if (source.childRecordIds) {
+		// createRecord auto-seeds a bare `column` with one empty paragraph (see
+		// its own column-seeding step) — discard that placeholder before
+		// copying the source's real children, so duplicating a column doesn't
+		// leave a stray extra paragraph ahead of its copied content.
+		if (copy.blockType === 'column') {
+			for (const seeded of listRecordsForParent(doc, copy.id)) {
+				deleteRecordAndChildren(doc, seeded.id);
+			}
+		}
+		let previousCopyId: string | undefined;
+		for (const childId of source.childRecordIds) {
+			// Skip a stale child-array entry the same way deleteRecordAndChildren
+			// does — a concurrent moveRecordToParent can leave one behind for a
+			// record that has since (legitimately) moved to a different parent.
+			if (!isAuthoritativeChild(doc, sourceId, childId)) continue;
+			const childCopy = duplicateRecordInto(doc, childId, copy.id, previousCopyId, actor);
+			previousCopyId = childCopy.id;
+		}
+	}
+
+	return getRecord(doc, copy.id)!;
+}
+
+// `depth` counts container nesting only (0 at the Document's own top level, 1
+// inside a column, and so on) — heading hierarchy is a presentational
+// concern the caller derives separately from each block's own `blockType`,
+// not something the walk below tracks itself.
+export interface FlattenedBlock {
+	record: WorkspaceRecord;
+	depth: number;
+}
+
+/**
+ * Every block belonging to a Document, in true document reading order —
+ * including blocks nested inside a container's children (`columns`/`column`,
+ * issue #148), unlike `listRecordsForParent`, which only returns one
+ * parent's own direct children. Built for the List View / outline panel
+ * (issue #152), which needs a flat, ordered walk of the whole block tree, not
+ * just the Document's own top-level flow.
+ */
+export function flattenDocumentBlocks(doc: Y.Doc, documentId: string): FlattenedBlock[] {
+	const result: FlattenedBlock[] = [];
+	function walk(parentId: string, depth: number): void {
+		for (const record of listRecordsForParent(doc, parentId)) {
+			result.push({ record, depth });
+			if (record.childRecordIds) walk(record.id, depth + 1);
+		}
+	}
+	walk(documentId, 0);
+	return result;
+}
