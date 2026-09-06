@@ -49,9 +49,33 @@ export const blockTypes = [
 	'page_link',
 	'embed',
 	'collection_view',
-	'child_pages'
+	'child_pages',
+	'columns',
+	'column'
 ] as const;
 export type BlockType = (typeof blockTypes)[number];
+
+// The block types a `column` may directly hold (issue #148) — a deliberately
+// small, curated subset kept in sync with each column's own mini block-list
+// renderer (ColumnsBlock.svelte). Reference/structural/container types
+// (page_link, collection_view, child_pages, callout, toggle, table, embed,
+// synced_block, table_of_contents, and columns/column themselves — no
+// nested columns-in-columns) are out of scope for v1: they'd each need their
+// own bespoke rendering re-implemented inside a column, which is deferred to
+// a follow-up rather than bundled into the initial columns block.
+export const columnChildBlockTypes = [
+	'paragraph',
+	'heading_1',
+	'heading_2',
+	'heading_3',
+	'heading_4',
+	'bulleted_list_item',
+	'numbered_list_item',
+	'to_do',
+	'quote',
+	'divider'
+] as const satisfies readonly BlockType[];
+export type ColumnChildBlockType = (typeof columnChildBlockTypes)[number];
 
 // "View" here means a Collection/database view (Table/Board/Calendar — a
 // rendering + configuration over a Collection's records), never an MVC-style
@@ -172,10 +196,10 @@ export interface RichText {
 // MCP tool surface never needs to special-case "block vs. row."
 export interface WorkspaceRecord {
 	id: string; // stable, globally unique
-	parentId: string; // Document ID or Collection ID
+	parentId: string; // Document ID, Collection ID, or (issue #148) another record's id — see ParentKind
 	order: string; // fractional index, orders records within parentId
 	blockType?: BlockType; // set when parent is a Document
-	content?: RichText; // set when parent is a Document — the block's text
+	content?: RichText; // set when parent is a Document — the block's text; absent for a container block (columns/column), which holds no text of its own
 	properties?: Record<string, PropertyValue>; // set when parent is a Collection
 	checked?: boolean; // for to_do blocks
 	collapsed?: boolean; // for toggle blocks
@@ -187,6 +211,14 @@ export interface WorkspaceRecord {
 	viewConfig?: EmbeddedViewConfig; // for collection_view blocks only
 	calloutStyle?: CalloutStyle; // for callout blocks only — absent renders the pre-#42 neutral default
 	childPagesDepth?: ChildPagesDepth; // for child_pages blocks only — absent means depth 1 (immediate children only)
+	// Present (possibly empty) only on a container block (columns/column,
+	// issue #148) — its own child records' ids, in order, the same role
+	// DocumentMeta.recordIds/CollectionMeta.recordIds play one level up.
+	// Undefined for every non-container record, including every pre-#148
+	// record — that absence is exactly what marks a record as a valid
+	// `parentId` target (see parentKindOf in record-ops.ts), so this must
+	// never be set to an empty array "just in case."
+	childRecordIds?: string[];
 	createdBy: ActorId;
 	createdAt: number;
 	lastEditedBy: ActorId;
@@ -229,4 +261,9 @@ export interface CollectionMeta {
 	spaceId?: string; // catalog-only — undefined for uncataloged/legacy content
 }
 
-export type ParentKind = 'document' | 'collection';
+// 'record' (issue #148) means `parentId` names a container block (columns/
+// column) rather than a Document or Collection directly — see parentKindOf
+// in record-ops.ts. A record-kind parent's own children are still ultimately
+// part of whichever Document contains the container, they're just one more
+// level removed from that Document's own flat recordIds array.
+export type ParentKind = 'document' | 'collection' | 'record';

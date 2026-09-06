@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import { createDocument, getDocument } from '$lib/data/document-ops';
 import { createCollection } from '$lib/data/collection-ops';
-import { createRecord, getRecordYText } from '$lib/data/record-ops';
+import { createColumnsBlock, createRecord, getRecord, getRecordYText } from '$lib/data/record-ops';
 import type { ActorId } from '$lib/data/types';
 import Page from './+page.svelte';
 
@@ -537,6 +537,174 @@ describe('doc/[id] +page', () => {
 
 			expect(container.querySelector('.drop-indicator')).not.toBeInTheDocument();
 			expect(orderedBlockIds()).toEqual(before);
+		});
+	});
+
+	describe('columns block (#148)', () => {
+		const pageData = {
+			spaces: [],
+			spaceId: 'space-1',
+			activeSpaceId: 'space-1',
+			documents: [],
+			collections: [],
+			documentId: 'doc-1',
+			title: 'D'
+		};
+
+		it('renders a columns block as two accessible column groups, each seeded with one paragraph', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const columns = createColumnsBlock(ydoc, { parentId: 'doc-1' }, HUMAN);
+			render(Page, { params: { spaceId: 'space-1', id: 'doc-1' }, form: null, data: pageData });
+			await flushShardResolution();
+
+			expect(
+				screen.getByRole('group', { name: 'Multi-column layout, 2 columns' })
+			).toBeInTheDocument();
+			expect(screen.getByRole('group', { name: 'Column 1 of 2' })).toBeInTheDocument();
+			expect(screen.getByRole('group', { name: 'Column 2 of 2' })).toBeInTheDocument();
+
+			for (const columnId of columns.childRecordIds!) {
+				const [paragraphId] = getRecord(ydoc, columnId)!.childRecordIds!;
+				expect(
+					document.querySelector(`[data-block-editor-id="${paragraphId}"]`)
+				).toBeInTheDocument();
+			}
+		});
+
+		it('the "Add column" control adds a third column; "Remove column" only appears once there are more than 2', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			createColumnsBlock(ydoc, { parentId: 'doc-1' }, HUMAN);
+			const user = userEvent.setup();
+			render(Page, { params: { spaceId: 'space-1', id: 'doc-1' }, form: null, data: pageData });
+			await flushShardResolution();
+
+			expect(screen.queryByRole('button', { name: /^Remove column/ })).not.toBeInTheDocument();
+
+			await user.click(screen.getByRole('button', { name: 'Add column' }));
+			await tick();
+
+			expect(
+				screen.getByRole('group', { name: 'Multi-column layout, 3 columns' })
+			).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: 'Remove column 3' })).toBeInTheDocument();
+
+			await user.click(screen.getByRole('button', { name: 'Remove column 3' }));
+			await tick();
+
+			expect(
+				screen.getByRole('group', { name: 'Multi-column layout, 2 columns' })
+			).toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: /^Remove column/ })).not.toBeInTheDocument();
+		});
+
+		it('Enter inside a column adds a new block within that same column, not the top-level Document', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const columns = createColumnsBlock(ydoc, { parentId: 'doc-1' }, HUMAN);
+			const [columnAId] = columns.childRecordIds!;
+			const [paragraphId] = getRecord(ydoc, columnAId)!.childRecordIds!;
+			render(Page, { params: { spaceId: 'space-1', id: 'doc-1' }, form: null, data: pageData });
+			await flushShardResolution();
+
+			const editor = document.querySelector(
+				`[data-block-editor-id="${paragraphId}"]`
+			) as HTMLElement;
+			editor.focus();
+			await fireEvent.keyDown(editor, { key: 'Enter' });
+			await tick();
+
+			expect(getRecord(ydoc, columnAId)!.childRecordIds).toHaveLength(2);
+			expect(getDocument(ydoc, 'doc-1')?.recordIds).toEqual([columns.id]); // still the only top-level block
+		});
+
+		it("ArrowLeft/ArrowRight on a column block's move handle shifts it into the adjacent column and announces the move", async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const columns = createColumnsBlock(ydoc, { parentId: 'doc-1' }, HUMAN);
+			const [columnAId, columnBId] = columns.childRecordIds!;
+			const [blockInA] = getRecord(ydoc, columnAId)!.childRecordIds!;
+			render(Page, { params: { spaceId: 'space-1', id: 'doc-1' }, form: null, data: pageData });
+			await flushShardResolution();
+
+			const handle = document.querySelector(
+				`[data-drag-handle="${blockInA}"]`
+			) as HTMLButtonElement;
+			handle.focus();
+			await fireEvent.keyDown(handle, { key: 'ArrowRight' });
+			await tick();
+
+			expect(getRecord(ydoc, blockInA)!.parentId).toBe(columnBId);
+			expect(getRecord(ydoc, columnAId)!.childRecordIds).toEqual([]);
+			expect(
+				screen.getByText(/Moved block to position 1 of 2 in column 2 of 2\./)
+			).toBeInTheDocument();
+
+			// The block's row remounted under column B's own {#each} list (a
+			// cross-container move, not a same-list reorder) — the old handle
+			// element is now detached, so it must be re-queried from the DOM.
+			const handleAfterMove = document.querySelector(
+				`[data-drag-handle="${blockInA}"]`
+			) as HTMLButtonElement;
+			handleAfterMove.focus();
+			await fireEvent.keyDown(handleAfterMove, { key: 'ArrowLeft' });
+			await tick();
+			expect(getRecord(ydoc, blockInA)!.parentId).toBe(columnAId);
+		});
+
+		it('ArrowLeft/ArrowRight is a no-op at the outermost columns', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const columns = createColumnsBlock(ydoc, { parentId: 'doc-1' }, HUMAN);
+			const [columnAId] = columns.childRecordIds!;
+			const [blockInA] = getRecord(ydoc, columnAId)!.childRecordIds!;
+			render(Page, { params: { spaceId: 'space-1', id: 'doc-1' }, form: null, data: pageData });
+			await flushShardResolution();
+
+			const handle = document.querySelector(
+				`[data-drag-handle="${blockInA}"]`
+			) as HTMLButtonElement;
+			handle.focus();
+			await fireEvent.keyDown(handle, { key: 'ArrowLeft' });
+			await tick();
+
+			expect(getRecord(ydoc, blockInA)!.parentId).toBe(columnAId);
+		});
+
+		it('inserts a columns block from the persistent toolbar', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			const user = userEvent.setup();
+			render(Page, { params: { spaceId: 'space-1', id: 'doc-1' }, form: null, data: pageData });
+			await flushShardResolution();
+
+			await user.click(screen.getByRole('button', { name: 'Insert Columns' }));
+			await tick();
+
+			expect(
+				screen.getByRole('group', { name: 'Multi-column layout, 2 columns' })
+			).toBeInTheDocument();
+		});
+
+		it('inserts a columns block via the slash menu', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const paragraph = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			const user = userEvent.setup();
+			render(Page, { params: { spaceId: 'space-1', id: 'doc-1' }, form: null, data: pageData });
+			await flushShardResolution();
+
+			const editor = document.querySelector(
+				`[data-block-editor-id="${paragraph.id}"]`
+			) as HTMLElement;
+			editor.focus();
+			await user.type(editor, '/columns');
+			await tick();
+			// getByText('Columns') is ambiguous with the persistent toolbar's own
+			// hidden "Columns" tooltip span — scope to the slash menu's option.
+			await user.click(screen.getByRole('option', { name: /^Columns/ }));
+			await tick();
+
+			expect(
+				screen.getByRole('group', { name: 'Multi-column layout, 2 columns' })
+			).toBeInTheDocument();
+			// The triggering block's "/columns" text is cleared, not left behind.
+			expect(getDocument(ydoc, 'doc-1')?.recordIds).toHaveLength(2);
 		});
 	});
 

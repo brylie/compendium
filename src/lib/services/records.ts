@@ -5,9 +5,14 @@ import type { Awareness } from 'y-protocols/awareness';
 import { clientIdForToken, isHeldByClient, releaseAgentHold } from '$lib/server/holds';
 import { getDocument as crdtGetDocument } from '$lib/data/document-ops';
 import {
+	createColumnsBlock as crdtCreateColumnsBlock,
 	createRecord as crdtCreateRecord,
 	deleteRecord as crdtDeleteRecord,
+	getRecord as crdtGetRecord,
 	getRecordYText,
+	MAX_COLUMN_COUNT,
+	MIN_COLUMN_COUNT,
+	parentKindOf,
 	patchRecordViewConfig as crdtPatchRecordViewConfig,
 	setRecordReferencedId as crdtSetRecordReferencedId,
 	setRecordViewConfig as crdtSetRecordViewConfig,
@@ -20,20 +25,22 @@ import { reserveRecordLocator, releaseRecordLocator } from '$lib/server/catalog'
 import { markdownToRichText } from '$lib/data/markdown-transcode';
 import { yTextToRichText } from '$lib/data/richtext';
 import { tokenAllowsParent } from '$lib/server/token-store';
-import type {
-	BlockType,
-	ChildPagesDepth,
-	EmbeddedViewConfig,
-	PropertyValue,
-	ViewConfig,
-	ViewType,
-	WorkspaceRecord
+import {
+	columnChildBlockTypes,
+	type BlockType,
+	type ChildPagesDepth,
+	type EmbeddedViewConfig,
+	type PropertyValue,
+	type ViewConfig,
+	type ViewType,
+	type WorkspaceRecord
 } from '$lib/data/types';
 import {
 	actorForCaller,
 	isAccessToken,
 	requireAccessibleParent,
 	requireAccessibleRecord,
+	resolveOwningParentId,
 	resolveParentWorkspaceContext,
 	resolveRecordWorkspaceContext,
 	type CallerIdentity
@@ -164,6 +171,58 @@ function validateViewConfigPatch(
 	}
 }
 
+/** Validates a `columns` block's initial `columnCount` (issue #148) — only accepted alongside that block type, and bounded to the same 2-6 range record-ops.ts's own createColumnsBlock/createRecord/deleteRecord enforce at every mutation path, not just this initial one. */
+function validateColumnCount(blockType: BlockType | undefined, columnCount: number): void {
+	if (blockType !== 'columns') {
+		throw new Error('columnCount is only valid on a columns block.');
+	}
+	if (
+		!Number.isSafeInteger(columnCount) ||
+		columnCount < MIN_COLUMN_COUNT ||
+		columnCount > MAX_COLUMN_COUNT
+	) {
+		throw new Error(
+			`columnCount must be an integer between ${MIN_COLUMN_COUNT} and ${MAX_COLUMN_COUNT}.`
+		);
+	}
+}
+
+/**
+ * Validates that `blockType` is actually creatable under `parentId`'s
+ * resolved kind (issue #148's columns/column nesting rules) — a `columns`
+ * block only directly inside a Document (no nested columns-in-columns), a
+ * `column` only directly inside an existing `columns` block, and every other
+ * block type either directly inside a Document (unchanged, pre-#148
+ * behavior) or inside a `column`, where only the curated
+ * `columnChildBlockTypes` subset is allowed — a column's own mini
+ * block-list renderer (ColumnsBlock.svelte) only knows how to render that
+ * subset; reference/structural/container types stay Document-only for v1.
+ */
+function validateBlockTypeForParent(doc: Y.Doc, parentId: string, blockType: BlockType): void {
+	const kind = parentKindOf(doc, parentId);
+	if (blockType === 'columns') {
+		if (kind !== 'document') {
+			throw new Error('columns blocks can only be created directly inside a Document.');
+		}
+		return;
+	}
+	if (blockType === 'column') {
+		const parent = kind === 'record' ? crdtGetRecord(doc, parentId) : undefined;
+		if (parent?.blockType !== 'columns') {
+			throw new Error('column blocks can only be created directly inside a columns block.');
+		}
+		return;
+	}
+	if (kind !== 'record') return; // ordinary Document-level block — unchanged, pre-#148 behavior
+	const parent = crdtGetRecord(doc, parentId);
+	const allowed: readonly BlockType[] = columnChildBlockTypes;
+	if (parent?.blockType !== 'column' || !allowed.includes(blockType)) {
+		throw new Error(
+			`${blockType} blocks cannot be created inside a column — supported column content is ${columnChildBlockTypes.join(', ')}.`
+		);
+	}
+}
+
 function validateChildPagesDepth(depth: ChildPagesDepth): void {
 	if (depth === 'unlimited') return;
 	if (!Number.isSafeInteger(depth) || depth < 1) {
@@ -211,37 +270,36 @@ function validateCreateReferencedRecordId(
 	);
 }
 
-/**
- * Creates a new record (block or row) under `input.parentId`, after checking the caller may
- * access that parent and, for a `page_link`/`child_pages` block whose `referencedRecordId` is
- * set, that its target is itself an accessible Document. Reserves the record's catalog locator
- * before the CRDT write so a row can never exist in a non-default shard without one, rolling
- * the reservation back if the write itself then fails.
- */
-export function createRecord(
+interface CreateRecordServiceInput {
+	parentId: string;
+	afterRecordId?: string;
+	blockType?: BlockType;
+	properties?: Record<string, PropertyValue>;
+	referencedRecordId?: string;
+	viewConfig?: EmbeddedViewConfig;
+	childPagesDepth?: ChildPagesDepth;
+	columnCount?: number; // for columns blocks only (issue #148) — default 2
+}
+
+// Extracted from createRecord purely to keep its own cognitive complexity
+// down (the same reason validateCreateReferencedRecordId above was already
+// split out) — every up-front rejection createRecord needs before it
+// reserves a locator or writes anything, in one place.
+function validateCreateRecordInput(
 	caller: CallerIdentity,
-	input: {
-		parentId: string;
-		afterRecordId?: string;
-		blockType?: BlockType;
-		properties?: Record<string, PropertyValue>;
-		referencedRecordId?: string;
-		viewConfig?: EmbeddedViewConfig;
-		childPagesDepth?: ChildPagesDepth;
-	}
-): WorkspaceRecord {
-	const { doc, workspaceId, shardId, defaultSpaceId } = resolveParentWorkspaceContext(
-		input.parentId
-	);
-	const actor = actorForCaller(caller);
-
-	requireAccessibleParent(caller, input.parentId, 'create_record');
-
+	doc: Y.Doc,
+	input: CreateRecordServiceInput
+): void {
 	// The CRDT layer intentionally stores Collection children as rows, dropping
 	// blockType. Reject every explicitly requested block here instead of
 	// reporting a successful create_record that silently produced a row.
-	if (input.blockType !== undefined && !crdtGetDocument(doc, input.parentId)) {
+	const parentKind = parentKindOf(doc, input.parentId);
+	if (input.blockType !== undefined && parentKind !== 'document' && parentKind !== 'record') {
 		throw new Error('blockType is only valid when creating a record inside a Document.');
+	}
+
+	if (input.blockType !== undefined) {
+		validateBlockTypeForParent(doc, input.parentId, input.blockType);
 	}
 
 	if (input.referencedRecordId !== undefined) {
@@ -265,6 +323,120 @@ export function createRecord(
 		validateChildPagesDepth(input.childPagesDepth);
 	}
 
+	if (input.columnCount !== undefined) {
+		validateColumnCount(input.blockType, input.columnCount);
+	}
+}
+
+// The actual CRDT write createRecord performs, split out so the try/catch
+// around it (and the locator bookkeeping around *that*) doesn't also have to
+// carry this branch's own complexity inline.
+function performCreateRecord(
+	doc: Y.Doc,
+	id: string,
+	input: CreateRecordServiceInput,
+	actor: ReturnType<typeof actorForCaller>
+): WorkspaceRecord {
+	if (input.blockType === 'columns') {
+		return crdtCreateColumnsBlock(
+			doc,
+			{ id, parentId: input.parentId, afterRecordId: input.afterRecordId },
+			actor,
+			input.columnCount
+		);
+	}
+	return crdtCreateRecord(
+		doc,
+		{
+			id,
+			parentId: input.parentId,
+			afterRecordId: input.afterRecordId,
+			blockType: input.blockType,
+			properties: input.properties,
+			referencedRecordId: input.referencedRecordId,
+			viewConfig: input.viewConfig,
+			childPagesDepth: input.childPagesDepth
+		},
+		actor
+	);
+}
+
+// createColumnsBlock (for blockType 'columns') creates each column and its
+// one seeded paragraph in the same transaction (record-ops.ts); a bare
+// create_record with blockType 'column' against an existing columns block
+// similarly seeds one paragraph of its own. Either way, every one of those
+// is a real record and needs its own locator entry exactly like
+// createRecord's own `id`, or a later write_record/delete_record/
+// hold_records call for it would resolve to the wrong (default) shard.
+// Recurses generically over whatever depth of children the created record
+// actually has (2 levels for a fresh columns block, 1 for a bare column)
+// rather than hardcoding either shape. `reserved` is a caller-owned array,
+// pushed into as each reservation succeeds — not built up locally and
+// returned at the end — so that if a `reserveRecordLocator` call throws
+// partway through, everything reserved *before* the throw is still visible
+// to the caller's rollback, instead of being lost along with the aborted
+// return value. A collision here is as vanishingly unlikely as for `id`
+// itself (all fresh nanoids) and isn't specially retried, the same
+// accepted-risk tradeoff deleteRecord's locator release already documents
+// for the inverse case.
+function reserveDescendantLocators(
+	doc: Y.Doc,
+	record: WorkspaceRecord,
+	workspaceId: string,
+	defaultSpaceId: string,
+	shardId: string,
+	reserved: string[]
+): void {
+	for (const childId of record.childRecordIds ?? []) {
+		reserveRecordLocator(workspaceId, defaultSpaceId, childId, shardId);
+		reserved.push(childId);
+		const child = crdtGetRecord(doc, childId);
+		if (child) {
+			reserveDescendantLocators(doc, child, workspaceId, defaultSpaceId, shardId, reserved);
+		}
+	}
+}
+
+// Compensating rollback for a columns/column block whose descendant-locator
+// reservation failed partway through (see createRecord's catch block
+// below): the CRDT tree was already committed by the earlier
+// transactWithOrigin call, before any descendant locator was reserved, so a
+// failure here must not leave it behind — a half-locator-tracked tree would
+// resolve any unreserved id to the wrong (default) shard, and a caller
+// retrying after this throw would otherwise create a second, duplicate tree
+// alongside the still-committed first one. deleteRecord's own recursion
+// (record-ops.ts) already knows how to remove a container and every one of
+// its children in one call.
+function rollBackContainerCreate(doc: Y.Doc, id: string): void {
+	transactWithOrigin(doc, SERVICE_ORIGIN, () => {
+		if (crdtGetRecord(doc, id)) crdtDeleteRecord(doc, id);
+	});
+}
+
+/**
+ * Creates a new record (block or row) under `input.parentId`, after checking the caller may
+ * access that parent and, for a `page_link`/`child_pages` block whose `referencedRecordId` is
+ * set, that its target is itself an accessible Document. Reserves the record's catalog locator
+ * before the CRDT write so a row can never exist in a non-default shard without one, rolling
+ * the reservation back if the write itself then fails.
+ */
+export function createRecord(
+	caller: CallerIdentity,
+	input: CreateRecordServiceInput
+): WorkspaceRecord {
+	const { doc, workspaceId, shardId, defaultSpaceId } = resolveParentWorkspaceContext(
+		input.parentId
+	);
+	const actor = actorForCaller(caller);
+
+	// A container record (columns/column) isn't itself catalog-navigable —
+	// access is checked against its owning Document's grant instead (issue
+	// #148). A no-op for every pre-#148 parentId, which was already
+	// top-level.
+	requireAccessibleParent(caller, resolveOwningParentId(doc, input.parentId), 'create_record');
+
+	validateCreateRecordInput(caller, doc, input);
+
 	// Reserved before the CRDT write (not after) so a row can never exist in a
 	// non-default shard without a locator: if reservation itself fails (e.g. a
 	// colliding id), nothing has been written yet. If the CRDT write then
@@ -278,26 +450,32 @@ export function createRecord(
 	const id = nanoid();
 	reserveRecordLocator(workspaceId, defaultSpaceId, id, shardId);
 
+	// Both container-creating blockTypes seed at least one descendant that
+	// needs its own locator: 'columns' seeds N columns (each with its own
+	// paragraph), and a bare 'column' (an agent adding one to an existing
+	// columns block) seeds one paragraph of its own — see
+	// reserveDescendantLocators.
+	const isContainerCreate = input.blockType === 'columns' || input.blockType === 'column';
 	let record: WorkspaceRecord;
+	const reservedChildIds: string[] = [];
 	try {
 		record = transactWithOrigin(doc, SERVICE_ORIGIN, () =>
-			crdtCreateRecord(
-				doc,
-				{
-					id,
-					parentId: input.parentId,
-					afterRecordId: input.afterRecordId,
-					blockType: input.blockType,
-					properties: input.properties,
-					referencedRecordId: input.referencedRecordId,
-					viewConfig: input.viewConfig,
-					childPagesDepth: input.childPagesDepth
-				},
-				actor
-			)
+			performCreateRecord(doc, id, input, actor)
 		);
+		if (isContainerCreate) {
+			reserveDescendantLocators(
+				doc,
+				record,
+				workspaceId,
+				defaultSpaceId,
+				shardId,
+				reservedChildIds
+			);
+		}
 	} catch (err) {
 		releaseRecordLocator(workspaceId, id);
+		for (const childId of reservedChildIds) releaseRecordLocator(workspaceId, childId);
+		if (isContainerCreate) rollBackContainerCreate(doc, id);
 		throw err;
 	}
 
@@ -506,6 +684,21 @@ export function writeRecord(
 	const { doc, awareness } = resolveRecordWorkspaceContext(recordId);
 	const actor = actorForCaller(caller);
 	const record = requireAccessibleRecord(caller, recordId, 'write_record');
+
+	// A columns/column block has no content of its own (data-model.md §3.1) —
+	// its markdown is entirely derived from its columns' children
+	// (document-projection.ts's renderColumnsMarkdown), so a markdown write
+	// here would have nowhere to go: no UI ever renders it, and it wouldn't
+	// even round-trip through get_document, unlike every other structural
+	// block type's content.
+	if (
+		input.markdown !== undefined &&
+		(record.blockType === 'columns' || record.blockType === 'column')
+	) {
+		throw new Error(
+			'markdown cannot be written to a columns or column block directly — write to one of its nested blocks instead.'
+		);
+	}
 
 	if (input.referencedRecordId !== undefined) {
 		validateReferencedRecordIdWrite(caller, doc, record, input.referencedRecordId);

@@ -29,6 +29,14 @@ export interface DocumentRecordView {
 	calloutStyle?: CalloutStyle;
 	childPagesDepth?: ChildPagesDepth;
 	markdown: string;
+	// Present only on a container block (columns/column, issue #148) — its
+	// own children, each projected the same recursive way. A columns
+	// block's `markdown` already folds its columns' children in as fenced
+	// `::: column` sections (see renderColumnsMarkdown below); this is
+	// exposed separately too so a caller that wants structured per-block
+	// fields (checked/collapsed/viewConfig/...) for something nested inside
+	// a column doesn't have to re-parse markdown to get them.
+	children?: DocumentRecordView[];
 }
 
 // GitHub's `> [!NOTE]` alert-blockquote syntax is the nearest existing
@@ -110,6 +118,27 @@ function renderRecordMarkdown(
 	return content;
 }
 
+// Pandoc-style fenced-div syntax (`::: name`) — the nearest existing plain-
+// markdown convention for "a named container of block content," and, like
+// callout's GitHub alert syntax above, read-direction only: there is no
+// parser turning `::: columns` back into a columns block/columnCount (an
+// agent adds/removes columns and their content the ordinary way, via
+// create_record/write_record/delete_record on the columns block's own
+// children — see mcp-tools.md). An empty column still renders its own
+// `::: column\n:::` pair so a caller can tell "N columns, some empty" apart
+// from "fewer columns than columnCount requested."
+function renderColumnMarkdown(column: DocumentRecordView): string {
+	const body = (column.children ?? [])
+		.map((block) => block.markdown)
+		.filter((markdown) => markdown.length > 0)
+		.join('\n\n');
+	return body ? `::: column\n${body}\n:::` : '::: column\n:::';
+}
+
+function renderColumnsMarkdown(columns: DocumentRecordView[]): string {
+	return ['::: columns', ...columns.map(renderColumnMarkdown), ':::'].join('\n');
+}
+
 function renderPresetCalloutMarkdown(preset: CalloutPreset, content: string): string {
 	const keyword = CALLOUT_PRESET_ALERT_KEYWORD[preset];
 	if (!content) return `> [!${keyword}]`;
@@ -136,7 +165,11 @@ export function projectDocumentRecordView(
 	const isPageLink = data.blockType === 'page_link';
 	const isCollectionView = data.blockType === 'collection_view';
 	const isChildPages = data.blockType === 'child_pages';
-	const markdown = renderRecordMarkdown(data, doc, isPageLink, isCollectionView, isChildPages);
+	const children = data.children?.map((child) => projectDocumentRecordView(child, doc));
+	const markdown =
+		data.blockType === 'columns' && children
+			? renderColumnsMarkdown(children)
+			: renderRecordMarkdown(data, doc, isPageLink, isCollectionView, isChildPages);
 	return {
 		id: data.id,
 		blockType: data.blockType,
@@ -147,7 +180,8 @@ export function projectDocumentRecordView(
 		viewConfig: data.viewConfig,
 		calloutStyle: data.calloutStyle,
 		childPagesDepth: data.childPagesDepth,
-		markdown
+		markdown,
+		children
 	};
 }
 

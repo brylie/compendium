@@ -51,7 +51,8 @@
 			| 'lightbulb'
 			| 'warning'
 			| 'danger'
-			| 'child-pages';
+			| 'child-pages'
+			| 'columns';
 		size?: number;
 		class?: string;
 	} = $props();
@@ -208,5 +209,8 @@
 		<path d="M10 6.5v2.5M4.5 12.5v-2a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v2" />
 		<rect x="2" y="12.5" width="5" height="4" rx="1" />
 		<rect x="13" y="12.5" width="5" height="4" rx="1" />
+	{:else if name === 'columns'}
+		<rect x="3" y="3.5" width="14" height="13" rx="1.5" />
+		<path d="M10 3.5v13" />
 	{/if}
 </svg>

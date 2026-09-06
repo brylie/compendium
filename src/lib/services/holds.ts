@@ -9,6 +9,7 @@ import {
 	groupRecordIdsByShard,
 	isAccessToken,
 	requireAccessibleRecord,
+	resolveOwningParentId,
 	type CallerIdentity
 } from './permissions';
 
@@ -41,8 +42,14 @@ export function holdRecords(
 			const groupResult = requestAgentHold(awareness, clientId, actor, ids, (id) => {
 				const record = getRecord(doc, id);
 				if (!record) return false;
-				const spaceId = resolveShardForParent(workspaceId, record.parentId)?.spaceId;
-				return tokenAllowsParent(caller, record.parentId, spaceId);
+				// A record nested inside a container block (columns/column,
+				// issue #148) isn't itself catalog-navigable — check the
+				// token's grant against its owning Document instead (mirrors
+				// requireAccessibleRecord's own resolution below, for the
+				// human-caller branch).
+				const owningParentId = resolveOwningParentId(doc, record.parentId);
+				const spaceId = resolveShardForParent(workspaceId, owningParentId)?.spaceId;
+				return tokenAllowsParent(caller, owningParentId, spaceId);
 			});
 			granted.push(...groupResult.granted);
 			denied.push(...groupResult.denied);
