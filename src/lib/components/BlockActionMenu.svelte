@@ -80,7 +80,7 @@
 	}
 
 	function handleWindowScrollOrResize(): void {
-		if (open) closeMenu();
+		if (open) closeMenu(false);
 	}
 
 	function openMenu(): void {
@@ -89,9 +89,18 @@
 		mode = 'menu';
 	}
 
-	function closeMenu(): void {
+	// `restoreFocus` defaults to true (the keyboard-dismissal and item-
+	// activation paths, where returning focus to the trigger is exactly what
+	// should happen) but must be false for a dismissal the user didn't aim at
+	// this menu at all — an outside click or a scroll/resize. Both of those
+	// fire *after* the browser has already moved focus wherever the user
+	// actually clicked (e.g. into a block's own editor); forcing focus back
+	// to the trigger there would silently steal it from where the user just
+	// clicked, and the next keystroke would hit this button instead of the
+	// editor.
+	function closeMenu(restoreFocus = true): void {
 		open = false;
-		trigger?.focus();
+		if (restoreFocus) trigger?.focus();
 	}
 
 	function run(action: () => void): void {
@@ -103,7 +112,7 @@
 		if (!open || !container) return;
 		const path = event.composedPath();
 		if (!path.includes(container) && !(panel && path.includes(panel))) {
-			closeMenu();
+			closeMenu(false);
 		}
 	}
 
@@ -119,7 +128,14 @@
 			return;
 		}
 		if (!panel) return;
-		const items = Array.from(panel.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+		// Disabled menuitems (e.g. "Move up" at the first position) can't
+		// receive focus at all — including them here would make
+		// ArrowUp/ArrowDown compute a `currentIndex` that never matches
+		// `document.activeElement`, silently stalling roving focus right
+		// before the disabled item instead of skipping over it.
+		const items = Array.from(
+			panel.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')
+		);
 		if (items.length === 0) return;
 		const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
 		if (event.key === 'ArrowDown') {

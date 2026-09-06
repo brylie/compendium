@@ -1279,20 +1279,41 @@ describe('flattenDocumentBlocks: full document order for the List View outline (
 	});
 
 	it('skips a stale child-array entry left by a concurrent cross-container move', () => {
-		const source = new Y.Doc();
-		const document = createDocument(source, { title: 'Notes' });
-		const columns = createColumnsBlock(source, { parentId: document.id }, human, 2);
-		const [columnA, columnB] = columns.childRecordIds!;
-		const [blockInA] = getRecord(source, columnA)!.childRecordIds!;
+		// A single, sequential move (fork, apply the full post-move state) never
+		// leaves a stale entry behind — the replica just converges to the exact
+		// same recordIds arrays the source ends up with. A real stale entry only
+		// exists when two replicas concurrently move the *same* block to two
+		// *different* containers and are then merged (the losing container's own
+		// recordIds array keeps its insert, since Y.Array has no atomic "move"
+		// primitive — see moveRecordToParent's own doc comment) — the same
+		// pattern the "deleting the losing column..." test above uses.
+		const docA = new Y.Doc();
+		const document = createDocument(docA, { title: 'Notes' });
+		const columns = createColumnsBlock(docA, { parentId: document.id }, human, 3);
+		const [columnA, columnB, columnC] = columns.childRecordIds!;
+		const [blockInA] = getRecord(docA, columnA)!.childRecordIds!;
 
-		const replica = new Y.Doc();
-		Y.applyUpdate(replica, Y.encodeStateAsUpdate(source));
-		moveRecordToParent(source, blockInA, columnB);
-		Y.applyUpdate(replica, Y.encodeStateAsUpdate(source));
+		const docB = new Y.Doc();
+		Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+		moveRecordToParent(docA, blockInA, columnB);
+		moveRecordToParent(docB, blockInA, columnC);
+		Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+		Y.applyUpdate(docA, Y.encodeStateAsUpdate(docB));
 
-		const flat = flattenDocumentBlocks(replica, document.id);
+		const winner = getRecord(docA, blockInA)!.parentId;
+		const loserColumn = winner === columnB ? columnC : columnB;
+		// The losing column's own *raw* recordIds array still has a stale entry
+		// for blockInA (listRecordsForParent already filters it out by design —
+		// see its own doc comment — so this checks the underlying Y.Array
+		// directly, the only way to confirm a stale entry actually exists here).
+		const loserRecordIds = (docA.getMap('records').get(loserColumn) as Y.Map<unknown>).get(
+			'recordIds'
+		) as Y.Array<string>;
+		expect(loserRecordIds.toArray()).toContain(blockInA);
+
+		const flat = flattenDocumentBlocks(docA, document.id);
 		const occurrences = flat.filter((f) => f.record.id === blockInA);
 		expect(occurrences).toHaveLength(1);
-		expect(occurrences[0].depth).toBe(2); // columns(0) -> columnB(1) -> block(2)
+		expect(occurrences[0].record.parentId).toBe(winner);
 	});
 });

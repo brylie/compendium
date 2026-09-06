@@ -1003,48 +1003,72 @@
 		selectionAnchorId = copies[0]?.id ?? null;
 	}
 
-	// Moves the whole selected group up/down by one position as a unit — only
-	// meaningful (and only offered in the bulk action bar) for a *contiguous*
-	// selection, since "move a scattered set up" has no single well-defined
-	// result. Implemented as swapping the group with its one adjacent
-	// unselected neighbor, the natural generalization of moveBlock's own
-	// single-block adjacent swap.
-	function moveSelectionAsGroup(direction: 'up' | 'down'): void {
-		if (!ydoc) return;
+	interface SelectionGroupBounds {
+		siblings: WorkspaceRecord[];
+		groupStart: number;
+		groupEnd: number;
+	}
+
+	// Resolves the current selection's start/end position within its shared
+	// parent's sibling list, or null when the selection is empty, spans an id
+	// no longer found there, or isn't contiguous — "move a scattered set up"
+	// has no single well-defined result. The one shared definition of "is this
+	// selection movable as a unit," used by isSelectionContiguous, the bulk
+	// bar's Move up/down disabled state, and moveSelectionAsGroup itself, so
+	// the three can't drift out of agreement with each other.
+	function resolveSelectionGroupBounds(): SelectionGroupBounds | null {
+		if (!ydoc) return null;
 		const selected = orderedSelection();
-		if (selected.length === 0) return;
-		const parentId = selected[0].parentId;
-		const siblings = listRecordsForParent(ydoc, parentId);
+		if (selected.length === 0) return null;
+		const siblings = listRecordsForParent(ydoc, selected[0].parentId);
 		const indices = selected
 			.map((r) => siblings.findIndex((s) => s.id === r.id))
 			.filter((i) => i !== -1)
 			.sort((a, b) => a - b);
-		if (indices.length !== selected.length) return;
+		if (indices.length !== selected.length) return null;
 		const groupStart = indices[0];
 		const groupEnd = indices[indices.length - 1];
-		if (groupEnd - groupStart + 1 !== indices.length) return; // not contiguous
+		if (groupEnd - groupStart + 1 !== indices.length) return null; // not contiguous
+		return { siblings, groupStart, groupEnd };
+	}
+
+	function isSelectionContiguous(): boolean {
+		return resolveSelectionGroupBounds() !== null;
+	}
+
+	// Whether the bulk bar's Move up/down button should be enabled — false for
+	// a non-contiguous selection (see resolveSelectionGroupBounds) and also
+	// false right at the container boundary in that direction, so the button
+	// can't be clicked to silently do nothing.
+	function canMoveSelectionAsGroup(direction: 'up' | 'down'): boolean {
+		const bounds = resolveSelectionGroupBounds();
+		if (!bounds) return false;
+		return direction === 'up'
+			? bounds.groupStart > 0
+			: bounds.groupEnd < bounds.siblings.length - 1;
+	}
+
+	// Moves the whole selected group up/down by one position as a unit,
+	// swapping it with its one adjacent unselected neighbor — the natural
+	// generalization of moveBlock's own single-block adjacent swap.
+	function moveSelectionAsGroup(direction: 'up' | 'down'): void {
+		if (!ydoc || !canMoveSelectionAsGroup(direction)) return;
+		const { siblings, groupStart, groupEnd } = resolveSelectionGroupBounds()!;
 
 		ydoc.transact(() => {
 			if (direction === 'up') {
-				if (groupStart === 0) return;
 				reorderRecord(ydoc!, siblings[groupStart - 1].id, siblings[groupEnd].id);
 			} else {
-				if (groupEnd === siblings.length - 1) return;
 				const beforeFirst = groupStart > 0 ? siblings[groupStart - 1].id : undefined;
 				reorderRecord(ydoc!, siblings[groupEnd + 1].id, beforeFirst);
 			}
 		});
-	}
-
-	function isSelectionContiguous(): boolean {
-		if (!ydoc) return false;
-		const selected = orderedSelection();
-		if (selected.length < 2) return true;
-		const siblings = listRecordsForParent(ydoc, selected[0].parentId);
-		const indices = selected
-			.map((r) => siblings.findIndex((s) => s.id === r.id))
-			.sort((a, b) => a - b);
-		return indices[indices.length - 1] - indices[0] + 1 === indices.length;
+		const count = groupEnd - groupStart + 1;
+		const newStart = direction === 'up' ? groupStart - 1 : groupStart + 1;
+		reorderAnnouncement =
+			count === 1
+				? `Moved block to position ${newStart + 1} of ${siblings.length}.`
+				: `Moved ${count} blocks to positions ${newStart + 1}-${newStart + count} of ${siblings.length}.`;
 	}
 
 	// Every drop container currently on screen (the Document's own top-level
@@ -2090,9 +2114,11 @@
 		<button
 			type="button"
 			onclick={() => moveSelectionAsGroup('up')}
-			disabled={!isSelectionContiguous()}
+			disabled={!canMoveSelectionAsGroup('up')}
 			class="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-fg hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-			title={isSelectionContiguous() ? 'Move up' : 'Only a contiguous selection can move as a unit'}
+			title={!isSelectionContiguous()
+				? 'Only a contiguous selection can move as a unit'
+				: 'Move up'}
 		>
 			<Icon name="arrow-up" size={14} />
 			Move up
@@ -2100,11 +2126,11 @@
 		<button
 			type="button"
 			onclick={() => moveSelectionAsGroup('down')}
-			disabled={!isSelectionContiguous()}
+			disabled={!canMoveSelectionAsGroup('down')}
 			class="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-fg hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-			title={isSelectionContiguous()
-				? 'Move down'
-				: 'Only a contiguous selection can move as a unit'}
+			title={!isSelectionContiguous()
+				? 'Only a contiguous selection can move as a unit'
+				: 'Move down'}
 		>
 			<Icon name="arrow-down" size={14} />
 			Move down

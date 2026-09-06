@@ -180,4 +180,40 @@ describe('BlockActionMenu (#152)', () => {
 		await user.click(document.body);
 		expect(screen.queryByRole('menuitem', { name: 'Duplicate' })).not.toBeInTheDocument();
 	});
+
+	// CodeRabbit review (PR #238): an outside click landing in a real focusable
+	// element (e.g. clicking into a block's own text editor while this menu
+	// happens to be open) must leave focus wherever the user actually clicked
+	// — closeMenu's default trigger.focus() is only correct for a *keyboard*
+	// dismissal or an item activation, not this path.
+	it('does not steal focus back to the trigger when an outside click lands on a focusable element', async () => {
+		const user = userEvent.setup();
+		const { container } = render(BlockActionMenu, baseProps());
+		const input = document.createElement('input');
+		container.appendChild(input);
+
+		await user.click(screen.getByRole('button', { name: 'Block actions' }));
+		await user.click(input);
+
+		expect(screen.queryByRole('menuitem', { name: 'Duplicate' })).not.toBeInTheDocument();
+		expect(input).toHaveFocus();
+	});
+
+	// CodeRabbit review (PR #238): a disabled menuitem can't receive focus, so
+	// including it in the roving-focus list stalls ArrowUp/ArrowDown right
+	// before it instead of skipping over it.
+	it('roving focus skips a disabled Move up/down item instead of stalling on it', async () => {
+		const user = userEvent.setup();
+		render(BlockActionMenu, { ...baseProps(), canMoveUp: false });
+
+		await user.click(screen.getByRole('button', { name: 'Block actions' }));
+		// Order: Duplicate, Convert to…, Copy link to block, [Move up —
+		// disabled], Move down, Delete. From Copy link, ArrowDown must land on
+		// Move down, not get stuck re-focusing Copy link every press.
+		await user.keyboard('{ArrowDown}{ArrowDown}');
+		expect(screen.getByRole('menuitem', { name: 'Copy link to block' })).toHaveFocus();
+
+		await user.keyboard('{ArrowDown}');
+		expect(screen.getByRole('menuitem', { name: 'Move down' })).toHaveFocus();
+	});
 });

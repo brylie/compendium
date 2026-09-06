@@ -734,6 +734,35 @@ describe('doc/[id] +page', () => {
 			await user.click(screen.getByRole('button', { name: 'Move up' }));
 
 			expect(orderedBlockIds()).toEqual([second.id, third.id, first.id]);
+			expect(screen.getByText(/Moved 2 blocks to positions 1-2 of 3\./)).toBeInTheDocument();
+		});
+
+		it('disables the group Move up/down buttons at the respective container boundary and does nothing if clicked anyway', async () => {
+			const { container, first, second, third } = await renderThreeBlocks();
+			const firstHandle = container.querySelector(
+				`[data-drag-handle="${first.id}"]`
+			) as HTMLElement;
+			const secondHandle = container.querySelector(
+				`[data-drag-handle="${second.id}"]`
+			) as HTMLElement;
+			// The first two blocks are already at the very top — Move up has
+			// nowhere to go.
+			await fireEvent.pointerDown(firstHandle, { button: 0, ctrlKey: true, pointerId: 1 });
+			await fireEvent.pointerDown(secondHandle, { button: 0, shiftKey: true, pointerId: 1 });
+			await tick();
+			const user = userEvent.setup();
+
+			const moveUp = screen.getByRole('button', { name: 'Move up' });
+			expect(moveUp).toBeDisabled();
+			await user.click(moveUp);
+			expect(orderedBlockIds()).toEqual([first.id, second.id, third.id]);
+
+			// Move down stays enabled for this same (non-boundary-on-that-side)
+			// selection, and moving it doesn't disturb `third`'s content.
+			const moveDown = screen.getByRole('button', { name: 'Move down' });
+			expect(moveDown).not.toBeDisabled();
+			await user.click(moveDown);
+			expect(orderedBlockIds()).toEqual([third.id, first.id, second.id]);
 		});
 
 		it('duplicates every selected block via the bulk action bar', async () => {
