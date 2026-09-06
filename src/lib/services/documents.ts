@@ -390,6 +390,12 @@ export interface DocumentRecordData {
 	// undefined when not a child_pages block, or when its target didn't
 	// resolve.
 	childPages?: ChildPageNode[];
+	// Present only on a container block (columns/column, issue #148) — its
+	// own child records, resolved the same recursive way as this record
+	// itself was (permission scoping included), in child order. Generic
+	// (not columns-specific) so any future container block type gets the
+	// same MCP-visible nesting for free.
+	children?: DocumentRecordData[];
 }
 
 interface ResolvedLink {
@@ -523,7 +529,20 @@ function resolveDocumentRecordData(
 		calloutStyle: r.blockType === 'callout' ? r.calloutStyle : undefined,
 		childPagesDepth: isChildPages ? r.childPagesDepth : undefined,
 		content: r.content,
-		childPages
+		childPages,
+		children: r.childRecordIds
+			? crdtListRecordsForParent(doc, r.id).map((child) =>
+					resolveDocumentRecordData(
+						child,
+						doc,
+						documentId,
+						workspaceId,
+						defaultSpaceId,
+						caller,
+						getDocuments
+					)
+				)
+			: undefined
 	};
 }
 

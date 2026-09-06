@@ -26,7 +26,8 @@
 			| 'sync'
 			| 'link'
 			| 'table'
-			| 'child-pages';
+			| 'child-pages'
+			| 'columns';
 		aliases: string[];
 	}
 
@@ -122,6 +123,14 @@
 			description: 'Hide or show content inside.',
 			icon: 'toggle',
 			aliases: ['toggle', 'collapsible', 'collapse', 'expand', 'details']
+		},
+		{
+			blockType: 'columns',
+			category: 'Structure',
+			label: 'Columns',
+			description: 'Lay out content side by side.',
+			icon: 'columns',
+			aliases: ['columns', 'column', 'layout', 'side by side', 'multi-column']
 		},
 		{
 			blockType: 'code',

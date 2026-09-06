@@ -57,6 +57,11 @@ export interface RecordYShape {
 	referencedRecordId?: string;
 	calloutStyle?: CalloutStyle;
 	childPagesDepth?: ChildPagesDepth;
+	// Only present on a container block (columns/column, issue #148) — see
+	// WorkspaceRecord.childRecordIds. Carries the Y.Array itself, the same
+	// "live array, not a snapshot" convention Document/CollectionYShape's own
+	// recordIds already use.
+	recordIds?: Y.Array<string>;
 	createdBy: ActorId;
 	createdAt: number;
 	lastEditedBy: ActorId;

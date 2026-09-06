@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { createDocument, getDocument } from './document-ops';
 import { createCollection, getCollection } from './collection-ops';
-import { createRecord, getRecord, updateRecordContent } from './record-ops';
+import { createColumnsBlock, createRecord, getRecord, updateRecordContent } from './record-ops';
 import { copyCollectionVerbatim, copyDocumentVerbatim } from './migration-copy';
 import { type ActorId } from './types';
 
@@ -64,5 +64,42 @@ describe('copyDocumentVerbatim / copyCollectionVerbatim: cross-doc migration pri
 
 		const copiedRow = getRecord(target, row.id);
 		expect(copiedRow?.properties?.status).toEqual({ type: 'checkbox', value: true });
+	});
+
+	it("recurses into a columns block's own children (issue #148) — a container's nested blocks live only in its own recordIds array, never the Document's", () => {
+		const source = new Y.Doc();
+		const target = new Y.Doc();
+
+		const document = createDocument(source, { title: 'Layout Doc' });
+		const columns = createColumnsBlock(source, { parentId: document.id }, human, 2);
+		const [columnAId, columnBId] = columns.childRecordIds!;
+		const [seededParagraphId] = getRecord(source, columnAId)!.childRecordIds!;
+		const heading = createRecord(source, { parentId: columnAId, blockType: 'heading_2' }, human);
+		updateRecordContent(
+			source,
+			heading.id,
+			{ runs: [{ text: 'Column heading', marks: {} }] },
+			human
+		);
+
+		copyDocumentVerbatim(source, target, document.id);
+
+		// The columns block itself is the only entry in the Document's own
+		// top-level recordIds — its columns are one level further in.
+		expect(getDocument(target, document.id)?.recordIds).toEqual([columns.id]);
+
+		const copiedColumns = getRecord(target, columns.id);
+		expect(copiedColumns?.blockType).toBe('columns');
+		expect(copiedColumns?.childRecordIds).toEqual([columnAId, columnBId]);
+
+		const copiedColumnA = getRecord(target, columnAId);
+		expect(copiedColumnA?.blockType).toBe('column');
+		expect(copiedColumnA?.childRecordIds).toEqual([seededParagraphId, heading.id]);
+
+		const copiedHeading = getRecord(target, heading.id);
+		expect(copiedHeading?.content).toEqual({ runs: [{ text: 'Column heading', marks: {} }] });
+
+		const copiedColumnB = getRecord(target, columnBId);
+		expect(copiedColumnB?.childRecordIds).toHaveLength(1);
 	});
 });

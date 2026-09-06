@@ -228,7 +228,10 @@
 	}
 
 	function isShortcutModifierPressed(event: KeyboardEvent): boolean {
-		return event.metaKey || event.ctrlKey;
+		// AltGr reports as ctrlKey+altKey together on many keyboard layouts —
+		// without this, a character-producing AltGr combination would fire a
+		// formatting shortcut instead of inserting the character.
+		return !event.getModifierState('AltGraph') && (event.metaKey || event.ctrlKey);
 	}
 
 	// ArrowUp/ArrowDown at the visual first/last line of this block, with no

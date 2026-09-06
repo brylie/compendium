@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import type { ParentKind } from './types';
+import type { ParentKind, WorkspaceRecord } from './types';
 import { applyRichTextToYText } from './richtext';
 import { type TypedYMap, typedYMap } from './yjs-typed';
 import {
@@ -15,7 +15,7 @@ import { applyOptionalBlockFields } from './view-config';
 import { NotFoundError } from './errors';
 import { getDocument } from './document-ops';
 import { getCollection } from './collection-ops';
-import { getRecord } from './record-ops';
+import { getRecord, isAuthoritativeChild } from './record-ops';
 
 // ---------------------------------------------------------------------------
 // Migration primitives (#114/#132) — verbatim structural copies of a
@@ -72,10 +72,67 @@ export function copyCollectionVerbatim(sourceDoc: Y.Doc, targetDoc: Y.Doc, id: s
 
 /**
  * Copies one record (block or row) into `targetDoc` with every field
- * preserved exactly. Does not touch the parent's recordIds array — callers
- * (copyDocumentVerbatim/copyCollectionVerbatim) push the id themselves, once,
- * in the legacy order already recorded on the source meta.
+ * preserved exactly, recursing into a container block's (columns/column,
+ * issue #148) own children the same way copyDocumentVerbatim/
+ * copyCollectionVerbatim recurse into a Document/Collection's top-level
+ * records — a container's children live only in its own `recordIds` array,
+ * never in the owning Document's, so without this recursion a shard
+ * migration would silently drop every block nested inside a columns block.
+ * Does not touch the *parent's* recordIds array — the top-level caller
+ * (copyDocumentVerbatim/copyCollectionVerbatim) pushes the id themselves,
+ * once, in the legacy order already recorded on the source meta; a
+ * recursive call here owns its own container's recordIds array instead,
+ * exactly mirroring that same split one level down.
  */
+// Populates a copied record's block-vs-row fields — split out of
+// copyRecordVerbatim purely to keep its own cognitive complexity down.
+function applyCopiedRecordFields(
+	yrecord: TypedYMap<RecordYShape>,
+	record: WorkspaceRecord,
+	kind: ParentKind
+): void {
+	if (kind === 'document' || kind === 'record') {
+		yrecord.set('blockType', record.blockType ?? 'paragraph');
+		// A container (columns/column) has no content Y.Text at all, matching
+		// how createRecord builds one fresh — not a present-but-empty one,
+		// which would round-trip differently through readRecord (an empty
+		// Y.Text is still truthy, so it wouldn't read back as `undefined`).
+		if (record.blockType !== 'columns' && record.blockType !== 'column') {
+			const ytext = new Y.Text();
+			if (record.content) applyRichTextToYText(ytext, record.content);
+			yrecord.set('content', ytext);
+		}
+		applyOptionalBlockFields(yrecord, record);
+	} else {
+		yrecord.set('isCollectionRow', true);
+		for (const [key, value] of Object.entries(record.properties ?? {})) {
+			setPropertyValue(yrecord, key, value);
+		}
+	}
+}
+
+// Recursively copies a container's own children, skipping a stale leftover
+// entry from a concurrent cross-container moveRecordToParent (issue #148)
+// whose own `parentId` now authoritatively points elsewhere — see
+// record-ops.ts#isAuthoritativeChild's doc comment. Copying it here too
+// would duplicate that record under two parents in the migrated doc (once
+// under its real, live parent when *that* parent is copied, and again here
+// under this stale reference). Split out of copyRecordVerbatim purely to
+// keep its own cognitive complexity down.
+function copyAuthoritativeChildren(
+	sourceDoc: Y.Doc,
+	targetDoc: Y.Doc,
+	id: string,
+	childIds: string[],
+	childRecordIds: Y.Array<string>
+): void {
+	for (const childId of childIds) {
+		if (!isAuthoritativeChild(sourceDoc, id, childId)) continue;
+		copyRecordVerbatim(sourceDoc, targetDoc, childId, 'record');
+		childRecordIds.push([childId]);
+	}
+}
+
 function copyRecordVerbatim(
 	sourceDoc: Y.Doc,
 	targetDoc: Y.Doc,
@@ -94,17 +151,14 @@ function copyRecordVerbatim(
 	yrecord.set('lastEditedBy', record.lastEditedBy);
 	yrecord.set('lastEditedAt', record.lastEditedAt);
 
-	if (kind === 'document') {
-		yrecord.set('blockType', record.blockType ?? 'paragraph');
-		const ytext = new Y.Text();
-		if (record.content) applyRichTextToYText(ytext, record.content);
-		yrecord.set('content', ytext);
-		applyOptionalBlockFields(yrecord, record);
-	} else {
-		yrecord.set('isCollectionRow', true);
-		for (const [key, value] of Object.entries(record.properties ?? {})) {
-			setPropertyValue(yrecord, key, value);
-		}
+	applyCopiedRecordFields(yrecord, record, kind);
+
+	if (record.childRecordIds) {
+		const childRecordIds = new Y.Array<string>();
+		yrecord.set('recordIds', childRecordIds);
+		recordsMap(targetDoc).set(id, yrecord.raw);
+		copyAuthoritativeChildren(sourceDoc, targetDoc, id, record.childRecordIds, childRecordIds);
+		return;
 	}
 
 	recordsMap(targetDoc).set(id, yrecord.raw);

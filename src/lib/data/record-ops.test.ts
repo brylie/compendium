@@ -4,11 +4,14 @@ import { DEFAULT_CUSTOM_CALLOUT_COLOR } from './callout-style';
 import { createDocument, listDocuments } from './document-ops';
 import { createCollection, listCollections } from './collection-ops';
 import {
+	createColumnsBlock,
 	createRecord,
 	deleteRecord,
 	getRecord,
 	getRecordYText,
 	listRecordsForParent,
+	moveRecordToParent,
+	parentKindOf,
 	patchRecordViewConfig,
 	reorderRecord,
 	setBlockType,
@@ -832,5 +835,284 @@ describe('reorderRecord: block drag-and-drop repositioning (#40)', () => {
 				.runs.map((r) => r.text)
 				.join('')
 		).toBe('from A');
+	});
+});
+
+describe('columns: container block nesting (#148)', () => {
+	function setup(columnCount?: number) {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const columns = createColumnsBlock(doc, { parentId: document.id }, human, columnCount);
+		return { doc, document, columns };
+	}
+
+	it('creates a columns block with 2 columns by default, each seeded with one empty paragraph', () => {
+		const { doc, columns } = setup();
+		expect(columns.blockType).toBe('columns');
+		expect(columns.childRecordIds).toHaveLength(2);
+
+		for (const columnId of columns.childRecordIds!) {
+			const column = getRecord(doc, columnId)!;
+			expect(column.blockType).toBe('column');
+			expect(column.childRecordIds).toHaveLength(1);
+			const [paragraphId] = column.childRecordIds!;
+			expect(getRecord(doc, paragraphId)!.blockType).toBe('paragraph');
+		}
+	});
+
+	it('honors a custom columnCount', () => {
+		const { columns } = setup(4);
+		expect(columns.childRecordIds).toHaveLength(4);
+	});
+
+	it('parentKindOf resolves a columns/column record as "record"', () => {
+		const { doc, columns } = setup();
+		expect(parentKindOf(doc, columns.id)).toBe('record');
+		expect(parentKindOf(doc, columns.childRecordIds![0])).toBe('record');
+	});
+
+	it('createRecord under a column adds it to that column, not the Document', () => {
+		const { doc, document, columns } = setup();
+		const columnId = columns.childRecordIds![0];
+		const heading = createRecord(doc, { parentId: columnId, blockType: 'heading_1' }, human);
+
+		expect(listRecordsForParent(doc, columnId).map((r) => r.id)).toContain(heading.id);
+		expect(listRecordsForParent(doc, document.id).map((r) => r.id)).not.toContain(heading.id);
+	});
+
+	it('a bare create_record-style column (blockType "column") is auto-seeded with one paragraph', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const columns = createColumnsBlock(doc, { parentId: document.id }, human, 2);
+		const column = createRecord(doc, { parentId: columns.id, blockType: 'column' }, human);
+		expect(column.childRecordIds).toHaveLength(1);
+	});
+
+	it('reorderRecord repositions blocks within a single column', () => {
+		const { doc, columns } = setup();
+		const columnId = columns.childRecordIds![0];
+		const [first] = getRecord(doc, columnId)!.childRecordIds!;
+		const second = createRecord(doc, { parentId: columnId, blockType: 'paragraph' }, human);
+
+		reorderRecord(doc, second.id);
+
+		expect(listRecordsForParent(doc, columnId).map((r) => r.id)).toEqual([second.id, first]);
+	});
+
+	it('moveRecordToParent moves a block from one column into another', () => {
+		const { doc, columns } = setup();
+		const [columnA, columnB] = columns.childRecordIds!;
+		const [blockInA] = getRecord(doc, columnA)!.childRecordIds!;
+
+		moveRecordToParent(doc, blockInA, columnB);
+
+		expect(listRecordsForParent(doc, columnA).map((r) => r.id)).toEqual([]);
+		expect(listRecordsForParent(doc, columnB).map((r) => r.id)).toContain(blockInA);
+		expect(getRecord(doc, blockInA)!.parentId).toBe(columnB);
+	});
+
+	it('moveRecordToParent supports afterRecordId to land at a specific position', () => {
+		const { doc, columns } = setup();
+		const [columnA, columnB] = columns.childRecordIds!;
+		const [blockInA] = getRecord(doc, columnA)!.childRecordIds!;
+		const [blockInB] = getRecord(doc, columnB)!.childRecordIds!;
+
+		moveRecordToParent(doc, blockInA, columnB, blockInB);
+
+		expect(listRecordsForParent(doc, columnB).map((r) => r.id)).toEqual([blockInB, blockInA]);
+	});
+
+	it('moveRecordToParent can move a block out of a column back to the top-level Document', () => {
+		const { doc, document, columns } = setup();
+		const [columnA] = columns.childRecordIds!;
+		const [blockInA] = getRecord(doc, columnA)!.childRecordIds!;
+
+		moveRecordToParent(doc, blockInA, document.id, columns.id);
+
+		expect(listRecordsForParent(doc, document.id).map((r) => r.id)).toEqual([columns.id, blockInA]);
+	});
+
+	it('moveRecordToParent throws ValidationError when moving a record into itself', () => {
+		const { doc, columns } = setup();
+		expect(() => moveRecordToParent(doc, columns.id, columns.id)).toThrow(ValidationError);
+	});
+
+	it('moveRecordToParent throws ValidationError when moving a container into its own descendant', () => {
+		const { doc, columns } = setup();
+		const [columnA] = columns.childRecordIds!;
+		expect(() => moveRecordToParent(doc, columns.id, columnA)).toThrow(ValidationError);
+	});
+
+	it('moveRecordToParent throws NotFoundError for an unknown destination parent', () => {
+		const { doc, columns } = setup();
+		const [columnA] = columns.childRecordIds!;
+		const [blockInA] = getRecord(doc, columnA)!.childRecordIds!;
+		expect(() => moveRecordToParent(doc, blockInA, 'missing')).toThrow(NotFoundError);
+	});
+
+	it('deleteRecord on a columns block recursively deletes every column and their blocks', () => {
+		const { doc, document, columns } = setup();
+		const [columnA, columnB] = columns.childRecordIds!;
+		const [blockInA] = getRecord(doc, columnA)!.childRecordIds!;
+		const [blockInB] = getRecord(doc, columnB)!.childRecordIds!;
+
+		deleteRecord(doc, columns.id);
+
+		expect(getRecord(doc, columns.id)).toBeUndefined();
+		expect(getRecord(doc, columnA)).toBeUndefined();
+		expect(getRecord(doc, columnB)).toBeUndefined();
+		expect(getRecord(doc, blockInA)).toBeUndefined();
+		expect(getRecord(doc, blockInB)).toBeUndefined();
+		expect(listRecordsForParent(doc, document.id).map((r) => r.id)).toEqual([]);
+	});
+
+	it('deleteRecord on a single column removes only that column and its blocks, when more than the minimum remain', () => {
+		const { doc, columns } = setup(3);
+		const [columnA, columnB, columnC] = columns.childRecordIds!;
+
+		deleteRecord(doc, columnA);
+
+		expect(getRecord(doc, columnA)).toBeUndefined();
+		expect(columns.childRecordIds).toContain(columnA); // stale snapshot, unaffected
+		expect(getRecord(doc, columns.id)!.childRecordIds).toEqual([columnB, columnC]);
+	});
+
+	it('deleteRecord throws ValidationError when deleting a column would leave fewer than the minimum', () => {
+		const { doc, columns } = setup(); // default 2 columns
+		const [columnA] = columns.childRecordIds!;
+
+		expect(() => deleteRecord(doc, columnA)).toThrow(ValidationError);
+		expect(getRecord(doc, columnA)).toBeDefined(); // rejected, not partially applied
+		expect(getRecord(doc, columns.id)!.childRecordIds).toHaveLength(2);
+	});
+
+	it('deleting the whole columns block is unaffected by the minimum-columns guard', () => {
+		const { doc, columns } = setup(); // default 2 columns — at the minimum already
+		expect(() => deleteRecord(doc, columns.id)).not.toThrow();
+		expect(getRecord(doc, columns.id)).toBeUndefined();
+	});
+
+	it('createColumnsBlock rejects a columnCount outside the 2-6 range, creating nothing', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		expect(() => createColumnsBlock(doc, { parentId: document.id }, human, 1)).toThrow(
+			ValidationError
+		);
+		expect(() => createColumnsBlock(doc, { parentId: document.id }, human, 7)).toThrow(
+			ValidationError
+		);
+		expect(listRecordsForParent(doc, document.id)).toEqual([]);
+	});
+
+	it('createRecord rejects adding a 7th column to a columns block already at the maximum', () => {
+		const { doc, columns } = setup(6);
+		expect(columns.childRecordIds).toHaveLength(6);
+		expect(() => createRecord(doc, { parentId: columns.id, blockType: 'column' }, human)).toThrow(
+			ValidationError
+		);
+		expect(getRecord(doc, columns.id)!.childRecordIds).toHaveLength(6);
+	});
+
+	it('a columns/column record has no content field at all, not an empty one', () => {
+		const { doc, columns } = setup();
+		const [columnId] = columns.childRecordIds!;
+		expect(getRecord(doc, columns.id)!.content).toBeUndefined();
+		expect(getRecord(doc, columnId)!.content).toBeUndefined();
+	});
+
+	it('two replicas concurrently moving the same block to different columns converge on one authoritative location, not a ghost duplicate', () => {
+		const docA = new Y.Doc();
+		const document = createDocument(docA, { title: 'Notes' });
+		const columns = createColumnsBlock(docA, { parentId: document.id }, human, 3);
+		const [columnA, columnB, columnC] = columns.childRecordIds!;
+		const [blockInA] = getRecord(docA, columnA)!.childRecordIds!;
+
+		const docB = new Y.Doc();
+		Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+
+		// Both replicas independently move the same block out of column A,
+		// into two *different* destination columns, before either has seen
+		// the other's change.
+		moveRecordToParent(docA, blockInA, columnB);
+		moveRecordToParent(docB, blockInA, columnC);
+
+		const updateFromA = Y.encodeStateAsUpdate(docA);
+		const updateFromB = Y.encodeStateAsUpdate(docB);
+		Y.applyUpdate(docB, updateFromA);
+		Y.applyUpdate(docA, updateFromB);
+
+		// Both replicas converge on the same parentId (Y.Map LWW) ...
+		const parentOnA = getRecord(docA, blockInA)!.parentId;
+		const parentOnB = getRecord(docB, blockInA)!.parentId;
+		expect(parentOnA).toBe(parentOnB);
+		expect([columnB, columnC]).toContain(parentOnA);
+
+		// ... and listRecordsForParent shows it in exactly that one column on
+		// both replicas — never in the losing column, and never in both.
+		const winner = parentOnA;
+		const loser = winner === columnB ? columnC : columnB;
+		expect(listRecordsForParent(docA, winner).map((r) => r.id)).toContain(blockInA);
+		expect(listRecordsForParent(docB, winner).map((r) => r.id)).toContain(blockInA);
+		expect(listRecordsForParent(docA, loser).map((r) => r.id)).not.toContain(blockInA);
+		expect(listRecordsForParent(docB, loser).map((r) => r.id)).not.toContain(blockInA);
+	});
+
+	it('deleting the losing column after a concurrent cross-container move does not delete the block that now lives in the winning column', () => {
+		const docA = new Y.Doc();
+		const document = createDocument(docA, { title: 'Notes' });
+		const columns = createColumnsBlock(docA, { parentId: document.id }, human, 3);
+		const [columnA, columnB, columnC] = columns.childRecordIds!;
+		const [blockInA] = getRecord(docA, columnA)!.childRecordIds!;
+
+		const docB = new Y.Doc();
+		Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+
+		moveRecordToParent(docA, blockInA, columnB);
+		moveRecordToParent(docB, blockInA, columnC);
+		Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+		Y.applyUpdate(docA, Y.encodeStateAsUpdate(docB));
+
+		const winner = getRecord(docA, blockInA)!.parentId;
+		const loser = winner === columnB ? columnC : columnB;
+
+		// The losing column's own recordIds array still has a stale entry for
+		// blockInA (see isAuthoritativeChild's doc comment) — deleting that
+		// column must not recurse into it and delete a block that now
+		// authoritatively lives in a different, live column.
+		deleteRecord(docA, loser);
+
+		expect(getRecord(docA, blockInA)).toBeDefined();
+		expect(getRecord(docA, blockInA)!.parentId).toBe(winner);
+		expect(listRecordsForParent(docA, winner).map((r) => r.id)).toContain(blockInA);
+	});
+
+	it('migrating a Document after a concurrent cross-container move copies the block once, under its winning column', () => {
+		const source = new Y.Doc();
+		const document = createDocument(source, { title: 'Notes' });
+		const columns = createColumnsBlock(source, { parentId: document.id }, human, 3);
+		const [columnA, columnB, columnC] = columns.childRecordIds!;
+		const [blockInA] = getRecord(source, columnA)!.childRecordIds!;
+
+		const replica = new Y.Doc();
+		Y.applyUpdate(replica, Y.encodeStateAsUpdate(source));
+
+		moveRecordToParent(source, blockInA, columnB);
+		moveRecordToParent(replica, blockInA, columnC);
+		Y.applyUpdate(replica, Y.encodeStateAsUpdate(source));
+		Y.applyUpdate(source, Y.encodeStateAsUpdate(replica));
+
+		const winner = getRecord(source, blockInA)!.parentId;
+		const loser = winner === columnB ? columnC : columnB;
+
+		const target = new Y.Doc();
+		copyDocumentVerbatim(source, target, document.id);
+
+		expect(getRecord(target, blockInA)).toBeDefined();
+		expect(getRecord(target, blockInA)!.parentId).toBe(winner);
+		// The winning column also still has its own seeded paragraph from
+		// createColumnsBlock — blockInA is an *additional* member, not the
+		// only one.
+		expect(listRecordsForParent(target, winner).map((r) => r.id)).toContain(blockInA);
+		expect(listRecordsForParent(target, loser).map((r) => r.id)).not.toContain(blockInA);
 	});
 });

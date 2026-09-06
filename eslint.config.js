@@ -219,10 +219,7 @@ export default defineConfig(
 		// (`ytext.toString() // => ''`). A type-declaration gap in the
 		// library, not a real risk here — these two files are the ones that
 		// call `.toString()` on a Y.Text directly in assertions.
-		// Route folders use literal `[param]` brackets, which the glob
-		// matcher reads as a character class rather than literal text — `*`
-		// sidesteps that instead of escaping every bracket.
-		files: ['src/lib/client/undo.test.ts', 'src/routes/space/*/doc/*/BlockEditor.svelte.test.ts'],
+		files: ['src/lib/client/undo.test.ts', 'src/lib/components/BlockEditor.svelte.test.ts'],
 		rules: {
 			'@typescript-eslint/no-base-to-string': 'off'
 		}

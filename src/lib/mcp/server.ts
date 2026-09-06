@@ -416,7 +416,8 @@ export function createMcpServer(): McpServer {
 			properties: z.record(z.string(), propertyValueSchema).optional(),
 			referencedRecordId: z.string().optional(),
 			viewConfig: viewConfigSchema.optional(),
-			childPagesDepth: childPagesDepthSchema.optional()
+			childPagesDepth: childPagesDepthSchema.optional(),
+			columnCount: z.number().int().optional()
 		},
 		async (
 			{
@@ -426,7 +427,8 @@ export function createMcpServer(): McpServer {
 				properties,
 				referencedRecordId,
 				viewConfig,
-				childPagesDepth
+				childPagesDepth,
+				columnCount
 			},
 			extra
 		) => {
@@ -439,7 +441,8 @@ export function createMcpServer(): McpServer {
 					properties,
 					referencedRecordId,
 					viewConfig: viewConfig as EmbeddedViewConfig | undefined,
-					childPagesDepth
+					childPagesDepth,
+					columnCount
 				});
 				return textResult({ recordId: record.id });
 			} catch (err) {

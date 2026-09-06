@@ -1,4 +1,5 @@
-import type { ActorId } from '$lib/data/types';
+import type * as Y from 'yjs';
+import type { ActorId, ParentKind } from '$lib/data/types';
 import { resolveWorkspaceContext, type WorkspaceContext } from '$lib/server/workspace-store';
 import { getRecord } from '$lib/data/record-ops';
 import { tokenAllowsParent, type AccessToken } from '$lib/server/token-store';
@@ -75,8 +76,31 @@ export function requireAccessibleParent(
 }
 
 /**
+ * Walks a record's `parentId` chain up to its owning Document or Collection
+ * — needed because a container block (columns/column, issue #148) can
+ * itself be a valid `parentId`, but access-token allowlists are always keyed
+ * by Document/Collection id (`mcp-tools.md`), never by an arbitrary nested
+ * record id. Returns `id` unchanged once it no longer resolves to a record
+ * at all (i.e. it's already a Document/Collection id, or unknown) — a no-op
+ * for every pre-#148 call site, where `id` was always already top-level.
+ * `guard` bounds the walk against a corrupted/cyclic `parentId` chain (real
+ * nesting is at most a couple of levels deep).
+ */
+export function resolveOwningParentId(doc: Y.Doc, id: string, guard = 50): string {
+	let current = id;
+	for (let i = 0; i < guard; i++) {
+		const record = getRecord(doc, current);
+		if (!record) return current;
+		current = record.parentId;
+	}
+	return current;
+}
+
+/**
  * Looks up `recordId` and throws `PermissionDeniedError` (logging a denial) if it doesn't
- * exist or its parent isn't accessible to `caller`; otherwise returns the record.
+ * exist or its parent isn't accessible to `caller`; otherwise returns the record. A record
+ * nested inside a container block (columns/column) is checked against its owning Document's
+ * grant, not the container's own (non-catalog-navigable) id — see resolveOwningParentId.
  */
 export function requireAccessibleRecord(
 	caller: CallerIdentity,
@@ -89,27 +113,37 @@ export function requireAccessibleRecord(
 		logDenial(caller, action, recordId);
 		throw new PermissionDeniedError(`Record ${recordId} not found`);
 	}
-	requireAccessibleParent(caller, record.parentId, action);
+	requireAccessibleParent(caller, resolveOwningParentId(doc, record.parentId), action);
 	return record;
 }
 
 /**
- * Resolves the WorkspaceContext a Document/Collection actually lives in,
- * for callers that already have its own id (query_collection's
- * collectionId, create_record's parentId) — see catalog.ts's
- * resolveShardForParent. Falls back to the default context when untracked
- * (content written directly to the Y.Doc, bypassing the service layer and
- * therefore the locator).
+ * Resolves the WorkspaceContext a Document/Collection — or, since issue
+ * #148, a nested container record (a `columns`/`column` block) — actually
+ * lives in, for callers that already have its own id (query_collection's
+ * collectionId, create_record's parentId). See catalog.ts's
+ * resolveShardForParent. A record-kind id isn't itself catalog-navigable
+ * (§3.1), so it falls back to `resolveShardForRecord` — every record,
+ * container or not, gets its own locator entry at creation (see
+ * services/records.ts#createRecord) — before finally falling back to the
+ * default context for anything still untracked (content written directly to
+ * the Y.Doc, bypassing the service layer and therefore the locator).
  */
 export function resolveParentWorkspaceContext(
 	parentId: string
-): WorkspaceContext & { parentKind?: 'document' | 'collection'; parentSpaceId?: string } {
+): WorkspaceContext & { parentKind?: ParentKind; parentSpaceId?: string } {
 	const { workspaceId } = resolveWorkspaceContext();
 	const shard = resolveShardForParent(workspaceId, parentId);
-	const ctx = resolveWorkspaceContext(
-		shard ? { workspaceId, shardId: shard.shardId } : { workspaceId }
-	);
-	return { ...ctx, parentKind: shard?.kind, parentSpaceId: shard?.spaceId };
+	if (shard) {
+		const ctx = resolveWorkspaceContext({ workspaceId, shardId: shard.shardId });
+		return { ...ctx, parentKind: shard.kind, parentSpaceId: shard.spaceId };
+	}
+	const recordShard = resolveShardForRecord(workspaceId, parentId);
+	if (recordShard) {
+		const ctx = resolveWorkspaceContext({ workspaceId, shardId: recordShard.shardId });
+		return { ...ctx, parentKind: 'record' };
+	}
+	return { ...resolveWorkspaceContext({ workspaceId }) };
 }
 
 /**
