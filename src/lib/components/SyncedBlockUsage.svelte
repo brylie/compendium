@@ -77,10 +77,27 @@
 		if (open) closeMenu(false);
 	}
 
+	// Roving focus between menuitems (the `<a>` locations plus the trailing
+	// Detach `<button>`, when present) — same pattern as BlockActionMenu.svelte's
+	// own handleKeydown, needed here for the same reason: the panel is portalled
+	// to `document.body`, so Tab doesn't reach it and arrow keys are the only
+	// way to move between its items without a mouse.
 	function handleKeydown(event: KeyboardEvent): void {
 		if (event.key === 'Escape') {
 			event.stopPropagation();
 			closeMenu();
+			return;
+		}
+		if (!panel) return;
+		const items = Array.from(panel.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+		if (items.length === 0) return;
+		const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+		if (event.key === 'ArrowDown') {
+			event.preventDefault();
+			items[(currentIndex + 1) % items.length]?.focus();
+		} else if (event.key === 'ArrowUp') {
+			event.preventDefault();
+			items[(currentIndex - 1 + items.length) % items.length]?.focus();
 		}
 	}
 
@@ -94,8 +111,15 @@
 		closeMenu(false);
 	}
 
+	async function focusFirstMenuItem(): Promise<void> {
+		await tick();
+		panel?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+	}
+
 	$effect(() => {
-		if (open) void refinePanelPosition();
+		if (!open) return;
+		void refinePanelPosition();
+		void focusFirstMenuItem();
 	});
 </script>
 

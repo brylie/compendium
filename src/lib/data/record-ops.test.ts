@@ -1410,4 +1410,72 @@ describe('detachSyncedBlock: issue #153 "detach to independent copy"', () => {
 
 		expect(() => detachSyncedBlock(doc, 'missing', human)).toThrow(NotFoundError);
 	});
+
+	// CodeRabbit finding (PR #244): the "Set target ID" dialog accepts any
+	// pasted record id with no kind check, so a synced_block can end up
+	// pointing at a columns/column container — copying that blockType as-is
+	// would produce a broken container with no childRecordIds.
+	it('detaches to an empty paragraph rather than copying a columns/column container source', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const columns = createColumnsBlock(doc, { parentId: document.id }, human);
+		const instance = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'synced_block', referencedRecordId: columns.id },
+			human
+		);
+
+		const detached = detachSyncedBlock(doc, instance.id, human);
+
+		expect(detached.blockType).toBe('paragraph');
+		expect(detached.referencedRecordId).toBeUndefined();
+		expect(detached.childRecordIds).toBeUndefined();
+	});
+
+	// CodeRabbit finding (PR #244): a synced_block can (unusually) point at
+	// another synced_block — copying that wrapper's own blockType/empty
+	// content as-is would just produce a second unconfigured synced_block
+	// instead of the real independent content detach is supposed to produce.
+	it('resolves through a chain of synced_block references to the real content', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const root = createRecord(doc, { parentId: document.id, blockType: 'heading_2' }, human);
+		getRecordYText(doc, root.id)!.insert(0, 'Root content');
+		const middle = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'synced_block', referencedRecordId: root.id },
+			human
+		);
+		const instance = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'synced_block', referencedRecordId: middle.id },
+			human
+		);
+
+		const detached = detachSyncedBlock(doc, instance.id, human);
+
+		expect(detached.blockType).toBe('heading_2');
+		expect(
+			yTextToRichText(getRecordYText(doc, instance.id)!)
+				.runs.map((r) => r.text)
+				.join('')
+		).toBe('Root content');
+	});
+
+	it('detaches to an empty paragraph rather than infinite-looping on a synced_block reference cycle', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const a = createRecord(doc, { parentId: document.id, blockType: 'synced_block' }, human);
+		const b = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'synced_block', referencedRecordId: a.id },
+			human
+		);
+		setRecordReferencedId(doc, a.id, b.id, human);
+
+		const detached = detachSyncedBlock(doc, a.id, human);
+
+		expect(detached.blockType).toBe('paragraph');
+		expect(detached.referencedRecordId).toBeUndefined();
+	});
 });
