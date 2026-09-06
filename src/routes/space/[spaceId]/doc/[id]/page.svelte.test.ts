@@ -1927,6 +1927,65 @@ describe('doc/[id] +page', () => {
 		expect(getRecord(ydoc, b.id)).toBeDefined();
 	});
 
+	// CodeRabbit review (PR #240): clearSelection() must run synchronously at
+	// the very start of the shard-resolution $effect, not after its `await
+	// fetch(...)` — otherwise the stale bulk action bar (and its fully
+	// operable Delete/Duplicate/Move, since doc-1's blocks stay valid in the
+	// shared Y.Doc) would survive for the whole network round-trip, not just
+	// disappear once it resolves. This test holds the shard-resolution fetch
+	// open to prove the bar is already gone before that fetch ever settles.
+	it('clears the stale selection immediately on navigation, before shard resolution completes', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'First' });
+		const a = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		createDocument(ydoc, { id: 'doc-2', title: 'Second' });
+
+		const { container, rerender } = render(Page, {
+			params: { spaceId: 'space-1', id: 'doc-1' },
+			form: null,
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'First'
+			}
+		});
+		await flushShardResolution();
+
+		const handleA = container.querySelector(`[data-drag-handle="${a.id}"]`) as HTMLElement;
+		await fireEvent.pointerDown(handleA, { button: 0, ctrlKey: true, pointerId: 1 });
+		await tick();
+		expect(screen.getByText('1 selected')).toBeInTheDocument();
+
+		// Held open deliberately — never resolved during this test — so
+		// re-rendering with a new documentId lands squarely inside the window
+		// between the effect starting and its shard-resolution fetch settling.
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => new Promise(() => {}))
+		);
+
+		await rerender({
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-2',
+				title: 'Second'
+			}
+		});
+		await tick();
+
+		expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole('toolbar', { name: 'Selected blocks actions' })
+		).not.toBeInTheDocument();
+	});
+
 	it('claims block presence on focus and releases it on unmount', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);

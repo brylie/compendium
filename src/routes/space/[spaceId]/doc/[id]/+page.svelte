@@ -367,6 +367,16 @@
 		let cancelled = false;
 		let cleanup: (() => void) | undefined;
 
+		// Cleared synchronously, before the shard-resolution fetch below even
+		// starts — not after it resolves. Documents aren't sharded (#120), so a
+		// selection from the previously-viewed Document stays fully valid
+		// against the shared Y.Doc; leaving this inside the async block below
+		// would leave the old bulk action bar active (and its Delete/Duplicate/
+		// Move fully operable against the old Document's real blocks) for the
+		// whole network round-trip, not just eliminate the stale state after
+		// the fact.
+		clearSelection();
+
 		(async () => {
 			const res = await fetch(`/api/documents/${id}/shard`);
 			const { shardId: resolvedShardId } = await res.json();
@@ -390,15 +400,6 @@
 			// previously-viewed document must not linger until this
 			// document's first real transition.
 			holdAnnouncement = '';
-			// A multi-selection (issue #152) is even more load-bearing to reset
-			// here than the announcement above: Documents aren't sharded (#120)
-			// — every Document lives in one shared Y.Doc — so a block id
-			// selected in the previously-viewed Document stays fully valid
-			// after navigating away. Left uncleared, the bulk action bar would
-			// keep showing a stale "N selected" for the *old* Document, and
-			// clicking Duplicate/Delete/Move there would silently mutate that
-			// now off-screen Document's real blocks instead of doing nothing.
-			clearSelection();
 			let previousHeldByOthers = new Map<string, ActorId>();
 			// The subscription's first callback reports presence as of connect
 			// time, not a transition — without this, every actor who was
