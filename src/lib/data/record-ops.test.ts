@@ -267,6 +267,96 @@ describe('records: creation ordering, mutation, and not-found edge cases', () =>
 		expect(getRecord(doc, row.id)?.properties).toEqual({});
 	});
 
+	describe('createRecord: select field default option (issue #100)', () => {
+		it('seeds a select field’s configured default onto a new collection row', () => {
+			const doc = new Y.Doc();
+			const collection = createCollection(doc, {
+				title: 'Tasks',
+				schema: [
+					{
+						key: 'status',
+						label: 'Status',
+						type: 'select',
+						options: [
+							{ id: 'todo', label: 'To do' },
+							{ id: 'done', label: 'Done' }
+						],
+						defaultOptionId: 'todo'
+					}
+				]
+			});
+			const row = createRecord(doc, { parentId: collection.id }, human);
+			expect(getRecord(doc, row.id)?.properties?.status).toEqual({ type: 'select', value: 'todo' });
+		});
+
+		it('lets a caller-supplied value for the same field override the configured default', () => {
+			const doc = new Y.Doc();
+			const collection = createCollection(doc, {
+				title: 'Tasks',
+				schema: [
+					{
+						key: 'status',
+						label: 'Status',
+						type: 'select',
+						options: [
+							{ id: 'todo', label: 'To do' },
+							{ id: 'done', label: 'Done' }
+						],
+						defaultOptionId: 'todo'
+					}
+				]
+			});
+			const row = createRecord(
+				doc,
+				{ parentId: collection.id, properties: { status: { type: 'select', value: 'done' } } },
+				human
+			);
+			expect(getRecord(doc, row.id)?.properties?.status).toEqual({ type: 'select', value: 'done' });
+		});
+
+		it('leaves a select field with no configured default unset, same as before', () => {
+			const doc = new Y.Doc();
+			const collection = createCollection(doc, {
+				title: 'Tasks',
+				schema: [
+					{
+						key: 'status',
+						label: 'Status',
+						type: 'select',
+						options: [{ id: 'todo', label: 'To do' }]
+					}
+				]
+			});
+			const row = createRecord(doc, { parentId: collection.id }, human);
+			expect(getRecord(doc, row.id)?.properties?.status).toBeUndefined();
+		});
+
+		it('skips a defaultOptionId that no longer names an existing option', () => {
+			const doc = new Y.Doc();
+			const collection = createCollection(doc, {
+				title: 'Tasks',
+				schema: [
+					{
+						key: 'status',
+						label: 'Status',
+						type: 'select',
+						options: [{ id: 'todo', label: 'To do' }],
+						defaultOptionId: 'archived-option-id'
+					}
+				]
+			});
+			const row = createRecord(doc, { parentId: collection.id }, human);
+			expect(getRecord(doc, row.id)?.properties?.status).toBeUndefined();
+		});
+
+		it('does not seed a default for a document block (defaults only apply to collection rows)', () => {
+			const doc = new Y.Doc();
+			const document = createDocument(doc, { title: 'Notes' });
+			const block = createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+			expect(getRecord(doc, block.id)?.properties).toBeUndefined();
+		});
+	});
+
 	it('updateRecordContent throws NotFoundError for an unknown record', () => {
 		const doc = new Y.Doc();
 		expect(() => updateRecordContent(doc, 'missing', { runs: [] }, human)).toThrow(NotFoundError);

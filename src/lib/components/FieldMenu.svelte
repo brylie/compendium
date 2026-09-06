@@ -11,6 +11,7 @@
 		duplicateCollectionProperty,
 		moveSelectOption,
 		previewCollectionPropertyTypeChange,
+		setDefaultSelectOption,
 		setPrimaryField,
 		updateCollectionProperty,
 		updateCollectionSchema,
@@ -336,6 +337,24 @@
 				err instanceof ValidationError
 					? err.message
 					: 'Could not reorder options. Please try again.';
+		}
+	}
+
+	// Default option for newly created records (issue #100) — a single toggle
+	// per option, mutually exclusive by construction: setting one option as
+	// default replaces whatever the field's previous defaultOptionId was,
+	// never adds a second one.
+	function toggleDefaultOption(optionId: string): void {
+		try {
+			setDefaultSelectOption(
+				getShardDoc(shardId),
+				collectionId,
+				property.key,
+				property.defaultOptionId === optionId ? null : optionId
+			);
+			optionError = '';
+		} catch {
+			optionError = 'Could not update the default option. Please try again.';
 		}
 	}
 
@@ -700,6 +719,19 @@
 										class="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-xs text-fg hover:border-border focus:border-accent focus:outline-none"
 										aria-label="Rename option {option.label}"
 									/>
+									<button
+										type="button"
+										onclick={() => toggleDefaultOption(option.id)}
+										class="rounded p-0.5 text-muted hover:text-fg"
+										class:text-accent={property.defaultOptionId === option.id}
+										aria-pressed={property.defaultOptionId === option.id}
+										aria-label={property.defaultOptionId === option.id
+											? `Unset ${option.label} as default`
+											: `Set ${option.label} as default`}
+										title="Default for newly created records"
+									>
+										<Icon name="check" size={11} />
+									</button>
 									<button
 										type="button"
 										onclick={() => openDeleteOptionConfirm(option.id, option.label)}
