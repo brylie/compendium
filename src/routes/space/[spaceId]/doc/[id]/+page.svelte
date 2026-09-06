@@ -906,7 +906,19 @@
 			return;
 		}
 
-		// Cross-container move (issue #148) — into/out of a column.
+		// Cross-container move (issue #148) — into/out of a column. Dropping
+		// into a column is restricted to the same curated
+		// columnChildBlockTypes set create_record enforces at creation time
+		// (services/records.ts) — the drag path bypasses that service-layer
+		// check entirely (a direct data-layer call, like every other UI
+		// mutation), so it needs its own guard here or an unsupported type
+		// (e.g. a table or another columns block) could be dropped into a
+		// column with nothing to render it.
+		const targetContainer = getRecord(ydoc, targetParentId);
+		if (targetContainer?.blockType === 'column') {
+			const allowed: readonly BlockType[] = columnChildBlockTypes;
+			if (!allowed.includes(record.blockType ?? 'paragraph')) return;
+		}
 		const destSiblings = listRecordsForParent(ydoc, targetParentId);
 		const afterRecordId = targetIndex > 0 ? destSiblings[targetIndex - 1]?.id : undefined;
 		moveRecordToParent(ydoc, blockId, targetParentId, afterRecordId);
@@ -1555,6 +1567,7 @@
 								{dropIndicatorParentId}
 								{dropIndicatorIndex}
 								onFocusBlock={(blockId) => handleFocusBlock(blockId)}
+								onInputText={(blockId) => handleBlockInput(blockId)}
 								onDragHandlePointerDown={(e, blockId, parentId, blockIndex) =>
 									startBlockDrag(e, blockId, parentId, blockIndex)}
 								onDragHandleKeydown={handleDragHandleKeydown}

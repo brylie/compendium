@@ -24,6 +24,7 @@ function baseProps(ydoc: Y.Doc, block: ReturnType<typeof createColumnsBlock>) {
 		dropIndicatorParentId: null,
 		dropIndicatorIndex: null,
 		onFocusBlock: vi.fn(),
+		onInputText: vi.fn(),
 		onDragHandlePointerDown: vi.fn(),
 		onDragHandleKeydown: vi.fn()
 	};
@@ -258,7 +259,12 @@ describe('ColumnsBlock (#148)', () => {
 			dropIndicatorParentId: columnAId,
 			dropIndicatorIndex: 0
 		});
-		expect(container.querySelector('.drop-indicator')).toBeInTheDocument();
+		expect(
+			container.querySelector(`[data-block-container="${columnAId}"] .drop-indicator`)
+		).toBeInTheDocument();
+		expect(
+			container.querySelector(`[data-block-container="${columnBId}"] .drop-indicator`)
+		).not.toBeInTheDocument();
 
 		await rerender({
 			...baseProps(ydoc, getRecord(ydoc, columns.id)!),
@@ -266,7 +272,12 @@ describe('ColumnsBlock (#148)', () => {
 			dropIndicatorParentId: columnBId,
 			dropIndicatorIndex: 1 // column B has 1 seeded block — matches the trailing indicator
 		});
-		expect(container.querySelector('.drop-indicator')).toBeInTheDocument();
+		expect(
+			container.querySelector(`[data-block-container="${columnBId}"] .drop-indicator`)
+		).toBeInTheDocument();
+		expect(
+			container.querySelector(`[data-block-container="${columnAId}"] .drop-indicator`)
+		).not.toBeInTheDocument();
 	});
 
 	it('invokes the drag-handle pointerdown/keydown callbacks with the block, column, and index', async () => {
@@ -304,5 +315,21 @@ describe('ColumnsBlock (#148)', () => {
 		editor.focus();
 
 		expect(props.onFocusBlock).toHaveBeenCalledWith(blockId);
+	});
+
+	it('calls onInputText with the block id when a column block is typed into', async () => {
+		const ydoc = new Y.Doc();
+		const doc = createDocument(ydoc, { title: 'D' });
+		const columns = createColumnsBlock(ydoc, { parentId: doc.id }, actor);
+		const [columnId] = columns.childRecordIds!;
+		const [blockId] = getRecord(ydoc, columnId)!.childRecordIds!;
+		const props = baseProps(ydoc, getRecord(ydoc, columns.id)!);
+
+		render(ColumnsBlock, props);
+		const editor = document.querySelector(`[data-block-editor-id="${blockId}"]`) as HTMLElement;
+		editor.textContent = 'hi';
+		await fireEvent.input(editor);
+
+		expect(props.onInputText).toHaveBeenCalledWith(blockId);
 	});
 });

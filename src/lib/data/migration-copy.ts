@@ -104,9 +104,15 @@ function copyRecordVerbatim(
 
 	if (kind === 'document' || kind === 'record') {
 		yrecord.set('blockType', record.blockType ?? 'paragraph');
-		const ytext = new Y.Text();
-		if (record.content) applyRichTextToYText(ytext, record.content);
-		yrecord.set('content', ytext);
+		// A container (columns/column) has no content Y.Text at all, matching
+		// how createRecord builds one fresh — not a present-but-empty one,
+		// which would round-trip differently through readRecord (an empty
+		// Y.Text is still truthy, so it wouldn't read back as `undefined`).
+		if (record.blockType !== 'columns' && record.blockType !== 'column') {
+			const ytext = new Y.Text();
+			if (record.content) applyRichTextToYText(ytext, record.content);
+			yrecord.set('content', ytext);
+		}
 		applyOptionalBlockFields(yrecord, record);
 	} else {
 		yrecord.set('isCollectionRow', true);

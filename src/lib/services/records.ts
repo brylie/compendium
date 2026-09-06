@@ -10,6 +10,8 @@ import {
 	deleteRecord as crdtDeleteRecord,
 	getRecord as crdtGetRecord,
 	getRecordYText,
+	MAX_COLUMN_COUNT,
+	MIN_COLUMN_COUNT,
 	parentKindOf,
 	patchRecordViewConfig as crdtPatchRecordViewConfig,
 	setRecordReferencedId as crdtSetRecordReferencedId,
@@ -169,10 +171,7 @@ function validateViewConfigPatch(
 	}
 }
 
-const MIN_COLUMN_COUNT = 2;
-const MAX_COLUMN_COUNT = 6;
-
-/** Validates a `columns` block's initial `columnCount` (issue #148) — only accepted alongside that block type, and bounded to a sane, renderable range. */
+/** Validates a `columns` block's initial `columnCount` (issue #148) — only accepted alongside that block type, and bounded to the same 2-6 range record-ops.ts's own createColumnsBlock/createRecord/deleteRecord enforce at every mutation path, not just this initial one. */
 function validateColumnCount(blockType: BlockType | undefined, columnCount: number): void {
 	if (blockType !== 'columns') {
 		throw new Error('columnCount is only valid on a columns block.');
@@ -370,20 +369,44 @@ function performCreateRecord(
 // vanishingly unlikely as for `id` itself (both are fresh nanoids) and isn't
 // unwound on failure, the same accepted-risk tradeoff deleteRecord's locator
 // release already documents for the inverse case.
+// Returns every id it successfully reserved a locator for, in order, so a
+// caller that hits a failure partway through (an id collision on some later
+// child — vanishingly unlikely, but not impossible with enough columns) can
+// release exactly what succeeded rather than guessing.
 function reserveColumnsChildLocators(
 	doc: Y.Doc,
 	record: WorkspaceRecord,
 	workspaceId: string,
 	defaultSpaceId: string,
 	shardId: string
-): void {
+): string[] {
+	const reserved: string[] = [];
 	for (const columnId of record.childRecordIds ?? []) {
 		reserveRecordLocator(workspaceId, defaultSpaceId, columnId, shardId);
+		reserved.push(columnId);
 		const column = crdtGetRecord(doc, columnId);
 		for (const paragraphId of column?.childRecordIds ?? []) {
 			reserveRecordLocator(workspaceId, defaultSpaceId, paragraphId, shardId);
+			reserved.push(paragraphId);
 		}
 	}
+	return reserved;
+}
+
+// Compensating rollback for a columns block whose child-locator reservation
+// failed partway through (see createRecord's catch block below): the CRDT
+// tree was already committed by the earlier transactWithOrigin call, before
+// any child locator was reserved, so a failure here must not leave it
+// behind — a half-locator-tracked columns block would resolve any
+// unreserved id to the wrong (default) shard, and a caller retrying after
+// this throw would otherwise create a second, duplicate tree alongside the
+// still-committed first one. deleteRecord's own recursion (record-ops.ts)
+// already knows how to remove a container and every one of its children in
+// one call.
+function rollBackColumnsBlock(doc: Y.Doc, id: string): void {
+	transactWithOrigin(doc, SERVICE_ORIGIN, () => {
+		if (crdtGetRecord(doc, id)) crdtDeleteRecord(doc, id);
+	});
 }
 
 /**
@@ -424,15 +447,24 @@ export function createRecord(
 	reserveRecordLocator(workspaceId, defaultSpaceId, id, shardId);
 
 	let record: WorkspaceRecord;
+	let reservedChildIds: string[] = [];
 	try {
 		record = transactWithOrigin(doc, SERVICE_ORIGIN, () =>
 			performCreateRecord(doc, id, input, actor)
 		);
 		if (input.blockType === 'columns') {
-			reserveColumnsChildLocators(doc, record, workspaceId, defaultSpaceId, shardId);
+			reservedChildIds = reserveColumnsChildLocators(
+				doc,
+				record,
+				workspaceId,
+				defaultSpaceId,
+				shardId
+			);
 		}
 	} catch (err) {
 		releaseRecordLocator(workspaceId, id);
+		for (const childId of reservedChildIds) releaseRecordLocator(workspaceId, childId);
+		if (input.blockType === 'columns') rollBackColumnsBlock(doc, id);
 		throw err;
 	}
 
@@ -641,6 +673,21 @@ export function writeRecord(
 	const { doc, awareness } = resolveRecordWorkspaceContext(recordId);
 	const actor = actorForCaller(caller);
 	const record = requireAccessibleRecord(caller, recordId, 'write_record');
+
+	// A columns/column block has no content of its own (data-model.md §3.1) —
+	// its markdown is entirely derived from its columns' children
+	// (document-projection.ts's renderColumnsMarkdown), so a markdown write
+	// here would have nowhere to go: no UI ever renders it, and it wouldn't
+	// even round-trip through get_document, unlike every other structural
+	// block type's content.
+	if (
+		input.markdown !== undefined &&
+		(record.blockType === 'columns' || record.blockType === 'column')
+	) {
+		throw new Error(
+			'markdown cannot be written to a columns or column block directly — write to one of its nested blocks instead.'
+		);
+	}
 
 	if (input.referencedRecordId !== undefined) {
 		validateReferencedRecordIdWrite(caller, doc, record, input.referencedRecordId);

@@ -129,6 +129,40 @@ export interface CreateRecordInput {
 	childPagesDepth?: ChildPagesDepth; // for child_pages blocks
 }
 
+// Extracted from createRecord purely to keep its own cognitive complexity
+// down — this is its entire "parent is a Document or a container record"
+// branch (the row-properties branch is the only sibling left inline there).
+function applyDocumentKindFields(
+	yrecord: TypedYMap<RecordYShape>,
+	blockType: BlockType,
+	input: CreateRecordInput,
+	siblingIds: Y.Array<string>
+): void {
+	const isContainer = blockType === 'columns' || blockType === 'column';
+	yrecord.set('blockType', blockType);
+	// A container never holds its own free-form text — its content lives
+	// entirely in its children (data-model.md §3.1) — so unlike every other
+	// Document-kind record it gets no content Y.Text at all: nothing in the
+	// UI ever mounts a BlockEditor against a columns/column record directly,
+	// and get_document's markdown for a columns block already comes
+	// entirely from its columns' children, not from any value here. Without
+	// this, a write_record markdown write to a columns/column id would
+	// silently vanish from both — writeRecord (services/records.ts) rejects
+	// that case outright.
+	if (!isContainer) yrecord.set('content', new Y.Text());
+	applyOptionalBlockFields(yrecord, input);
+	if (isContainer) {
+		// A columns/column block always carries its own child-ordering array
+		// from the moment it exists — that's what makes it a valid `parentId`
+		// target immediately (see parentKindOf above), with no separate
+		// "initialize container" step a caller could forget.
+		yrecord.set('recordIds', new Y.Array<string>());
+	}
+	if (blockType === 'column' && siblingIds.length >= MAX_COLUMN_COUNT) {
+		throw new ValidationError(`A columns block can hold at most ${MAX_COLUMN_COUNT} columns.`);
+	}
+}
+
 /** Creates a new record (a block if the parent is a Document, a row if the parent is a Collection) and inserts it into the parent's sibling order via a fresh fractional-index `order`. */
 export function createRecord(
 	doc: Y.Doc,
@@ -162,16 +196,7 @@ export function createRecord(
 		let blockType: BlockType | undefined;
 		if (kind === 'document' || kind === 'record') {
 			blockType = input.blockType ?? 'paragraph';
-			yrecord.set('blockType', blockType);
-			yrecord.set('content', new Y.Text());
-			applyOptionalBlockFields(yrecord, input);
-			// A columns/column block always carries its own child-ordering
-			// array from the moment it exists — that's what makes it a valid
-			// `parentId` target immediately (see parentKindOf above), with no
-			// separate "initialize container" step a caller could forget.
-			if (blockType === 'columns' || blockType === 'column') {
-				yrecord.set('recordIds', new Y.Array<string>());
-			}
+			applyDocumentKindFields(yrecord, blockType, input, siblingIds);
 		} else {
 			yrecord.set('isCollectionRow', true);
 			const schema = collectionsMap(doc).get(input.parentId)?.get('schema') ?? [];
@@ -197,6 +222,15 @@ export function createRecord(
 	});
 }
 
+// A columns block's column count invariant (issue #148, block-capability-
+// contract.md) — enforced at every mutation path that can change it
+// (createColumnsBlock's initial count, createRecord's own per-column-add
+// check above, and deleteRecord's per-column-remove check below), not just
+// at the UI layer, so a direct data-layer or MCP caller can't bypass it the
+// way the UI's own hidden +/- buttons alone would only discourage.
+export const MIN_COLUMN_COUNT = 2;
+export const MAX_COLUMN_COUNT = 6;
+
 /**
  * Creates a `columns` container block plus `columnCount` (default 2, issue
  * #148) empty `column` children beneath it — the only way a `columns` block
@@ -211,6 +245,20 @@ export function createColumnsBlock(
 	actor: ActorId,
 	columnCount = 2
 ): WorkspaceRecord {
+	// Validated up front, before the transaction opens — createRecord's own
+	// per-add check below would otherwise let this loop create up to
+	// MAX_COLUMN_COUNT columns before throwing on the (MAX+1)th, leaving a
+	// half-sized columns block committed instead of failing cleanly with
+	// nothing created.
+	if (
+		!Number.isSafeInteger(columnCount) ||
+		columnCount < MIN_COLUMN_COUNT ||
+		columnCount > MAX_COLUMN_COUNT
+	) {
+		throw new ValidationError(
+			`columnCount must be an integer between ${MIN_COLUMN_COUNT} and ${MAX_COLUMN_COUNT}.`
+		);
+	}
 	return doc.transact(() => {
 		const columnsRecord = createRecord(
 			doc,
@@ -525,9 +573,28 @@ function deleteRecordAndChildren(doc: Y.Doc, id: string): void {
 	recordsMap(doc).delete(id);
 }
 
-/** Deletes a record (and, for a container block, all of its descendants) and removes its id from its parent's sibling order. */
+/**
+ * Deletes a record (and, for a container block, all of its descendants) and
+ * removes its id from its parent's sibling order. A direct delete of one
+ * `column` is rejected once its `columns` block is already at
+ * MIN_COLUMN_COUNT (issue #148) — deleting the whole `columns` block instead
+ * is unaffected, since that recurses via deleteRecordAndChildren directly
+ * rather than through this per-column guard.
+ */
 export function deleteRecord(doc: Y.Doc, id: string): void {
-	doc.transact(() => deleteRecordAndChildren(doc, id));
+	doc.transact(() => {
+		const yrecord = recordsMap(doc).get(id);
+		if (yrecord?.get('blockType') === 'column') {
+			const columnsId = yrecord.get('parentId')!;
+			const siblingCount = recordsMap(doc).get(columnsId)?.get('recordIds')?.length ?? 0;
+			if (siblingCount <= MIN_COLUMN_COUNT) {
+				throw new ValidationError(
+					`A columns block must keep at least ${MIN_COLUMN_COUNT} columns — delete the columns block itself instead.`
+				);
+			}
+		}
+		deleteRecordAndChildren(doc, id);
+	});
 }
 
 /** All records belonging to a Document or Collection, in sibling order; empty array if `parentId` isn't a known Document or Collection. */
@@ -546,7 +613,20 @@ export function listRecordsForParent(doc: Y.Doc, parentId: string): WorkspaceRec
 		if (seen.has(id)) continue;
 		seen.add(id);
 		const record = getRecord(doc, id);
-		if (record) records.push(record);
+		// A record's own `parentId` field and its id's presence in a sibling
+		// array are two independently-merged pieces of CRDT state (issue
+		// #148's moveRecordToParent, unlike same-array reorderRecord, spans
+		// two different Y.Arrays) — two replicas concurrently moving the same
+		// record to two *different* destination containers can each insert it
+		// into their own target array (no conflict between them, since
+		// they're different arrays), while `parentId`'s own last-write-wins
+		// resolution deterministically picks one winner. Filtering by
+		// `record.parentId === parentId` here means every replica converges
+		// on showing the record only in its one authoritative location — the
+		// losing container's leftover array entry is skipped, not rendered as
+		// a ghost duplicate — without needing to mutate anything during a
+		// read.
+		if (record?.parentId === parentId) records.push(record);
 	}
 	return records;
 }

@@ -1581,6 +1581,34 @@ describe('service layer: columns block nesting and its container-parent permissi
 		expect(() => getRecord(human, columnId)).toThrow(PermissionDeniedError);
 		expect(() => getRecord(human, heading.id)).toThrow(PermissionDeniedError);
 	});
+
+	it('write_record rejects a markdown write directly on a columns or column block (its content has nowhere to render)', () => {
+		const doc = createDocument(human, { title: 'Layout' });
+		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const [columnId] = columns.childRecordIds!;
+
+		expect(() => writeRecord(human, columns.id, { markdown: 'lost' })).toThrow(
+			/cannot be written to a columns or column block/
+		);
+		expect(() => writeRecord(human, columnId, { markdown: 'also lost' })).toThrow(
+			/cannot be written to a columns or column block/
+		);
+	});
+
+	it('rejects growing a columns block past the maximum of 6 columns via create_record', () => {
+		const doc = createDocument(human, { title: 'Layout' });
+		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns', columnCount: 6 });
+		expect(() => createRecord(human, { parentId: columns.id, blockType: 'column' })).toThrow(
+			/at most 6 columns/
+		);
+	});
+
+	it('rejects deleting a column that would leave a columns block below the minimum of 2', () => {
+		const doc = createDocument(human, { title: 'Layout' });
+		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' }); // default 2
+		const [columnId] = columns.childRecordIds!;
+		expect(() => deleteRecord(human, columnId)).toThrow(/at least 2 columns/);
+	});
 });
 
 describe('service layer: holds — human caller path and permission-denied records', () => {

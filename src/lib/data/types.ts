@@ -199,7 +199,7 @@ export interface WorkspaceRecord {
 	parentId: string; // Document ID, Collection ID, or (issue #148) another record's id — see ParentKind
 	order: string; // fractional index, orders records within parentId
 	blockType?: BlockType; // set when parent is a Document
-	content?: RichText; // set when parent is a Document — the block's text
+	content?: RichText; // set when parent is a Document — the block's text; absent for a container block (columns/column), which holds no text of its own
 	properties?: Record<string, PropertyValue>; // set when parent is a Collection
 	checked?: boolean; // for to_do blocks
 	collapsed?: boolean; // for toggle blocks

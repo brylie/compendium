@@ -7,6 +7,8 @@
 		deleteRecord,
 		getRecordYText,
 		listRecordsForParent,
+		MAX_COLUMN_COUNT,
+		MIN_COLUMN_COUNT,
 		setBlockType,
 		setRecordChecked
 	} from '$lib/data/record-ops';
@@ -30,6 +32,7 @@
 		dropIndicatorParentId,
 		dropIndicatorIndex,
 		onFocusBlock,
+		onInputText,
 		onDragHandlePointerDown,
 		onDragHandleKeydown
 	}: {
@@ -41,6 +44,7 @@
 		dropIndicatorParentId: string | null;
 		dropIndicatorIndex: number | null;
 		onFocusBlock: (blockId: string) => void;
+		onInputText: (blockId: string) => void;
 		onDragHandlePointerDown: (
 			event: PointerEvent,
 			blockId: string,
@@ -162,12 +166,13 @@
 		createRecord(ydoc, { parentId: block.id, blockType: 'column' }, CURRENT_USER);
 	}
 
-	// Columns stay a "2 or more" layout (block-capability-contract.md) — the
-	// remove control simply isn't offered once only 2 remain, rather than
-	// enforcing the floor at the data layer the way every other generic
-	// delete_record/deleteRecord call in this app stays unconstrained.
+	// Columns stay a MIN_COLUMN_COUNT-to-MAX_COLUMN_COUNT layout
+	// (block-capability-contract.md) — deleteRecord/createRecord themselves
+	// enforce this floor/ceiling (issue #148's CodeRabbit review), so hiding
+	// the controls here is purely a UX nicety (no point offering a button
+	// that would just throw), not the only guard.
 	function removeColumn(columnId: string): void {
-		if (columns.length <= 2) return;
+		if (columns.length <= MIN_COLUMN_COUNT) return;
 		deleteRecord(ydoc, columnId);
 	}
 </script>
@@ -253,7 +258,7 @@
 											recordId={columnRecord.id}
 											{linkTargets}
 											placeholder="Quote…"
-											onInputText={() => {}}
+											onInputText={() => onInputText(columnRecord.id)}
 											onEnter={() => handleEnter(column.id, columnRecord)}
 											onBackspaceAtStart={() => handleBackspace(column.id, index)}
 											onFocusBlock={() => onFocusBlock(columnRecord.id)}
@@ -276,7 +281,7 @@
 											{linkTargets}
 											class={headingTextClass(bt)}
 											placeholder={index === 0 ? 'Type in this column…' : ''}
-											onInputText={() => {}}
+											onInputText={() => onInputText(columnRecord.id)}
 											onEnter={() => handleEnter(column.id, columnRecord)}
 											onBackspaceAtStart={() => handleBackspace(column.id, index)}
 											onFocusBlock={() => onFocusBlock(columnRecord.id)}
@@ -303,7 +308,7 @@
 					<Icon name="plus" size={12} />
 					Add block
 				</button>
-				{#if columns.length > 2}
+				{#if columns.length > MIN_COLUMN_COUNT}
 					<button
 						type="button"
 						onclick={() => removeColumn(column.id)}
@@ -316,12 +321,14 @@
 			</div>
 		</div>
 	{/each}
-	<button
-		type="button"
-		onclick={addColumn}
-		class="flex flex-shrink-0 items-center gap-1 self-start rounded-lg border border-dashed border-border/70 px-2 py-2 text-xs text-muted hover:bg-surface hover:text-fg md:self-stretch"
-		aria-label="Add column"
-	>
-		<Icon name="plus" size={14} />
-	</button>
+	{#if columns.length < MAX_COLUMN_COUNT}
+		<button
+			type="button"
+			onclick={addColumn}
+			class="flex flex-shrink-0 items-center gap-1 self-start rounded-lg border border-dashed border-border/70 px-2 py-2 text-xs text-muted hover:bg-surface hover:text-fg md:self-stretch"
+			aria-label="Add column"
+		>
+			<Icon name="plus" size={14} />
+		</button>
+	{/if}
 </div>
