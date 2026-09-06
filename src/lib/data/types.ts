@@ -209,6 +209,15 @@ export interface WorkspaceRecord {
 	// meaning than page_link/collection_view's "unconfigured" (issue #43)
 	referencedRecordId?: string;
 	viewConfig?: EmbeddedViewConfig; // for collection_view blocks only
+	// Opts a block out of the page's content-width column so it spans the
+	// full document canvas instead (issue #150) — Notion's per-block
+	// full-width toggle. Currently only collection_view blocks expose the
+	// UI affordance for this (see CollectionViewBlock.svelte and
+	// collection-views.md), but the field itself isn't block-type-restricted
+	// at the data layer, the same way calloutStyle/childPagesDepth aren't
+	// enforced here either — a future block type could reuse it without a
+	// data-model change. Absent/false means the normal narrow column.
+	fullWidth?: boolean;
 	calloutStyle?: CalloutStyle; // for callout blocks only — absent renders the pre-#42 neutral default
 	childPagesDepth?: ChildPagesDepth; // for child_pages blocks only — absent means depth 1 (immediate children only)
 	// Present (possibly empty) only on a container block (columns/column,

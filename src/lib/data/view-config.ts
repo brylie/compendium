@@ -112,7 +112,7 @@ export function sanitizeCalloutStyle(calloutStyle: CalloutStyle): CalloutStyle {
 
 /**
  * Sets the checked/collapsed/referencedRecordId/viewConfig/calloutStyle/
- * childPagesDepth group of block-only optional fields — shared by
+ * childPagesDepth/fullWidth group of block-only optional fields — shared by
  * createRecord and copyRecordVerbatim, which otherwise each repeat the same
  * conditionals inline (pushing both functions' own cognitive complexity over
  * the lint threshold once calloutStyle was the fifth).
@@ -126,6 +126,7 @@ export function applyOptionalBlockFields(
 		viewConfig?: EmbeddedViewConfig;
 		calloutStyle?: CalloutStyle;
 		childPagesDepth?: ChildPagesDepth;
+		fullWidth?: boolean;
 	}
 ): void {
 	if (fields.checked !== undefined) yrecord.set('checked', fields.checked);
@@ -136,4 +137,5 @@ export function applyOptionalBlockFields(
 	if (fields.childPagesDepth !== undefined) {
 		yrecord.set('childPagesDepth', fields.childPagesDepth);
 	}
+	if (fields.fullWidth !== undefined) yrecord.set('fullWidth', fields.fullWidth);
 }

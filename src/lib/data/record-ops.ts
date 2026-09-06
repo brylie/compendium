@@ -123,6 +123,7 @@ function readRecord(yrecord: TypedYMap<RecordYShape>): WorkspaceRecord {
 		viewConfig: readViewConfig(yrecord),
 		calloutStyle: yrecord.get('calloutStyle'),
 		childPagesDepth: yrecord.get('childPagesDepth'),
+		fullWidth: yrecord.get('fullWidth'),
 		childRecordIds: yrecord.get('recordIds')?.toArray(),
 		createdBy: yrecord.get('createdBy')!,
 		createdAt: yrecord.get('createdAt')!,
@@ -143,6 +144,7 @@ export interface CreateRecordInput {
 	viewConfig?: EmbeddedViewConfig; // for collection_view blocks
 	calloutStyle?: CalloutStyle; // for callout blocks
 	childPagesDepth?: ChildPagesDepth; // for child_pages blocks
+	fullWidth?: boolean; // opts out of the content-width column (issue #150)
 }
 
 // Extracted from createRecord purely to keep its own cognitive complexity
@@ -400,6 +402,22 @@ export function setRecordCollapsed(
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	doc.transact(() => {
 		yrecord.set('collapsed', collapsed);
+		yrecord.set('lastEditedBy', actor);
+		yrecord.set('lastEditedAt', Date.now());
+	});
+}
+
+/** Toggles a block's full-width display (issue #150) — opts it out of the page's content-width column so it spans the full document canvas instead. Whole-value, like `setRecordChecked`/`setRecordCollapsed`. */
+export function setRecordFullWidth(
+	doc: Y.Doc,
+	id: string,
+	fullWidth: boolean,
+	actor: ActorId
+): void {
+	const yrecord = recordsMap(doc).get(id);
+	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
+	doc.transact(() => {
+		yrecord.set('fullWidth', fullWidth);
 		yrecord.set('lastEditedBy', actor);
 		yrecord.set('lastEditedAt', Date.now());
 	});

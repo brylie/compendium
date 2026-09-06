@@ -1050,6 +1050,51 @@ describe('doc/[id] +page', () => {
 		expect(screen.getByText('· board')).toBeInTheDocument();
 	});
 
+	it('renders a full-width collection_view block row without the content-width column class, and a normal one with it (issue #150)', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const collection = createCollection(ydoc, { title: 'Sprint Tasks', schema: [] });
+		const narrow = createRecord(
+			ydoc,
+			{
+				parentId: 'doc-1',
+				blockType: 'collection_view',
+				referencedRecordId: collection.id,
+				viewConfig: { viewType: 'table' }
+			},
+			HUMAN
+		);
+		const wide = createRecord(
+			ydoc,
+			{
+				parentId: 'doc-1',
+				blockType: 'collection_view',
+				referencedRecordId: collection.id,
+				viewConfig: { viewType: 'table' },
+				fullWidth: true
+			},
+			HUMAN
+		);
+		render(Page, {
+			params: { spaceId: 'space-1', id: 'doc-1' },
+			form: null,
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [collection],
+				documentId: 'doc-1',
+				title: 'D'
+			}
+		});
+		await flushShardResolution();
+
+		const narrowRow = document.getElementById(`block-${narrow.id}`)!;
+		const wideRow = document.getElementById(`block-${wide.id}`)!;
+		expect(narrowRow.classList.contains('max-w-3xl')).toBe(true);
+		expect(wideRow.classList.contains('max-w-3xl')).toBe(false);
+	});
+
 	it('adds a new block from the "Add block" button at the bottom', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);

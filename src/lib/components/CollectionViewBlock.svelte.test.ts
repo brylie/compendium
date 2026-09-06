@@ -101,6 +101,48 @@ describe('CollectionViewBlock', () => {
 		expect(screen.getByText('· board')).toBeInTheDocument();
 	});
 
+	it('toggles full-width display and persists it to the record (issue #150)', async () => {
+		const doc = createDocument(ydoc, { title: 'Team Page' });
+		const collection = createCollection(ydoc, {
+			title: 'Sprint Tasks',
+			schema: [{ key: 'status', label: 'Status', type: 'select', options: [] }]
+		});
+		const block = createRecord(
+			ydoc,
+			{
+				parentId: doc.id,
+				blockType: 'collection_view',
+				referencedRecordId: collection.id,
+				viewConfig: { viewType: 'board' }
+			},
+			actor
+		);
+		const user = userEvent.setup();
+
+		const { rerender } = render(CollectionViewBlock, {
+			block: getRecord(ydoc, block.id)!,
+			ydoc,
+			collections: listCollections(ydoc)
+		});
+
+		const toggle = screen.getByRole('button', { name: 'Default width' });
+		expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+		await user.click(toggle);
+
+		expect(getRecord(ydoc, block.id)?.fullWidth).toBe(true);
+		await rerender({
+			block: getRecord(ydoc, block.id)!,
+			ydoc,
+			collections: listCollections(ydoc)
+		});
+		const pressedToggle = screen.getByRole('button', { name: 'Full width' });
+		expect(pressedToggle).toHaveAttribute('aria-pressed', 'true');
+
+		await user.click(pressedToggle);
+		expect(getRecord(ydoc, block.id)?.fullWidth).toBe(false);
+	});
+
 	it('shows a broken-embed state once the target collection is deleted, preserving the reference', () => {
 		const doc = createDocument(ydoc, { title: 'Team Page' });
 		const collection = createCollection(ydoc, { title: 'Doomed', schema: [] });
