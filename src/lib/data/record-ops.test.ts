@@ -1432,6 +1432,58 @@ describe('detachSyncedBlock: issue #153 "detach to independent copy"', () => {
 		expect(detached.childRecordIds).toBeUndefined();
 	});
 
+	// CodeRabbit finding (PR #244): a page_link/collection_view/child_pages
+	// source's own referencedRecordId/viewConfig is configuration, not just
+	// content — copying only blockType/text previously produced an
+	// unconfigured block of that type (a page_link with no target, etc.).
+	it('copies referencedRecordId when the source is a page_link', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const target = createDocument(doc, { title: 'Target' });
+		const source = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'page_link', referencedRecordId: target.id },
+			human
+		);
+		const instance = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'synced_block', referencedRecordId: source.id },
+			human
+		);
+
+		const detached = detachSyncedBlock(doc, instance.id, human);
+
+		expect(detached.blockType).toBe('page_link');
+		expect(detached.referencedRecordId).toBe(target.id);
+	});
+
+	it('copies referencedRecordId and viewConfig when the source is a collection_view', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const collection = createCollection(doc, { title: 'Tasks', schema: [] });
+		const source = createRecord(
+			doc,
+			{
+				parentId: document.id,
+				blockType: 'collection_view',
+				referencedRecordId: collection.id,
+				viewConfig: { viewType: 'table' }
+			},
+			human
+		);
+		const instance = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'synced_block', referencedRecordId: source.id },
+			human
+		);
+
+		const detached = detachSyncedBlock(doc, instance.id, human);
+
+		expect(detached.blockType).toBe('collection_view');
+		expect(detached.referencedRecordId).toBe(collection.id);
+		expect(detached.viewConfig?.viewType).toBe('table');
+	});
+
 	// CodeRabbit finding (PR #244): a synced_block can (unusually) point at
 	// another synced_block — copying that wrapper's own blockType/empty
 	// content as-is would just produce a second unconfigured synced_block
