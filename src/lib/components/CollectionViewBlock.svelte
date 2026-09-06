@@ -4,6 +4,7 @@
 	import { CURRENT_USER } from '$lib/client/actor';
 	import {
 		patchRecordViewConfig,
+		setRecordFullWidth,
 		setRecordReferencedId,
 		setRecordViewConfig
 	} from '$lib/data/record-ops';
@@ -155,6 +156,15 @@
 		pickerViewType = block.viewConfig?.viewType ?? 'table';
 		changing = true;
 	}
+
+	// Full-width display (issue #150) is a per-embed instance setting, not
+	// part of the shared/draft viewConfig above — it toggles instantly like
+	// referencedRecordId does, with no Save/Discard step, since there's no
+	// concurrent-edit merge concern for a single boolean one viewer sets for
+	// everyone.
+	function toggleFullWidth(): void {
+		setRecordFullWidth(ydoc, block.id, !block.fullWidth, CURRENT_USER);
+	}
 </script>
 
 <div class="my-1 rounded-lg border border-border bg-surface/30 p-3">
@@ -191,6 +201,15 @@
 						Save view
 					</button>
 				{/if}
+				<button
+					type="button"
+					onclick={toggleFullWidth}
+					aria-pressed={block.fullWidth === true}
+					class="rounded px-2 py-0.5 text-xs text-muted hover:text-accent"
+					class:text-accent={block.fullWidth === true}
+				>
+					{block.fullWidth ? 'Full width' : 'Default width'}
+				</button>
 				<button
 					type="button"
 					onclick={startChange}

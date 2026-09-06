@@ -50,6 +50,14 @@ interface WorkspaceRecord {
 	// meaning than page_link/collection_view's "unconfigured")
 	referencedRecordId?: string;
 	viewConfig?: EmbeddedViewConfig; // for collection_view blocks only — see §2
+	// Opts a block out of the page's content-width column so it spans the
+	// full document canvas instead (issue #150) — Notion's per-block
+	// full-width toggle. Not enforced to a specific blockType at this layer
+	// (the same way calloutStyle/childPagesDepth aren't either), but only
+	// collection_view blocks currently expose the UI toggle for it — see
+	// collection-views.md and design-system.md's content-column section.
+	// Absent/false means the normal narrow column.
+	fullWidth?: boolean;
 	calloutStyle?: CalloutStyle; // for callout blocks only — absent renders the pre-#42 neutral default, see collection-views.md's sibling pattern and design-system.md §6
 	childPagesDepth?: ChildPagesDepth; // for child_pages blocks only — absent means depth 1 (immediate children only), see §3
 	// Present (possibly empty) only on a container block (columns/column,
@@ -206,6 +214,8 @@ A Collection is the source of truth for structured data: its schema and its memb
 A view is a non-owning projection of one Collection — Table, Board, and Calendar are implemented (see [`collection-views.md`](./collection-views.md)); Gallery, Timeline, Form, and Chart are not yet built. **"View" always means this — a database/Collection view, Notion's sense of the word — never an MVC-style page or route.** There is deliberately no standalone view route: a View exists only as `viewConfig` on a `collection_view` block, which is a Document block like any other (a paragraph, a heading, a `page_link`) rather than a page of its own. Placing one inside a Document — a "team page," a project page, any prose page — is how a Board or Calendar is surfaced at all; `/table/[id]` is the one exception, a pre-existing full-page Table route for a Collection that predates and is unrelated to this embedding mechanism.
 
 A view may have configuration — filters, sorts, grouping, visible properties, and a layout-specific driving property — but it never copies records, changes their identity, or introduces view-specific row fields. That configuration lives on the embedding block's own `viewConfig` field (`EmbeddedViewConfig` above) — a `WorkspaceRecord` field like `referencedRecordId`, not a second write path. `referencedRecordId` names the target Collection (the same field `page_link`/`synced_block` already use for "what this block references"); `viewConfig` says how to render it. Both are set together once insertion is configured, and can be changed later without changing the block's identity — a newly inserted, not-yet-configured `collection_view` block temporarily has neither field set, while the inline picker (`collection-views.md` §2) is showing.
+
+A `collection_view` block may also be displayed full-width (`WorkspaceRecord.fullWidth`, issue #150), breaking out of the Document's normal content-width column — Notion's per-block full-width setting. This is a display/layout choice about the embedding block, not view configuration: it's a plain scalar on the record (like `referencedRecordId`), set instantly via `setRecordFullWidth`/`CollectionViewBlock.svelte`'s own toggle, not part of `EmbeddedViewConfig` or its draft/Save flow. See `collection-views.md` §2 and `design-system.md`'s content-column section for the rendering mechanics and narrow-viewport behavior.
 
 GitLab projects are the interaction reference for Board and data-grid configuration: users can choose visible fields, a grouping property (Board columns or Calendar placement — Table doesn't use `groupBy`), manual or property-based sort, filtering, and (Table only) per-column footer summaries (next paragraph) — all implemented today in `EmbeddedViewConfig`, including an optional second Board grouping dimension (`swimlaneBy`, issue #67/#165 — see `collection-views.md` §3/§4). These choices are declarative view configuration, not Collection schema changes. Moving a card between Board columns updates the selected existing property; rearranging a manually sorted view updates only its view ordering. A Table view (whether the `/table/[id]` full page or a `collection_view` block with `viewType: 'table'`) is an application data grid with this configuration, distinct from the `table` Document block, which is inline narrative content.
 

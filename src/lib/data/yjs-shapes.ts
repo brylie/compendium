@@ -57,6 +57,7 @@ export interface RecordYShape {
 	referencedRecordId?: string;
 	calloutStyle?: CalloutStyle;
 	childPagesDepth?: ChildPagesDepth;
+	fullWidth?: boolean;
 	// Only present on a container block (columns/column, issue #148) — see
 	// WorkspaceRecord.childRecordIds. Carries the Y.Array itself, the same
 	// "live array, not a snapshot" convention Document/CollectionYShape's own

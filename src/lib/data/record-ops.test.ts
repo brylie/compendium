@@ -18,6 +18,7 @@ import {
 	setRecordCalloutStyle,
 	setRecordChecked,
 	setRecordCollapsed,
+	setRecordFullWidth,
 	setRecordReferencedId,
 	setRecordViewConfig,
 	touchRecordEditor,
@@ -406,6 +407,37 @@ describe('records: creation ordering, mutation, and not-found edge cases', () =>
 		setRecordCollapsed(doc, block.id, true, human);
 		expect(getRecord(doc, block.id)?.collapsed).toBe(true);
 		expect(() => setRecordCollapsed(doc, 'missing', true, human)).toThrow(NotFoundError);
+	});
+
+	it('setRecordFullWidth toggles a collection_view block full-width, round-trips through createRecord/copyDocumentVerbatim, and throws NotFoundError for an unknown record (issue #150)', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(doc, { parentId: document.id, blockType: 'collection_view' }, human);
+		expect(getRecord(doc, block.id)?.fullWidth).toBeUndefined();
+
+		setRecordFullWidth(doc, block.id, true, human);
+		expect(getRecord(doc, block.id)?.fullWidth).toBe(true);
+
+		setRecordFullWidth(doc, block.id, false, human);
+		expect(getRecord(doc, block.id)?.fullWidth).toBe(false);
+
+		expect(() => setRecordFullWidth(doc, 'missing', true, human)).toThrow(NotFoundError);
+
+		setRecordFullWidth(doc, block.id, true, human);
+		const targetDoc = new Y.Doc();
+		copyDocumentVerbatim(doc, targetDoc, document.id);
+		expect(getRecord(targetDoc, block.id)?.fullWidth).toBe(true);
+	});
+
+	it('createRecord accepts fullWidth directly, matching the collapsed/calloutStyle creation-time precedent (issue #150)', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'collection_view', fullWidth: true },
+			human
+		);
+		expect(getRecord(doc, block.id)?.fullWidth).toBe(true);
 	});
 
 	it('setRecordCalloutStyle sets a preset or custom style on a callout block, clears it back to the default with null, and throws NotFoundError for an unknown record (issue #42)', () => {
