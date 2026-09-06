@@ -346,11 +346,14 @@
 		value?: unknown
 	): void {
 		if (offsets.start === offsets.end) return;
-		// No explicit value: toggle the mark off if it's currently on
-		// anywhere in the selection, on otherwise.
+		// No explicit value: toggle the mark off if `offsets` is already fully
+		// marked, on otherwise. Read directly off the Y.Text content covered by
+		// `offsets` — not `getFormatState()`, which reads the live DOM selection
+		// and can disagree with `offsets` (programmatic calls, focus moved since).
 		let nextValue = value;
 		if (value === undefined) {
-			nextValue = getFormatState()[mark] ? null : true;
+			const runs = yTextToRichText(ytext).runs;
+			nextValue = markCoversSelection(runs, mark, offsets.start, offsets.end) ? null : true;
 		}
 		const doc = ytext.doc;
 		const apply = () =>

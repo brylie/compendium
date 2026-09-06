@@ -378,6 +378,38 @@ describe('BlockEditor', () => {
 		expect(delta[0].attributes?.bold).toBeUndefined();
 	});
 
+	it('toggles the mark off for an explicit offsets range even when the live DOM selection differs', () => {
+		const ytext = doc.getText('a');
+		ytext.insert(0, 'bold text', { bold: true });
+		const { container, component } = render(BlockEditor, { ytext, ...handlers() });
+		const el = container.querySelector('[contenteditable]') as HTMLElement;
+
+		// Live selection covers only "bold", but the explicit offsets passed in
+		// cover the whole "bold text" run — the toggle decision must follow the
+		// offsets, not what's currently selected in the DOM.
+		selectRange(el, 0, 4);
+		component.applyFormatAtRange('bold', { start: 0, end: 9 });
+
+		const delta = ytext.toDelta() as { insert: string; attributes?: { bold?: boolean } }[];
+		expect(delta[0]).toMatchObject({ insert: 'bold text' });
+		expect(delta[0].attributes?.bold).toBeUndefined();
+	});
+
+	it('toggles the mark off for an explicit offsets range with no live DOM selection at all', () => {
+		const ytext = doc.getText('a');
+		ytext.insert(0, 'bold', { bold: true });
+		const { component } = render(BlockEditor, { ytext, ...handlers() });
+
+		// No selectRange() call: there is no live DOM selection when this runs.
+		// getFormatState() would return {} here, wrongly forcing nextValue to
+		// `true` and making the mark impossible to toggle off via this path.
+		component.applyFormatAtRange('bold', { start: 0, end: 4 });
+
+		const delta = ytext.toDelta() as { insert: string; attributes?: { bold?: boolean } }[];
+		expect(delta[0]).toMatchObject({ insert: 'bold' });
+		expect(delta[0].attributes?.bold).toBeUndefined();
+	});
+
 	it('delegates Cmd/Ctrl+K to the in-page link composer', async () => {
 		const ytext = doc.getText('a');
 		ytext.insert(0, 'hello world');
