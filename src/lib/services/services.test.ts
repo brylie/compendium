@@ -1457,6 +1457,132 @@ describe('service layer: records — write validation, delete, and direct read',
 	});
 });
 
+describe('service layer: columns block nesting and its container-parent permission scoping (issue #148)', () => {
+	it('createRecord with blockType "columns" seeds 2 columns by default, each with one paragraph', () => {
+		const doc = createDocument(human, { title: 'Layout' });
+		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		expect(columns.childRecordIds).toHaveLength(2);
+		for (const columnId of columns.childRecordIds!) {
+			expect(getRecord(human, columnId)?.blockType).toBe('column');
+			expect(getRecord(human, columnId)?.childRecordIds).toHaveLength(1);
+		}
+	});
+
+	it('honors a custom columnCount', () => {
+		const doc = createDocument(human, { title: 'Layout' });
+		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns', columnCount: 3 });
+		expect(columns.childRecordIds).toHaveLength(3);
+	});
+
+	it('rejects columnCount outside the 2-6 range', () => {
+		const doc = createDocument(human, { title: 'Layout' });
+		expect(() =>
+			createRecord(human, { parentId: doc.id, blockType: 'columns', columnCount: 1 })
+		).toThrow(/columnCount/);
+		expect(() =>
+			createRecord(human, { parentId: doc.id, blockType: 'columns', columnCount: 7 })
+		).toThrow(/columnCount/);
+	});
+
+	it('rejects columnCount on a non-columns block', () => {
+		const doc = createDocument(human, { title: 'Layout' });
+		expect(() =>
+			createRecord(human, { parentId: doc.id, blockType: 'paragraph', columnCount: 2 })
+		).toThrow(/columnCount/);
+	});
+
+	it('rejects a column block created directly inside a Document', () => {
+		const doc = createDocument(human, { title: 'Layout' });
+		expect(() => createRecord(human, { parentId: doc.id, blockType: 'column' })).toThrow(
+			/column blocks can only be created directly inside a columns block/
+		);
+	});
+
+	it('rejects a nested columns block inside a column', () => {
+		const doc = createDocument(human, { title: 'Layout' });
+		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const [columnId] = columns.childRecordIds!;
+		expect(() => createRecord(human, { parentId: columnId, blockType: 'columns' })).toThrow(
+			/columns blocks can only be created directly inside a Document/
+		);
+	});
+
+	it('rejects an unsupported block type inside a column', () => {
+		const doc = createDocument(human, { title: 'Layout' });
+		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const [columnId] = columns.childRecordIds!;
+		expect(() => createRecord(human, { parentId: columnId, blockType: 'callout' })).toThrow(
+			/cannot be created inside a column/
+		);
+	});
+
+	it('allows a curated block type to be created inside a column, nested under the columns block in getDocument', () => {
+		const doc = createDocument(human, { title: 'Layout' });
+		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const [columnId] = columns.childRecordIds!;
+		const heading = createRecord(human, { parentId: columnId, blockType: 'heading_2' });
+		writeRecord(human, heading.id, { markdown: '## Column heading' });
+
+		const projected = getDocument(human, doc.id)!;
+		expect(projected.records).toHaveLength(1); // only the columns block is top-level
+		const columnsView = projected.records[0];
+		expect(columnsView.blockType).toBe('columns');
+		expect(columnsView.markdown).toContain('::: columns');
+		expect(columnsView.markdown).toContain('Column heading');
+	});
+
+	it('a token granted only the owning Document can create, write, and delete a block nested inside one of its columns', () => {
+		const doc = createDocument(human, { title: 'Scoped Layout' });
+		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const [columnId] = columns.childRecordIds!;
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Layout Bot',
+			allowedDocumentIds: [doc.id],
+			allowedCollectionIds: []
+		});
+
+		// The column's own id is never in the token's allowlist — access must
+		// resolve up to the owning Document (doc.id) instead (see
+		// resolveOwningParentId in services/permissions.ts).
+		const block = createRecord(tokenRecord, { parentId: columnId, blockType: 'paragraph' });
+		holdRecords(tokenRecord, [block.id]);
+		writeRecord(tokenRecord, block.id, { markdown: 'written by an agent' });
+		expect(getRecord(tokenRecord, block.id)?.id).toBe(block.id);
+		deleteRecord(tokenRecord, block.id);
+		expect(() => getRecord(tokenRecord, block.id)).toThrow(PermissionDeniedError);
+	});
+
+	it('a token not granted the owning Document is denied creating a block inside one of its columns', () => {
+		const doc = createDocument(human, { title: 'Unscoped Layout' });
+		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const [columnId] = columns.childRecordIds!;
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Outsider Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+
+		expect(() => createRecord(tokenRecord, { parentId: columnId, blockType: 'paragraph' })).toThrow(
+			PermissionDeniedError
+		);
+	});
+
+	it('deleteRecord on the columns block removes every column and their content', () => {
+		const doc = createDocument(human, { title: 'Layout' });
+		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const [columnId] = columns.childRecordIds!;
+		const heading = createRecord(human, { parentId: columnId, blockType: 'heading_2' });
+
+		deleteRecord(human, columns.id);
+
+		expect(() => getRecord(human, columns.id)).toThrow(PermissionDeniedError);
+		expect(() => getRecord(human, columnId)).toThrow(PermissionDeniedError);
+		expect(() => getRecord(human, heading.id)).toThrow(PermissionDeniedError);
+	});
+});
+
 describe('service layer: holds — human caller path and permission-denied records', () => {
 	it('a human caller holding an inaccessible/nonexistent record is denied that one record only', () => {
 		const doc = createDocument(human, { title: 'Doc' });

@@ -6,7 +6,7 @@ import SlashMenu from './SlashMenu.svelte';
 describe('SlashMenu', () => {
 	it('lists every supported block command when the query is empty', () => {
 		render(SlashMenu, { query: '', onSelect: vi.fn() });
-		expect(screen.getAllByRole('option')).toHaveLength(20);
+		expect(screen.getAllByRole('option')).toHaveLength(21);
 	});
 
 	it('groups commands into the editor categories', () => {
@@ -93,6 +93,12 @@ describe('SlashMenu', () => {
 
 		await user.keyboard('{ArrowDown}'.repeat(10));
 		expect(screen.getByText('Toggle list').closest('[role="option"]')).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
+
+		await user.keyboard('{ArrowDown}');
+		expect(screen.getByText('Columns').closest('[role="option"]')).toHaveAttribute(
 			'aria-selected',
 			'true'
 		);

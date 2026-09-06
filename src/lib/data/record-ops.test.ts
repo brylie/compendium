@@ -4,11 +4,14 @@ import { DEFAULT_CUSTOM_CALLOUT_COLOR } from './callout-style';
 import { createDocument, listDocuments } from './document-ops';
 import { createCollection, listCollections } from './collection-ops';
 import {
+	createColumnsBlock,
 	createRecord,
 	deleteRecord,
 	getRecord,
 	getRecordYText,
 	listRecordsForParent,
+	moveRecordToParent,
+	parentKindOf,
 	patchRecordViewConfig,
 	reorderRecord,
 	setBlockType,
@@ -832,5 +835,145 @@ describe('reorderRecord: block drag-and-drop repositioning (#40)', () => {
 				.runs.map((r) => r.text)
 				.join('')
 		).toBe('from A');
+	});
+});
+
+describe('columns: container block nesting (#148)', () => {
+	function setup(columnCount?: number) {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const columns = createColumnsBlock(doc, { parentId: document.id }, human, columnCount);
+		return { doc, document, columns };
+	}
+
+	it('creates a columns block with 2 columns by default, each seeded with one empty paragraph', () => {
+		const { doc, columns } = setup();
+		expect(columns.blockType).toBe('columns');
+		expect(columns.childRecordIds).toHaveLength(2);
+
+		for (const columnId of columns.childRecordIds!) {
+			const column = getRecord(doc, columnId)!;
+			expect(column.blockType).toBe('column');
+			expect(column.childRecordIds).toHaveLength(1);
+			const [paragraphId] = column.childRecordIds!;
+			expect(getRecord(doc, paragraphId)!.blockType).toBe('paragraph');
+		}
+	});
+
+	it('honors a custom columnCount', () => {
+		const { columns } = setup(4);
+		expect(columns.childRecordIds).toHaveLength(4);
+	});
+
+	it('parentKindOf resolves a columns/column record as "record"', () => {
+		const { doc, columns } = setup();
+		expect(parentKindOf(doc, columns.id)).toBe('record');
+		expect(parentKindOf(doc, columns.childRecordIds![0])).toBe('record');
+	});
+
+	it('createRecord under a column adds it to that column, not the Document', () => {
+		const { doc, document, columns } = setup();
+		const columnId = columns.childRecordIds![0];
+		const heading = createRecord(doc, { parentId: columnId, blockType: 'heading_1' }, human);
+
+		expect(listRecordsForParent(doc, columnId).map((r) => r.id)).toContain(heading.id);
+		expect(listRecordsForParent(doc, document.id).map((r) => r.id)).not.toContain(heading.id);
+	});
+
+	it('a bare create_record-style column (blockType "column") is auto-seeded with one paragraph', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const columns = createColumnsBlock(doc, { parentId: document.id }, human, 2);
+		const column = createRecord(doc, { parentId: columns.id, blockType: 'column' }, human);
+		expect(column.childRecordIds).toHaveLength(1);
+	});
+
+	it('reorderRecord repositions blocks within a single column', () => {
+		const { doc, columns } = setup();
+		const columnId = columns.childRecordIds![0];
+		const [first] = getRecord(doc, columnId)!.childRecordIds!;
+		const second = createRecord(doc, { parentId: columnId, blockType: 'paragraph' }, human);
+
+		reorderRecord(doc, second.id);
+
+		expect(listRecordsForParent(doc, columnId).map((r) => r.id)).toEqual([second.id, first]);
+	});
+
+	it('moveRecordToParent moves a block from one column into another', () => {
+		const { doc, columns } = setup();
+		const [columnA, columnB] = columns.childRecordIds!;
+		const [blockInA] = getRecord(doc, columnA)!.childRecordIds!;
+
+		moveRecordToParent(doc, blockInA, columnB);
+
+		expect(listRecordsForParent(doc, columnA).map((r) => r.id)).toEqual([]);
+		expect(listRecordsForParent(doc, columnB).map((r) => r.id)).toContain(blockInA);
+		expect(getRecord(doc, blockInA)!.parentId).toBe(columnB);
+	});
+
+	it('moveRecordToParent supports afterRecordId to land at a specific position', () => {
+		const { doc, columns } = setup();
+		const [columnA, columnB] = columns.childRecordIds!;
+		const [blockInA] = getRecord(doc, columnA)!.childRecordIds!;
+		const [blockInB] = getRecord(doc, columnB)!.childRecordIds!;
+
+		moveRecordToParent(doc, blockInA, columnB, blockInB);
+
+		expect(listRecordsForParent(doc, columnB).map((r) => r.id)).toEqual([blockInB, blockInA]);
+	});
+
+	it('moveRecordToParent can move a block out of a column back to the top-level Document', () => {
+		const { doc, document, columns } = setup();
+		const [columnA] = columns.childRecordIds!;
+		const [blockInA] = getRecord(doc, columnA)!.childRecordIds!;
+
+		moveRecordToParent(doc, blockInA, document.id, columns.id);
+
+		expect(listRecordsForParent(doc, document.id).map((r) => r.id)).toEqual([columns.id, blockInA]);
+	});
+
+	it('moveRecordToParent throws ValidationError when moving a record into itself', () => {
+		const { doc, columns } = setup();
+		expect(() => moveRecordToParent(doc, columns.id, columns.id)).toThrow(ValidationError);
+	});
+
+	it('moveRecordToParent throws ValidationError when moving a container into its own descendant', () => {
+		const { doc, columns } = setup();
+		const [columnA] = columns.childRecordIds!;
+		expect(() => moveRecordToParent(doc, columns.id, columnA)).toThrow(ValidationError);
+	});
+
+	it('moveRecordToParent throws NotFoundError for an unknown destination parent', () => {
+		const { doc, columns } = setup();
+		const [columnA] = columns.childRecordIds!;
+		const [blockInA] = getRecord(doc, columnA)!.childRecordIds!;
+		expect(() => moveRecordToParent(doc, blockInA, 'missing')).toThrow(NotFoundError);
+	});
+
+	it('deleteRecord on a columns block recursively deletes every column and their blocks', () => {
+		const { doc, document, columns } = setup();
+		const [columnA, columnB] = columns.childRecordIds!;
+		const [blockInA] = getRecord(doc, columnA)!.childRecordIds!;
+		const [blockInB] = getRecord(doc, columnB)!.childRecordIds!;
+
+		deleteRecord(doc, columns.id);
+
+		expect(getRecord(doc, columns.id)).toBeUndefined();
+		expect(getRecord(doc, columnA)).toBeUndefined();
+		expect(getRecord(doc, columnB)).toBeUndefined();
+		expect(getRecord(doc, blockInA)).toBeUndefined();
+		expect(getRecord(doc, blockInB)).toBeUndefined();
+		expect(listRecordsForParent(doc, document.id).map((r) => r.id)).toEqual([]);
+	});
+
+	it('deleteRecord on a single column removes only that column and its blocks', () => {
+		const { doc, columns } = setup();
+		const [columnA, columnB] = columns.childRecordIds!;
+
+		deleteRecord(doc, columnA);
+
+		expect(getRecord(doc, columnA)).toBeUndefined();
+		expect(columns.childRecordIds).toContain(columnA); // stale snapshot, unaffected
+		expect(getRecord(doc, columns.id)!.childRecordIds).toEqual([columnB]);
 	});
 });

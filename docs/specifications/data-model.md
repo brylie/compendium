@@ -37,7 +37,7 @@ interface PropertyDefinition {
 // below still uses the built-in generic.
 interface WorkspaceRecord {
 	id: string; // stable, globally unique
-	parentId: string; // Document ID or Collection ID
+	parentId: string; // Document ID, Collection ID, or (issue #148) another record's id — see §3.1
 	order: string; // fractional index, orders records within parentId
 	blockType?: BlockType; // set when parent is a Document
 	content?: RichText; // set when parent is a Document — the block's text
@@ -52,6 +52,12 @@ interface WorkspaceRecord {
 	viewConfig?: EmbeddedViewConfig; // for collection_view blocks only — see §2
 	calloutStyle?: CalloutStyle; // for callout blocks only — absent renders the pre-#42 neutral default, see collection-views.md's sibling pattern and design-system.md §6
 	childPagesDepth?: ChildPagesDepth; // for child_pages blocks only — absent means depth 1 (immediate children only), see §3
+	// Present (possibly empty) only on a container block (columns/column,
+	// issue #148, see §3.1) — its own child records' ids, in order, one
+	// level below this record rather than in its owning Document's own
+	// recordIds. Its mere presence, not a hardcoded blockType check, is what
+	// makes a record a valid `parentId` target — see parentKindOf.
+	childRecordIds?: string[];
 	createdBy: ActorId;
 	createdAt: number;
 	lastEditedBy: ActorId;
@@ -78,7 +84,28 @@ type BlockType =
 	| 'page_link'
 	| 'embed'
 	| 'collection_view' // embeds a Table/Board/Calendar view of a Collection — see §2
-	| 'child_pages'; // live listing of a Document's sub-pages (Confluence-style page tree) — see §3, issue #43
+	| 'child_pages' // live listing of a Document's sub-pages (Confluence-style page tree) — see §3, issue #43
+	| 'columns' // multi-column layout container — see §3.1, issue #148
+	| 'column'; // one column of a columns block — see §3.1, issue #148
+
+// The block types a `column` may directly hold (issue #148) — see §3.1. A
+// deliberately curated subset, not the full BlockType union: no reference/
+// structural/container types (no nested columns, no callout/toggle/table/
+// page_link/collection_view/child_pages/embed/synced_block/
+// table_of_contents inside a column for v1).
+type ColumnChildBlockType = Extract<
+	BlockType,
+	| 'paragraph'
+	| 'heading_1'
+	| 'heading_2'
+	| 'heading_3'
+	| 'heading_4'
+	| 'bulleted_list_item'
+	| 'numbered_list_item'
+	| 'to_do'
+	| 'quote'
+	| 'divider'
+>;
 
 // "View" always means a Collection/database view here (Notion's sense),
 // never an MVC-style page/route. There is no standalone view route — a View
@@ -199,6 +226,18 @@ Blocks are deliberately a small, documentation-oriented set rather than one type
 - `child_pages` (issue #43) is a live, Confluence-style page-tree listing of a target Document's sub-pages, computed from `Document.parentDocumentId`/`order` rather than a copied outline — the same "computed block" category as `table_of_contents`, one level up the hierarchy. `referencedRecordId` names the target Document; absent, it defaults to the block's own containing Document (unlike `page_link`/`collection_view`, where absent means "unconfigured" — see `mcp-tools.md` for how `get_document`/`create_record` handle this distinction). `childPagesDepth` (absent = 1) bounds how many nesting levels are rendered. `src/lib/data/records.ts`'s `resolveChildPages` resolves the listing from a flat `DocumentMeta[]` (client: the catalog-backed `data.documents` load already used for the sidebar/`page_link` picker; server: `listDocuments(caller)`, already permission-scoped) — a child the caller can't see is silently omitted from the listing, not surfaced as broken, since only the block's own _target_ is a single resolved reference the way `page_link`'s is. **Liveness scope, deliberately narrower than `table_of_contents`'s:** on the MCP boundary this is always fully live and correct — `get_document` re-reads the catalog on every call, no caching. In the browser UI it is **not** cross-client live — a Document's title/hierarchy is catalog-backed, not part of any single Document's own Yjs shard (#120), so a `child_pages` block only re-renders when this session's own SvelteKit data is invalidated (creating/deleting a sub-page through the sidebar or the block's own controls), the same explicit, accepted gap `Sidebar.svelte`'s document tree already has pending Phase C's SSE feed (#121) — not something this issue attempts to close.
 - Binary media (`image`, `file`, `pdf`, `video`, and `audio`) is deferred until an asset-storage design defines stable references, backups, and sync behavior; it is not merely another text-block discriminator.
 
+### 3.1 Container blocks: real nesting (`columns`/`column`, issue #148)
+
+Every block type above is a leaf under its Document — `parentId` names the Document directly, and the Document's own `recordIds` is the complete, flat ordering of every block in it. `columns`/`column` are the first exception: a `columns` block's children are `column` blocks, and a `column` block's own children are ordinary blocks (the curated `ColumnChildBlockType` subset above) — two more levels of nesting below the Document, each with its **own** `recordIds` array (`WorkspaceRecord.childRecordIds`), not one more entry in the Document's. This is a real, generic storage/coordination primitive, not just "a new discriminator" the way a text-based block type is (§3's sentence above describes every _other_ block type, not this one) — see `record-ops.ts`'s `parentKindOf`, which now resolves three parent kinds instead of two: `'document'`, `'collection'`, or `'record'` (a container block, identified by the presence of its own `childRecordIds` array, not a hardcoded blockType check).
+
+Practically: `createRecord`'s `parentId` may be a `columns`/`column` block's own id, and `listRecordsForParent`/`reorderRecord` operate on that container's own array exactly as they would a Document's. `createColumnsBlock` is the only way a `columns` block comes into existence — one transaction creates it plus `columnCount` (2–6, default 2) `column` children, each pre-seeded with one empty paragraph so no column is ever left with nothing to click into; a bare `column` created directly (an MCP agent adding a column via `create_record`) gets the same auto-seeded paragraph. `moveRecordToParent` is the new reparenting primitive `reorderRecord` doesn't cover — it moves a block from one container into a different one (dragging, or a keyboard ArrowLeft/ArrowRight, between two columns of the same `columns` block), rejecting a move into the record's own descendant. `deleteRecord` recurses into a container's `childRecordIds` before deleting it, so removing a `columns` block or a single `column` also removes everything nested inside it.
+
+**Nesting is capped at these two levels for v1** — a `columns` block only valid directly inside a Document (no `columns` nested inside a `column`), a `column` only valid directly inside a `columns` block, and anything else only valid directly inside a Document or inside a `column` (never directly inside a bare `columns` block — content always goes in one of its columns). `services/records.ts`'s `validateBlockTypeForParent` enforces all of this at the one MCP/UI-adjacent write boundary that has policy at all; `record-ops.ts`'s primitives themselves stay structurally generic (any record with a `childRecordIds` array is a valid parent), the same "primitives are policy-free, services own policy" split `service-layer.md` already establishes for everything else.
+
+**Permission scoping doesn't change:** an access token's allowlist is still keyed by Document/Collection id only (`mcp-tools.md`) — a container record is never itself a grantable id. `resolveOwningParentId` (`services/permissions.ts`) walks a record's `parentId` chain up to its owning Document/Collection before every permission check (`requireAccessibleParent`/`requireAccessibleRecord`, and the token-caller branch of `holdRecords`), so a token granted a Document can create/write/delete/hold a block nested inside one of its `columns` blocks without needing a separate grant for the column itself. This walk is a no-op (one extra lookup that immediately returns) for every pre-#148 record, which was already top-level.
+
+**Migration and MCP read-side implications:** a shard migration (`migration-copy.ts`'s `copyRecordVerbatim`) recurses into a container's `childRecordIds` the same way `copyDocumentVerbatim` recurses into a Document's own `recordIds`, or a `columns` block's nested content would be silently dropped when its Document moves to a real per-record shard. `get_document`'s protocol-neutral `DocumentRecordData` (and the MCP-facing `DocumentRecordView` it projects to) carry a generic `children` field, populated the same recursive way, for any record with `childRecordIds` — so `columns` (and any future container type) is visible to an MCP agent without a dedicated tool; see `mcp-tools.md` and `markdown-transcoding.md` for the read-side markdown shape.
+
 ## 4. Yjs mapping
 
 One `Y.Doc` per Document and one `Y.Doc` per Collection (#113/#132), each independently subscribed, loaded, and persisted — not a single workspace-wide `Y.Doc`, which was accurate Phase-0 behavior superseded by this shard split. A server-owned SQLite catalog (`src/lib/server/catalog.ts`, [`workspace-sharding.md`](./workspace-sharding.md) §1–§3) is the durable source of truth for a Document/Collection's title, hierarchy, and `spaceId`; a Document's own `Y.Doc` stores only that Document's own meta entry and blocks, not its siblings or descendants. A pre-#113 workspace's content migrates into this shape via `migrateWorkspace()` (`src/lib/server/migration.ts`, §7) rather than being rewritten in place.
@@ -210,7 +249,7 @@ One `Y.Doc` per Document and one `Y.Doc` per Collection (#113/#132), each indepe
 | --- | --- | --- |
 | Documents index | `Y.Map<string, DocumentMeta>` | keyed by Document ID; `DocumentMeta` is `{title, parentDocumentId?, order, recordIds: Y.Array<string>}` — a Document nested under a parent stores that parent's ID directly on its own meta entry, alongside its sibling-ordering `order` |
 | Collections index | `Y.Map<string, CollectionMeta>` | keyed by Collection ID; includes `schema` as a plain JSON value (schema edits are rare, don't need fine-grained CRDT merge) |
-| Records | `Y.Map<string, Y.Map>` | keyed by record ID; each record's own `Y.Map` holds every `WorkspaceRecord` scalar field directly (`id`, `parentId`, `order`, `blockType`, `checked`, `collapsed`, `referencedRecordId`, `calloutStyle`, `childPagesDepth`, `createdBy`, `createdAt`, `lastEditedBy`, `lastEditedAt`), an internal `isCollectionRow` flag distinguishing collection rows from Document blocks, one entry per property (so concurrent edits to different properties merge independently, per Yjs's own key-level CRDT semantics — not a single nested JSON blob), one entry per `viewConfig` member for `collection_view` blocks (same per-member merge rationale — see below), and — for block-records — `content` |
+| Records | `Y.Map<string, Y.Map>` | keyed by record ID; each record's own `Y.Map` holds every `WorkspaceRecord` scalar field directly (`id`, `parentId`, `order`, `blockType`, `checked`, `collapsed`, `referencedRecordId`, `calloutStyle`, `childPagesDepth`, `createdBy`, `createdAt`, `lastEditedBy`, `lastEditedAt`), an internal `isCollectionRow` flag distinguishing collection rows from Document blocks, one entry per property (so concurrent edits to different properties merge independently, per Yjs's own key-level CRDT semantics — not a single nested JSON blob), one entry per `viewConfig` member for `collection_view` blocks (same per-member merge rationale — see below), `content` for block-records, and — for a container block only (`columns`/`column`, §3.1) — its own `recordIds: Y.Array<string>`, the same shape and role Documents/Collections' own `recordIds` already play, just one level further down |
 | Block rich text | `Y.Text` | one per block-record, stored as the record's `content` field. **Not** a custom run array — Yjs's own `Y.Text.format()` already stores marks as attribute ranges over the text and merges concurrent overlapping formatting correctly (see PRD's rich-text acceptance criterion). The `RichText.runs` shape in §1 is derived from `Y.Text` on read, not stored separately. |
 
 **Why not a `Y.Text` per Document instead of one per block:** merging at the whole-document level would make block-level hold/release (see [`collaboration.md`](./collaboration.md)) meaningless — the CRDT and the coordination layer need to operate at the same granularity. One `Y.Text` per block-record keeps them aligned.

@@ -49,13 +49,15 @@ The toolbar provides a registered insert control for every currently supported `
 
 - Paragraph; Heading 1–4; bulleted, numbered, and to-do list items.
 - Quote, callout, toggle, divider, and code.
-- Table, table of contents, synced block, page link, child pages, and embed.
+- Table, table of contents, synced block, page link, child pages, embed, and columns.
 
 For a control whose target is a **text-bearing** type (paragraph, any heading level, bulleted/numbered/to-do list, quote, callout, toggle, code) and the _active_ block is itself text-bearing, the control **converts that block in place**: its text and marks are preserved, only `blockType` changes, via the same `setBlockType` path the slash-command menu uses. This matches conventional word-processor toolbar behavior — clicking "Bulleted List" in Word or Google Docs turns the current paragraph into a list item, it does not insert a new one after it — and was a deliberate correction to this toolbar's original design, which inserted a new block after the active one for every control regardless of type.
 
 If the active block's current type already matches the control clicked, it **toggles off** to `paragraph` instead of a no-op re-application — the same convention as clicking an already-pressed "Bulleted List" button in Word/Docs to remove the list formatting.
 
-For a control whose target is a **structural** type (table, table of contents, synced block, page link, child pages, embed, divider), or when the active block is itself structural, or when no block is active — content shapes that a "keep my text, change its formatting" operation doesn't apply to — the control instead creates the requested block immediately after the active block (or appends to the Document, or creates its first block, when none is active). The new block is focused after creation. This keeps a structural block (a synced block, in particular) from having its own distinct content silently replaced by an in-place conversion meant for freeform text.
+For a control whose target is a **structural** type (table, table of contents, synced block, page link, child pages, embed, divider, columns), or when the active block is itself structural, or when no block is active — content shapes that a "keep my text, change its formatting" operation doesn't apply to — the control instead creates the requested block immediately after the active block (or appends to the Document, or creates its first block, when none is active). The new block is focused after creation. This keeps a structural block (a synced block, in particular) from having its own distinct content silently replaced by an in-place conversion meant for freeform text.
+
+The columns control is stricter still: it always creates a new `columns` block at the Document's top level (`createColumnsBlock`, `data-model.md` §3.1), never inside a column — clicking it while a column's own block is active escalates the insertion point to right after that column's enclosing `columns` block instead of after the active block itself, since a `columns` block can't be created via a plain `blockType` flip the way every other structural type can, and nesting one inside a column isn't supported (§3.1).
 
 `table` here is the inline Document block type. It is distinct from a configurable Collection Table view, whose design is specified separately in the Collection roadmap and data-model documentation.
 
@@ -92,7 +94,7 @@ A held block (another actor's placeholder — `collaboration.md`) has no mounted
 
 ## 6. Extension point
 
-[`toolbar-controls.ts`](../../src/routes/doc/[id]/toolbar-controls.ts) is the sole registration list for the current toolbar. A registration declares a stable ID, group, accessible label, compact label, and either a `TextMarks` key (`format`) or `BlockType` (`insert`). `Toolbar.svelte` renders controls generically from that list; adding a button within either category does not require changing the toolbar layout or branching its markup.
+[`toolbar-controls.ts`](../../src/routes/space/[spaceId]/doc/[id]/toolbar-controls.ts) is the sole registration list for the current toolbar. A registration declares a stable ID, group, accessible label, compact label, and either a `TextMarks` key (`format`) or `BlockType` (`insert`). `Toolbar.svelte` renders controls generically from that list; adding a button within either category does not require changing the toolbar layout or branching its markup.
 
 New control categories require an explicit interaction contract before implementation (for example, confirmation, audit attribution, and permissions for an agent-triggered action). They should not be smuggled into a text-format or block-insert registration merely to reuse the UI.
 
@@ -107,6 +109,12 @@ Styling happens afterward, via a small picker (`CalloutBlock.svelte`) built into
 A `child_pages` block's target Document and nesting depth (`data-model.md` §3) are, like the callout style picker above, deliberately **not** slash-menu sub-choices or a second insert-time-only affordance — the same §6 rule applies. The slash-command/toolbar "Child pages" control is unchanged: it inserts a plain block defaulting to "list the current Document's immediate children" (`createRecord` as normal, no target/depth supplied), matching every other block-insert control's single-action contract.
 
 Configuring a non-default target or depth happens afterward, via a small settings menu (`ChildPagesBlock.svelte`) built into the block's own rendering — a `⋯` button doubles as its trigger, the same "icon/control on the block itself opens its own picker" shape the callout style picker already established, rather than a bespoke pattern per block. Choosing a target or depth calls `setRecordChildPagesConfig` directly against the shared Yjs record — the same direct-UI-mutation pattern `setRecordCalloutStyle`/`setRecordChecked`/`setRecordCollapsed` already use for other block-level fields, not routed through the service layer (audited generically per `audit-coverage.md`).
+
+## 8.1 Columns block controls (issue #148)
+
+A `columns` block's initial column count (`data-model.md` §3.1) is set once, at insertion — the slash-command/toolbar "Columns" control always creates a `columns` block with the default 2 columns (`createColumnsBlock`), matching every other block-insert control's single-action contract; there is no insert-time count picker.
+
+Adding or removing a column afterward is **not** a settings-menu popup like §7/§8's — it's a permanent "+"/"−" control built directly into `ColumnsBlock.svelte`'s own rendering, alongside each column (a "−", hidden once only 2 columns remain — a `columns` block never drops below 2) and after the last one (a "+"). Both call the same generic `create_record`/`delete_record` path any other block uses (`createRecord`(`blockType: 'column'`) / `deleteRecord` on the target column), not a dedicated add/remove-column operation — consistent with `mcp-tools.md`'s "no block-type-specific tools" rule, and auditable/agent-drivable the same way as everything else.
 
 ## 9. Slash-command menu
 

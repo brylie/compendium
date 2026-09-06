@@ -1,6 +1,7 @@
 import {
 	Bold,
 	Code,
+	Columns2,
 	Copy,
 	FileCode,
 	Heading1,
@@ -142,7 +143,8 @@ export const TOOLBAR_CONTROLS: readonly ToolbarControl[] = [
 		icon: Link2,
 		blockType: 'page_link'
 	},
-	{ id: 'embed', group: 'insert', label: 'Embed', icon: PanelsTopLeft, blockType: 'embed' }
+	{ id: 'embed', group: 'insert', label: 'Embed', icon: PanelsTopLeft, blockType: 'embed' },
+	{ id: 'columns', group: 'insert', label: 'Columns', icon: Columns2, blockType: 'columns' }
 ];
 
 /**

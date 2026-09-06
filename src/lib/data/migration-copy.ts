@@ -72,9 +72,17 @@ export function copyCollectionVerbatim(sourceDoc: Y.Doc, targetDoc: Y.Doc, id: s
 
 /**
  * Copies one record (block or row) into `targetDoc` with every field
- * preserved exactly. Does not touch the parent's recordIds array — callers
- * (copyDocumentVerbatim/copyCollectionVerbatim) push the id themselves, once,
- * in the legacy order already recorded on the source meta.
+ * preserved exactly, recursing into a container block's (columns/column,
+ * issue #148) own children the same way copyDocumentVerbatim/
+ * copyCollectionVerbatim recurse into a Document/Collection's top-level
+ * records — a container's children live only in its own `recordIds` array,
+ * never in the owning Document's, so without this recursion a shard
+ * migration would silently drop every block nested inside a columns block.
+ * Does not touch the *parent's* recordIds array — the top-level caller
+ * (copyDocumentVerbatim/copyCollectionVerbatim) pushes the id themselves,
+ * once, in the legacy order already recorded on the source meta; a
+ * recursive call here owns its own container's recordIds array instead,
+ * exactly mirroring that same split one level down.
  */
 function copyRecordVerbatim(
 	sourceDoc: Y.Doc,
@@ -94,7 +102,7 @@ function copyRecordVerbatim(
 	yrecord.set('lastEditedBy', record.lastEditedBy);
 	yrecord.set('lastEditedAt', record.lastEditedAt);
 
-	if (kind === 'document') {
+	if (kind === 'document' || kind === 'record') {
 		yrecord.set('blockType', record.blockType ?? 'paragraph');
 		const ytext = new Y.Text();
 		if (record.content) applyRichTextToYText(ytext, record.content);
@@ -105,6 +113,17 @@ function copyRecordVerbatim(
 		for (const [key, value] of Object.entries(record.properties ?? {})) {
 			setPropertyValue(yrecord, key, value);
 		}
+	}
+
+	if (record.childRecordIds) {
+		const childRecordIds = new Y.Array<string>();
+		yrecord.set('recordIds', childRecordIds);
+		recordsMap(targetDoc).set(id, yrecord.raw);
+		for (const childId of record.childRecordIds) {
+			copyRecordVerbatim(sourceDoc, targetDoc, childId, 'record');
+			childRecordIds.push([childId]);
+		}
+		return;
 	}
 
 	recordsMap(targetDoc).set(id, yrecord.raw);
