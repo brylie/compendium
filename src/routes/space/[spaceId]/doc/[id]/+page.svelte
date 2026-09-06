@@ -390,6 +390,15 @@
 			// previously-viewed document must not linger until this
 			// document's first real transition.
 			holdAnnouncement = '';
+			// A multi-selection (issue #152) is even more load-bearing to reset
+			// here than the announcement above: Documents aren't sharded (#120)
+			// — every Document lives in one shared Y.Doc — so a block id
+			// selected in the previously-viewed Document stays fully valid
+			// after navigating away. Left uncleared, the bulk action bar would
+			// keep showing a stale "N selected" for the *old* Document, and
+			// clicking Duplicate/Delete/Move there would silently mutate that
+			// now off-screen Document's real blocks instead of doing nothing.
+			clearSelection();
 			let previousHeldByOthers = new Map<string, ActorId>();
 			// The subscription's first callback reports presence as of connect
 			// time, not a transition — without this, every actor who was
