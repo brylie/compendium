@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { createDocument, deleteDocument, updateDocumentTitle } from './document-ops';
 import { createCollection } from './collection-ops';
-import { createRecord, updateRecordContent } from './record-ops';
+import { createRecord, deleteRecord, updateRecordContent } from './record-ops';
 import {
 	RECORD_LINK_SCHEME,
 	isLinkBroken,
 	listIncomingLinks,
 	listOutgoingLinks,
+	listSyncedBlockInstances,
 	resolveInternalLinkTarget
 } from './links';
 import type { ActorId } from './types';
@@ -281,5 +282,66 @@ describe('listIncomingLinks', () => {
 
 		expect(listIncomingLinks(doc, first.id)).toEqual([]);
 		expect(listIncomingLinks(doc, second.id)).toHaveLength(1);
+	});
+});
+
+describe('listSyncedBlockInstances', () => {
+	it('finds every synced_block instance pointing at a source, and none of its ordinary backlinks', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { id: 'doc-1', title: 'Doc' });
+		const source = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'paragraph' },
+			CURRENT_USER
+		);
+		const instanceA = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'synced_block', referencedRecordId: source.id },
+			CURRENT_USER
+		);
+		const instanceB = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'synced_block', referencedRecordId: source.id },
+			CURRENT_USER
+		);
+		// An inline wiki-link to the same id should never be mistaken for a
+		// synced_block instance — only the block-type check separates them.
+		const wikiLinker = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'paragraph' },
+			CURRENT_USER
+		);
+		updateRecordContent(
+			doc,
+			wikiLinker.id,
+			{ runs: [{ text: 'see it', marks: { link: `${RECORD_LINK_SCHEME}${source.id}` } }] },
+			CURRENT_USER
+		);
+
+		const instances = listSyncedBlockInstances(doc, source.id);
+		expect(new Set(instances.map((i) => i.sourceRecordId))).toEqual(
+			new Set([instanceA.id, instanceB.id])
+		);
+		expect(instances.every((i) => i.context === 'Synced block')).toBe(true);
+	});
+
+	it('returns an empty list once every instance is deleted', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { id: 'doc-1', title: 'Doc' });
+		const source = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'paragraph' },
+			CURRENT_USER
+		);
+		const instance = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'synced_block', referencedRecordId: source.id },
+			CURRENT_USER
+		);
+
+		expect(listSyncedBlockInstances(doc, source.id)).toHaveLength(1);
+
+		deleteRecord(doc, instance.id);
+		expect(listSyncedBlockInstances(doc, source.id)).toEqual([]);
 	});
 });

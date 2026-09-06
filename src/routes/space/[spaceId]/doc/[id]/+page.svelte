@@ -11,6 +11,7 @@
 		createColumnsBlock,
 		createRecord,
 		deleteRecord,
+		detachSyncedBlock,
 		duplicateRecord,
 		flattenDocumentBlocks,
 		getRecord,
@@ -25,7 +26,12 @@
 		setRecordReferencedId,
 		touchRecordEditor
 	} from '$lib/data/record-ops';
-	import { RECORD_LINK_SCHEME, type InternalLinkTarget } from '$lib/data/links';
+	import {
+		listSyncedBlockInstances,
+		RECORD_LINK_SCHEME,
+		type Backlink,
+		type InternalLinkTarget
+	} from '$lib/data/links';
 	import {
 		appendRichTextToYText,
 		applyRichTextToYText,
@@ -57,6 +63,7 @@
 	import ColumnsBlock from '$lib/components/ColumnsBlock.svelte';
 	import PromptDialog from '$lib/components/PromptDialog.svelte';
 	import BlockActionMenu from '$lib/components/BlockActionMenu.svelte';
+	import SyncedBlockUsage from '$lib/components/SyncedBlockUsage.svelte';
 	import DocumentOutline from '$lib/components/DocumentOutline.svelte';
 	import type { PageProps } from './$types';
 
@@ -1472,6 +1479,43 @@
 			: block.id;
 	}
 
+	/**
+	 * Every *other* location in `sourceId`'s sync group, from the perspective
+	 * of whichever block (`excludeRecordId`) is currently rendering — the
+	 * source itself when called for a plain block, or one particular
+	 * synced_block instance when called for one. Issue #153's "used in N
+	 * places": the source's own row counts as one location too, not just its
+	 * instances, so this always prepends it (when it isn't the block asking)
+	 * ahead of `listSyncedBlockInstances`' sibling instances (also excluding
+	 * self). Same-document only today — see listSyncedBlockInstances' own
+	 * comment on why a genuinely cross-Document instance can't appear here
+	 * (or exist at all) until synced blocks are shard-aware.
+	 */
+	function syncGroupLocations(sourceId: string, excludeRecordId: string): Backlink[] {
+		if (!ydoc) return [];
+		const others = listSyncedBlockInstances(ydoc, sourceId).filter(
+			(instance) => instance.sourceRecordId !== excludeRecordId
+		);
+		const source = getRecord(ydoc, sourceId);
+		if (!source || source.id === excludeRecordId) return others;
+		const sourceText = getRecordYText(ydoc, source.id);
+		const context = sourceText ? plainText(yTextToRichText(sourceText)).trim() : '';
+		return [
+			{
+				sourceDocumentId: data.documentId,
+				sourceDocumentTitle: title || 'Untitled Document',
+				sourceRecordId: source.id,
+				context: context || 'Synced source'
+			},
+			...others
+		];
+	}
+
+	function handleDetachSyncedBlock(blockId: string): void {
+		if (!ydoc) return;
+		detachSyncedBlock(ydoc, blockId, CURRENT_USER);
+	}
+
 	function getHeadingLevel(blockType?: BlockType): number {
 		switch (blockType) {
 			case 'heading_1':
@@ -1632,6 +1676,7 @@
 		{@const provenanceRecordId = syncedBlockTargetId(block)}
 		{@const provenance = ydoc ? (getRecord(ydoc, provenanceRecordId) ?? block) : block}
 		{@const bt = block.blockType ?? 'paragraph'}
+		{@const syncLocations = ydoc ? syncGroupLocations(provenanceRecordId, block.id) : []}
 
 		{#if draggingBlockId && dropIndicatorParentId === data.documentId && dropIndicatorIndex === index}
 			<div class="mx-auto w-full max-w-3xl px-6">
@@ -1844,20 +1889,42 @@
 					</div>
 				{:else if bt === 'synced_block'}
 					<div class="rounded-md border border-dashed border-accent/40 bg-surface/30 p-2.5">
-						<div class="mb-1 flex items-center justify-between text-[11px] text-muted">
+						<div class="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted">
 							<span class="flex items-center gap-1 font-medium text-accent">
 								<Icon name="sync" size={13} />
 								<span>Synced Block</span>
 							</span>
-							<button
-								type="button"
-								onclick={() => handleLinkSyncedBlock(block.id)}
-								class="hover:text-accent hover:underline"
-							>
-								{block.referencedRecordId
-									? `ID: ${block.referencedRecordId.slice(0, 8)}…`
-									: 'Set target ID'}
-							</button>
+							<div class="flex items-center gap-2">
+								{#if syncLocations.length > 0}
+									<SyncedBlockUsage
+										spaceId={page.params.spaceId!}
+										currentDocumentId={data.documentId}
+										instances={syncLocations}
+										onJumpTo={(documentId, recordId) => {
+											if (documentId === data.documentId) void navigateToBlock(recordId);
+										}}
+										onDetach={() => handleDetachSyncedBlock(block.id)}
+									/>
+								{:else if block.referencedRecordId}
+									<button
+										type="button"
+										onclick={() => handleDetachSyncedBlock(block.id)}
+										class="flex items-center gap-1 hover:text-accent hover:underline"
+									>
+										<Icon name="unlink" size={12} />
+										<span>Detach</span>
+									</button>
+								{/if}
+								<button
+									type="button"
+									onclick={() => handleLinkSyncedBlock(block.id)}
+									class="hover:text-accent hover:underline"
+								>
+									{block.referencedRecordId
+										? `ID: ${block.referencedRecordId.slice(0, 8)}…`
+										: 'Set target ID'}
+								</button>
+							</div>
 						</div>
 						{#if ytext}
 							<BlockEditor
@@ -2044,6 +2111,25 @@
 					/>
 				{/if}
 			</div>
+
+			<!-- Synced-block source indicator (issue #153): only a plain block
+					 that at least one synced_block instance currently mirrors gets
+					 this — a distinct treatment from the instance's own dashed-border
+					 "Synced Block" card above, so a source is recognizable even
+					 though it renders like any other block otherwise. -->
+			{#if bt !== 'synced_block' && syncLocations.length > 0}
+				<div class="ml-3 flex flex-shrink-0 items-center gap-1 self-center text-accent">
+					<Icon name="sync" size={12} />
+					<SyncedBlockUsage
+						spaceId={page.params.spaceId!}
+						currentDocumentId={data.documentId}
+						instances={syncLocations}
+						onJumpTo={(documentId, recordId) => {
+							if (documentId === data.documentId) void navigateToBlock(recordId);
+						}}
+					/>
+				</div>
+			{/if}
 
 			<!-- Provenance comes from the record's live CRDT projection; the link
 					 opens the corresponding rows in the shared audit history. -->

@@ -506,6 +506,48 @@ export function setRecordReferencedId(
 }
 
 /**
+ * Breaks a synced_block instance out of its sync relationship (issue #153's
+ * "detach to independent copy") — bakes the source's *current* blockType,
+ * content, and checked/collapsed/calloutStyle state into the instance's own
+ * (previously unused — see createRecord's content Y.Text, always allocated
+ * for a non-container block regardless of blockType) fields, then clears
+ * referencedRecordId. The instance keeps its own id, so anything already
+ * pointing at it (a copied block link, an undo entry) keeps working; only its
+ * relationship to the former source is gone, with no reference left to go
+ * stale if that source is later edited or deleted.
+ *
+ * A source that no longer resolves (deleted, or never set) detaches to an
+ * empty paragraph rather than throwing — "detach" is meant as an escape
+ * hatch, including from a synced_block whose target is already broken.
+ */
+export function detachSyncedBlock(doc: Y.Doc, id: string, actor: ActorId): WorkspaceRecord {
+	const yrecord = recordsMap(doc).get(id);
+	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
+	if (yrecord.get('blockType') !== 'synced_block') {
+		throw new ValidationError('detachSyncedBlock can only be called on a synced_block record.');
+	}
+
+	const sourceId = yrecord.get('referencedRecordId');
+	const source = sourceId ? getRecord(doc, sourceId) : undefined;
+	const sourceText = sourceId ? getRecordYText(doc, sourceId) : undefined;
+
+	return doc.transact(() => {
+		yrecord.set('blockType', source?.blockType ?? 'paragraph');
+		yrecord.delete('referencedRecordId');
+		yrecord.set('lastEditedBy', actor);
+		yrecord.set('lastEditedAt', Date.now());
+		if (source?.checked !== undefined) yrecord.set('checked', source.checked);
+		if (source?.collapsed !== undefined) yrecord.set('collapsed', source.collapsed);
+		if (source?.calloutStyle !== undefined) yrecord.set('calloutStyle', source.calloutStyle);
+
+		const ownText = yrecord.get('content');
+		if (sourceText && ownText) applyRichTextToYText(ownText, yTextToRichText(sourceText));
+
+		return readRecord(yrecord);
+	});
+}
+
+/**
  * Replaces a collection_view block's entire view type + filters/sort/
  * visible-properties/grouping-property config — for an outright reconfigure
  * (a brand new embed, or switching its view type/target), where every member

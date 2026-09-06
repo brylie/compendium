@@ -97,6 +97,18 @@ function targetIdsForRecord(record: ReturnType<typeof getRecord>): string[] {
 	if (record.blockType === 'page_link' && record.referencedRecordId) {
 		return [record.referencedRecordId];
 	}
+	// A synced_block's referencedRecordId points at an ordinary content
+	// record (never a Document/Collection), not a navigational target — but
+	// it's the same "one record ID pointing at another" shape, so it reuses
+	// this same reverse-index machinery rather than a parallel one (issue
+	// #153's "used in N places"). listSyncedBlockInstances below is the
+	// synced-block-specific read; resolveInternalLinkTarget legitimately
+	// returns undefined for these since the target is never a Document/
+	// Collection, which is why synced_block instances are filtered out of
+	// listOutgoingLinks' own broken-link reporting by callers that care.
+	if (record.blockType === 'synced_block' && record.referencedRecordId) {
+		return [record.referencedRecordId];
+	}
 	return (record.content?.runs ?? [])
 		.map((run) => run.marks.link)
 		.filter((href): href is string => href?.startsWith(RECORD_LINK_SCHEME) ?? false)
@@ -124,9 +136,12 @@ function indexRecord(doc: Y.Doc, index: BacklinkIndex, sourceRecordId: string): 
 	const sourceDocument = getDocument(doc, sourceRecord.parentId);
 	if (!sourceDocument) return;
 
-	const context =
-		(sourceRecord.content ? plainText(sourceRecord.content).trim() : '') ||
-		(sourceRecord.blockType === 'page_link' ? 'Page link' : 'Untitled block');
+	const trimmedContent = sourceRecord.content ? plainText(sourceRecord.content).trim() : '';
+	const blockTypeLabel =
+		(sourceRecord.blockType === 'page_link' ? 'Page link' : undefined) ??
+		(sourceRecord.blockType === 'synced_block' ? 'Synced block' : undefined) ??
+		'Untitled block';
+	const context = trimmedContent || blockTypeLabel;
 	const backlinks = targetIdsForRecord(sourceRecord).map((targetId) => ({
 		targetId,
 		sourceDocumentId: sourceDocument.id,
@@ -220,4 +235,27 @@ export function listIncomingLinks(doc: Y.Doc, targetId: string): Backlink[] {
 		sourceRecordId: backlink.sourceRecordId,
 		context: backlink.context
 	}));
+}
+
+/**
+ * Every synced_block instance currently mirroring `sourceId` — the "used in
+ * N places" list behind issue #153's provenance UX. Built on the same
+ * reverse-link index `listIncomingLinks` maintains (targetIdsForRecord above
+ * now includes synced_block's referencedRecordId alongside page_link/wiki-
+ * link targets), filtered down to just the synced_block instances since that
+ * shared index also carries ordinary navigational backlinks to `sourceId`
+ * when it happens to be a Document/Collection.
+ *
+ * Scoped to whatever this `doc` covers, same as listIncomingLinks — and
+ * since each Document now resolves to its own shard (#120), that's just the
+ * current Document today. A synced_block instance in a different Document
+ * can't actually mirror this source's content at all yet (its own
+ * getRecordYText lookup finds nothing in that Document's own Y.Doc), so it
+ * couldn't appear in this list regardless of index scope — true cross-
+ * Document synced blocks need shard-aware resolution first (issue #242).
+ */
+export function listSyncedBlockInstances(doc: Y.Doc, sourceId: string): Backlink[] {
+	return listIncomingLinks(doc, sourceId).filter(
+		(backlink) => getRecord(doc, backlink.sourceRecordId)?.blockType === 'synced_block'
+	);
 }

@@ -7,6 +7,7 @@ import {
 	createColumnsBlock,
 	createRecord,
 	deleteRecord,
+	detachSyncedBlock,
 	duplicateRecord,
 	flattenDocumentBlocks,
 	getRecord,
@@ -1315,5 +1316,98 @@ describe('flattenDocumentBlocks: full document order for the List View outline (
 		const occurrences = flat.filter((f) => f.record.id === blockInA);
 		expect(occurrences).toHaveLength(1);
 		expect(occurrences[0].record.parentId).toBe(winner);
+	});
+});
+
+describe('detachSyncedBlock: issue #153 "detach to independent copy"', () => {
+	it('bakes the source content and blockType into the instance and clears the reference', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const source = createRecord(doc, { parentId: document.id, blockType: 'heading_2' }, human);
+		getRecordYText(doc, source.id)!.insert(0, 'Original heading');
+		const instance = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'synced_block', referencedRecordId: source.id },
+			human
+		);
+
+		const detached = detachSyncedBlock(doc, instance.id, agent);
+
+		expect(detached.blockType).toBe('heading_2');
+		expect(detached.referencedRecordId).toBeUndefined();
+		expect(
+			yTextToRichText(getRecordYText(doc, instance.id)!)
+				.runs.map((r) => r.text)
+				.join('')
+		).toBe('Original heading');
+		expect(detached.lastEditedBy).toEqual(agent);
+		// The source itself, and its own content, are untouched by the detach.
+		expect(getRecord(doc, source.id)?.blockType).toBe('heading_2');
+		expect(
+			yTextToRichText(getRecordYText(doc, source.id)!)
+				.runs.map((r) => r.text)
+				.join('')
+		).toBe('Original heading');
+	});
+
+	it('copies checked/collapsed/calloutStyle state from the source', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const source = createRecord(doc, { parentId: document.id, blockType: 'to_do' }, human);
+		setRecordChecked(doc, source.id, true, human);
+		const instance = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'synced_block', referencedRecordId: source.id },
+			human
+		);
+
+		const detached = detachSyncedBlock(doc, instance.id, human);
+
+		expect(detached.blockType).toBe('to_do');
+		expect(detached.checked).toBe(true);
+	});
+
+	it('detaches to an empty paragraph when the reference is already broken', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const instance = createRecord(
+			doc,
+			{
+				parentId: document.id,
+				blockType: 'synced_block',
+				referencedRecordId: 'never-existed'
+			},
+			human
+		);
+
+		const detached = detachSyncedBlock(doc, instance.id, human);
+
+		expect(detached.blockType).toBe('paragraph');
+		expect(detached.referencedRecordId).toBeUndefined();
+	});
+
+	it('detaches to an empty paragraph when no target was ever set', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const instance = createRecord(doc, { parentId: document.id, blockType: 'synced_block' }, human);
+
+		const detached = detachSyncedBlock(doc, instance.id, human);
+
+		expect(detached.blockType).toBe('paragraph');
+	});
+
+	it('throws when called on a non-synced_block record', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const paragraph = createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+
+		expect(() => detachSyncedBlock(doc, paragraph.id, human)).toThrow(ValidationError);
+	});
+
+	it('throws NotFoundError for an unknown record id', () => {
+		const doc = new Y.Doc();
+		createDocument(doc, { title: 'Notes' });
+
+		expect(() => detachSyncedBlock(doc, 'missing', human)).toThrow(NotFoundError);
 	});
 });

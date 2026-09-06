@@ -1298,6 +1298,143 @@ describe('doc/[id] +page', () => {
 		expect(screen.getAllByText('Original content').length).toBeGreaterThan(0);
 	});
 
+	// Issue #153: source badge, "used in N places", and detach.
+	describe('synced-block provenance and detach (#153)', () => {
+		it('shows a "used in N places" affordance on the source, listing its instance', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const source = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, source.id)!.insert(0, 'Shared content');
+			createRecord(
+				ydoc,
+				{ parentId: 'doc-1', blockType: 'synced_block', referencedRecordId: source.id },
+				HUMAN
+			);
+			const user = userEvent.setup();
+			render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: {
+					spaces: [],
+					spaceId: 'space-1',
+					activeSpaceId: 'space-1',
+					documents: [],
+					collections: [],
+					documentId: 'doc-1',
+					title: 'D'
+				}
+			});
+			await flushShardResolution();
+
+			// The source's own badge is the first of the two "Used in 1 place"
+			// controls in document order (source row, then the instance's card).
+			const [sourceTrigger] = screen.getAllByRole('button', { name: 'Used in 1 place' });
+			await user.click(sourceTrigger);
+
+			const menu = await screen.findByRole('menu', { name: 'Synced block usage' });
+			expect(within(menu).getByText('Synced block')).toBeInTheDocument();
+		});
+
+		it('shows the source as one of the "used in" locations from a synced_block instance', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const source = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, source.id)!.insert(0, 'Shared content');
+			createRecord(
+				ydoc,
+				{ parentId: 'doc-1', blockType: 'synced_block', referencedRecordId: source.id },
+				HUMAN
+			);
+			const user = userEvent.setup();
+			render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: {
+					spaces: [],
+					spaceId: 'space-1',
+					activeSpaceId: 'space-1',
+					documents: [],
+					collections: [],
+					documentId: 'doc-1',
+					title: 'D'
+				}
+			});
+			await flushShardResolution();
+
+			// Both the source's own badge and the instance's usage control read
+			// "Used in 1 place" — the instance's is inside the dashed-border card.
+			const triggers = screen.getAllByRole('button', { name: 'Used in 1 place' });
+			expect(triggers).toHaveLength(2);
+			await user.click(triggers[1]);
+
+			const menu = await screen.findByRole('menu', { name: 'Synced block usage' });
+			expect(within(menu).getByText('Shared content')).toBeInTheDocument();
+		});
+
+		it('detaches a synced_block instance to an independent copy of the source content', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const source = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, source.id)!.insert(0, 'Shared content');
+			const instance = createRecord(
+				ydoc,
+				{ parentId: 'doc-1', blockType: 'synced_block', referencedRecordId: source.id },
+				HUMAN
+			);
+			const user = userEvent.setup();
+			render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: {
+					spaces: [],
+					spaceId: 'space-1',
+					activeSpaceId: 'space-1',
+					documents: [],
+					collections: [],
+					documentId: 'doc-1',
+					title: 'D'
+				}
+			});
+			await flushShardResolution();
+
+			const triggers = screen.getAllByRole('button', { name: 'Used in 1 place' });
+			await user.click(triggers[1]);
+			await user.click(await screen.findByRole('menuitem', { name: 'Detach to independent copy' }));
+
+			expect(screen.queryByText('Synced Block')).not.toBeInTheDocument();
+			const detached = getRecord(ydoc, instance.id);
+			expect(detached?.blockType).toBe('paragraph');
+			expect(detached?.referencedRecordId).toBeUndefined();
+			expect(plainText(yTextToRichText(getRecordYText(ydoc, instance.id)!))).toBe('Shared content');
+			// The source itself keeps its own content and is no longer a sync
+			// source once its only instance has detached.
+			expect(screen.queryByRole('button', { name: /Used in \d+ place/ })).not.toBeInTheDocument();
+		});
+
+		it('offers a plain Detach button (no usage list) when the reference is already broken', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			createRecord(
+				ydoc,
+				{ parentId: 'doc-1', blockType: 'synced_block', referencedRecordId: 'never-existed' },
+				HUMAN
+			);
+			render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: {
+					spaces: [],
+					spaceId: 'space-1',
+					activeSpaceId: 'space-1',
+					documents: [],
+					collections: [],
+					documentId: 'doc-1',
+					title: 'D'
+				}
+			});
+			await flushShardResolution();
+
+			expect(screen.getByRole('button', { name: 'Detach' })).toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: /Used in \d+ place/ })).not.toBeInTheDocument();
+		});
+	});
+
 	it('shows a document picker for an unlinked page_link block', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const other = createDocument(ydoc, { id: 'other', title: 'Other Doc' });
