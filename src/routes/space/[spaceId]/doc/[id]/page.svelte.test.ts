@@ -1867,6 +1867,125 @@ describe('doc/[id] +page', () => {
 		expect(screen.getByText('From doc two')).toBeInTheDocument();
 	});
 
+	// Regression test: Documents aren't sharded (#120) — every Document lives
+	// in one shared Y.Doc — so a stale multi-selection from a previously-
+	// viewed Document stays fully resolvable after navigating away. Without
+	// clearing it, the bulk action bar would keep showing "N selected" for
+	// the old Document, and a click there would silently mutate that now
+	// off-screen Document's real blocks.
+	it('clears a stale multi-block selection (and its bulk action bar) when navigating client-side to a different document', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'First' });
+		const a = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		getRecordYText(ydoc, a.id)!.insert(0, 'A');
+		const b = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		getRecordYText(ydoc, b.id)!.insert(0, 'B');
+		createDocument(ydoc, { id: 'doc-2', title: 'Second' });
+		createRecord(ydoc, { parentId: 'doc-2', blockType: 'paragraph' }, HUMAN);
+
+		const { container, rerender } = render(Page, {
+			params: { spaceId: 'space-1', id: 'doc-1' },
+			form: null,
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'First'
+			}
+		});
+		await flushShardResolution();
+
+		const handleA = container.querySelector(`[data-drag-handle="${a.id}"]`) as HTMLElement;
+		const handleB = container.querySelector(`[data-drag-handle="${b.id}"]`) as HTMLElement;
+		await fireEvent.pointerDown(handleA, { button: 0, ctrlKey: true, pointerId: 1 });
+		await fireEvent.pointerDown(handleB, { button: 0, ctrlKey: true, pointerId: 1 });
+		await tick();
+		expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+		await rerender({
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-2',
+				title: 'Second'
+			}
+		});
+		await flushShardResolution();
+
+		expect(screen.queryByText('2 selected')).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole('toolbar', { name: 'Selected blocks actions' })
+		).not.toBeInTheDocument();
+		// doc-1's blocks must have survived — a stale Delete click on the
+		// leftover bulk bar would otherwise have removed them.
+		expect(getRecord(ydoc, a.id)).toBeDefined();
+		expect(getRecord(ydoc, b.id)).toBeDefined();
+	});
+
+	// CodeRabbit review (PR #240): clearSelection() must run synchronously at
+	// the very start of the shard-resolution $effect, not after its `await
+	// fetch(...)` — otherwise the stale bulk action bar (and its fully
+	// operable Delete/Duplicate/Move, since doc-1's blocks stay valid in the
+	// shared Y.Doc) would survive for the whole network round-trip, not just
+	// disappear once it resolves. This test holds the shard-resolution fetch
+	// open to prove the bar is already gone before that fetch ever settles.
+	it('clears the stale selection immediately on navigation, before shard resolution completes', async () => {
+		createDocument(ydoc, { id: 'doc-1', title: 'First' });
+		const a = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		createDocument(ydoc, { id: 'doc-2', title: 'Second' });
+
+		const { container, rerender } = render(Page, {
+			params: { spaceId: 'space-1', id: 'doc-1' },
+			form: null,
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				title: 'First'
+			}
+		});
+		await flushShardResolution();
+
+		const handleA = container.querySelector(`[data-drag-handle="${a.id}"]`) as HTMLElement;
+		await fireEvent.pointerDown(handleA, { button: 0, ctrlKey: true, pointerId: 1 });
+		await tick();
+		expect(screen.getByText('1 selected')).toBeInTheDocument();
+
+		// Held open deliberately — never resolved during this test — so
+		// re-rendering with a new documentId lands squarely inside the window
+		// between the effect starting and its shard-resolution fetch settling.
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(() => new Promise(() => {}))
+		);
+
+		await rerender({
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-2',
+				title: 'Second'
+			}
+		});
+		await tick();
+
+		expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole('toolbar', { name: 'Selected blocks actions' })
+		).not.toBeInTheDocument();
+	});
+
 	it('claims block presence on focus and releases it on unmount', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);

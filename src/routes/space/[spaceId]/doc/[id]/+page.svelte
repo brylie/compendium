@@ -367,6 +367,16 @@
 		let cancelled = false;
 		let cleanup: (() => void) | undefined;
 
+		// Cleared synchronously, before the shard-resolution fetch below even
+		// starts — not after it resolves. Documents aren't sharded (#120), so a
+		// selection from the previously-viewed Document stays fully valid
+		// against the shared Y.Doc; leaving this inside the async block below
+		// would leave the old bulk action bar active (and its Delete/Duplicate/
+		// Move fully operable against the old Document's real blocks) for the
+		// whole network round-trip, not just eliminate the stale state after
+		// the fact.
+		clearSelection();
+
 		(async () => {
 			const res = await fetch(`/api/documents/${id}/shard`);
 			const { shardId: resolvedShardId } = await res.json();
