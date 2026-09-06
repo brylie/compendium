@@ -361,49 +361,53 @@ function performCreateRecord(
 	);
 }
 
-// createColumnsBlock also creates each column and its one seeded paragraph
-// in the same transaction (record-ops.ts) — every one of those is a real
-// record and needs its own locator entry exactly like createRecord's own
-// `id`, or a later write_record/delete_record/hold_records call for it
-// would resolve to the wrong (default) shard. A collision here is as
-// vanishingly unlikely as for `id` itself (both are fresh nanoids) and isn't
-// unwound on failure, the same accepted-risk tradeoff deleteRecord's locator
-// release already documents for the inverse case.
-// Returns every id it successfully reserved a locator for, in order, so a
-// caller that hits a failure partway through (an id collision on some later
-// child — vanishingly unlikely, but not impossible with enough columns) can
-// release exactly what succeeded rather than guessing.
-function reserveColumnsChildLocators(
+// createColumnsBlock (for blockType 'columns') creates each column and its
+// one seeded paragraph in the same transaction (record-ops.ts); a bare
+// create_record with blockType 'column' against an existing columns block
+// similarly seeds one paragraph of its own. Either way, every one of those
+// is a real record and needs its own locator entry exactly like
+// createRecord's own `id`, or a later write_record/delete_record/
+// hold_records call for it would resolve to the wrong (default) shard.
+// Recurses generically over whatever depth of children the created record
+// actually has (2 levels for a fresh columns block, 1 for a bare column)
+// rather than hardcoding either shape. `reserved` is a caller-owned array,
+// pushed into as each reservation succeeds — not built up locally and
+// returned at the end — so that if a `reserveRecordLocator` call throws
+// partway through, everything reserved *before* the throw is still visible
+// to the caller's rollback, instead of being lost along with the aborted
+// return value. A collision here is as vanishingly unlikely as for `id`
+// itself (all fresh nanoids) and isn't specially retried, the same
+// accepted-risk tradeoff deleteRecord's locator release already documents
+// for the inverse case.
+function reserveDescendantLocators(
 	doc: Y.Doc,
 	record: WorkspaceRecord,
 	workspaceId: string,
 	defaultSpaceId: string,
-	shardId: string
-): string[] {
-	const reserved: string[] = [];
-	for (const columnId of record.childRecordIds ?? []) {
-		reserveRecordLocator(workspaceId, defaultSpaceId, columnId, shardId);
-		reserved.push(columnId);
-		const column = crdtGetRecord(doc, columnId);
-		for (const paragraphId of column?.childRecordIds ?? []) {
-			reserveRecordLocator(workspaceId, defaultSpaceId, paragraphId, shardId);
-			reserved.push(paragraphId);
+	shardId: string,
+	reserved: string[]
+): void {
+	for (const childId of record.childRecordIds ?? []) {
+		reserveRecordLocator(workspaceId, defaultSpaceId, childId, shardId);
+		reserved.push(childId);
+		const child = crdtGetRecord(doc, childId);
+		if (child) {
+			reserveDescendantLocators(doc, child, workspaceId, defaultSpaceId, shardId, reserved);
 		}
 	}
-	return reserved;
 }
 
-// Compensating rollback for a columns block whose child-locator reservation
-// failed partway through (see createRecord's catch block below): the CRDT
-// tree was already committed by the earlier transactWithOrigin call, before
-// any child locator was reserved, so a failure here must not leave it
-// behind — a half-locator-tracked columns block would resolve any
-// unreserved id to the wrong (default) shard, and a caller retrying after
-// this throw would otherwise create a second, duplicate tree alongside the
-// still-committed first one. deleteRecord's own recursion (record-ops.ts)
-// already knows how to remove a container and every one of its children in
-// one call.
-function rollBackColumnsBlock(doc: Y.Doc, id: string): void {
+// Compensating rollback for a columns/column block whose descendant-locator
+// reservation failed partway through (see createRecord's catch block
+// below): the CRDT tree was already committed by the earlier
+// transactWithOrigin call, before any descendant locator was reserved, so a
+// failure here must not leave it behind — a half-locator-tracked tree would
+// resolve any unreserved id to the wrong (default) shard, and a caller
+// retrying after this throw would otherwise create a second, duplicate tree
+// alongside the still-committed first one. deleteRecord's own recursion
+// (record-ops.ts) already knows how to remove a container and every one of
+// its children in one call.
+function rollBackContainerCreate(doc: Y.Doc, id: string): void {
 	transactWithOrigin(doc, SERVICE_ORIGIN, () => {
 		if (crdtGetRecord(doc, id)) crdtDeleteRecord(doc, id);
 	});
@@ -446,25 +450,32 @@ export function createRecord(
 	const id = nanoid();
 	reserveRecordLocator(workspaceId, defaultSpaceId, id, shardId);
 
+	// Both container-creating blockTypes seed at least one descendant that
+	// needs its own locator: 'columns' seeds N columns (each with its own
+	// paragraph), and a bare 'column' (an agent adding one to an existing
+	// columns block) seeds one paragraph of its own — see
+	// reserveDescendantLocators.
+	const isContainerCreate = input.blockType === 'columns' || input.blockType === 'column';
 	let record: WorkspaceRecord;
-	let reservedChildIds: string[] = [];
+	const reservedChildIds: string[] = [];
 	try {
 		record = transactWithOrigin(doc, SERVICE_ORIGIN, () =>
 			performCreateRecord(doc, id, input, actor)
 		);
-		if (input.blockType === 'columns') {
-			reservedChildIds = reserveColumnsChildLocators(
+		if (isContainerCreate) {
+			reserveDescendantLocators(
 				doc,
 				record,
 				workspaceId,
 				defaultSpaceId,
-				shardId
+				shardId,
+				reservedChildIds
 			);
 		}
 	} catch (err) {
 		releaseRecordLocator(workspaceId, id);
 		for (const childId of reservedChildIds) releaseRecordLocator(workspaceId, childId);
-		if (input.blockType === 'columns') rollBackColumnsBlock(doc, id);
+		if (isContainerCreate) rollBackContainerCreate(doc, id);
 		throw err;
 	}
 

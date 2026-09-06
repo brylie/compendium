@@ -1056,4 +1056,63 @@ describe('columns: container block nesting (#148)', () => {
 		expect(listRecordsForParent(docA, loser).map((r) => r.id)).not.toContain(blockInA);
 		expect(listRecordsForParent(docB, loser).map((r) => r.id)).not.toContain(blockInA);
 	});
+
+	it('deleting the losing column after a concurrent cross-container move does not delete the block that now lives in the winning column', () => {
+		const docA = new Y.Doc();
+		const document = createDocument(docA, { title: 'Notes' });
+		const columns = createColumnsBlock(docA, { parentId: document.id }, human, 3);
+		const [columnA, columnB, columnC] = columns.childRecordIds!;
+		const [blockInA] = getRecord(docA, columnA)!.childRecordIds!;
+
+		const docB = new Y.Doc();
+		Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+
+		moveRecordToParent(docA, blockInA, columnB);
+		moveRecordToParent(docB, blockInA, columnC);
+		Y.applyUpdate(docB, Y.encodeStateAsUpdate(docA));
+		Y.applyUpdate(docA, Y.encodeStateAsUpdate(docB));
+
+		const winner = getRecord(docA, blockInA)!.parentId;
+		const loser = winner === columnB ? columnC : columnB;
+
+		// The losing column's own recordIds array still has a stale entry for
+		// blockInA (see isAuthoritativeChild's doc comment) — deleting that
+		// column must not recurse into it and delete a block that now
+		// authoritatively lives in a different, live column.
+		deleteRecord(docA, loser);
+
+		expect(getRecord(docA, blockInA)).toBeDefined();
+		expect(getRecord(docA, blockInA)!.parentId).toBe(winner);
+		expect(listRecordsForParent(docA, winner).map((r) => r.id)).toContain(blockInA);
+	});
+
+	it('migrating a Document after a concurrent cross-container move copies the block once, under its winning column', () => {
+		const source = new Y.Doc();
+		const document = createDocument(source, { title: 'Notes' });
+		const columns = createColumnsBlock(source, { parentId: document.id }, human, 3);
+		const [columnA, columnB, columnC] = columns.childRecordIds!;
+		const [blockInA] = getRecord(source, columnA)!.childRecordIds!;
+
+		const replica = new Y.Doc();
+		Y.applyUpdate(replica, Y.encodeStateAsUpdate(source));
+
+		moveRecordToParent(source, blockInA, columnB);
+		moveRecordToParent(replica, blockInA, columnC);
+		Y.applyUpdate(replica, Y.encodeStateAsUpdate(source));
+		Y.applyUpdate(source, Y.encodeStateAsUpdate(replica));
+
+		const winner = getRecord(source, blockInA)!.parentId;
+		const loser = winner === columnB ? columnC : columnB;
+
+		const target = new Y.Doc();
+		copyDocumentVerbatim(source, target, document.id);
+
+		expect(getRecord(target, blockInA)).toBeDefined();
+		expect(getRecord(target, blockInA)!.parentId).toBe(winner);
+		// The winning column also still has its own seeded paragraph from
+		// createColumnsBlock — blockInA is an *additional* member, not the
+		// only one.
+		expect(listRecordsForParent(target, winner).map((r) => r.id)).toContain(blockInA);
+		expect(listRecordsForParent(target, loser).map((r) => r.id)).not.toContain(blockInA);
+	});
 });

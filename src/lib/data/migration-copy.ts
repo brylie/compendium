@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import type { ParentKind } from './types';
+import type { ParentKind, WorkspaceRecord } from './types';
 import { applyRichTextToYText } from './richtext';
 import { type TypedYMap, typedYMap } from './yjs-typed';
 import {
@@ -15,7 +15,7 @@ import { applyOptionalBlockFields } from './view-config';
 import { NotFoundError } from './errors';
 import { getDocument } from './document-ops';
 import { getCollection } from './collection-ops';
-import { getRecord } from './record-ops';
+import { getRecord, isAuthoritativeChild } from './record-ops';
 
 // ---------------------------------------------------------------------------
 // Migration primitives (#114/#132) — verbatim structural copies of a
@@ -84,24 +84,13 @@ export function copyCollectionVerbatim(sourceDoc: Y.Doc, targetDoc: Y.Doc, id: s
  * recursive call here owns its own container's recordIds array instead,
  * exactly mirroring that same split one level down.
  */
-function copyRecordVerbatim(
-	sourceDoc: Y.Doc,
-	targetDoc: Y.Doc,
-	id: string,
+// Populates a copied record's block-vs-row fields — split out of
+// copyRecordVerbatim purely to keep its own cognitive complexity down.
+function applyCopiedRecordFields(
+	yrecord: TypedYMap<RecordYShape>,
+	record: WorkspaceRecord,
 	kind: ParentKind
 ): void {
-	const record = getRecord(sourceDoc, id);
-	if (!record) throw new NotFoundError(`Record ${id} not found in source doc`);
-
-	const yrecord: TypedYMap<RecordYShape> = typedYMap<RecordYShape>(new Y.Map<unknown>());
-	yrecord.set('id', record.id);
-	yrecord.set('parentId', record.parentId);
-	yrecord.set('order', record.order);
-	yrecord.set('createdBy', record.createdBy);
-	yrecord.set('createdAt', record.createdAt);
-	yrecord.set('lastEditedBy', record.lastEditedBy);
-	yrecord.set('lastEditedAt', record.lastEditedAt);
-
 	if (kind === 'document' || kind === 'record') {
 		yrecord.set('blockType', record.blockType ?? 'paragraph');
 		// A container (columns/column) has no content Y.Text at all, matching
@@ -120,15 +109,55 @@ function copyRecordVerbatim(
 			setPropertyValue(yrecord, key, value);
 		}
 	}
+}
+
+// Recursively copies a container's own children, skipping a stale leftover
+// entry from a concurrent cross-container moveRecordToParent (issue #148)
+// whose own `parentId` now authoritatively points elsewhere — see
+// record-ops.ts#isAuthoritativeChild's doc comment. Copying it here too
+// would duplicate that record under two parents in the migrated doc (once
+// under its real, live parent when *that* parent is copied, and again here
+// under this stale reference). Split out of copyRecordVerbatim purely to
+// keep its own cognitive complexity down.
+function copyAuthoritativeChildren(
+	sourceDoc: Y.Doc,
+	targetDoc: Y.Doc,
+	id: string,
+	childIds: string[],
+	childRecordIds: Y.Array<string>
+): void {
+	for (const childId of childIds) {
+		if (!isAuthoritativeChild(sourceDoc, id, childId)) continue;
+		copyRecordVerbatim(sourceDoc, targetDoc, childId, 'record');
+		childRecordIds.push([childId]);
+	}
+}
+
+function copyRecordVerbatim(
+	sourceDoc: Y.Doc,
+	targetDoc: Y.Doc,
+	id: string,
+	kind: ParentKind
+): void {
+	const record = getRecord(sourceDoc, id);
+	if (!record) throw new NotFoundError(`Record ${id} not found in source doc`);
+
+	const yrecord: TypedYMap<RecordYShape> = typedYMap<RecordYShape>(new Y.Map<unknown>());
+	yrecord.set('id', record.id);
+	yrecord.set('parentId', record.parentId);
+	yrecord.set('order', record.order);
+	yrecord.set('createdBy', record.createdBy);
+	yrecord.set('createdAt', record.createdAt);
+	yrecord.set('lastEditedBy', record.lastEditedBy);
+	yrecord.set('lastEditedAt', record.lastEditedAt);
+
+	applyCopiedRecordFields(yrecord, record, kind);
 
 	if (record.childRecordIds) {
 		const childRecordIds = new Y.Array<string>();
 		yrecord.set('recordIds', childRecordIds);
 		recordsMap(targetDoc).set(id, yrecord.raw);
-		for (const childId of record.childRecordIds) {
-			copyRecordVerbatim(sourceDoc, targetDoc, childId, 'record');
-			childRecordIds.push([childId]);
-		}
+		copyAuthoritativeChildren(sourceDoc, targetDoc, id, record.childRecordIds, childRecordIds);
 		return;
 	}
 

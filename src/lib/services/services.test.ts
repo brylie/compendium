@@ -1609,6 +1609,32 @@ describe('service layer: columns block nesting and its container-parent permissi
 		const [columnId] = columns.childRecordIds!;
 		expect(() => deleteRecord(human, columnId)).toThrow(/at least 2 columns/);
 	});
+
+	it("reserves a locator for the paragraph auto-seeded by a bare column create, so writes to it resolve to the Document's real shard rather than silently missing it", () => {
+		// Every Document already lives in its own real shard (shardId = its own
+		// id, see createDocument in services/documents.ts) — no synthetic
+		// OTHER_SHARD fixture needed here. Growing an existing columns block by
+		// creating one more bare `column` (parentId = columns.id) is the code
+		// path that used to be missing from the recursive locator reservation:
+		// createRecord only reserved a locator for the column itself, not for
+		// the paragraph it auto-seeds inside its own recordIds array.
+		const { workspaceId } = resolveWorkspaceContext();
+		const doc = createDocument(human, { title: 'Layout' });
+		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+
+		const newColumn = createRecord(human, { parentId: columns.id, blockType: 'column' });
+		expect(newColumn.childRecordIds).toHaveLength(1);
+		const [seededParagraphId] = newColumn.childRecordIds!;
+
+		expect(resolveShardForRecord(workspaceId, seededParagraphId)).toEqual({ shardId: doc.id });
+
+		writeRecord(human, seededParagraphId, { markdown: 'written from a bare column' });
+		expect(
+			getRecord(human, seededParagraphId)
+				?.content?.runs.map((r) => r.text)
+				.join('')
+		).toBe('written from a bare column');
+	});
 });
 
 describe('service layer: holds — human caller path and permission-denied records', () => {

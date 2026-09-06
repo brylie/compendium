@@ -49,6 +49,22 @@ export function parentKindOf(doc: Y.Doc, parentId: string): ParentKind | undefin
 	return undefined;
 }
 
+/**
+ * True when `childId` still authoritatively belongs to `parentId` — i.e. its
+ * own live `parentId` field agrees, not just its presence in `parentId`'s
+ * sibling/child array. A concurrent cross-container `moveRecordToParent`
+ * (issue #148) can leave the *losing* container with a stale array entry for
+ * a record whose `parentId` now points elsewhere (two different Y.Arrays
+ * each independently accept their own insert — see `listRecordsForParent`'s
+ * doc comment) — every recursive or projecting consumer of a container's
+ * `recordIds` must treat that stale entry as gone, not as a real child, or
+ * it can act on (render, delete, migrate) a record that no longer belongs to
+ * it. Exported for `migration-copy.ts`'s own recursive copy to share.
+ */
+export function isAuthoritativeChild(doc: Y.Doc, parentId: string, childId: string): boolean {
+	return recordsMap(doc).get(childId)?.get('parentId') === parentId;
+}
+
 function parentRecordIds(doc: Y.Doc, parentId: string, kind: ParentKind): Y.Array<string> {
 	if (kind === 'document') {
 		return documentsMap(doc).get(parentId)!.get('recordIds')!;
@@ -556,7 +572,20 @@ function deleteRecordAndChildren(doc: Y.Doc, id: string): void {
 	if (!yrecord) return;
 	const childIds = yrecord.get('recordIds')?.toArray();
 	if (childIds) {
-		for (const childId of childIds) deleteRecordAndChildren(doc, childId);
+		for (const childId of childIds) {
+			// Only recurse into a child whose own `parentId` still
+			// authoritatively agrees — a concurrent cross-container
+			// moveRecordToParent can leave a stale array entry here for a
+			// record that now legitimately lives under a *different* parent
+			// (see listRecordsForParent's own doc comment on this same race).
+			// Recursing into it unconditionally would delete a live record
+			// out of its real, current parent as a side effect of deleting
+			// this one — not just render a harmless duplicate. `id`'s own
+			// `recordIds` array (including this stale entry) is discarded
+			// wholesale below regardless, so skipping it here is enough;
+			// nothing needs to be individually removed from it.
+			if (isAuthoritativeChild(doc, id, childId)) deleteRecordAndChildren(doc, childId);
+		}
 	}
 	const parentId = yrecord.get('parentId')!;
 	const kind = parentKindOf(doc, parentId);
@@ -625,7 +654,8 @@ export function listRecordsForParent(doc: Y.Doc, parentId: string): WorkspaceRec
 		// on showing the record only in its one authoritative location — the
 		// losing container's leftover array entry is skipped, not rendered as
 		// a ghost duplicate — without needing to mutate anything during a
-		// read.
+		// read. Same check as `isAuthoritativeChild` above, inlined here since
+		// `record` is already fetched for the return value anyway.
 		if (record?.parentId === parentId) records.push(record);
 	}
 	return records;
