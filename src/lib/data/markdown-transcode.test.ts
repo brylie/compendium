@@ -24,6 +24,15 @@ describe('markdown transcoding', () => {
 		expect(markdownToRichText(doc, backToMarkdown)).toEqual(richText);
 	});
 
+	it('preserves blank lines between adjacent block-level nodes', () => {
+		const doc = new Y.Doc();
+		const markdown = 'Paragraph one.\n\nParagraph two.';
+		const richText = markdownToRichText(doc, markdown);
+
+		expect(richText.runs.map((run) => run.text).join('')).toBe(markdown);
+		expect(richTextToMarkdown(doc, richText)).toBe('Paragraph one\\.\n\nParagraph two\\.');
+	});
+
 	it('parses @mention into a mention-marked run', () => {
 		const doc = new Y.Doc();
 		const richText = markdownToRichText(doc, 'ping @local please');

@@ -188,6 +188,16 @@ describe('service layer: centralized business rules & side effects', () => {
 		);
 	});
 
+	it('preserves adjacent Markdown paragraphs written to one block', () => {
+		const document = createDocument(human, { title: 'Paragraph boundaries' });
+		const block = createRecord(human, { parentId: document.id, blockType: 'paragraph' });
+
+		writeRecord(human, block.id, { markdown: 'Paragraph one.\n\nParagraph two.' });
+
+		const content = servicesGetDocument(human, document.id)?.records[0].content;
+		expect(content?.runs.map((run) => run.text).join('')).toBe('Paragraph one.\n\nParagraph two.');
+	});
+
 	it('manages collections, persists collection grants, and queries rows', () => {
 		const col = createCollection(human, {
 			title: 'Sprint Backlog',

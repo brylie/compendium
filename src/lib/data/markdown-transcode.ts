@@ -104,6 +104,9 @@ export function markdownToRichText(doc: Y.Doc, markdown: string): RichText {
 
 function collectRuns(doc: Y.Doc, node: MdastNode, marks: TextMarks, runs: MutableRun[]): void {
 	switch (node.type) {
+		case 'root':
+			collectRootRuns(doc, node.children ?? [], marks, runs);
+			return;
 		case 'text':
 			splitSpecialTokens(doc, node.value ?? '', marks, runs);
 			return;
@@ -126,6 +129,21 @@ function collectRuns(doc: Y.Doc, node: MdastNode, marks: TextMarks, runs: Mutabl
 		default:
 			for (const c of node.children ?? []) collectRuns(doc, c, marks, runs);
 			if (!node.children && node.value) splitSpecialTokens(doc, node.value, marks, runs);
+	}
+}
+
+function collectRootRuns(
+	doc: Y.Doc,
+	children: MdastNode[],
+	marks: TextMarks,
+	runs: MutableRun[]
+): void {
+	for (const child of children) {
+		const childRuns: MutableRun[] = [];
+		collectRuns(doc, child, marks, childRuns);
+		if (childRuns.length === 0) continue;
+		if (runs.length > 0) runs.push({ text: '\n\n', marks });
+		runs.push(...childRuns);
 	}
 }
 
