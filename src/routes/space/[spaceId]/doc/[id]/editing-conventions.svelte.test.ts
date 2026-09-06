@@ -22,7 +22,10 @@ import Page from './+page.svelte';
 
 vi.mock('$app/state', () => ({
 	get page() {
-		return { params: { spaceId: 'space-1' } };
+		return {
+			params: { spaceId: 'space-1' },
+			url: new URL('http://localhost/space/space-1/doc/d1')
+		};
 	}
 }));
 

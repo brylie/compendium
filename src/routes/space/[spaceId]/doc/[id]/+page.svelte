@@ -11,6 +11,8 @@
 		createColumnsBlock,
 		createRecord,
 		deleteRecord,
+		duplicateRecord,
+		flattenDocumentBlocks,
 		getRecord,
 		getRecordYText,
 		listRecordsForParent,
@@ -54,6 +56,8 @@
 	import ChildPagesBlock from '$lib/components/ChildPagesBlock.svelte';
 	import ColumnsBlock from '$lib/components/ColumnsBlock.svelte';
 	import PromptDialog from '$lib/components/PromptDialog.svelte';
+	import BlockActionMenu from '$lib/components/BlockActionMenu.svelte';
+	import DocumentOutline from '$lib/components/DocumentOutline.svelte';
 	import type { PageProps } from './$types';
 
 	// Toggled onto holdAnnouncement below to guarantee a screen reader
@@ -97,6 +101,21 @@
 	// ambiguous once more than one block list is on screen at once.
 	let dropIndicatorParentId: string | null = $state(null);
 	let reorderAnnouncement = $state('');
+
+	// Multi-select (issue #152) — a set of block ids, always siblings of one
+	// another within the same parent container (the Document's own top level,
+	// or one column). selectionAnchorId is the fixed end of a Shift-click/
+	// Shift-Arrow range; the other end is whatever block was just interacted
+	// with. Selecting in a different container replaces the set outright
+	// rather than mixing containers — group move/delete below assume a single
+	// shared parent.
+	const selectedBlockIds = new SvelteSet<string>();
+	let selectionAnchorId: string | null = $state(null);
+	let outlineOpen = $state(false);
+	// Briefly highlighted after a List View selection or a #block-<id> deep
+	// link lands focus on it — a purely presentational pulse, not stored state.
+	let justNavigatedBlockId: string | null = $state(null);
+	let justNavigatedTimer: ReturnType<typeof setTimeout> | undefined;
 
 	/**
 	 * Older imported documents may predate per-record attribution. This runtime
@@ -459,6 +478,15 @@
 		if (event.ctrlKey && !event.metaKey && key === 'y') {
 			event.preventDefault();
 			redo(ydoc);
+			return;
+		}
+		// A block-editor's own Escape uses (e.g. the drag handle's own
+		// cancel-drag listener, the link composer) all stop propagation before
+		// this document-level listener would see them, so this only ever fires
+		// for a plain, otherwise-unhandled Escape — safe to use as "clear the
+		// current multi-selection" (issue #152).
+		if (event.key === 'Escape' && selectedBlockIds.size > 0) {
+			clearSelection();
 		}
 	}
 
@@ -471,6 +499,22 @@
 	// (e.g. client-side navigation away while a pointer is still down).
 	$effect(() => {
 		return () => cleanupDragListeners();
+	});
+
+	// Deep-link support for "Copy link to block" (issue #152) — once this
+	// Document's blocks have actually loaded, a `#block-<id>` URL fragment
+	// scrolls to and focuses that block the same way a List View click does.
+	// Guarded per documentId so it fires once per navigation, not on every
+	// subsequent blocks refresh (any later edit anywhere in the Document also
+	// reassigns `blocks`, which would otherwise re-trigger this on every
+	// keystroke).
+	let hashNavigatedForDocument: string | null = $state(null);
+	$effect(() => {
+		if (!ydoc || blocks.length === 0) return;
+		if (hashNavigatedForDocument === data.documentId) return;
+		hashNavigatedForDocument = data.documentId;
+		const match = /^#block-(.+)$/.exec(page.url.hash);
+		if (match) void navigateToBlock(match[1]);
 	});
 
 	function handleTitleInput(event: Event): void {
@@ -805,9 +849,10 @@
 		void focusDragHandle(blockId);
 	}
 
-	function handleDragHandleKeydown(event: KeyboardEvent, blockId: string): void {
-		const noModifiers = !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey;
-		if (!noModifiers) return;
+	// The plain-move-key branch of handleDragHandleKeydown, split out purely to
+	// keep that function's own cognitive complexity within budget — this
+	// function assumes no modifier keys are held (its caller already checked).
+	function handleDragHandleMoveKey(event: KeyboardEvent, blockId: string): void {
 		if (event.key === 'ArrowUp') {
 			event.preventDefault();
 			moveBlock(blockId, 'up');
@@ -826,7 +871,204 @@
 		} else if (event.key === 'ArrowRight') {
 			event.preventDefault();
 			moveBlockToAdjacentColumn(blockId, 'next');
+		} else if (event.key === 'Escape' && selectedBlockIds.size > 0) {
+			event.preventDefault();
+			clearSelection();
 		}
+	}
+
+	function handleDragHandleKeydown(event: KeyboardEvent, blockId: string): void {
+		// Shift+ArrowUp/Down extends the multi-select range from the current
+		// anchor (issue #152) — the keyboard equivalent of Shift-clicking the
+		// handle, checked before the plain-move branch below so a held Shift
+		// never also triggers a reorder.
+		if (event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+			if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+				event.preventDefault();
+				extendBlockSelectionByKeyboard(blockId, event.key === 'ArrowUp' ? 'up' : 'down');
+			}
+			return;
+		}
+		if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+		handleDragHandleMoveKey(event, blockId);
+	}
+
+	// ---------------------------------------------------------------------
+	// Multi-select and group actions (issue #152) — Shift/Ctrl-click (or
+	// Shift+Arrow) on a block's move handle builds a set of block ids, always
+	// scoped to one parent container (the Document's own top level, or a
+	// single column); selecting in a different container replaces the set
+	// rather than mixing containers, since group move below assumes one
+	// shared, orderable sibling list. The bulk action bar (rendered near the
+	// bottom of the template) is the primary UI for acting on the set; it's a
+	// plain, Tab-reachable toolbar, so no separate keyboard path is needed for
+	// duplicate/delete/move-as-group beyond what already reaches those
+	// buttons.
+	// ---------------------------------------------------------------------
+
+	function clearSelection(): void {
+		selectedBlockIds.clear();
+		selectionAnchorId = null;
+	}
+
+	function toggleBlockSelection(blockId: string, parentId: string): void {
+		// Starting a fresh toggle-select in a different container than the
+		// current selection replaces it outright — see the comment above.
+		if (!sameContainerSelection(parentId)) selectedBlockIds.clear();
+		if (selectedBlockIds.has(blockId)) selectedBlockIds.delete(blockId);
+		else selectedBlockIds.add(blockId);
+		selectionAnchorId = blockId;
+	}
+
+	function extendBlockSelectionRange(blockId: string, parentId: string, index: number): void {
+		if (!ydoc) return;
+		const anchorId =
+			selectionAnchorId && sameContainerSelection(parentId) ? selectionAnchorId : blockId;
+		const siblings = listRecordsForParent(ydoc, parentId);
+		const anchorIndex = siblings.findIndex((s) => s.id === anchorId);
+		if (anchorIndex === -1) {
+			selectedBlockIds.clear();
+			selectedBlockIds.add(blockId);
+			selectionAnchorId = blockId;
+			return;
+		}
+		const [lo, hi] = anchorIndex <= index ? [anchorIndex, index] : [index, anchorIndex];
+		selectedBlockIds.clear();
+		for (const sibling of siblings.slice(lo, hi + 1)) selectedBlockIds.add(sibling.id);
+		selectionAnchorId = anchorId;
+	}
+
+	// True when the current selection (if any) already belongs to `parentId` —
+	// an empty selection trivially agrees with any container.
+	function sameContainerSelection(parentId: string): boolean {
+		if (!ydoc || selectedBlockIds.size === 0) return true;
+		const [firstId] = selectedBlockIds;
+		return getRecord(ydoc, firstId)?.parentId === parentId;
+	}
+
+	function extendBlockSelectionByKeyboard(blockId: string, direction: 'up' | 'down'): void {
+		if (!ydoc) return;
+		const record = getRecord(ydoc, blockId);
+		if (!record) return;
+		// Establish the anchor at the block the handle was focused on *before*
+		// this keypress — without this, a first Shift+Arrow (no prior
+		// selection) would fall through to extendBlockSelectionRange's own
+		// "no anchor yet" fallback, which anchors on its `blockId` argument.
+		// That argument is the *target* row (siblings[nextIndex] below), so the
+		// selection would collapse to that single row instead of spanning from
+		// where the user started.
+		if (!selectionAnchorId || !sameContainerSelection(record.parentId)) {
+			selectionAnchorId = blockId;
+		}
+		const siblings = listRecordsForParent(ydoc, record.parentId);
+		const currentIndex = siblings.findIndex((s) => s.id === blockId);
+		if (currentIndex === -1) return;
+		const nextIndex =
+			direction === 'up'
+				? Math.max(0, currentIndex - 1)
+				: Math.min(siblings.length - 1, currentIndex + 1);
+		extendBlockSelectionRange(siblings[nextIndex].id, record.parentId, nextIndex);
+		void focusDragHandle(siblings[nextIndex].id);
+	}
+
+	// The selected ids in their actual sibling order — needed so
+	// duplicate/delete-as-group act in a stable, predictable order rather than
+	// Set insertion order (which toggleBlockSelection's add/remove can scramble
+	// relative to document order).
+	function orderedSelection(): WorkspaceRecord[] {
+		if (!ydoc || selectedBlockIds.size === 0) return [];
+		const [firstId] = selectedBlockIds;
+		const parentId = getRecord(ydoc, firstId)?.parentId;
+		if (!parentId) return [];
+		return listRecordsForParent(ydoc, parentId).filter((r) => selectedBlockIds.has(r.id));
+	}
+
+	function deleteSelection(): void {
+		if (!ydoc) return;
+		const ids = orderedSelection().map((r) => r.id);
+		if (ids.length === 0) return;
+		ydoc.transact(() => {
+			for (const id of ids) deleteRecord(ydoc!, id);
+		});
+		clearSelection();
+	}
+
+	function duplicateSelection(): void {
+		if (!ydoc) return;
+		const ids = orderedSelection().map((r) => r.id);
+		if (ids.length === 0) return;
+		const copies = ydoc.transact(() => ids.map((id) => duplicateRecord(ydoc!, id, CURRENT_USER)));
+		selectedBlockIds.clear();
+		for (const copy of copies) selectedBlockIds.add(copy.id);
+		selectionAnchorId = copies[0]?.id ?? null;
+	}
+
+	interface SelectionGroupBounds {
+		siblings: WorkspaceRecord[];
+		groupStart: number;
+		groupEnd: number;
+	}
+
+	// Resolves the current selection's start/end position within its shared
+	// parent's sibling list, or null when the selection is empty, spans an id
+	// no longer found there, or isn't contiguous — "move a scattered set up"
+	// has no single well-defined result. The one shared definition of "is this
+	// selection movable as a unit," used by isSelectionContiguous, the bulk
+	// bar's Move up/down disabled state, and moveSelectionAsGroup itself, so
+	// the three can't drift out of agreement with each other.
+	function resolveSelectionGroupBounds(): SelectionGroupBounds | null {
+		if (!ydoc) return null;
+		const selected = orderedSelection();
+		if (selected.length === 0) return null;
+		const siblings = listRecordsForParent(ydoc, selected[0].parentId);
+		const indices = selected
+			.map((r) => siblings.findIndex((s) => s.id === r.id))
+			.filter((i) => i !== -1)
+			.sort((a, b) => a - b);
+		if (indices.length !== selected.length) return null;
+		const groupStart = indices[0];
+		const groupEnd = indices[indices.length - 1];
+		if (groupEnd - groupStart + 1 !== indices.length) return null; // not contiguous
+		return { siblings, groupStart, groupEnd };
+	}
+
+	function isSelectionContiguous(): boolean {
+		return resolveSelectionGroupBounds() !== null;
+	}
+
+	// Whether the bulk bar's Move up/down button should be enabled — false for
+	// a non-contiguous selection (see resolveSelectionGroupBounds) and also
+	// false right at the container boundary in that direction, so the button
+	// can't be clicked to silently do nothing.
+	function canMoveSelectionAsGroup(direction: 'up' | 'down'): boolean {
+		const bounds = resolveSelectionGroupBounds();
+		if (!bounds) return false;
+		return direction === 'up'
+			? bounds.groupStart > 0
+			: bounds.groupEnd < bounds.siblings.length - 1;
+	}
+
+	// Moves the whole selected group up/down by one position as a unit,
+	// swapping it with its one adjacent unselected neighbor — the natural
+	// generalization of moveBlock's own single-block adjacent swap.
+	function moveSelectionAsGroup(direction: 'up' | 'down'): void {
+		if (!ydoc || !canMoveSelectionAsGroup(direction)) return;
+		const { siblings, groupStart, groupEnd } = resolveSelectionGroupBounds()!;
+
+		ydoc.transact(() => {
+			if (direction === 'up') {
+				reorderRecord(ydoc!, siblings[groupStart - 1].id, siblings[groupEnd].id);
+			} else {
+				const beforeFirst = groupStart > 0 ? siblings[groupStart - 1].id : undefined;
+				reorderRecord(ydoc!, siblings[groupEnd + 1].id, beforeFirst);
+			}
+		});
+		const count = groupEnd - groupStart + 1;
+		const newStart = direction === 'up' ? groupStart - 1 : groupStart + 1;
+		reorderAnnouncement =
+			count === 1
+				? `Moved block to position ${newStart + 1} of ${siblings.length}.`
+				: `Moved ${count} blocks to positions ${newStart + 1}-${newStart + count} of ${siblings.length}.`;
 	}
 
 	// Every drop container currently on screen (the Document's own top-level
@@ -973,6 +1215,19 @@
 		// Only the primary button/touch starts a drag — a right-click or an
 		// auxiliary button on the handle shouldn't hijack a context menu.
 		if (event.button !== 0) return;
+		// Shift/Ctrl/Cmd-clicking the move handle selects a range/toggles a
+		// block instead of dragging it (issue #152 multi-select) — the same
+		// modifier-click convention a file manager or spreadsheet uses, chosen
+		// specifically so it can't collide with a plain drag-to-reorder click.
+		if (event.shiftKey || event.ctrlKey || event.metaKey) {
+			event.preventDefault();
+			if (event.shiftKey) {
+				extendBlockSelectionRange(blockId, parentId, index);
+			} else {
+				toggleBlockSelection(blockId, parentId);
+			}
+			return;
+		}
 		event.preventDefault();
 		draggingBlockId = blockId;
 		dropIndicatorParentId = parentId;
@@ -1065,12 +1320,121 @@
 		syncedBlockDialogId = blockId;
 	}
 
+	// ---------------------------------------------------------------------
+	// Block action menu (issue #152) — duplicate/delete/convert/copy-link/
+	// move, offered per-block via BlockActionMenu.svelte's "…" trigger next
+	// to the move handle. Move up/down reuse moveBlock (defined above, the
+	// same function the drag handle's own Home/End/ArrowUp/ArrowDown already
+	// call) rather than duplicating that logic.
+	// ---------------------------------------------------------------------
+
+	// The text-bearing BlockTypes a block can be converted between in place,
+	// per rich-text-toolbar.md §5 — the exact set that keeps its text across a
+	// setBlockType call. Structural/reference/container types (table, embed,
+	// page_link, synced_block, table_of_contents, child_pages, collection_view,
+	// columns/column) have no in-place conversion target and are excluded from
+	// the menu's "Convert to" list entirely, matching the toolbar's own rule.
+	const CONVERTIBLE_BLOCK_TYPES: { type: BlockType; label: string }[] = [
+		{ type: 'paragraph', label: 'Text' },
+		{ type: 'heading_1', label: 'Heading 1' },
+		{ type: 'heading_2', label: 'Heading 2' },
+		{ type: 'heading_3', label: 'Heading 3' },
+		{ type: 'heading_4', label: 'Heading 4' },
+		{ type: 'bulleted_list_item', label: 'Bulleted list' },
+		{ type: 'numbered_list_item', label: 'Numbered list' },
+		{ type: 'to_do', label: 'To-do' },
+		{ type: 'quote', label: 'Quote' },
+		{ type: 'callout', label: 'Callout' },
+		{ type: 'toggle', label: 'Toggle' },
+		{ type: 'code', label: 'Code' }
+	];
+
+	function isConvertibleBlockType(blockType?: BlockType): boolean {
+		return CONVERTIBLE_BLOCK_TYPES.some((c) => c.type === blockType);
+	}
+
+	// A column's own curated child-type subset (data-model.md §3.1) excludes
+	// callout/toggle/code entirely, so those three are dropped from the
+	// "Convert to" list offered *inside* a column — converting a column's
+	// block to one of them would produce a block type that block-capability-
+	// contract.md's column-child rule (and services/records.ts's own
+	// creation-time validation) doesn't allow there.
+	const COLUMN_CONVERTIBLE_BLOCK_TYPES = CONVERTIBLE_BLOCK_TYPES.filter((c) =>
+		(columnChildBlockTypes as readonly BlockType[]).includes(c.type)
+	);
+
+	function duplicateBlock(blockId: string): void {
+		if (!ydoc) return;
+		const copy = duplicateRecord(ydoc, blockId, CURRENT_USER);
+		void tick().then(() => blockRefs[copy.id]?.focusEditor(true));
+	}
+
+	// Focuses the previous sibling (or the next one, if the deleted block was
+	// first) after deletion — the same "focus lands somewhere sensible, never
+	// nowhere" convention handleBackspace already follows when it deletes an
+	// empty block.
+	function deleteBlockViaMenu(blockId: string): void {
+		if (!ydoc) return;
+		const record = getRecord(ydoc, blockId);
+		if (!record) return;
+		const siblings = listRecordsForParent(ydoc, record.parentId);
+		const index = siblings.findIndex((s) => s.id === blockId);
+		const fallback = siblings[index - 1] ?? siblings[index + 1];
+		deleteRecord(ydoc, blockId);
+		selectedBlockIds.delete(blockId);
+		if (fallback) void tick().then(() => blockRefs[fallback.id]?.focusEditor(false));
+	}
+
+	function convertBlockViaMenu(blockId: string, blockType: BlockType): void {
+		if (!ydoc) return;
+		setBlockType(ydoc, blockId, blockType, CURRENT_USER);
+		void tick().then(() => blockRefs[blockId]?.focusEditor(true));
+	}
+
+	async function copyBlockLink(blockId: string): Promise<void> {
+		const url = `${window.location.origin}${page.url.pathname}#block-${blockId}`;
+		try {
+			await navigator.clipboard.writeText(url);
+			provenanceAnnouncement = 'Link to block copied.';
+		} catch {
+			provenanceAnnouncement = 'Could not copy the link. Please try again.';
+		}
+	}
+
+	// Shared by the List View outline (click an entry) and the #block-<id>
+	// deep-link handled on mount below — scrolls the row into view, focuses
+	// its editor when one exists (a top-level or column block; a structural
+	// block with no BlockEditor just scrolls), and pulses a brief highlight so
+	// the destination is visually obvious even when it lands mid-viewport.
+	async function navigateToBlock(blockId: string): Promise<void> {
+		await tick();
+		document
+			.getElementById(`block-${blockId}`)
+			?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		blockRefs[blockId]?.focusEditor(true);
+		justNavigatedBlockId = blockId;
+		clearTimeout(justNavigatedTimer);
+		justNavigatedTimer = setTimeout(() => {
+			justNavigatedBlockId = null;
+		}, 1500);
+	}
+
 	// Computed heading list for Table of Contents blocks
 	let headings = $derived(
 		blocks.filter((b) =>
 			['heading_1', 'heading_2', 'heading_3', 'heading_4'].includes(b.blockType ?? '')
 		)
 	);
+
+	// Full document order for the List View outline (issue #152) — includes
+	// blocks nested inside columns, unlike `blocks`/`headings` above, which
+	// only cover the Document's own top-level flow. `blocks` is read here
+	// purely as this derived's reactivity trigger (refresh() above already
+	// reassigns it on every observed mutation anywhere in the Document,
+	// including inside a column — see ColumnsBlock.svelte's own comment on
+	// that same observeDeep) — flattenDocumentBlocks re-reads the live ydoc
+	// itself rather than being derived from `blocks`' own contents.
+	let outlineBlocks = $derived(ydoc && blocks ? flattenDocumentBlocks(ydoc, data.documentId) : []);
 
 	function getHeadingText(recordId: string): string {
 		if (!ydoc) return '';
@@ -1186,6 +1550,17 @@
 		{/if}
 		<span>/</span>
 		<span class="truncate font-medium text-fg">{title || 'Untitled'}</span>
+		<button
+			type="button"
+			onclick={() => (outlineOpen = !outlineOpen)}
+			class="ml-auto flex flex-shrink-0 items-center gap-1 rounded px-1.5 py-1 text-muted transition-colors hover:bg-surface hover:text-fg"
+			class:text-accent={outlineOpen}
+			aria-pressed={outlineOpen}
+			aria-label="{outlineOpen ? 'Close' : 'Open'} document List View"
+			title="List View"
+		>
+			<Icon name="list-view" size={15} />
+		</button>
 	</nav>
 
 	<!-- Document Title -->
@@ -1257,22 +1632,43 @@
 			class="group relative mx-auto flex w-full items-start px-6 py-0.5"
 			class:max-w-3xl={!isBlockFullWidth(block)}
 			class:opacity-50={draggingBlockId === block.id}
+			class:bg-surface={selectedBlockIds.has(block.id)}
+			class:rounded={selectedBlockIds.has(block.id) || justNavigatedBlockId === block.id}
+			class:outline={justNavigatedBlockId === block.id}
+			class:outline-2={justNavigatedBlockId === block.id}
+			class:outline-accent={justNavigatedBlockId === block.id}
 			id="block-{block.id}"
 			data-block-row
 			data-block-parent={data.documentId}
 		>
 			<!-- Move handle: pointer-draggable, or ArrowUp/ArrowDown/Home/End
-					 once focused — see the block-reordering functions above. -->
+					 once focused; Shift/Ctrl-click or Shift+Arrow selects a range
+					 instead (issue #152) — see the block-reordering/selection
+					 functions above. -->
 			<button
 				type="button"
 				class="mt-1 mr-1 flex h-5 w-5 flex-shrink-0 cursor-grab items-center justify-center rounded text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:bg-surface hover:text-fg focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent active:cursor-grabbing"
-				aria-label="Move block. Drag, or use Arrow Up, Arrow Down, Home, and End."
+				aria-label="Move block. Drag, or use Arrow Up, Arrow Down, Home, and End. Shift-click, Ctrl-click, or Shift-Arrow to select multiple blocks."
 				data-drag-handle={block.id}
 				onpointerdown={(e) => startBlockDrag(e, block.id, data.documentId, index)}
 				onkeydown={(e) => handleDragHandleKeydown(e, block.id)}
 			>
 				<Icon name="grip" size={14} />
 			</button>
+
+			<BlockActionMenu
+				blockType={block.blockType}
+				canMoveUp={index > 0}
+				canMoveDown={index < blocks.length - 1}
+				isConvertible={isConvertibleBlockType(block.blockType)}
+				convertOptions={CONVERTIBLE_BLOCK_TYPES}
+				onDuplicate={() => duplicateBlock(block.id)}
+				onDelete={() => deleteBlockViaMenu(block.id)}
+				onConvert={(blockType) => convertBlockViaMenu(block.id, blockType)}
+				onCopyLink={() => copyBlockLink(block.id)}
+				onMoveUp={() => moveBlock(block.id, 'up')}
+				onMoveDown={() => moveBlock(block.id, 'down')}
+			/>
 
 			<!-- Left Indicator / Control Gutter -->
 			{#if bt === 'to_do'}
@@ -1584,11 +1980,20 @@
 							{draggingBlockId}
 							{dropIndicatorParentId}
 							{dropIndicatorIndex}
+							{selectedBlockIds}
+							{justNavigatedBlockId}
+							convertOptions={COLUMN_CONVERTIBLE_BLOCK_TYPES}
 							onFocusBlock={(blockId) => handleFocusBlock(blockId)}
 							onInputText={(blockId) => handleBlockInput(blockId)}
 							onDragHandlePointerDown={(e, blockId, parentId, blockIndex) =>
 								startBlockDrag(e, blockId, parentId, blockIndex)}
 							onDragHandleKeydown={handleDragHandleKeydown}
+							onDuplicateBlock={duplicateBlock}
+							onDeleteBlock={deleteBlockViaMenu}
+							onConvertBlock={convertBlockViaMenu}
+							onCopyBlockLink={copyBlockLink}
+							onMoveBlockUp={(blockId) => moveBlock(blockId, 'up')}
+							onMoveBlockDown={(blockId) => moveBlock(blockId, 'down')}
 						/>
 					{/if}
 				{:else}
@@ -1681,6 +2086,73 @@
 		<kbd class="rounded bg-surface px-1 py-0.5 font-mono">K</kbd> link. Type "/" for slash commands.
 	</footer>
 </div>
+
+<DocumentOutline
+	open={outlineOpen}
+	flatBlocks={outlineBlocks}
+	{ydoc}
+	{activeBlockId}
+	onSelect={(blockId) => void navigateToBlock(blockId)}
+	onClose={() => (outlineOpen = false)}
+/>
+
+{#if selectedBlockIds.size > 0}
+	<div
+		class="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-border bg-bg px-2 py-1.5 shadow-lg ring-1 ring-black/5"
+		role="toolbar"
+		aria-label="Selected blocks actions"
+	>
+		<span class="px-2 text-xs font-medium text-muted">{selectedBlockIds.size} selected</span>
+		<button
+			type="button"
+			onclick={duplicateSelection}
+			class="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-fg hover:bg-surface"
+		>
+			<Icon name="duplicate" size={14} />
+			Duplicate
+		</button>
+		<button
+			type="button"
+			onclick={() => moveSelectionAsGroup('up')}
+			disabled={!canMoveSelectionAsGroup('up')}
+			class="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-fg hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+			title={!isSelectionContiguous()
+				? 'Only a contiguous selection can move as a unit'
+				: 'Move up'}
+		>
+			<Icon name="arrow-up" size={14} />
+			Move up
+		</button>
+		<button
+			type="button"
+			onclick={() => moveSelectionAsGroup('down')}
+			disabled={!canMoveSelectionAsGroup('down')}
+			class="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-fg hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+			title={!isSelectionContiguous()
+				? 'Only a contiguous selection can move as a unit'
+				: 'Move down'}
+		>
+			<Icon name="arrow-down" size={14} />
+			Move down
+		</button>
+		<button
+			type="button"
+			onclick={deleteSelection}
+			class="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40"
+		>
+			<Icon name="trash" size={14} />
+			Delete
+		</button>
+		<button
+			type="button"
+			onclick={clearSelection}
+			class="ml-1 rounded-md p-1 text-muted hover:bg-surface hover:text-fg"
+			aria-label="Clear selection"
+		>
+			<Icon name="close" size={14} />
+		</button>
+	</div>
+{/if}
 
 <PromptDialog
 	open={syncedBlockDialogId !== null}
