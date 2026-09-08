@@ -454,7 +454,7 @@
 									<button
 										type="button"
 										onclick={() => (openRecordId = row.id)}
-										class="p-0.5 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-accent"
+										class="p-0.5 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-accent focus-visible:opacity-100"
 										title="Open record"
 										aria-label="Open record"
 									>

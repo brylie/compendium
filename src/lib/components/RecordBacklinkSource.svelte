@@ -25,15 +25,24 @@
 	} = $props();
 
 	let doc: Y.Doc | undefined = $state();
+	// Tracks which collectionId `doc` actually belongs to — gates the
+	// useCollectionView read below so a still-connecting or just-retargeted
+	// instance never reads the *previous* collection's live snapshot under
+	// the *new* collection.id key (the same `resolvedFor` guard
+	// RelationPropertyCell.svelte uses for its own forward-relation resolve).
+	let resolvedFor: string | undefined = $state();
 	let resolveFailed = $state(false);
 
 	$effect(() => {
 		const collectionId = collection.id;
 		resolveFailed = false;
+		doc = undefined;
+		resolvedFor = undefined;
 		resolveCollectionDoc(collectionId)
 			.then((resolved) => {
 				if (collection.id !== collectionId) return;
 				doc = resolved;
+				resolvedFor = collectionId;
 			})
 			.catch(() => {
 				if (collection.id !== collectionId) return;
@@ -42,7 +51,7 @@
 	});
 
 	const view = useCollectionView(
-		() => doc,
+		() => (resolvedFor === collection.id ? doc : undefined),
 		() => collection.id
 	);
 	const titleProperty = $derived(resolvePrimaryField(view.schema, view.primaryFieldKey));
