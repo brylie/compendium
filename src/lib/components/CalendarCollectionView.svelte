@@ -32,6 +32,7 @@
 	import PropertyValueCell from './PropertyValueCell.svelte';
 	import ViewToolbar from './ViewToolbar.svelte';
 	import PromptDialog from './PromptDialog.svelte';
+	import RecordDetailPane from './RecordDetailPane.svelte';
 
 	let {
 		collectionId,
@@ -52,6 +53,10 @@
 	let newDatePropertyLabel = $state('Date');
 	let optionDialogPropertyKey: string | null = $state(null);
 	let optionDialogError = $state('');
+	// The side-pane surface for an entry's full schema/backlinks/attribution
+	// (issue #154) — local, per-instance state, same as TableCollectionView's
+	// own openRecordId.
+	let openRecordId: string | null = $state(null);
 
 	// Auto-picking a default groupBy is attempted at most once per
 	// collectionId, not on every refresh — the hook's snapshot callback fires
@@ -351,14 +356,24 @@
 								<div class="rounded border border-border bg-bg px-1.5 py-1 text-xs">
 									<div class="flex items-center justify-between gap-1">
 										<span class="truncate font-medium text-fg">{entryTitle(row)}</span>
-										<button
-											type="button"
-											onclick={() => removeEntry(row.id)}
-											class="p-0.5 text-muted hover:text-red-500"
-											aria-label="Delete entry"
-										>
-											<Icon name="trash" size={10} />
-										</button>
+										<div class="flex flex-shrink-0 items-center gap-0.5">
+											<button
+												type="button"
+												onclick={() => (openRecordId = row.id)}
+												class="p-0.5 text-muted hover:text-accent"
+												aria-label="Open record"
+											>
+												<Icon name="expand" size={10} />
+											</button>
+											<button
+												type="button"
+												onclick={() => removeEntry(row.id)}
+												class="p-0.5 text-muted hover:text-red-500"
+												aria-label="Delete entry"
+											>
+												<Icon name="trash" size={10} />
+											</button>
+										</div>
 									</div>
 									{#if dateProperty}
 										<PropertyValueCell
@@ -408,6 +423,14 @@
 
 						<button
 							type="button"
+							onclick={() => (openRecordId = row.id)}
+							class="p-0.5 text-muted hover:text-accent"
+							aria-label="Open record"
+						>
+							<Icon name="expand" size={12} />
+						</button>
+						<button
+							type="button"
 							onclick={() => removeEntry(row.id)}
 							class="p-0.5 text-muted hover:text-red-500"
 							aria-label="Delete entry"
@@ -436,3 +459,17 @@
 		optionDialogError = '';
 	}}
 />
+
+{#if openRecordId}
+	<RecordDetailPane
+		recordId={openRecordId}
+		{collectionId}
+		collectionTitle={view.collection?.title ?? ''}
+		{schema}
+		{rows}
+		{primaryFieldKey}
+		{ydoc}
+		{collections}
+		onClose={() => (openRecordId = null)}
+	/>
+{/if}

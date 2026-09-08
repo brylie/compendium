@@ -296,4 +296,34 @@ describe('CalendarCollectionView', () => {
 		await user.click(screen.getByRole('button', { name: 'Today' }));
 		expect(screen.getByText('March 2026')).toBeInTheDocument();
 	});
+
+	it('opens a scheduled entry in the record detail pane (issue #154)', async () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Cal',
+			schema: [
+				{ key: 'title', label: 'Title', type: 'text' },
+				{ key: 'due', label: 'Due', type: 'date' }
+			]
+		});
+		createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: {
+					title: { type: 'text', value: 'Ship it' },
+					due: { type: 'date', value: '2026-03-20' }
+				}
+			},
+			actor
+		);
+		const user = userEvent.setup();
+		renderCalendar('col-1', { groupBy: 'due' });
+
+		await user.click(await screen.findByRole('button', { name: 'Open record' }));
+
+		const pane = screen.getByRole('region', { name: 'Record details' });
+		expect(within(pane).getByText('Cal')).toBeInTheDocument();
+		expect(within(pane).getByDisplayValue('Ship it')).toBeInTheDocument();
+	});
 });

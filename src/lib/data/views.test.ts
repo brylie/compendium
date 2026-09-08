@@ -8,6 +8,7 @@ import {
 	fieldSummaryLabel,
 	groupBySelectProperty,
 	groupBySwimlaneAndColumn,
+	listRelationBacklinks,
 	primaryFieldDisplayValue,
 	projectRecords,
 	summaryOptionsForType,
@@ -545,6 +546,59 @@ describe('dateKeyForRecord', () => {
 	it('returns undefined when the record has a value of the wrong property type', () => {
 		const r = record('a', { due: { type: 'text', value: 'not a date' } });
 		expect(dateKeyForRecord(r, dueProperty)).toBeUndefined();
+	});
+});
+
+describe('listRelationBacklinks', () => {
+	const blocksProperty: PropertyDefinition = {
+		key: 'blocks',
+		label: 'Blocks',
+		type: 'relation',
+		targetCollectionId: 'collection-1'
+	};
+
+	it('finds every record whose relation value names the target record', () => {
+		const a = record('a', { blocks: { type: 'relation', value: ['target'] } });
+		const b = record('b', { blocks: { type: 'relation', value: ['other'] } });
+		const c = record('c', { blocks: { type: 'relation', value: ['target', 'other'] } });
+		const backlinks = listRelationBacklinks([a, b, c], [blocksProperty], 'target');
+		expect(backlinks).toEqual([
+			{ record: a, property: blocksProperty },
+			{ record: c, property: blocksProperty }
+		]);
+	});
+
+	it('returns one entry per matching relation field when a record has more than one', () => {
+		const blockedByProperty: PropertyDefinition = {
+			key: 'blockedBy',
+			label: 'Blocked by',
+			type: 'relation',
+			targetCollectionId: 'collection-1'
+		};
+		const a = record('a', {
+			blocks: { type: 'relation', value: ['target'] },
+			blockedBy: { type: 'relation', value: ['target'] }
+		});
+		const backlinks = listRelationBacklinks([a], [blocksProperty, blockedByProperty], 'target');
+		expect(backlinks).toEqual([
+			{ record: a, property: blocksProperty },
+			{ record: a, property: blockedByProperty }
+		]);
+	});
+
+	it('returns nothing when the schema has no relation field', () => {
+		const a = record('a', { name: { type: 'text', value: 'x' } });
+		expect(listRelationBacklinks([a], [titleProperty], 'target')).toEqual([]);
+	});
+
+	it('returns nothing when no relation value names the target', () => {
+		const a = record('a', { blocks: { type: 'relation', value: ['other'] } });
+		expect(listRelationBacklinks([a], [blocksProperty], 'target')).toEqual([]);
+	});
+
+	it('ignores a non-relation value under the same key', () => {
+		const a = record('a', { blocks: { type: 'text', value: 'target' } });
+		expect(listRelationBacklinks([a], [blocksProperty], 'target')).toEqual([]);
 	});
 });
 

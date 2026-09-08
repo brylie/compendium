@@ -5,15 +5,18 @@
 	import { untrack } from 'svelte';
 	import TableCollectionView from './TableCollectionView.svelte';
 	import type { ViewConfig } from '$lib/data/views';
+	import type { CollectionMeta } from '$lib/data/types';
 
 	let {
 		collectionId,
 		initialConfig = {},
-		onConfigChange
+		onConfigChange,
+		collections = []
 	}: {
 		collectionId: string;
 		initialConfig?: ViewConfig;
 		onConfigChange?: (config: ViewConfig) => void;
+		collections?: CollectionMeta[];
 	} = $props();
 
 	let config: ViewConfig = $state(untrack(() => initialConfig));
@@ -23,4 +26,9 @@
 	});
 </script>
 
-<TableCollectionView {collectionId} {config} onConfigChange={(next) => (config = next)} />
+<TableCollectionView
+	{collectionId}
+	{config}
+	onConfigChange={(next) => (config = next)}
+	{collections}
+/>

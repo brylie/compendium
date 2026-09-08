@@ -34,6 +34,7 @@
 	import ViewToolbar from './ViewToolbar.svelte';
 	import PromptDialog from './PromptDialog.svelte';
 	import FieldMenu from './FieldMenu.svelte';
+	import RecordDetailPane from './RecordDetailPane.svelte';
 
 	let {
 		collectionId,
@@ -61,6 +62,11 @@
 
 	let optionDialogPropertyKey: string | null = $state(null);
 	let optionDialogError = $state('');
+	// The side-pane surface for a record's full schema/backlinks/attribution
+	// (issue #154) — local, per-instance state, so opening a record never
+	// changes this grid's own filters/scroll/sort, and two embeds of the same
+	// Collection can have different (or no) record open at once.
+	let openRecordId: string | null = $state(null);
 
 	// Resolves this Collection's real shard (#120) and (re)connects whenever
 	// collectionId changes (a component instance can be retargeted to a
@@ -161,6 +167,7 @@
 				<tr
 					class="border-b border-border bg-surface text-xs font-semibold tracking-wider text-muted"
 				>
+					<th class="w-8 px-1 py-2.5"></th>
 					{#each columns as property (property.key)}
 						<th class="border-r border-border/60 px-3.5 py-2.5">
 							<div class="flex items-center justify-between gap-2">
@@ -190,6 +197,17 @@
 			<tbody class="divide-y divide-border">
 				{#each projected as row (row.id)}
 					<tr class="group transition-colors hover:bg-surface/40">
+						<td class="px-1 py-1.5 text-center">
+							<button
+								type="button"
+								onclick={() => (openRecordId = row.id)}
+								class="rounded p-1 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-accent focus-visible:opacity-100"
+								title="Open record"
+								aria-label="Open record"
+							>
+								<Icon name="expand" size={13} />
+							</button>
+						</td>
 						{#each columns as property (property.key)}
 							<td class="border-r border-border/60 p-1.5">
 								<PropertyValueCell
@@ -214,7 +232,7 @@
 					</tr>
 				{:else}
 					<tr>
-						<td colspan={columns.length + 1} class="py-6 text-center text-sm text-muted italic">
+						<td colspan={columns.length + 2} class="py-6 text-center text-sm text-muted italic">
 							No rows in this collection.
 						</td>
 					</tr>
@@ -222,6 +240,7 @@
 			</tbody>
 			<tfoot>
 				<tr class="border-t border-border bg-surface/60 text-xs text-muted">
+					<td></td>
 					{#each columns as property (property.key)}
 						{@const summaryType = config.summaries?.[property.key] ?? 'none'}
 						<td class="border-r border-border/60 px-3.5 py-2">
@@ -295,3 +314,17 @@
 		optionDialogError = '';
 	}}
 />
+
+{#if openRecordId}
+	<RecordDetailPane
+		recordId={openRecordId}
+		{collectionId}
+		collectionTitle={view.collection?.title ?? ''}
+		{schema}
+		{rows}
+		{primaryFieldKey}
+		{ydoc}
+		{collections}
+		onClose={() => (openRecordId = null)}
+	/>
+{/if}

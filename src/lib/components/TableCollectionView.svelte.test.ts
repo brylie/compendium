@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import { createCollection, setPrimaryField } from '$lib/data/collection-ops';
+import { createCollection, getCollection, setPrimaryField } from '$lib/data/collection-ops';
 import { createRecord, getRecord } from '$lib/data/record-ops';
+import type { CollectionMeta } from '$lib/data/types';
 import TableCollectionViewHarness from './TableCollectionViewHarness.svelte';
 
 vi.mock('$app/state', () => ({
@@ -13,9 +14,13 @@ vi.mock('$app/state', () => ({
 }));
 
 let ydoc: Y.Doc;
+const resolveCollectionDocMock = vi.fn<(collectionId: string) => Promise<Y.Doc>>(() =>
+	Promise.resolve(ydoc)
+);
 vi.mock('$lib/client/yjs-client', () => ({
 	getClientDoc: () => ydoc,
-	getShardDoc: () => ydoc
+	getShardDoc: () => ydoc,
+	resolveCollectionDoc: (id: string) => resolveCollectionDocMock(id)
 }));
 
 const actor = { kind: 'human' as const, userId: 'local' };
@@ -23,14 +28,21 @@ const actor = { kind: 'human' as const, userId: 'local' };
 function renderTable(
 	collectionId: string,
 	initialConfig: import('$lib/data/views').ViewConfig = {},
-	onConfigChange?: (config: import('$lib/data/views').ViewConfig) => void
+	onConfigChange?: (config: import('$lib/data/views').ViewConfig) => void,
+	collections: CollectionMeta[] = []
 ) {
-	return render(TableCollectionViewHarness, { collectionId, initialConfig, onConfigChange });
+	return render(TableCollectionViewHarness, {
+		collectionId,
+		initialConfig,
+		onConfigChange,
+		collections
+	});
 }
 
 describe('TableCollectionView', () => {
 	beforeEach(() => {
 		ydoc = new Y.Doc();
+		resolveCollectionDocMock.mockReset().mockImplementation(() => Promise.resolve(ydoc));
 		// TableCollectionView resolves its real shard via a fetch before
 		// connecting — see #120. Stubbed to resolve immediately against the
 		// same test doc.
@@ -332,6 +344,334 @@ describe('TableCollectionView', () => {
 			expect(within(namePicker).queryByText('Sum')).not.toBeInTheDocument();
 			expect(within(duePicker).getByText('Earliest')).toBeInTheDocument();
 			expect(within(namePicker).queryByText('Earliest')).not.toBeInTheDocument();
+		});
+	});
+
+	describe('record detail pane (issue #154)', () => {
+		it('opens a record, shows every schema property, and edits sync to the underlying row', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'Tasks',
+				schema: [
+					{ key: 'name', label: 'Name', type: 'text' },
+					{ key: 'notes', label: 'Notes', type: 'text' }
+				]
+			});
+			const record = createRecord(
+				ydoc,
+				{
+					parentId: 'col-1',
+					properties: {
+						name: { type: 'text', value: 'Ship it' },
+						notes: { type: 'text', value: 'Almost done' }
+					}
+				},
+				actor
+			);
+			const user = userEvent.setup();
+			renderTable('col-1');
+
+			await user.click(await screen.findByRole('button', { name: 'Open record' }));
+
+			const pane = screen.getByRole('region', { name: 'Record details' });
+			expect(within(pane).getByText('Tasks')).toBeInTheDocument();
+			const notesInput = within(pane).getByDisplayValue('Almost done');
+			await user.clear(notesInput);
+			await user.type(notesInput, 'Shipped');
+			await user.tab();
+
+			expect(getRecord(ydoc, record.id)?.properties?.notes).toEqual({
+				type: 'text',
+				value: 'Shipped'
+			});
+			// The originating grid's own cell picks up the same edit live, off
+			// the same Yjs record — no second write path.
+			expect(screen.getAllByDisplayValue('Shipped')).toHaveLength(2);
+		});
+
+		it('shows createdBy/lastEditedBy attribution', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'Tasks',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { name: { type: 'text', value: 'Ship it' } } },
+				actor
+			);
+			const user = userEvent.setup();
+			renderTable('col-1');
+
+			await user.click(await screen.findByRole('button', { name: 'Open record' }));
+
+			const pane = screen.getByRole('region', { name: 'Record details' });
+			expect(within(pane).getByText(/^Created by You/)).toBeInTheDocument();
+			expect(within(pane).getByText(/^Last edited by You/)).toBeInTheDocument();
+		});
+
+		it('closes via its close button', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'Tasks',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			createRecord(ydoc, { parentId: 'col-1', properties: {} }, actor);
+			const user = userEvent.setup();
+			renderTable('col-1');
+
+			await user.click(await screen.findByRole('button', { name: 'Open record' }));
+			expect(screen.getByRole('region', { name: 'Record details' })).toBeInTheDocument();
+
+			await user.click(screen.getByRole('button', { name: 'Close record details' }));
+			expect(screen.queryByRole('region', { name: 'Record details' })).not.toBeInTheDocument();
+		});
+
+		it('closes on Escape', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'Tasks',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			createRecord(ydoc, { parentId: 'col-1', properties: {} }, actor);
+			const user = userEvent.setup();
+			renderTable('col-1');
+
+			await user.click(await screen.findByRole('button', { name: 'Open record' }));
+			expect(screen.getByRole('region', { name: 'Record details' })).toBeInTheDocument();
+
+			await user.keyboard('{Escape}');
+			expect(screen.queryByRole('region', { name: 'Record details' })).not.toBeInTheDocument();
+		});
+
+		it('shows same-collection relation backlinks under "Referenced by"', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'Tasks',
+				schema: [
+					{ key: 'name', label: 'Name', type: 'text' },
+					{
+						key: 'blockedBy',
+						label: 'Blocked by',
+						type: 'relation',
+						targetCollectionId: 'col-1'
+					}
+				]
+			});
+			const target = createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { name: { type: 'text', value: 'Design' } } },
+				actor
+			);
+			createRecord(
+				ydoc,
+				{
+					parentId: 'col-1',
+					properties: {
+						name: { type: 'text', value: 'Build' },
+						blockedBy: { type: 'relation', value: [target.id] }
+					}
+				},
+				actor
+			);
+			const user = userEvent.setup();
+			renderTable('col-1');
+
+			const openButtons = await screen.findAllByRole('button', { name: 'Open record' });
+			// "Design" is the first row created, and rows render in creation
+			// order — open its own pane to see who references it.
+			await user.click(openButtons[0]);
+
+			const pane = screen.getByRole('region', { name: 'Record details' });
+			expect(within(pane).getByText('Referenced by')).toBeInTheDocument();
+			// Scoped to the backlinks list specifically — "Blocked by" also
+			// appears as this record's own (empty) property label in its
+			// property list above, which "Referenced by" must not be confused
+			// with.
+			const backlinksList = within(pane).getByRole('list');
+			expect(within(backlinksList).getByText('Build')).toBeInTheDocument();
+			expect(within(backlinksList).getByText('Blocked by')).toBeInTheDocument();
+		});
+
+		it('resolves and shows a backlink from a different Collection whose schema targets this one', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'Projects',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			createCollection(ydoc, {
+				id: 'col-2',
+				title: 'Tasks',
+				schema: [
+					{ key: 'title', label: 'Title', type: 'text' },
+					{
+						key: 'project',
+						label: 'Project',
+						type: 'relation',
+						targetCollectionId: 'col-1'
+					}
+				]
+			});
+			const project = createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { name: { type: 'text', value: 'Website' } } },
+				actor
+			);
+			createRecord(
+				ydoc,
+				{
+					parentId: 'col-2',
+					properties: {
+						title: { type: 'text', value: 'Design homepage' },
+						project: { type: 'relation', value: [project.id] }
+					}
+				},
+				actor
+			);
+			const user = userEvent.setup();
+			renderTable('col-1', {}, undefined, [
+				getCollection(ydoc, 'col-1')!,
+				getCollection(ydoc, 'col-2')!
+			]);
+
+			await user.click(await screen.findByRole('button', { name: 'Open record' }));
+
+			const pane = screen.getByRole('region', { name: 'Record details' });
+			expect(await within(pane).findByText('Referenced by')).toBeInTheDocument();
+			const backlinksList = within(pane).getByRole('list');
+			expect(await within(backlinksList).findByText('Design homepage')).toBeInTheDocument();
+			expect(within(backlinksList).getByText('Tasks · Project')).toBeInTheDocument();
+		});
+
+		it('shows a load error for a candidate Collection whose shard fails to resolve', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'Projects',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			createCollection(ydoc, {
+				id: 'col-2',
+				title: 'Tasks',
+				schema: [
+					{
+						key: 'project',
+						label: 'Project',
+						type: 'relation',
+						targetCollectionId: 'col-1'
+					}
+				]
+			});
+			createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { name: { type: 'text', value: 'Website' } } },
+				actor
+			);
+			resolveCollectionDocMock.mockImplementation((id: string) =>
+				id === 'col-2' ? Promise.reject(new Error('shard unavailable')) : Promise.resolve(ydoc)
+			);
+			const user = userEvent.setup();
+			renderTable('col-1', {}, undefined, [
+				getCollection(ydoc, 'col-1')!,
+				getCollection(ydoc, 'col-2')!
+			]);
+
+			await user.click(await screen.findByRole('button', { name: 'Open record' }));
+
+			const pane = screen.getByRole('region', { name: 'Record details' });
+			expect(await within(pane).findByText("Couldn't load Tasks")).toBeInTheDocument();
+		});
+
+		it('deletes the record from its own "Delete record" button', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'Tasks',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			const record = createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { name: { type: 'text', value: 'Ship it' } } },
+				actor
+			);
+			const user = userEvent.setup();
+			renderTable('col-1');
+
+			await user.click(await screen.findByRole('button', { name: 'Open record' }));
+			await user.click(screen.getByRole('button', { name: 'Delete record' }));
+
+			expect(getRecord(ydoc, record.id)).toBeUndefined();
+			expect(screen.queryByRole('region', { name: 'Record details' })).not.toBeInTheDocument();
+		});
+
+		it('shows a deleted-record state instead of closing when the open record is removed elsewhere', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'Tasks',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			const record = createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { name: { type: 'text', value: 'Ship it' } } },
+				actor
+			);
+			const user = userEvent.setup();
+			renderTable('col-1');
+
+			await user.click(await screen.findByRole('button', { name: 'Open record' }));
+			await user.click(screen.getByRole('button', { name: 'Delete row' }));
+
+			const pane = screen.getByRole('region', { name: 'Record details' });
+			expect(within(pane).getByText('This record was deleted.')).toBeInTheDocument();
+			expect(getRecord(ydoc, record.id)).toBeUndefined();
+		});
+
+		it('adds a select option through the pane\'s own "+ add option" dialog', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'Tasks',
+				schema: [
+					{ key: 'name', label: 'Name', type: 'text' },
+					{ key: 'status', label: 'Status', type: 'select', options: [] }
+				]
+			});
+			createRecord(ydoc, { parentId: 'col-1', properties: {} }, actor);
+			const user = userEvent.setup();
+			renderTable('col-1');
+
+			await user.click(await screen.findByRole('button', { name: 'Open record' }));
+			const pane = screen.getByRole('region', { name: 'Record details' });
+
+			await user.click(within(pane).getByTitle('Add option'));
+			await user.type(screen.getByLabelText('Option name'), 'Done');
+			await user.click(
+				within(screen.getByRole('dialog')).getByRole('button', { name: 'Add option' })
+			);
+
+			expect(within(pane).getByText('Done')).toBeInTheDocument();
+		});
+
+		it("dismisses the pane's select-option dialog via Cancel with no option added", async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'Tasks',
+				schema: [
+					{ key: 'name', label: 'Name', type: 'text' },
+					{ key: 'status', label: 'Status', type: 'select', options: [] }
+				]
+			});
+			createRecord(ydoc, { parentId: 'col-1', properties: {} }, actor);
+			const user = userEvent.setup();
+			renderTable('col-1');
+
+			await user.click(await screen.findByRole('button', { name: 'Open record' }));
+			const pane = screen.getByRole('region', { name: 'Record details' });
+
+			await user.click(within(pane).getByTitle('Add option'));
+			await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+
+			expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+			expect(getCollection(ydoc, 'col-1')?.schema.find((p) => p.key === 'status')?.options).toEqual(
+				[]
+			);
 		});
 	});
 });

@@ -569,4 +569,39 @@ describe('BoardCollectionView', () => {
 		await user.selectOptions(groupSelect, 'priority');
 		expect(latestConfig).toMatchObject({ groupBy: 'priority', swimlaneBy: undefined });
 	});
+
+	it('opens a card in the record detail pane (issue #154)', async () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Board',
+			schema: [
+				{
+					key: 'status',
+					label: 'Status',
+					type: 'select',
+					options: [{ id: 'todo', label: 'To do' }]
+				},
+				{ key: 'notes', label: 'Notes', type: 'text' }
+			]
+		});
+		createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: {
+					status: { type: 'select', value: 'todo' },
+					notes: { type: 'text', value: 'Ship it' }
+				}
+			},
+			actor
+		);
+		const user = userEvent.setup();
+		renderBoard('col-1');
+
+		await user.click(await screen.findByRole('button', { name: 'Open record' }));
+
+		const pane = screen.getByRole('region', { name: 'Record details' });
+		expect(within(pane).getByText('Board')).toBeInTheDocument();
+		expect(within(pane).getByDisplayValue('Ship it')).toBeInTheDocument();
+	});
 });
