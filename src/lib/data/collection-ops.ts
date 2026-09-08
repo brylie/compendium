@@ -80,6 +80,58 @@ export function appendCollectionField(doc: Y.Doc, id: string, field: PropertyDef
 	});
 }
 
+/**
+ * Inserts a new field immediately before/after `referenceKey`, reading the
+ * current schema from Yjs inside the same transaction rather than trusting a
+ * caller-supplied snapshot — same race `appendCollectionField` guards
+ * against (issue #203), here for FieldMenu's "insert left/right".
+ */
+export function insertCollectionField(
+	doc: Y.Doc,
+	collectionId: string,
+	referenceKey: string,
+	direction: 'left' | 'right',
+	field: PropertyDefinition
+): void {
+	const ymeta = collectionsMap(doc).get(collectionId);
+	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
+	doc.transact(() => {
+		const schema = ymeta.get('schema') ?? [];
+		const index = schema.findIndex((p) => p.key === referenceKey);
+		if (index === -1) throw new NotFoundError(`Property ${referenceKey} not found`);
+		const insertAt = direction === 'left' ? index : index + 1;
+		ymeta.set('schema', [...schema.slice(0, insertAt), field, ...schema.slice(insertAt)]);
+	});
+}
+
+/**
+ * Swaps the field identified by `propertyKey` with its neighbor in
+ * `direction` (-1 left/up, 1 right/down), reading the current schema from
+ * Yjs inside the same transaction rather than trusting a caller-supplied
+ * snapshot — same race `appendCollectionField` guards against (issue #203),
+ * here for FieldManagerDialog's reorder buttons. A no-op if the move would
+ * go out of bounds (already at that edge of the schema).
+ */
+export function moveCollectionField(
+	doc: Y.Doc,
+	collectionId: string,
+	propertyKey: string,
+	direction: -1 | 1
+): void {
+	const ymeta = collectionsMap(doc).get(collectionId);
+	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
+	doc.transact(() => {
+		const schema = ymeta.get('schema') ?? [];
+		const index = schema.findIndex((p) => p.key === propertyKey);
+		if (index === -1) throw new NotFoundError(`Property ${propertyKey} not found`);
+		const target = index + direction;
+		if (target < 0 || target >= schema.length) return;
+		const next = [...schema];
+		[next[index], next[target]] = [next[target], next[index]];
+		ymeta.set('schema', next);
+	});
+}
+
 // A `relation` value is a list of record IDs with no inherent display string
 // of its own (data-model.md's PropertyValue — resolving it to a title would
 // mean reaching into other records), so it's the one property type that
