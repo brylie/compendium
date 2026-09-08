@@ -55,7 +55,20 @@
 		() => collection.id
 	);
 	const titleProperty = $derived(resolvePrimaryField(view.schema, view.primaryFieldKey));
-	const backlinks = $derived(listRelationBacklinks(view.rows, view.schema, targetRecordId));
+	// useCollectionView retains its last-read snapshot when its own getDoc
+	// returns undefined (by design, for a caller that wants to freeze rather
+	// than reset — see its own doc comment), so the resolvedFor gate above
+	// only stops a *fresh* read; view.rows/view.schema can still be the
+	// *previous* collection's data for one tick after collection.id changes.
+	// Re-checking view.collection?.id here (not just resolvedFor) is what
+	// keeps a mid-retarget render from pairing a stale snapshot's backlinks
+	// with this component's already-updated collection.title/id in the
+	// markup below.
+	const backlinks = $derived(
+		resolvedFor === collection.id && view.collection?.id === collection.id
+			? listRelationBacklinks(view.rows, view.schema, targetRecordId)
+			: []
+	);
 
 	function titleFor(record: WorkspaceRecord): string {
 		return (
