@@ -337,6 +337,44 @@ export function dateKeyForRecord(
 	return value.value.slice(0, 10);
 }
 
+export interface RelationBacklink {
+	record: WorkspaceRecord;
+	property: PropertyDefinition;
+}
+
+/**
+ * Every record in `records` whose `relation`-type `property` value names
+ * `targetRecordId` — the reverse direction of a `relation` field's own
+ * forward value (record-detail-pane.md's "backlinks" section, issue #154).
+ * A relation field can target any Collection (`targetCollectionId`), not
+ * just its own, so a caller scans one Collection's already-loaded
+ * `records`/`schema` at a time: the pane's own Collection for a same-
+ * Collection (often self-referencing) relation, and — only for a Collection
+ * whose schema actually has a relation field pointing at the pane's
+ * Collection — that other Collection's own records, resolved separately
+ * (see RecordBacklinkSource.svelte). Pure and read-only, like every other
+ * function in this module: it never mutates a record or the relation value
+ * it matched against.
+ */
+export function listRelationBacklinks(
+	records: WorkspaceRecord[],
+	schema: PropertyDefinition[],
+	targetRecordId: string
+): RelationBacklink[] {
+	const relationFields = schema.filter((p) => p.type === 'relation');
+	if (relationFields.length === 0) return [];
+	const backlinks: RelationBacklink[] = [];
+	for (const record of records) {
+		for (const property of relationFields) {
+			const value = record.properties?.[property.key];
+			if (value?.type === 'relation' && value.value.includes(targetRecordId)) {
+				backlinks.push({ record, property });
+			}
+		}
+	}
+	return backlinks;
+}
+
 // Structural equality over ViewConfig's own fields (order-insensitive where
 // order isn't semantically meaningful) — the dirty/draft-vs-saved check
 // CollectionViewBlock uses to decide whether a viewer's local edits differ

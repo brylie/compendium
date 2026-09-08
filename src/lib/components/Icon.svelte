@@ -55,7 +55,8 @@
 			| 'columns'
 			| 'convert'
 			| 'list-view'
-			| 'unlink';
+			| 'unlink'
+			| 'expand';
 		size?: number;
 		class?: string;
 	} = $props();
@@ -226,5 +227,9 @@
 	{:else if name === 'unlink'}
 		<path d="M8.5 12.5a3.5 3.5 0 0 0 5 0l1-1M11.5 7.5a3.5 3.5 0 0 0-5 0l-1 1" />
 		<path d="M3 3l14 14" />
+	{:else if name === 'expand'}
+		<path
+			d="M3 7.5V4a1 1 0 0 1 1-1h3.5M12.5 3H16a1 1 0 0 1 1 1v3.5M17 12.5V16a1 1 0 0 1-1 1h-3.5M7.5 17H4a1 1 0 0 1-1-1v-3.5"
+		/>
 	{/if}
 </svg>

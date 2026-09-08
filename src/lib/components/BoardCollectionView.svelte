@@ -32,6 +32,7 @@
 	import PropertyValueCell from './PropertyValueCell.svelte';
 	import ViewToolbar from './ViewToolbar.svelte';
 	import PromptDialog from './PromptDialog.svelte';
+	import RecordDetailPane from './RecordDetailPane.svelte';
 
 	let {
 		collectionId,
@@ -52,6 +53,10 @@
 	let newGroupingPropertyLabel = $state('Status');
 	let optionDialogPropertyKey: string | null = $state(null);
 	let optionDialogError = $state('');
+	// The side-pane surface for a card's full schema/backlinks/attribution
+	// (issue #154) — local, per-instance state, same as TableCollectionView's
+	// own openRecordId.
+	let openRecordId: string | null = $state(null);
 
 	// Auto-picking a default groupBy is attempted at most once per
 	// collectionId, not on every refresh — the hook's snapshot callback fires
@@ -445,15 +450,26 @@
 								{:else}
 									<span class="text-sm font-medium text-fg">{cardTitle(row)}</span>
 								{/if}
-								<button
-									type="button"
-									onclick={() => removeCard(row.id)}
-									class="p-0.5 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-500"
-									title="Delete card"
-									aria-label="Delete card"
-								>
-									<Icon name="trash" size={12} />
-								</button>
+								<div class="flex flex-shrink-0 items-center gap-0.5">
+									<button
+										type="button"
+										onclick={() => (openRecordId = row.id)}
+										class="p-0.5 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-accent"
+										title="Open record"
+										aria-label="Open record"
+									>
+										<Icon name="expand" size={12} />
+									</button>
+									<button
+										type="button"
+										onclick={() => removeCard(row.id)}
+										class="p-0.5 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-500"
+										title="Delete card"
+										aria-label="Delete card"
+									>
+										<Icon name="trash" size={12} />
+									</button>
+								</div>
 							</div>
 							<label class="sr-only" for="move-{row.id}">Move {cardTitle(row)} to column</label>
 							<select
@@ -527,3 +543,17 @@
 		optionDialogError = '';
 	}}
 />
+
+{#if openRecordId}
+	<RecordDetailPane
+		recordId={openRecordId}
+		{collectionId}
+		collectionTitle={view.collection?.title ?? ''}
+		{schema}
+		{rows}
+		{primaryFieldKey}
+		{ydoc}
+		{collections}
+		onClose={() => (openRecordId = null)}
+	/>
+{/if}
