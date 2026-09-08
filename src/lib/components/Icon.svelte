@@ -54,7 +54,8 @@
 			| 'child-pages'
 			| 'columns'
 			| 'convert'
-			| 'list-view';
+			| 'list-view'
+			| 'unlink';
 		size?: number;
 		class?: string;
 	} = $props();
@@ -222,5 +223,8 @@
 		<circle cx="4" cy="10" r="1" fill="currentColor" stroke="none" />
 		<circle cx="4" cy="14.5" r="1" fill="currentColor" stroke="none" />
 		<path d="M7.5 5.5h9M7.5 10h9M7.5 14.5h6" />
+	{:else if name === 'unlink'}
+		<path d="M8.5 12.5a3.5 3.5 0 0 0 5 0l1-1M11.5 7.5a3.5 3.5 0 0 0-5 0l-1 1" />
+		<path d="M3 3l14 14" />
 	{/if}
 </svg>

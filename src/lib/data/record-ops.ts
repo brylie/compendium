@@ -505,6 +505,110 @@ export function setRecordReferencedId(
 	});
 }
 
+// Neither of detachSyncedBlock's blockType/content copy steps below is safe
+// for these: a container has no content Y.Text at all (createRecord never
+// allocates one — see applyDocumentKindFields) and, more importantly, needs
+// its own childRecordIds array to be a valid columns/column block at all —
+// blindly copying just the blockType would produce a broken container with
+// no children. The "Set target ID" dialog accepts any pasted record id with
+// no kind check, so this has to be guarded here rather than assumed away.
+const UNDETACHABLE_SOURCE_BLOCK_TYPES: ReadonlySet<BlockType> = new Set(['columns', 'column']);
+
+/**
+ * Resolves a synced_block's referencedRecordId to the first *non*-synced_block
+ * record in the chain — a synced_block can (unusually, but the "Set target
+ * ID" dialog doesn't prevent it) point at another synced_block, and copying
+ * that wrapper's own blockType/content as-is would just produce a second
+ * unconfigured synced_block rather than the real independent content detach
+ * is supposed to produce. Bounded by `seen` against a reference cycle (A
+ * pointing at B pointing back at A); returns undefined once the chain
+ * breaks, cycles, or the pasted id never resolved to anything — same as an
+ * ordinary broken reference, which detachSyncedBlock already handles by
+ * falling back to an empty paragraph.
+ */
+function resolveSyncedBlockSource(doc: Y.Doc, id: string): WorkspaceRecord | undefined {
+	const seen = new Set<string>();
+	let current = getRecord(doc, id);
+	while (current?.blockType === 'synced_block') {
+		if (seen.has(current.id) || !current.referencedRecordId) return undefined;
+		seen.add(current.id);
+		current = getRecord(doc, current.referencedRecordId);
+	}
+	return current;
+}
+
+/**
+ * Breaks a synced_block instance out of its sync relationship (issue #153's
+ * "detach to independent copy") — bakes the source's *current* blockType,
+ * content, and full optional-field configuration (checked/collapsed/
+ * calloutStyle/referencedRecordId/viewConfig/childPagesDepth/fullWidth, the
+ * same set duplicateRecordInto copies for an ordinary record duplication)
+ * into the instance's own (previously unused — see createRecord's content
+ * Y.Text, always allocated for a non-container block regardless of
+ * blockType) fields, then clears the *former* sync-target referencedRecordId
+ * (re-set immediately after if the source itself carries its own, e.g. a
+ * page_link/collection_view/child_pages source). The instance keeps its own
+ * id, so anything already pointing at it (a copied block link, an undo
+ * entry) keeps working; only its relationship to the former source is gone,
+ * with no reference left to go stale if that source is later edited or
+ * deleted.
+ *
+ * A source that no longer resolves (deleted, never set, a reference cycle,
+ * or — see UNDETACHABLE_SOURCE_BLOCK_TYPES above — a columns/column
+ * container this function can't safely copy) detaches to an empty paragraph
+ * rather than throwing: "detach" is meant as an escape hatch, including from
+ * a synced_block whose target is already broken.
+ */
+export function detachSyncedBlock(doc: Y.Doc, id: string, actor: ActorId): WorkspaceRecord {
+	const yrecord = recordsMap(doc).get(id);
+	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
+	if (yrecord.get('blockType') !== 'synced_block') {
+		throw new ValidationError('detachSyncedBlock can only be called on a synced_block record.');
+	}
+
+	const sourceId = yrecord.get('referencedRecordId');
+	const resolved = sourceId ? resolveSyncedBlockSource(doc, sourceId) : undefined;
+	const source =
+		resolved && !UNDETACHABLE_SOURCE_BLOCK_TYPES.has(resolved.blockType ?? 'paragraph')
+			? resolved
+			: undefined;
+	const sourceText = source ? getRecordYText(doc, source.id) : undefined;
+
+	return doc.transact(() => {
+		yrecord.set('blockType', source?.blockType ?? 'paragraph');
+		// Cleared unconditionally, then re-set below by applyOptionalBlockFields
+		// if the source itself carries one (a page_link/collection_view/
+		// child_pages source) — otherwise this detach must not leave the
+		// instance's *former* sync-target reference behind.
+		yrecord.delete('referencedRecordId');
+		yrecord.set('lastEditedBy', actor);
+		yrecord.set('lastEditedAt', Date.now());
+		// Same field set duplicateRecordInto passes to createRecord for a full
+		// record copy — reused here so detaching from a page_link/
+		// collection_view/child_pages source also carries over the
+		// configuration that makes that block type actually work (its
+		// referencedRecordId/viewConfig/childPagesDepth), not just its
+		// blockType label (CodeRabbit finding on this PR: detaching such a
+		// source previously produced an unconfigured block of that type).
+		if (source) {
+			applyOptionalBlockFields(yrecord, {
+				checked: source.checked,
+				collapsed: source.collapsed,
+				referencedRecordId: source.referencedRecordId,
+				viewConfig: source.viewConfig,
+				calloutStyle: source.calloutStyle,
+				childPagesDepth: source.childPagesDepth,
+				fullWidth: source.fullWidth
+			});
+		}
+
+		const ownText = yrecord.get('content');
+		if (sourceText && ownText) applyRichTextToYText(ownText, yTextToRichText(sourceText));
+
+		return readRecord(yrecord);
+	});
+}
+
 /**
  * Replaces a collection_view block's entire view type + filters/sort/
  * visible-properties/grouping-property config — for an outright reconfigure
