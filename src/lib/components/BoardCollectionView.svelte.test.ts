@@ -8,7 +8,12 @@ import {
 	setPrimaryField,
 	updateCollectionSchema
 } from '$lib/data/collection-ops';
-import { createRecord, getRecord } from '$lib/data/record-ops';
+import {
+	createRecord,
+	deleteRecord,
+	getRecord,
+	updateRecordProperties
+} from '$lib/data/record-ops';
 import type { ViewConfig } from '$lib/data/views';
 import BoardCollectionViewHarness from './BoardCollectionViewHarness.svelte';
 
@@ -603,5 +608,90 @@ describe('BoardCollectionView', () => {
 		const pane = screen.getByRole('region', { name: 'Record details' });
 		expect(within(pane).getByText('Board')).toBeInTheDocument();
 		expect(within(pane).getByDisplayValue('Ship it')).toBeInTheDocument();
+	});
+
+	describe('screen-reader announcements for remote changes (issue #167)', () => {
+		const remoteActor = { kind: 'agent' as const, agentId: 'a1', name: 'Claude' };
+
+		function boardSchema() {
+			return [
+				{
+					key: 'status',
+					label: 'Status',
+					type: 'select' as const,
+					options: [
+						{ id: 'todo', label: 'To do' },
+						{ id: 'done', label: 'Done' }
+					]
+				}
+			];
+		}
+
+		it('announces a remote card add, but not a local one', async () => {
+			createCollection(ydoc, { id: 'col-1', title: 'Board', schema: boardSchema() });
+			renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
+			const liveRegion = await screen.findByRole('status');
+			await screen.findByText('To do');
+
+			createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { status: { type: 'select', value: 'todo' } } },
+				actor
+			);
+			await screen.findByText('Untitled');
+			expect(liveRegion).not.toHaveTextContent('added a card');
+
+			createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { status: { type: 'select', value: 'todo' } } },
+				remoteActor
+			);
+			await vi.waitFor(() => expect(liveRegion).toHaveTextContent('Claude added a card'));
+		});
+
+		it('announces a remote move between columns as "moved a card to <column>"', async () => {
+			createCollection(ydoc, { id: 'col-1', title: 'Board', schema: boardSchema() });
+			const card = createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { status: { type: 'select', value: 'todo' } } },
+				remoteActor
+			);
+			renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
+			const liveRegion = await screen.findByRole('status');
+			await screen.findByText('Untitled');
+
+			updateRecordProperties(
+				ydoc,
+				card.id,
+				{ status: { type: 'select', value: 'done' } },
+				remoteActor
+			);
+			await vi.waitFor(() => expect(liveRegion).toHaveTextContent('Claude moved a card to Done'));
+		});
+
+		it('announces an unattributed remote removal but stays silent for a local delete-button click', async () => {
+			createCollection(ydoc, { id: 'col-1', title: 'Board', schema: boardSchema() });
+			const localCard = createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { status: { type: 'select', value: 'todo' } } },
+				actor
+			);
+			const remoteCard = createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { status: { type: 'select', value: 'todo' } } },
+				remoteActor
+			);
+			const user = userEvent.setup();
+			renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
+			const liveRegion = await screen.findByRole('status');
+			await screen.findAllByText('Untitled');
+
+			await user.click((await screen.findAllByRole('button', { name: 'Delete card' }))[0]);
+			expect(getRecord(ydoc, localCard.id)).toBeUndefined();
+			expect(liveRegion).not.toHaveTextContent('was removed');
+
+			deleteRecord(ydoc, remoteCard.id);
+			await vi.waitFor(() => expect(liveRegion).toHaveTextContent('A card was removed'));
+		});
 	});
 });

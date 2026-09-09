@@ -3,7 +3,12 @@ import { render, screen, fireEvent, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import { createCollection, getCollection } from '$lib/data/collection-ops';
-import { createRecord, getRecord } from '$lib/data/record-ops';
+import {
+	createRecord,
+	deleteRecord,
+	getRecord,
+	updateRecordProperties
+} from '$lib/data/record-ops';
 import type { ViewConfig } from '$lib/data/views';
 import CalendarCollectionViewHarness from './CalendarCollectionViewHarness.svelte';
 
@@ -325,5 +330,86 @@ describe('CalendarCollectionView', () => {
 		const pane = screen.getByRole('region', { name: 'Record details' });
 		expect(within(pane).getByText('Cal')).toBeInTheDocument();
 		expect(within(pane).getByDisplayValue('Ship it')).toBeInTheDocument();
+	});
+
+	describe('screen-reader announcements for remote changes (issue #167)', () => {
+		const remoteActor = { kind: 'agent' as const, agentId: 'a1', name: 'Claude' };
+
+		function calendarSchema() {
+			return [{ key: 'due', label: 'Due', type: 'date' as const }];
+		}
+
+		it('announces a remote event add, but not a local one', async () => {
+			createCollection(ydoc, { id: 'col-1', title: 'Cal', schema: calendarSchema() });
+			renderCalendar('col-1', { groupBy: 'due' });
+			const liveRegion = await screen.findByRole('status');
+			await screen.findByText('March 2026');
+
+			createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { due: { type: 'date', value: '2026-03-20' } } },
+				actor
+			);
+			await screen.findByText('Untitled');
+			expect(liveRegion).not.toHaveTextContent('added an event');
+
+			createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { due: { type: 'date', value: '2026-03-21' } } },
+				remoteActor
+			);
+			await vi.waitFor(() => expect(liveRegion).toHaveTextContent('Claude added an event'));
+		});
+
+		it('announces a remote reschedule as "rescheduled an event to <date>"', async () => {
+			createCollection(ydoc, { id: 'col-1', title: 'Cal', schema: calendarSchema() });
+			const entry = createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { due: { type: 'date', value: '2026-03-20' } } },
+				remoteActor
+			);
+			renderCalendar('col-1', { groupBy: 'due' });
+			const liveRegion = await screen.findByRole('status');
+			await screen.findByText('Untitled');
+
+			// System time is frozen for deterministic month-grid assertions in
+			// this file — advance it so the reschedule's lastEditedAt actually
+			// differs from the create's, the signal the announcer diffs on.
+			vi.setSystemTime(new Date('2026-03-15T12:00:05Z'));
+			updateRecordProperties(
+				ydoc,
+				entry.id,
+				{ due: { type: 'date', value: '2026-03-22' } },
+				remoteActor
+			);
+			await vi.waitFor(() =>
+				expect(liveRegion).toHaveTextContent('Claude rescheduled an event to 2026-03-22')
+			);
+		});
+
+		it('announces an unattributed remote removal but stays silent for a local delete-button click', async () => {
+			createCollection(ydoc, { id: 'col-1', title: 'Cal', schema: calendarSchema() });
+			const localEntry = createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { due: { type: 'date', value: '2026-03-20' } } },
+				actor
+			);
+			const remoteEntry = createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { due: { type: 'date', value: '2026-03-21' } } },
+				remoteActor
+			);
+			const user = userEvent.setup();
+			renderCalendar('col-1', { groupBy: 'due' });
+			const liveRegion = await screen.findByRole('status');
+			await screen.findAllByText('Untitled');
+
+			await user.click((await screen.findAllByRole('button', { name: 'Delete entry' }))[0]);
+			expect(getRecord(ydoc, localEntry.id)).toBeUndefined();
+			expect(liveRegion).not.toHaveTextContent('was removed');
+
+			deleteRecord(ydoc, remoteEntry.id);
+			await vi.waitFor(() => expect(liveRegion).toHaveTextContent('An event was removed'));
+		});
 	});
 });

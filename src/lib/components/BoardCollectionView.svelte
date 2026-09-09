@@ -6,6 +6,7 @@
 		useCollectionView,
 		type CollectionViewSnapshot
 	} from '$lib/client/collection-view.svelte';
+	import { useRemoteUpdateAnnouncer } from '$lib/client/collection-announcer.svelte';
 	import {
 		addCollectionSelectOption,
 		appendCollectionField,
@@ -66,7 +67,30 @@
 	// resolvedKey stays undefined).
 	let autoGroupByAttempted = false;
 
+	// Screen-reader live-region diffing for remote card add/remove/move (issue
+	// #167) — the same pattern PR #159 established for the Document editor's
+	// held-block announcements, applied to Yjs record content instead of
+	// Awareness. Shared with Table/Calendar via collection-announcer.svelte.ts.
+	// A moved card (its groupBy value changed between snapshots) announces
+	// which column it landed in rather than the generic "edited a card".
+	const announcer = useRemoteUpdateAnnouncer({
+		noun: 'card',
+		describeEdit: (previous, current) => {
+			if (!groupProperty) return undefined;
+			const priorValue = previous.properties?.[groupProperty.key];
+			const nextValue = current.properties?.[groupProperty.key];
+			const priorOptionId = priorValue?.type === 'select' ? priorValue.value : undefined;
+			const nextOptionId = nextValue?.type === 'select' ? nextValue.value : undefined;
+			if (priorOptionId === nextOptionId) return undefined;
+			const columnLabel =
+				groupProperty.options?.find((o) => o.id === nextOptionId)?.label ??
+				`No ${groupProperty.label}`;
+			return `moved a card to ${columnLabel}`;
+		}
+	});
+
 	function handleSnapshot(snapshot: CollectionViewSnapshot): void {
+		announcer.notify(snapshot.rows);
 		if (autoGroupByAttempted) return;
 		autoGroupByAttempted = true;
 		autoPickGroupBy(snapshot.schema, 'select', config, onConfigChange);
@@ -74,10 +98,13 @@
 
 	// Resolves this Collection's real shard (#120) and (re)connects whenever
 	// collectionId changes — shared by every Collection renderer (issue #189).
+	// Retargeting also resets the announcer, so cards from the previous
+	// Collection aren't diffed against the new one's first snapshot.
 	const connection = useCollectionConnection(
 		() => collectionId,
 		() => {
 			autoGroupByAttempted = false;
+			announcer.reset();
 		}
 	);
 	const ydoc = $derived(connection.ydoc);
@@ -197,6 +224,7 @@
 	}
 
 	function removeCard(id: string): void {
+		announcer.noteLocalRemoval(id);
 		removeCollectionRow(ydoc, id);
 	}
 
@@ -398,6 +426,9 @@
 		+ Add column
 	</button>
 {/if}
+
+<!-- Screen-reader announcements for remote card changes (issue #167) -->
+<div class="sr-only" role="status" aria-live="polite">{announcer.text}</div>
 
 {#snippet columnsRow(cols: BoardColumn[], swimlane?: BoardSwimlane)}
 	<div class="flex gap-4 overflow-x-auto pb-4">
