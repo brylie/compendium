@@ -48,6 +48,7 @@ export const blockTypes = [
 	'synced_block',
 	'page_link',
 	'embed',
+	'bookmark',
 	'collection_view',
 	'child_pages',
 	'columns',
@@ -108,6 +109,28 @@ export type CalloutStyle =
 	// stored — computed text contrast must never go stale relative to a
 	// separately-stored, independently-editable color.
 	| { kind: 'custom'; icon: CalloutIcon; color: string };
+
+// A bookmark block's server-fetched preview state (issue #155) — 'pending'
+// right after a url is set (before the fetch resolves), 'ready' once
+// title/description/favicon/thumbnail were successfully scraped, 'error' when
+// the fetch failed or the page returned no usable metadata. The block's own
+// `url` field is always present once configured regardless of status, so a
+// plain accessible link is never lost even in the 'pending'/'error' states —
+// see markdown-transcoding.md and BookmarkBlock.svelte.
+export type BookmarkFetchStatus = 'pending' | 'ready' | 'error';
+
+// Whole-value, like CalloutStyle: one server-side fetch operation
+// (refreshBookmarkMetadata, services/records.ts) replaces this atomically as
+// a unit, never edited member-by-member the way viewConfig's members are — so
+// there's no per-member merge concern to design around here (data-model.md).
+export interface BookmarkMetadata {
+	status: BookmarkFetchStatus;
+	title?: string;
+	description?: string;
+	faviconUrl?: string;
+	thumbnailUrl?: string;
+	fetchedAt?: number; // epoch ms of the last fetch attempt, success or failure
+}
 
 // How many levels of sub-pages a child_pages block renders below its target
 // Document — 1 (the default, absent value) lists immediate children only, a
@@ -220,6 +243,18 @@ export interface WorkspaceRecord {
 	fullWidth?: boolean;
 	calloutStyle?: CalloutStyle; // for callout blocks only — absent renders the pre-#42 neutral default
 	childPagesDepth?: ChildPagesDepth; // for child_pages blocks only — absent means depth 1 (immediate children only)
+	// for bookmark blocks only (issue #155) — the pasted/typed URL. Absent
+	// means "unconfigured" (the block's own inline URL input is still
+	// showing), the same absence convention page_link/collection_view's
+	// referencedRecordId already use. Set once at creation or via the block's
+	// own UI control (setRecordUrl, record-ops.ts) — there is no MCP retarget
+	// path (see mcp-tools.md), since changing it requires a fresh async
+	// metadata fetch write_record's synchronous contract doesn't accommodate.
+	url?: string;
+	// for bookmark blocks only — the server-fetched preview state. Absent
+	// until a url is set; set to `{status: 'pending'}` immediately when url is
+	// set, then replaced wholesale once the fetch settles.
+	bookmarkMetadata?: BookmarkMetadata;
 	// Present (possibly empty) only on a container block (columns/column,
 	// issue #148) — its own child records' ids, in order, the same role
 	// DocumentMeta.recordIds/CollectionMeta.recordIds play one level up.

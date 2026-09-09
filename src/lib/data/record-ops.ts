@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid';
 import type {
 	ActorId,
 	BlockType,
+	BookmarkMetadata,
 	CalloutStyle,
 	ChildPagesDepth,
 	EmbeddedViewConfig,
@@ -124,6 +125,8 @@ function readRecord(yrecord: TypedYMap<RecordYShape>): WorkspaceRecord {
 		calloutStyle: yrecord.get('calloutStyle'),
 		childPagesDepth: yrecord.get('childPagesDepth'),
 		fullWidth: yrecord.get('fullWidth'),
+		url: yrecord.get('url'),
+		bookmarkMetadata: yrecord.get('bookmarkMetadata'),
 		childRecordIds: yrecord.get('recordIds')?.toArray(),
 		createdBy: yrecord.get('createdBy')!,
 		createdAt: yrecord.get('createdAt')!,
@@ -145,6 +148,8 @@ export interface CreateRecordInput {
 	calloutStyle?: CalloutStyle; // for callout blocks
 	childPagesDepth?: ChildPagesDepth; // for child_pages blocks
 	fullWidth?: boolean; // opts out of the content-width column (issue #150)
+	url?: string; // for bookmark blocks (issue #155)
+	bookmarkMetadata?: BookmarkMetadata; // for bookmark blocks
 }
 
 // Extracted from createRecord purely to keep its own cognitive complexity
@@ -441,6 +446,53 @@ export function setRecordCalloutStyle(
 }
 
 /**
+ * Sets (or reconfigures) a bookmark block's URL (issue #155) — direct UI
+ * mutation, like setRecordCalloutStyle/setRecordChildPagesConfig: there is no
+ * MCP write path for changing an existing bookmark's url (create_record's
+ * initial value is the only MCP-facing way to set one), since a url change
+ * needs a fresh async metadata fetch that write_record's synchronous contract
+ * doesn't accommodate — see services/records.ts. Callers are expected to
+ * follow this with setRecordBookmarkMetadata (passing a pending status) and
+ * then trigger a server-side refresh (the BookmarkBlock.svelte UI flow),
+ * since a url with stale or no metadata is still a valid, just-not-yet-
+ * previewed state.
+ */
+export function setRecordUrl(doc: Y.Doc, id: string, url: string, actor: ActorId): void {
+	const yrecord = recordsMap(doc).get(id);
+	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
+	if (yrecord.get('blockType') !== 'bookmark') {
+		throw new ValidationError(`Record ${id} is not a bookmark block`);
+	}
+	doc.transact(() => {
+		yrecord.set('url', url);
+		yrecord.set('lastEditedBy', actor);
+		yrecord.set('lastEditedAt', Date.now());
+	});
+}
+
+/**
+ * Sets a bookmark block's fetched preview metadata (issue #155) — whole-
+ * value, like setRecordCalloutStyle: one server-side fetch
+ * (refreshBookmarkMetadata, services/records.ts) always replaces this as a
+ * single atomic unit (status plus title/description/favicon/thumbnail
+ * together), never a per-member merge the way viewConfig's members are.
+ */
+export function setRecordBookmarkMetadata(
+	doc: Y.Doc,
+	id: string,
+	metadata: BookmarkMetadata,
+	actor: ActorId
+): void {
+	const yrecord = recordsMap(doc).get(id);
+	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
+	doc.transact(() => {
+		yrecord.set('bookmarkMetadata', metadata);
+		yrecord.set('lastEditedBy', actor);
+		yrecord.set('lastEditedAt', Date.now());
+	});
+}
+
+/**
  * Reconfigures a child_pages block's target Document and/or nesting depth
  * (issue #43) — `referencedRecordId: null` clears an explicit target back to
  * the default ("the current Document"); `depth: null` clears back to the
@@ -541,8 +593,9 @@ function resolveSyncedBlockSource(doc: Y.Doc, id: string): WorkspaceRecord | und
  * Breaks a synced_block instance out of its sync relationship (issue #153's
  * "detach to independent copy") — bakes the source's *current* blockType,
  * content, and full optional-field configuration (checked/collapsed/
- * calloutStyle/referencedRecordId/viewConfig/childPagesDepth/fullWidth, the
- * same set duplicateRecordInto copies for an ordinary record duplication)
+ * calloutStyle/referencedRecordId/viewConfig/childPagesDepth/fullWidth/url/
+ * bookmarkMetadata, the same set duplicateRecordInto copies for an ordinary
+ * record duplication)
  * into the instance's own (previously unused — see createRecord's content
  * Y.Text, always allocated for a non-container block regardless of
  * blockType) fields, then clears the *former* sync-target referencedRecordId
@@ -598,7 +651,9 @@ export function detachSyncedBlock(doc: Y.Doc, id: string, actor: ActorId): Works
 				viewConfig: source.viewConfig,
 				calloutStyle: source.calloutStyle,
 				childPagesDepth: source.childPagesDepth,
-				fullWidth: source.fullWidth
+				fullWidth: source.fullWidth,
+				url: source.url,
+				bookmarkMetadata: source.bookmarkMetadata
 			});
 		}
 
@@ -954,7 +1009,9 @@ function duplicateRecordInto(
 			viewConfig: source.viewConfig,
 			calloutStyle: source.calloutStyle,
 			childPagesDepth: source.childPagesDepth,
-			fullWidth: source.fullWidth
+			fullWidth: source.fullWidth,
+			url: source.url,
+			bookmarkMetadata: source.bookmarkMetadata
 		},
 		actor
 	);

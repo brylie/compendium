@@ -248,7 +248,15 @@ export default defineConfig(
 			// from this codebase's own internally-generated record ids (e.g.
 			// `page.waitForURL(new RegExp(`/doc/${docId}`))`) to match a URL —
 			// never from external input, so no ReDoS surface.
-			'security/detect-non-literal-regexp': 'off'
+			'security/detect-non-literal-regexp': 'off',
+			// link-preview.test.ts (issue #155) exercises the SSRF guard in
+			// $lib/server/link-preview.ts by asserting it rejects literal
+			// loopback/private-range IPv4 addresses and plain-http URLs — the
+			// exact hardcoded-IP/clear-text-protocol literals these two rules
+			// flag are the whole point of that test, not a real deployed
+			// insecure connection.
+			'sonarjs/no-hardcoded-ip': 'off',
+			'sonarjs/no-clear-text-protocols': 'off'
 		}
 	},
 	{

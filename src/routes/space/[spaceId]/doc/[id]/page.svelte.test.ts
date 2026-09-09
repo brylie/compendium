@@ -2442,4 +2442,105 @@ describe('doc/[id] +page', () => {
 		const yrecord = ydoc.getMap('records').get(record.id) as Y.Map<unknown>;
 		expect(yrecord.get('referencedRecordId')).toBe('target-b');
 	});
+
+	describe('bookmark block (issue #155)', () => {
+		function requestUrl(input: RequestInfo | URL): string {
+			if (typeof input === 'string') return input;
+			if (input instanceof URL) return input.href;
+			return input.url;
+		}
+
+		function renderDoc() {
+			return render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: {
+					spaces: [],
+					spaceId: 'space-1',
+					activeSpaceId: 'space-1',
+					documents: [],
+					collections: [],
+					documentId: 'doc-1',
+					title: 'D'
+				}
+			});
+		}
+
+		it('pasting a bare URL into an empty block converts it to a bookmark and requests a preview', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			const { container } = renderDoc();
+			await flushShardResolution();
+
+			const editor = container.querySelector('[contenteditable]') as HTMLElement;
+			const pasteEvent = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+			Object.defineProperty(pasteEvent, 'clipboardData', {
+				value: { getData: () => 'https://example.com/pasted' }
+			});
+			editor.dispatchEvent(pasteEvent);
+			await tick();
+
+			const doc = getDocument(ydoc, 'doc-1')!;
+			const yrecord = ydoc.getMap('records').get(doc.recordIds[0]) as Y.Map<unknown>;
+			expect(yrecord.get('blockType')).toBe('bookmark');
+			expect(yrecord.get('url')).toBe('https://example.com/pasted');
+
+			await vi.waitFor(() => {
+				const fetchMock = vi.mocked(fetch);
+				expect(
+					fetchMock.mock.calls.some(([url]) => requestUrl(url).includes('/api/records/'))
+				).toBe(true);
+			});
+		});
+
+		it('inserting a bookmark via the slash menu and submitting a URL sets it and requests a preview', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			const user = userEvent.setup();
+			const { container } = renderDoc();
+			await flushShardResolution();
+
+			const editor = container.querySelector('[contenteditable]') as HTMLElement;
+			editor.textContent = '/';
+			editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+			await tick();
+			expect(screen.getByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
+
+			await user.click(within(screen.getByRole('listbox')).getByText('Bookmark'));
+			expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+
+			await user.type(screen.getByLabelText('Bookmark URL'), 'example.com/via-slash-menu');
+			await user.click(screen.getByRole('button', { name: 'Add bookmark' }));
+
+			const doc = getDocument(ydoc, 'doc-1')!;
+			const yrecord = ydoc.getMap('records').get(doc.recordIds[0]) as Y.Map<unknown>;
+			expect(yrecord.get('blockType')).toBe('bookmark');
+			expect(yrecord.get('url')).toBe('https://example.com/via-slash-menu');
+		});
+
+		it('falls back to an error status when the bookmark-preview request itself fails', async () => {
+			vi.stubGlobal(
+				'fetch',
+				vi.fn(async (input: RequestInfo | URL) => {
+					if (requestUrl(input).includes('/api/records/')) throw new Error('network down');
+					return { ok: true, json: async () => ({ shardId: 'test-shard' }) };
+				})
+			);
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const bookmark = createRecord(ydoc, { parentId: 'doc-1', blockType: 'bookmark' }, HUMAN);
+			const user = userEvent.setup();
+			renderDoc();
+			await flushShardResolution();
+
+			await user.type(screen.getByLabelText('Bookmark URL'), 'https://example.com/broken');
+			await user.click(screen.getByRole('button', { name: 'Add bookmark' }));
+
+			await vi.waitFor(() => {
+				const yrecord = ydoc.getMap('records').get(bookmark.id) as Y.Map<unknown>;
+				expect((yrecord.get('bookmarkMetadata') as { status: string } | undefined)?.status).toBe(
+					'error'
+				);
+			});
+		});
+	});
 });

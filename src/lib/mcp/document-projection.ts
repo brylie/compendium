@@ -3,6 +3,7 @@ import { richTextToMarkdown } from '$lib/data/markdown-transcode';
 import { resolveParentWorkspaceContext } from '$lib/services/permissions';
 import type { DocumentRecordData } from '$lib/services/documents';
 import type {
+	BookmarkMetadata,
 	CalloutPreset,
 	CalloutStyle,
 	ChildPageNode,
@@ -28,6 +29,8 @@ export interface DocumentRecordView {
 	viewConfig?: EmbeddedViewConfig;
 	calloutStyle?: CalloutStyle;
 	childPagesDepth?: ChildPagesDepth;
+	url?: string;
+	bookmarkMetadata?: BookmarkMetadata;
 	markdown: string;
 	// Present only on a container block (columns/column, issue #148) — its
 	// own children, each projected the same recursive way. A columns
@@ -81,6 +84,27 @@ function renderPageLinkMarkdown(data: DocumentRecordData, doc: Y.Doc): string {
 	return data.content ? richTextToMarkdown(doc, data.content) : '';
 }
 
+// Escapes the characters that would otherwise break `[label](url)` syntax —
+// a minimal escape, not the full inline-mark escaping richTextToMarkdown's
+// own escapeMarkdown does, since a bookmark's title is plain scraped text
+// with no marks of its own to preserve.
+function escapeBookmarkLabel(text: string): string {
+	return text.replace(/\\/g, '\\\\').replace(/[[\]]/g, (c) => `\\${c}`);
+}
+
+// A real Markdown link, not a bracketed placeholder like page_link's `[[Title]]`
+// or collection_view's `[collection view: ...]` — a bookmark's target is a
+// genuine external URL, so `[Title](url)` already *is* the graceful plain-link
+// fallback the PRD requires (issue #155): any Markdown renderer that doesn't
+// know about rich preview cards still shows a normal, clickable link, whether
+// the fetch that would populate Title succeeded, is still pending, or failed.
+function renderBookmarkMarkdown(data: DocumentRecordData): string {
+	if (!data.url) return '[bookmark: unconfigured]';
+	const trimmedTitle = data.bookmarkMetadata?.title?.trim();
+	const label = trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : data.url;
+	return `[${escapeBookmarkLabel(label)}](${data.url})`;
+}
+
 function renderCollectionViewMarkdown(data: DocumentRecordData): string {
 	return data.referencedRecordId
 		? `[collection view: ${data.linkedTargetTitle ?? 'Deleted collection'}]`
@@ -111,6 +135,7 @@ function renderRecordMarkdown(
 	if (isPageLink) return renderPageLinkMarkdown(data, doc);
 	if (isCollectionView) return renderCollectionViewMarkdown(data);
 	if (isChildPages) return renderChildPagesBlockMarkdown(data);
+	if (data.blockType === 'bookmark') return renderBookmarkMarkdown(data);
 	const content = data.content ? richTextToMarkdown(doc, data.content) : '';
 	if (data.blockType === 'callout' && data.calloutStyle?.kind === 'preset') {
 		return renderPresetCalloutMarkdown(data.calloutStyle.preset, content);
@@ -180,6 +205,8 @@ export function projectDocumentRecordView(
 		viewConfig: data.viewConfig,
 		calloutStyle: data.calloutStyle,
 		childPagesDepth: data.childPagesDepth,
+		url: data.url,
+		bookmarkMetadata: data.bookmarkMetadata,
 		markdown,
 		children
 	};

@@ -27,7 +27,8 @@
 			| 'link'
 			| 'table'
 			| 'child-pages'
-			| 'columns';
+			| 'columns'
+			| 'bookmark';
 		aliases: string[];
 	}
 
@@ -203,6 +204,14 @@
 			description: 'Embed content from another source.',
 			icon: 'link',
 			aliases: ['embed', 'media', 'video', 'image', 'url']
+		},
+		{
+			blockType: 'bookmark',
+			category: 'Media',
+			label: 'Bookmark',
+			description: 'Rich preview card for a pasted URL, with a plain-link fallback.',
+			icon: 'bookmark',
+			aliases: ['bookmark', 'smart link', 'link preview', 'url', 'card']
 		}
 	];
 

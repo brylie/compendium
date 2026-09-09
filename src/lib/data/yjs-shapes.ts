@@ -2,6 +2,7 @@ import type * as Y from 'yjs';
 import type {
 	ActorId,
 	BlockType,
+	BookmarkMetadata,
 	CalloutStyle,
 	ChildPagesDepth,
 	PropertyDefinition,
@@ -58,6 +59,8 @@ export interface RecordYShape {
 	calloutStyle?: CalloutStyle;
 	childPagesDepth?: ChildPagesDepth;
 	fullWidth?: boolean;
+	url?: string;
+	bookmarkMetadata?: BookmarkMetadata;
 	// Only present on a container block (columns/column, issue #148) — see
 	// WorkspaceRecord.childRecordIds. Carries the Y.Array itself, the same
 	// "live array, not a snapshot" convention Document/CollectionYShape's own

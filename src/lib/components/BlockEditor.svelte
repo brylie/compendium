@@ -29,6 +29,7 @@
 		onFocusBlock,
 		onSlashKey,
 		onLinkShortcut = () => {},
+		onPasteUrl,
 		isFirstBlock = false,
 		isLastBlock = false,
 		onArrowUpAtStart = () => false,
@@ -50,6 +51,15 @@
 		onFocusBlock: () => void;
 		onSlashKey: () => void;
 		onLinkShortcut?: () => void;
+		// "Pasting a URL offers a rich preview card" (issue #155) — called only
+		// when the clipboard paste is a single bare http(s) URL AND this block
+		// is currently empty, so a URL pasted mid-sentence or into non-empty
+		// text is left as an ordinary paste. Returning true means the caller
+		// converted the block (or is doing so); this component then skips its
+		// own default paste-insertion of the URL text. Omit this prop entirely
+		// (e.g. inside a toggle summary or a synced block) to always fall back
+		// to plain-text paste behavior.
+		onPasteUrl?: (url: string) => boolean;
 		// Cheap short-circuit for the very first/last block in the document —
 		// decided by the parent (it owns block order), not derivable from
 		// this component alone. Not sufficient on its own to know whether a
@@ -188,6 +198,24 @@
 		onInputText();
 
 		if (newText === '/') onSlashKey();
+	}
+
+	// A single bare http(s) URL with no surrounding whitespace/text — the
+	// narrow shape that counts as "pasting a URL" for issue #155's bookmark
+	// conversion. Anything else (a sentence containing a URL, multiple lines,
+	// a non-http(s) scheme) falls through to ordinary paste behavior.
+	const BARE_URL_RE = /^https?:\/\/\S+$/;
+
+	function handlePaste(event: ClipboardEvent): void {
+		if (!onPasteUrl || lastPlainText !== '') return;
+		const text = event.clipboardData?.getData('text/plain')?.trim();
+		if (!text || !BARE_URL_RE.test(text)) return;
+		try {
+			new URL(text);
+		} catch {
+			return;
+		}
+		if (onPasteUrl(text)) event.preventDefault();
 	}
 
 	const SHORTCUT_MARKS: Record<string, keyof TextMarks> = {
@@ -427,6 +455,7 @@
 	aria-placeholder={placeholder || undefined}
 	data-placeholder={placeholder}
 	oninput={handleInput}
+	onpaste={handlePaste}
 	onkeydown={handleKeydown}
 	oncompositionstart={handleCompositionStart}
 	oncompositionend={handleCompositionEnd}
