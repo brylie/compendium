@@ -5,6 +5,16 @@ import type { ViewConfig } from '$lib/data/views';
 import type { CollectionMeta, PropertyDefinition, WorkspaceRecord } from '$lib/data/types';
 
 export interface CollectionViewSnapshot {
+	// The collectionId this particular snapshot was read for — not
+	// necessarily `collection?.id` (undefined until the Collection's own
+	// metadata exists in the doc). Callers that need to tell "a genuinely new
+	// Collection's first snapshot" apart from "a stale snapshot for the
+	// Collection this view is retargeting away from" (issue #167's announcer)
+	// must key off this field, not off when `onReconnect`/`onSnapshot` merely
+	// fired — `ydoc`/the resolved collectionId only catch up once the async
+	// shard lookup in useCollectionConnection resolves, so a snapshot for the
+	// previous Collection can still arrive after retargeting starts.
+	collectionId: string;
 	schema: PropertyDefinition[];
 	rows: WorkspaceRecord[];
 	primaryFieldKey: string | undefined;
@@ -33,7 +43,7 @@ export function useCollectionView(
 	getDoc: () => Y.Doc | undefined,
 	getCollectionId: () => string,
 	onSnapshot?: (snapshot: CollectionViewSnapshot) => void
-): CollectionViewSnapshot {
+): Omit<CollectionViewSnapshot, 'collectionId'> {
 	let schema: PropertyDefinition[] = $state([]);
 	let rows: WorkspaceRecord[] = $state([]);
 	let primaryFieldKey: string | undefined = $state();
@@ -58,6 +68,7 @@ export function useCollectionView(
 			primaryFieldKey = snapshotPrimaryFieldKey;
 			collection = view.collection;
 			onSnapshot?.({
+				collectionId,
 				schema: snapshotSchema,
 				rows: view.records,
 				primaryFieldKey: snapshotPrimaryFieldKey,

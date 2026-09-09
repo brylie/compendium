@@ -1,6 +1,6 @@
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { actorKey, formatActor } from '$lib/data/format';
-import type { WorkspaceRecord } from '$lib/data/types';
+import type { PropertyValue, WorkspaceRecord } from '$lib/data/types';
 import { CURRENT_USER } from './actor';
 
 // Toggled into the announced text below to guarantee a screen reader
@@ -15,6 +15,24 @@ function withArticle(noun: string, capitalize = false): string {
 	const article = /^[aeiou]/i.test(noun) ? 'an' : 'a';
 	const prefix = capitalize ? article[0].toUpperCase() + article.slice(1) : article;
 	return `${prefix} ${noun}`;
+}
+
+/**
+ * Whether two snapshots of the same record differ in a way worth announcing.
+ * Deliberately content-based rather than `lastEditedAt`-based: that field is
+ * `Date.now()` millisecond precision (see `record-ops.ts`), so two distinct
+ * remote edits landing in the same millisecond would otherwise both stamp an
+ * identical timestamp and silently fail to announce the second one.
+ */
+function propertiesChanged(
+	prior?: Record<string, PropertyValue>,
+	current?: Record<string, PropertyValue>
+): boolean {
+	const keys = new Set([...Object.keys(prior ?? {}), ...Object.keys(current ?? {})]);
+	for (const key of keys) {
+		if (JSON.stringify(prior?.[key]) !== JSON.stringify(current?.[key])) return true;
+	}
+	return false;
 }
 
 export interface RemoteUpdateAnnouncerOptions {
@@ -33,12 +51,24 @@ export interface RemoteUpdateAnnouncerOptions {
 export interface RemoteUpdateAnnouncer {
 	/** The live region's current text — empty until the first remote transition this instance observes. */
 	readonly text: string;
-	/** Diffs `rows` against the previously-seen snapshot and updates `text` with any remote transitions found. Call once per useCollectionView onSnapshot. */
-	notify(rows: WorkspaceRecord[]): void;
+	/**
+	 * Diffs `rows` against the previously-seen snapshot for `collectionId` and
+	 * updates `text` with any remote transitions found. Call once per
+	 * `useCollectionView` `onSnapshot`, passing that same callback's
+	 * `snapshot.collectionId` — a change from the last-seen `collectionId` is
+	 * treated as a hard reset (this call's rows just seed the new baseline,
+	 * nothing is announced), the same "first snapshot isn't a transition"
+	 * suppression a brand-new mount gets. This is keyed on the snapshot's own
+	 * `collectionId`, not on when a caller's reconnect/retarget logic merely
+	 * fired, because `useCollectionConnection`'s `ydoc`/resolved collectionId
+	 * only catch up once its async shard lookup resolves — a stray snapshot
+	 * for the Collection being retargeted away from can still arrive after
+	 * retargeting starts, and diffing it against (or as a baseline for) the
+	 * wrong Collection would misattribute every row as added/edited/removed.
+	 */
+	notify(collectionId: string, rows: WorkspaceRecord[]): void;
 	/** Marks `id` as a locally-initiated removal, so the next `notify()` that observes it gone reports it silently rather than as an unattributed remote change. Call synchronously before removing a row/card/event. */
 	noteLocalRemoval(id: string): void;
-	/** Clears tracked state — call when retargeting to a different Collection, so rows from the previous one aren't diffed against the new one's first snapshot. */
-	reset(): void;
 }
 
 function isRemote(actor: WorkspaceRecord['createdBy']): boolean {
@@ -52,7 +82,7 @@ function describeExistingRecord(
 	noun: string,
 	describeEdit: RemoteUpdateAnnouncerOptions['describeEdit']
 ): string | undefined {
-	if (prior.lastEditedAt === record.lastEditedAt) return undefined;
+	if (!propertiesChanged(prior.properties, record.properties)) return undefined;
 	if (!isRemote(record.lastEditedBy)) return undefined;
 	const detail = describeEdit?.(prior, record) ?? `edited ${withArticle(noun)}`;
 	return `${formatActor(record.lastEditedBy)} ${detail}`;
@@ -82,6 +112,7 @@ export function useRemoteUpdateAnnouncer(
 ): RemoteUpdateAnnouncer {
 	let text = $state('');
 	let toggle = false;
+	let lastCollectionId: string | undefined;
 	let previous: SvelteMap<string, WorkspaceRecord> | undefined;
 	let pendingLocalRemovals = new SvelteSet<string>();
 
@@ -95,10 +126,17 @@ export function useRemoteUpdateAnnouncer(
 		get text() {
 			return text;
 		},
-		notify(rows: WorkspaceRecord[]): void {
+		notify(collectionId: string, rows: WorkspaceRecord[]): void {
 			const current = new SvelteMap(rows.map((r) => [r.id, r] as const));
-			if (!previous) {
+			if (collectionId !== lastCollectionId || !previous) {
+				lastCollectionId = collectionId;
 				previous = current;
+				pendingLocalRemovals = new SvelteSet();
+				// A stale announcement from whatever this instance was previously
+				// watching (a different Collection, or nothing yet) must not
+				// linger once the baseline it described no longer applies.
+				text = '';
+				toggle = false;
 				return;
 			}
 
@@ -125,12 +163,6 @@ export function useRemoteUpdateAnnouncer(
 		},
 		noteLocalRemoval(id: string): void {
 			pendingLocalRemovals.add(id);
-		},
-		reset(): void {
-			text = '';
-			toggle = false;
-			previous = undefined;
-			pendingLocalRemovals = new SvelteSet();
 		}
 	};
 }

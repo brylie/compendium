@@ -4,11 +4,7 @@
 	import { formatActor, formatTimestamp } from '$lib/data/format';
 	import { resolvePrimaryField } from '$lib/data/collection-ops';
 	import { listRelationBacklinks, primaryFieldDisplayValue } from '$lib/data/views';
-	import {
-		addCollectionSelectOption,
-		removeCollectionRow,
-		setCollectionCell
-	} from '$lib/client/collection-editor';
+	import { addCollectionSelectOption, setCollectionCell } from '$lib/client/collection-editor';
 	import type {
 		CollectionMeta,
 		PropertyDefinition,
@@ -40,7 +36,8 @@
 		primaryFieldKey,
 		ydoc,
 		collections,
-		onClose
+		onClose,
+		onDelete
 	}: {
 		recordId: string;
 		collectionId: string;
@@ -51,6 +48,12 @@
 		ydoc: Y.Doc | undefined;
 		collections: CollectionMeta[];
 		onClose: () => void;
+		// The caller's own removeRow/removeCard/removeEntry — routed through
+		// rather than calling removeCollectionRow directly, so this delete goes
+		// through the same announcer.noteLocalRemoval bookkeeping issue #167's
+		// screen-reader announcements need to tell "I just deleted this" apart
+		// from a genuine remote removal.
+		onDelete: (recordId: string) => void;
 	} = $props();
 
 	const record = $derived(rows.find((r) => r.id === recordId));
@@ -107,7 +110,7 @@
 	}
 
 	function deleteRecord(): void {
-		removeCollectionRow(ydoc, recordId);
+		onDelete(recordId);
 		onClose();
 	}
 

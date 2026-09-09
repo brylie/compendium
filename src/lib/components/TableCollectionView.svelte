@@ -79,12 +79,7 @@
 	// collectionId changes (a component instance can be retargeted to a
 	// different Collection without remounting, e.g. via CollectionViewBlock's
 	// change-embed flow) — shared by every Collection renderer (issue #189).
-	// Retargeting also resets the announcer, so rows from the previous
-	// Collection aren't diffed against the new one's first snapshot.
-	const connection = useCollectionConnection(
-		() => collectionId,
-		() => announcer.reset()
-	);
+	const connection = useCollectionConnection(() => collectionId);
 	const ydoc = $derived(connection.ydoc);
 	const shardId = $derived(connection.shardId);
 
@@ -96,7 +91,7 @@
 		() => ydoc,
 		() => connection.resolvedCollectionId ?? collectionId,
 		(snapshot) => {
-			announcer.notify(snapshot.rows);
+			announcer.notify(snapshot.collectionId, snapshot.rows);
 			onSnapshot?.(snapshot);
 		}
 	);
@@ -344,5 +339,6 @@
 		{ydoc}
 		{collections}
 		onClose={() => (openRecordId = null)}
+		onDelete={removeRow}
 	/>
 {/if}

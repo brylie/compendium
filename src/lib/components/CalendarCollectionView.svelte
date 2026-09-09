@@ -85,7 +85,7 @@
 	});
 
 	function handleSnapshot(snapshot: CollectionViewSnapshot): void {
-		announcer.notify(snapshot.rows);
+		announcer.notify(snapshot.collectionId, snapshot.rows);
 		if (autoGroupByAttempted) return;
 		autoGroupByAttempted = true;
 		autoPickGroupBy(snapshot.schema, 'date', config, onConfigChange);
@@ -93,13 +93,10 @@
 
 	// Resolves this Collection's real shard (#120) and (re)connects whenever
 	// collectionId changes — shared by every Collection renderer (issue #189).
-	// Retargeting also resets the announcer, so entries from the previous
-	// Collection aren't diffed against the new one's first snapshot.
 	const connection = useCollectionConnection(
 		() => collectionId,
 		() => {
 			autoGroupByAttempted = false;
-			announcer.reset();
 		}
 	);
 	const ydoc = $derived(connection.ydoc);
@@ -497,5 +494,6 @@
 		{ydoc}
 		{collections}
 		onClose={() => (openRecordId = null)}
+		onDelete={removeEntry}
 	/>
 {/if}

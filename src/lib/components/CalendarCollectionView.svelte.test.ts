@@ -372,10 +372,6 @@ describe('CalendarCollectionView', () => {
 			const liveRegion = await screen.findByRole('status');
 			await screen.findByText('Untitled');
 
-			// System time is frozen for deterministic month-grid assertions in
-			// this file — advance it so the reschedule's lastEditedAt actually
-			// differs from the create's, the signal the announcer diffs on.
-			vi.setSystemTime(new Date('2026-03-15T12:00:05Z'));
 			updateRecordProperties(
 				ydoc,
 				entry.id,

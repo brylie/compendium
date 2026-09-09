@@ -5,11 +5,7 @@ import { createCollection, setPrimaryField } from '$lib/data/collection-ops';
 import { createRecord } from '$lib/data/record-ops';
 import type { ViewConfig } from '$lib/data/views';
 import type { PropertyDefinition } from '$lib/data/types';
-import {
-	autoPickGroupBy,
-	useCollectionView,
-	type CollectionViewSnapshot
-} from './collection-view.svelte';
+import { autoPickGroupBy, useCollectionView } from './collection-view.svelte';
 
 const actor = { kind: 'human' as const, userId: 'local' };
 
@@ -28,7 +24,7 @@ describe('useCollectionView', () => {
 		});
 		createRecord(ydoc, { parentId: collection.id, properties: {} }, actor);
 
-		let view!: CollectionViewSnapshot;
+		let view!: ReturnType<typeof useCollectionView>;
 		const destroy = withRoot(() => {
 			view = useCollectionView(
 				() => ydoc,
@@ -49,7 +45,7 @@ describe('useCollectionView', () => {
 		const ydoc = new Y.Doc();
 		const collection = createCollection(ydoc, { title: 'T', schema: [] });
 
-		let view!: CollectionViewSnapshot;
+		let view!: ReturnType<typeof useCollectionView>;
 		const destroy = withRoot(() => {
 			view = useCollectionView(
 				() => ydoc,
@@ -79,7 +75,7 @@ describe('useCollectionView', () => {
 		});
 
 		let active = $state(false);
-		let view!: CollectionViewSnapshot;
+		let view!: ReturnType<typeof useCollectionView>;
 		const destroy = withRoot(() => {
 			view = useCollectionView(
 				() => (active ? ydoc : undefined),
@@ -119,7 +115,7 @@ describe('useCollectionView', () => {
 		});
 
 		let currentId = $state(first.id);
-		let view!: CollectionViewSnapshot;
+		let view!: ReturnType<typeof useCollectionView>;
 		const destroy = withRoot(() => {
 			view = useCollectionView(
 				() => ydoc,
