@@ -7,6 +7,7 @@
 		useCollectionView,
 		type CollectionViewSnapshot
 	} from '$lib/client/collection-view.svelte';
+	import { useRemoteUpdateAnnouncer } from '$lib/client/collection-announcer.svelte';
 	import {
 		addCollectionSelectOption,
 		appendCollectionField,
@@ -66,7 +67,25 @@
 	// resolvedKey stays undefined).
 	let autoGroupByAttempted = false;
 
+	// Screen-reader live-region diffing for remote event add/remove/reschedule
+	// (issue #167) — the same pattern PR #159 established for the Document
+	// editor's held-block announcements, applied to Yjs record content instead
+	// of Awareness. Shared with Table/Board via collection-announcer.svelte.ts.
+	// A rescheduled entry (its date-property value changed between snapshots)
+	// announces the new date rather than the generic "edited an event".
+	const announcer = useRemoteUpdateAnnouncer({
+		noun: 'event',
+		describeEdit: (previous, current) => {
+			if (!dateProperty) return undefined;
+			const priorKey = dateKeyForRecord(previous, dateProperty);
+			const nextKey = dateKeyForRecord(current, dateProperty);
+			if (priorKey === nextKey) return undefined;
+			return nextKey ? `rescheduled an event to ${nextKey}` : `removed the date from an event`;
+		}
+	});
+
 	function handleSnapshot(snapshot: CollectionViewSnapshot): void {
+		announcer.notify(snapshot.collectionId, snapshot.rows);
 		if (autoGroupByAttempted) return;
 		autoGroupByAttempted = true;
 		autoPickGroupBy(snapshot.schema, 'date', config, onConfigChange);
@@ -199,6 +218,7 @@
 	}
 
 	function removeEntry(id: string): void {
+		announcer.noteLocalRemoval(id);
 		removeCollectionRow(ydoc, id);
 	}
 
@@ -444,6 +464,9 @@
 	{/if}
 {/if}
 
+<!-- Screen-reader announcements for remote event changes (issue #167) -->
+<div class="sr-only" role="status" aria-live="polite">{announcer.text}</div>
+
 <PromptDialog
 	open={optionDialogPropertyKey !== null}
 	title="New option"
@@ -471,5 +494,6 @@
 		{ydoc}
 		{collections}
 		onClose={() => (openRecordId = null)}
+		onDelete={removeEntry}
 	/>
 {/if}

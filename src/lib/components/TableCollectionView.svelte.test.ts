@@ -3,7 +3,12 @@ import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import { createCollection, getCollection, setPrimaryField } from '$lib/data/collection-ops';
-import { createRecord, getRecord } from '$lib/data/record-ops';
+import {
+	createRecord,
+	deleteRecord,
+	getRecord,
+	updateRecordProperties
+} from '$lib/data/record-ops';
 import type { CollectionMeta } from '$lib/data/types';
 import TableCollectionViewHarness from './TableCollectionViewHarness.svelte';
 
@@ -672,6 +677,221 @@ describe('TableCollectionView', () => {
 			expect(getCollection(ydoc, 'col-1')?.schema.find((p) => p.key === 'status')?.options).toEqual(
 				[]
 			);
+		});
+	});
+
+	describe('screen-reader announcements for remote changes (issue #167)', () => {
+		const remoteActor = { kind: 'agent' as const, agentId: 'a1', name: 'Claude' };
+
+		it('announces a remote row add and a remote row edit, but not local ones', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'T',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			renderTable('col-1');
+			const liveRegion = await screen.findByRole('status');
+			expect(liveRegion).toHaveTextContent('');
+
+			// A local add (the same actor renderTable's own mutations use) must
+			// stay silent — it's the person looking at the screen, not a remote
+			// change worth announcing.
+			const localRecord = createRecord(ydoc, { parentId: 'col-1', properties: {} }, actor);
+			await screen.findByDisplayValue('');
+			expect(liveRegion).toHaveTextContent('');
+
+			const remoteRecord = createRecord(ydoc, { parentId: 'col-1', properties: {} }, remoteActor);
+			await vi.waitFor(() => expect(liveRegion).toHaveTextContent('Claude added a row'));
+
+			updateRecordProperties(
+				ydoc,
+				localRecord.id,
+				{ name: { type: 'text', value: 'local edit' } },
+				actor
+			);
+			await screen.findByDisplayValue('local edit');
+			expect(liveRegion).not.toHaveTextContent('edited a row');
+
+			updateRecordProperties(
+				ydoc,
+				remoteRecord.id,
+				{ name: { type: 'text', value: 'remote edit' } },
+				remoteActor
+			);
+			await vi.waitFor(() => expect(liveRegion).toHaveTextContent('Claude edited a row'));
+		});
+
+		it('does not announce rows already present when the view first connects', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'T',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			createRecord(ydoc, { parentId: 'col-1', properties: {} }, remoteActor);
+			renderTable('col-1');
+
+			const liveRegion = await screen.findByRole('status');
+			await screen.findByRole('table');
+			expect(liveRegion.textContent).toBe('');
+		});
+
+		it('announces an unattributed remote removal but stays silent for a local delete-button click', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'T',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			const localRecord = createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { name: { type: 'text', value: 'Mine' } } },
+				actor
+			);
+			const remoteRecord = createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { name: { type: 'text', value: 'Theirs' } } },
+				remoteActor
+			);
+			const user = userEvent.setup();
+			renderTable('col-1');
+			const liveRegion = await screen.findByRole('status');
+			const mineInput = await screen.findByDisplayValue('Mine');
+
+			await user.click(
+				within(mineInput.closest('tr')!).getByRole('button', { name: 'Delete row' })
+			);
+			expect(getRecord(ydoc, localRecord.id)).toBeUndefined();
+			expect(liveRegion).not.toHaveTextContent('was removed');
+
+			deleteRecord(ydoc, remoteRecord.id);
+			await vi.waitFor(() => expect(liveRegion).toHaveTextContent('A row was removed'));
+		});
+
+		it('stays silent when a row is deleted from its own record detail pane, not just the grid delete button', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'T',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			const record = createRecord(
+				ydoc,
+				{ parentId: 'col-1', properties: { name: { type: 'text', value: 'Mine' } } },
+				actor
+			);
+			const user = userEvent.setup();
+			renderTable('col-1');
+			const liveRegion = await screen.findByRole('status');
+			await screen.findByDisplayValue('Mine');
+
+			await user.click(await screen.findByRole('button', { name: 'Open record' }));
+			await user.click(screen.getByRole('button', { name: 'Delete record' }));
+
+			expect(getRecord(ydoc, record.id)).toBeUndefined();
+			expect(liveRegion).not.toHaveTextContent('was removed');
+		});
+
+		it('changes the live region text even when two consecutive announcements share identical wording', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'T',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			const recordA = createRecord(ydoc, { parentId: 'col-1', properties: {} }, remoteActor);
+			const recordB = createRecord(ydoc, { parentId: 'col-1', properties: {} }, remoteActor);
+			renderTable('col-1');
+			const liveRegion = await screen.findByRole('status');
+			await screen.findAllByRole('textbox');
+
+			deleteRecord(ydoc, recordA.id);
+			await vi.waitFor(() => expect(liveRegion).toHaveTextContent('A row was removed'));
+			const firstContent = liveRegion.textContent;
+
+			deleteRecord(ydoc, recordB.id);
+			await vi.waitFor(() => expect(liveRegion.textContent).not.toBe(firstContent));
+			// A screen reader only re-announces a live region whose text content
+			// actually changed — same wording twice, no DOM change, would go
+			// silent, which the alternating zero-width-space marker prevents.
+			expect(liveRegion).toHaveTextContent('A row was removed');
+		});
+
+		it('clears a stale announcement when retargeted to a different Collection', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'T1',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			createCollection(ydoc, {
+				id: 'col-2',
+				title: 'T2',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			createRecord(ydoc, { parentId: 'col-2', properties: {} }, remoteActor);
+
+			const { rerender } = renderTable('col-1');
+			const liveRegion = await screen.findByRole('status');
+			await screen.findByText('No rows in this collection.');
+
+			createRecord(ydoc, { parentId: 'col-1', properties: {} }, remoteActor);
+			await vi.waitFor(() => expect(liveRegion).toHaveTextContent('Claude added a row'));
+
+			await rerender({ collectionId: 'col-2' });
+			await screen.findByRole('table');
+			// col-2's pre-existing row must not replay as a fresh "just added"
+			// transition, the same first-snapshot suppression a brand-new mount
+			// gets — and the stale col-1 announcement must not linger either.
+			expect(liveRegion.textContent).toBe('');
+		});
+
+		it('does not misattribute a stray old-Collection update to the new Collection while a retarget is still resolving its shard', async () => {
+			createCollection(ydoc, {
+				id: 'col-1',
+				title: 'T1',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			createCollection(ydoc, {
+				id: 'col-2',
+				title: 'T2',
+				schema: [{ key: 'name', label: 'Name', type: 'text' }]
+			});
+			// A row that already existed in col-2 before this view ever looked at
+			// it — its first real snapshot must not announce this as "added".
+			createRecord(ydoc, { parentId: 'col-2', properties: {} }, remoteActor);
+
+			const { rerender } = renderTable('col-1');
+			const liveRegion = await screen.findByRole('status');
+			await screen.findByText('No rows in this collection.');
+
+			// useCollectionConnection resolves col-2's shard via an async fetch —
+			// hold it open so col-1's own subscription is still the live one
+			// (ydoc/resolvedCollectionId only catch up once that fetch resolves,
+			// see collection-view.svelte.ts) while the retarget is in flight.
+			let resolveFetch!: (value: { ok: true; json: () => Promise<{ shardId: string }> }) => void;
+			const pendingFetch = new Promise<{ ok: true; json: () => Promise<{ shardId: string }> }>(
+				(resolve) => {
+					resolveFetch = resolve;
+				}
+			);
+			vi.stubGlobal(
+				'fetch',
+				vi.fn(() => pendingFetch)
+			);
+
+			await rerender({ collectionId: 'col-2' });
+
+			// A remote mutation on col-1 arrives while col-2's shard lookup is
+			// still pending — still legitimately col-1's own subscription, so
+			// this update is expected to (transiently) announce for col-1.
+			createRecord(ydoc, { parentId: 'col-1', properties: {} }, remoteActor);
+			await vi.waitFor(() => expect(liveRegion).toHaveTextContent('Claude added a row'));
+
+			resolveFetch({ ok: true, json: async () => ({ shardId: 'test-shard' }) });
+			await screen.findByRole('table');
+			// useCollectionView's teardown/re-subscribe + first refresh for col-2
+			// settles asynchronously after the shard resolves.
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			// col-2's pre-existing row must not be reported as freshly added, and
+			// the stray col-1 announcement must not leak into col-2's baseline.
+			expect(liveRegion.textContent).toBe('');
 		});
 	});
 });

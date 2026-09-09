@@ -7,6 +7,7 @@
 		useCollectionView,
 		type CollectionViewSnapshot
 	} from '$lib/client/collection-view.svelte';
+	import { useRemoteUpdateAnnouncer } from '$lib/client/collection-announcer.svelte';
 	import {
 		addCollectionSelectOption,
 		createCollectionRow,
@@ -68,6 +69,12 @@
 	// Collection can have different (or no) record open at once.
 	let openRecordId: string | null = $state(null);
 
+	// Screen-reader live-region diffing for remote row add/remove/edit (issue
+	// #167) — the same pattern PR #159 established for the Document editor's
+	// held-block announcements, applied to Yjs record content instead of
+	// Awareness. Shared with Board/Calendar via collection-announcer.svelte.ts.
+	const announcer = useRemoteUpdateAnnouncer({ noun: 'row' });
+
 	// Resolves this Collection's real shard (#120) and (re)connects whenever
 	// collectionId changes (a component instance can be retargeted to a
 	// different Collection without remounting, e.g. via CollectionViewBlock's
@@ -83,7 +90,10 @@
 	const view = useCollectionView(
 		() => ydoc,
 		() => connection.resolvedCollectionId ?? collectionId,
-		(snapshot) => onSnapshot?.(snapshot)
+		(snapshot) => {
+			announcer.notify(snapshot.collectionId, snapshot.rows);
+			onSnapshot?.(snapshot);
+		}
 	);
 	const schema = $derived(view.schema);
 	const rows = $derived(view.rows);
@@ -97,6 +107,7 @@
 	}
 
 	function removeRow(id: string): void {
+		announcer.noteLocalRemoval(id);
 		removeCollectionRow(ydoc, id);
 	}
 
@@ -298,6 +309,9 @@
 	</div>
 {/if}
 
+<!-- Screen-reader announcements for remote row changes (issue #167) -->
+<div class="sr-only" role="status" aria-live="polite">{announcer.text}</div>
+
 <PromptDialog
 	open={optionDialogPropertyKey !== null}
 	title="New option"
@@ -325,5 +339,6 @@
 		{ydoc}
 		{collections}
 		onClose={() => (openRecordId = null)}
+		onDelete={removeRow}
 	/>
 {/if}
