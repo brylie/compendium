@@ -9,12 +9,12 @@
 		deleteCollectionProperty,
 		deleteSelectOption,
 		duplicateCollectionProperty,
+		insertCollectionField,
 		moveSelectOption,
 		previewCollectionPropertyTypeChange,
 		setDefaultSelectOption,
 		setPrimaryField,
 		updateCollectionProperty,
-		updateCollectionSchema,
 		updateSelectOption
 	} from '$lib/data/collection-ops';
 	import { ValidationError } from '$lib/data/errors';
@@ -26,7 +26,6 @@
 	let {
 		collectionId,
 		shardId,
-		schema,
 		property,
 		primaryFieldKey,
 		visible,
@@ -41,7 +40,6 @@
 	}: {
 		collectionId: string;
 		shardId: string;
-		schema: PropertyDefinition[];
 		property: PropertyDefinition;
 		primaryFieldKey?: string;
 		visible?: boolean;
@@ -203,12 +201,9 @@
 	}
 
 	function insertField(direction: 'left' | 'right'): void {
-		const index = schema.findIndex((p) => p.key === property.key);
-		const insertAt = direction === 'left' ? index : index + 1;
 		const field: PropertyDefinition = { key: nanoid(8), label: 'New field', type: 'text' };
-		const next = [...schema.slice(0, insertAt), field, ...schema.slice(insertAt)];
 		try {
-			updateCollectionSchema(getShardDoc(shardId), collectionId, next);
+			insertCollectionField(getShardDoc(shardId), collectionId, property.key, direction, field);
 			closeMenu();
 		} catch {
 			errorMessage = 'Could not insert a field. Please try again.';

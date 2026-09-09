@@ -181,7 +181,6 @@
 								<FieldMenu
 									{collectionId}
 									shardId={shardId!}
-									{schema}
 									{property}
 									{primaryFieldKey}
 									{collections}

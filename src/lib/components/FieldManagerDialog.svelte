@@ -4,7 +4,7 @@
 	import { getShardDoc } from '$lib/client/yjs-client';
 	import { useCollectionView } from '$lib/client/collection-view.svelte';
 	import { appendCollectionField } from '$lib/client/collection-editor';
-	import { resolvePrimaryField, updateCollectionSchema } from '$lib/data/collection-ops';
+	import { moveCollectionField, resolvePrimaryField } from '$lib/data/collection-ops';
 	import type { CollectionMeta, PropertyDefinition, PropertyType } from '$lib/data/types';
 	import Icon from './Icon.svelte';
 	import FieldMenu from './FieldMenu.svelte';
@@ -74,18 +74,16 @@
 	function moveField(index: number, direction: -1 | 1): void {
 		const target = index + direction;
 		if (target < 0 || target >= schema.length) return;
-		const next = [...schema];
-		[next[index], next[target]] = [next[target], next[index]];
 		const key = schema[index].key;
 		try {
-			updateCollectionSchema(getShardDoc(shardId), collectionId, next);
+			moveCollectionField(getShardDoc(shardId), collectionId, key, direction);
 			// The moved field's own up/down button becomes `disabled` (and loses
 			// focus to document.body) when the move lands it at either edge of
 			// the list — move focus to the counterpart button on the same field
 			// so a keyboard user doesn't lose their place in the list.
 			if (target === 0) {
 				void tick().then(() => downButtons[key]?.focus());
-			} else if (target === next.length - 1) {
+			} else if (target === schema.length - 1) {
 				void tick().then(() => upButtons[key]?.focus());
 			}
 		} catch {
@@ -208,14 +206,7 @@
 						>
 							{property.type}
 						</span>
-						<FieldMenu
-							{collectionId}
-							{shardId}
-							{schema}
-							{property}
-							{primaryFieldKey}
-							{collections}
-						/>
+						<FieldMenu {collectionId} {shardId} {property} {primaryFieldKey} {collections} />
 					</li>
 				{:else}
 					<li class="py-4 text-center text-sm text-muted italic">No fields yet.</li>

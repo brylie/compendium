@@ -29,7 +29,6 @@ describe('FieldMenu', () => {
 		render(FieldMenu, {
 			shardId: 'test-shard',
 			collectionId: collection.id,
-			schema: collection.schema,
 			property: collection.schema[0]
 		});
 
@@ -57,7 +56,6 @@ describe('FieldMenu', () => {
 		render(FieldMenu, {
 			shardId: 'test-shard',
 			collectionId: collection.id,
-			schema: collection.schema,
 			property: collection.schema[0]
 		});
 
@@ -82,7 +80,6 @@ describe('FieldMenu', () => {
 		render(FieldMenu, {
 			shardId: 'test-shard',
 			collectionId: collection.id,
-			schema: collection.schema,
 			property: collection.schema[0]
 		});
 
@@ -107,7 +104,6 @@ describe('FieldMenu', () => {
 		render(FieldMenu, {
 			shardId: 'test-shard',
 			collectionId: collection.id,
-			schema: collection.schema,
 			property: collection.schema[0]
 		});
 
@@ -132,7 +128,6 @@ describe('FieldMenu', () => {
 		render(FieldMenu, {
 			shardId: 'test-shard',
 			collectionId: collection.id,
-			schema: collection.schema,
 			property: collection.schema[0],
 			visible: true,
 			onToggleVisible
@@ -154,7 +149,6 @@ describe('FieldMenu', () => {
 		render(FieldMenu, {
 			shardId: 'test-shard',
 			collectionId: collection.id,
-			schema: collection.schema,
 			property: collection.schema[0]
 		});
 
@@ -177,7 +171,6 @@ describe('FieldMenu', () => {
 		render(FieldMenu, {
 			shardId: 'test-shard',
 			collectionId: collection.id,
-			schema: collection.schema,
 			property: collection.schema[0]
 		});
 
@@ -200,7 +193,6 @@ describe('FieldMenu', () => {
 		render(FieldMenu, {
 			shardId: 'test-shard',
 			collectionId: collection.id,
-			schema: collection.schema,
 			property: collection.schema[0]
 		});
 
@@ -220,7 +212,6 @@ describe('FieldMenu', () => {
 		render(FieldMenu, {
 			shardId: 'test-shard',
 			collectionId: collection.id,
-			schema: collection.schema,
 			property: collection.schema[0],
 			visible: true,
 			onToggleVisible: vi.fn()
@@ -245,7 +236,6 @@ describe('FieldMenu', () => {
 		render(FieldMenu, {
 			shardId: 'test-shard',
 			collectionId: collection.id,
-			schema: collection.schema,
 			property: collection.schema[0]
 		});
 
@@ -274,7 +264,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[1] // 'notes' — not the auto-fallback first text field
 			});
 
@@ -290,7 +279,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0] // 'name' — the resolved fallback with no explicit primaryFieldKey set
 				// primaryFieldKey intentionally omitted — this is the auto-fallback case
 			});
@@ -308,7 +296,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[1],
 				primaryFieldKey: 'notes'
 			});
@@ -323,7 +310,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[1],
 				primaryFieldKey: 'notes'
 			});
@@ -343,7 +329,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -364,7 +349,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0],
 				collections: [
 					{ id: people.id, title: 'People', schema: [], recordIds: [] },
@@ -392,7 +376,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -433,7 +416,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -451,7 +433,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -469,7 +450,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -489,7 +469,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -510,7 +489,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -528,7 +506,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -545,7 +522,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -577,7 +553,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -604,7 +579,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -623,7 +597,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -640,7 +613,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -684,7 +656,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -700,7 +671,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -716,7 +686,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -732,7 +701,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -763,7 +731,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -781,7 +748,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -802,7 +768,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -820,7 +785,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -845,7 +809,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -866,7 +829,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -886,7 +848,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 
@@ -908,7 +869,6 @@ describe('FieldMenu', () => {
 			render(FieldMenu, {
 				shardId: 'test-shard',
 				collectionId: collection.id,
-				schema: collection.schema,
 				property: collection.schema[0]
 			});
 

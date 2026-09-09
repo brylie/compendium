@@ -13,6 +13,8 @@ import {
 	deleteSelectOption,
 	duplicateCollectionProperty,
 	getCollection,
+	insertCollectionField,
+	moveCollectionField,
 	moveSelectOption,
 	previewCollectionPropertyTypeChange,
 	resolvePrimaryField,
@@ -145,6 +147,100 @@ describe('appendCollectionField: reads the current Yjs schema atomically (issue 
 			'status',
 			'due'
 		]);
+	});
+});
+
+describe('insertCollectionField: reads the current Yjs schema atomically (issue #203)', () => {
+	it('two sequential inserts against the same reference field both survive, in submission order', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+
+		// Both calls resolve 'name's index fresh from Yjs rather than trusting a
+		// caller-supplied schema snapshot — the old FieldMenu.svelte shape built
+		// a whole replacement array from a stale reactive `schema` prop, so the
+		// second insert would silently overwrite the first.
+		insertCollectionField(doc, collection.id, 'name', 'right', {
+			key: 'status',
+			label: 'Status',
+			type: 'select'
+		});
+		insertCollectionField(doc, collection.id, 'name', 'left', {
+			key: 'priority',
+			label: 'Priority',
+			type: 'text'
+		});
+
+		expect(getCollection(doc, collection.id)?.schema.map((p) => p.key)).toEqual([
+			'priority',
+			'name',
+			'status'
+		]);
+	});
+
+	it('throws NotFoundError when the reference field no longer exists', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, { title: 'Tasks', schema: [] });
+		expect(() =>
+			insertCollectionField(doc, collection.id, 'missing', 'left', {
+				key: 'x',
+				label: 'X',
+				type: 'text'
+			})
+		).toThrow(NotFoundError);
+	});
+});
+
+describe('moveCollectionField: reads the current Yjs schema atomically (issue #203)', () => {
+	it('a reorder racing an insert from one initial schema snapshot both survive', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [
+				{ key: 'name', label: 'Name', type: 'text' },
+				{ key: 'status', label: 'Status', type: 'select' }
+			]
+		});
+
+		// Both calls read the schema fresh inside their own transaction, so the
+		// insert (keyed off 'name') lands relative to where the reorder just put
+		// it, not where 'name' sat in the initial [name, status] snapshot.
+		moveCollectionField(doc, collection.id, 'status', -1);
+		insertCollectionField(doc, collection.id, 'name', 'right', {
+			key: 'due',
+			label: 'Due',
+			type: 'date'
+		});
+
+		expect(getCollection(doc, collection.id)?.schema.map((p) => p.key)).toEqual([
+			'status',
+			'name',
+			'due'
+		]);
+	});
+
+	it('is a no-op past either edge of the schema', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [
+				{ key: 'name', label: 'Name', type: 'text' },
+				{ key: 'status', label: 'Status', type: 'select' }
+			]
+		});
+
+		moveCollectionField(doc, collection.id, 'name', -1);
+		moveCollectionField(doc, collection.id, 'status', 1);
+
+		expect(getCollection(doc, collection.id)?.schema.map((p) => p.key)).toEqual(['name', 'status']);
+	});
+
+	it('throws NotFoundError for a nonexistent field', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, { title: 'Tasks', schema: [] });
+		expect(() => moveCollectionField(doc, collection.id, 'missing', 1)).toThrow(NotFoundError);
 	});
 });
 
