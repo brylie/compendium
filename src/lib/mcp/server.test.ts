@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpServer } from './server';
 import { createToken } from './tokens';
@@ -10,6 +10,18 @@ import {
 } from '$lib/data/collection-ops';
 import { createRecord as rawCreateRecord } from '$lib/data/record-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
+
+const fetchLinkPreviewMetadataMock = vi.fn();
+vi.mock('$lib/server/link-preview', () => ({
+	fetchLinkPreviewMetadata: (...args: unknown[]) => fetchLinkPreviewMetadataMock(...args)
+}));
+
+beforeEach(() => {
+	// mockReset (not mockClear): also drops any unconsumed
+	// mockReturnValueOnce queued by a previous test, so it can't be delivered
+	// to a later, unrelated test.
+	fetchLinkPreviewMetadataMock.mockReset();
+});
 
 function createDocument(...args: Parameters<typeof rawCreateDocument>) {
 	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCreateDocument(...args));
@@ -392,6 +404,189 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 			token
 		);
 		expect(wrongKindResult.isError).toBe(true);
+	});
+
+	it('create_record with blockType bookmark and a url fetches the preview synchronously in the same call (issue #155)', async () => {
+		fetchLinkPreviewMetadataMock.mockReturnValueOnce(
+			Promise.resolve({ title: 'Example Domain', description: 'An example.' })
+		);
+		const { doc } = resolveWorkspaceContext();
+		const source = createDocument(doc, { title: 'Source Doc' });
+		const { token } = createToken({
+			clientLabel: 'Bookmark Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: []
+		});
+		const mcpServer = createMcpServer();
+
+		const createResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{ parentId: source.id, blockType: 'bookmark', url: 'https://example.com/' },
+			token
+		);
+		expect(createResult.isError).toBeFalsy();
+		const blockId = JSON.parse(getTextContent(createResult)).recordId;
+
+		const getResult = await invokeTool(mcpServer, 'get_document', { documentId: source.id }, token);
+		const record = JSON.parse(getTextContent(getResult)).records.find(
+			(r: { id: string }) => r.id === blockId
+		);
+		expect(record.url).toBe('https://example.com/');
+		expect(record.bookmarkMetadata).toMatchObject({ status: 'ready', title: 'Example Domain' });
+		expect(record.markdown).toBe('[Example Domain](<https://example.com/>)');
+	});
+
+	it('create_record with a bookmark url degrades to an error status (not a tool error) when the preview fetch fails', async () => {
+		fetchLinkPreviewMetadataMock.mockReturnValueOnce(Promise.reject(new Error('unreachable')));
+		const { doc } = resolveWorkspaceContext();
+		const source = createDocument(doc, { title: 'Source Doc' });
+		const { token } = createToken({
+			clientLabel: 'Bookmark Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: []
+		});
+		const mcpServer = createMcpServer();
+
+		const createResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{ parentId: source.id, blockType: 'bookmark', url: 'https://example.com/broken' },
+			token
+		);
+		expect(createResult.isError).toBeFalsy();
+		const blockId = JSON.parse(getTextContent(createResult)).recordId;
+
+		const getResult = await invokeTool(mcpServer, 'get_document', { documentId: source.id }, token);
+		const record = JSON.parse(getTextContent(getResult)).records.find(
+			(r: { id: string }) => r.id === blockId
+		);
+		expect(record.bookmarkMetadata.status).toBe('error');
+		// The plain link fallback is preserved in the markdown even on error.
+		expect(record.markdown).toBe('[https://example.com/broken](<https://example.com/broken>)');
+	});
+
+	it('refresh_bookmark_metadata re-fetches an existing bookmark by id', async () => {
+		fetchLinkPreviewMetadataMock.mockReturnValueOnce(Promise.reject(new Error('first try fails')));
+		const { doc } = resolveWorkspaceContext();
+		const source = createDocument(doc, { title: 'Source Doc' });
+		const { token } = createToken({
+			clientLabel: 'Bookmark Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: []
+		});
+		const mcpServer = createMcpServer();
+
+		const createResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{ parentId: source.id, blockType: 'bookmark', url: 'https://example.com/' },
+			token
+		);
+		const blockId = JSON.parse(getTextContent(createResult)).recordId;
+
+		fetchLinkPreviewMetadataMock.mockReturnValueOnce(Promise.resolve({ title: 'Now It Works' }));
+		const refreshResult = await invokeTool(
+			mcpServer,
+			'refresh_bookmark_metadata',
+			{ recordId: blockId },
+			token
+		);
+		expect(refreshResult.isError).toBeFalsy();
+		expect(JSON.parse(getTextContent(refreshResult)).bookmarkMetadata).toMatchObject({
+			status: 'ready',
+			title: 'Now It Works'
+		});
+	});
+
+	it('an unconfigured bookmark block (no url) renders as a bracketed placeholder, not a broken link', async () => {
+		const { doc } = resolveWorkspaceContext();
+		const source = createDocument(doc, { title: 'Source Doc' });
+		const { token } = createToken({
+			clientLabel: 'Bookmark Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: []
+		});
+		const mcpServer = createMcpServer();
+
+		const createResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{ parentId: source.id, blockType: 'bookmark' },
+			token
+		);
+		expect(createResult.isError).toBeFalsy();
+		expect(fetchLinkPreviewMetadataMock).not.toHaveBeenCalled();
+		const blockId = JSON.parse(getTextContent(createResult)).recordId;
+
+		const getResult = await invokeTool(mcpServer, 'get_document', { documentId: source.id }, token);
+		const record = JSON.parse(getTextContent(getResult)).records.find(
+			(r: { id: string }) => r.id === blockId
+		);
+		expect(record.url).toBeUndefined();
+		expect(record.markdown).toBe('[bookmark: unconfigured]');
+	});
+
+	it('escapes a scraped title that contains markdown link syntax so the rendered markdown stays a valid link', async () => {
+		fetchLinkPreviewMetadataMock.mockReturnValueOnce(
+			Promise.resolve({ title: 'Weird [Title] With Brackets' })
+		);
+		const { doc } = resolveWorkspaceContext();
+		const source = createDocument(doc, { title: 'Source Doc' });
+		const { token } = createToken({
+			clientLabel: 'Bookmark Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: []
+		});
+		const mcpServer = createMcpServer();
+
+		const createResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{ parentId: source.id, blockType: 'bookmark', url: 'https://example.com/weird' },
+			token
+		);
+		const blockId = JSON.parse(getTextContent(createResult)).recordId;
+
+		const getResult = await invokeTool(mcpServer, 'get_document', { documentId: source.id }, token);
+		const record = JSON.parse(getTextContent(getResult)).records.find(
+			(r: { id: string }) => r.id === blockId
+		);
+		expect(record.markdown).toBe('[Weird \\[Title\\] With Brackets](<https://example.com/weird>)');
+	});
+
+	it('wraps the markdown destination in angle brackets so a URL containing parentheses does not truncate the link', async () => {
+		fetchLinkPreviewMetadataMock.mockReturnValueOnce(
+			Promise.resolve({ title: 'Mercury (planet)' })
+		);
+		const { doc } = resolveWorkspaceContext();
+		const source = createDocument(doc, { title: 'Source Doc' });
+		const { token } = createToken({
+			clientLabel: 'Bookmark Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: []
+		});
+		const mcpServer = createMcpServer();
+
+		const createResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{
+				parentId: source.id,
+				blockType: 'bookmark',
+				url: 'https://en.wikipedia.org/wiki/Mercury_(planet)'
+			},
+			token
+		);
+		const blockId = JSON.parse(getTextContent(createResult)).recordId;
+
+		const getResult = await invokeTool(mcpServer, 'get_document', { documentId: source.id }, token);
+		const record = JSON.parse(getTextContent(getResult)).records.find(
+			(r: { id: string }) => r.id === blockId
+		);
+		expect(record.markdown).toBe(
+			'[Mercury (planet)](<https://en.wikipedia.org/wiki/Mercury_(planet)>)'
+		);
 	});
 });
 

@@ -97,6 +97,36 @@ export function resolveOwningParentId(doc: Y.Doc, id: string, guard = 50): strin
 }
 
 /**
+ * Same lookup-and-authorize contract as `requireAccessibleRecord` below, against an
+ * already-resolved `doc` rather than re-resolving one from a bare `recordId` — for a caller
+ * that already knows (and has itself resolved) the correct shard, e.g. via a parent id whose
+ * own locator is reliably tracked. This matters for a record with no locator of its own: a
+ * block created as a *direct UI mutation* (record-ops.ts's createRecord called straight from
+ * `+page.svelte`, bypassing the service layer — see audit-coverage.md §1) is never
+ * locator-tracked the way a service-layer-created record is (`services/records.ts#createRecord`'s
+ * own `reserveRecordLocator` call), so `resolveRecordWorkspaceContext(recordId)`'s "not found"
+ * fallback resolves to the wrong (default) shard once Documents are individually sharded (#120)
+ * — resolving via the owning Document's id instead (`resolveParentWorkspaceContext`, itself
+ * locator-tracked since `createDocument` always reserves one) finds the record correctly. See
+ * `refreshBookmarkMetadata`'s own doc comment (services/records.ts, issue #155) for the one
+ * current caller of this path.
+ */
+export function requireAccessibleRecordInDoc(
+	doc: Y.Doc,
+	caller: CallerIdentity,
+	recordId: string,
+	action?: string
+): NonNullable<ReturnType<typeof getRecord>> {
+	const record = getRecord(doc, recordId);
+	if (!record) {
+		logDenial(caller, action, recordId);
+		throw new PermissionDeniedError(`Record ${recordId} not found`);
+	}
+	requireAccessibleParent(caller, resolveOwningParentId(doc, record.parentId), action);
+	return record;
+}
+
+/**
  * Looks up `recordId` and throws `PermissionDeniedError` (logging a denial) if it doesn't
  * exist or its parent isn't accessible to `caller`; otherwise returns the record. A record
  * nested inside a container block (columns/column) is checked against its owning Document's
@@ -108,13 +138,7 @@ export function requireAccessibleRecord(
 	action?: string
 ): NonNullable<ReturnType<typeof getRecord>> {
 	const { doc } = resolveRecordWorkspaceContext(recordId);
-	const record = getRecord(doc, recordId);
-	if (!record) {
-		logDenial(caller, action, recordId);
-		throw new PermissionDeniedError(`Record ${recordId} not found`);
-	}
-	requireAccessibleParent(caller, resolveOwningParentId(doc, record.parentId), action);
-	return record;
+	return requireAccessibleRecordInDoc(doc, caller, recordId, action);
 }
 
 /**

@@ -1,4 +1,5 @@
 import type {
+	BookmarkMetadata,
 	CalloutStyle,
 	ChildPagesDepth,
 	EmbeddedViewConfig,
@@ -112,10 +113,11 @@ export function sanitizeCalloutStyle(calloutStyle: CalloutStyle): CalloutStyle {
 
 /**
  * Sets the checked/collapsed/referencedRecordId/viewConfig/calloutStyle/
- * childPagesDepth/fullWidth group of block-only optional fields — shared by
- * createRecord and copyRecordVerbatim, which otherwise each repeat the same
- * conditionals inline (pushing both functions' own cognitive complexity over
- * the lint threshold once calloutStyle was the fifth).
+ * childPagesDepth/fullWidth/url/bookmarkMetadata group of block-only optional
+ * fields — shared by createRecord and copyRecordVerbatim, which otherwise
+ * each repeat the same conditionals inline (pushing both functions' own
+ * cognitive complexity over the lint threshold once calloutStyle was the
+ * fifth).
  */
 export function applyOptionalBlockFields(
 	yrecord: TypedYMap<RecordYShape>,
@@ -127,6 +129,8 @@ export function applyOptionalBlockFields(
 		calloutStyle?: CalloutStyle;
 		childPagesDepth?: ChildPagesDepth;
 		fullWidth?: boolean;
+		url?: string;
+		bookmarkMetadata?: BookmarkMetadata;
 	}
 ): void {
 	if (fields.checked !== undefined) yrecord.set('checked', fields.checked);
@@ -138,4 +142,8 @@ export function applyOptionalBlockFields(
 		yrecord.set('childPagesDepth', fields.childPagesDepth);
 	}
 	if (fields.fullWidth !== undefined) yrecord.set('fullWidth', fields.fullWidth);
+	if (fields.url !== undefined) yrecord.set('url', fields.url);
+	if (fields.bookmarkMetadata !== undefined) {
+		yrecord.set('bookmarkMetadata', fields.bookmarkMetadata);
+	}
 }

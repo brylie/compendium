@@ -18,11 +18,13 @@ import {
 	patchRecordViewConfig,
 	reorderRecord,
 	setBlockType,
+	setRecordBookmarkMetadata,
 	setRecordCalloutStyle,
 	setRecordChecked,
 	setRecordCollapsed,
 	setRecordFullWidth,
 	setRecordReferencedId,
+	setRecordUrl,
 	setRecordViewConfig,
 	touchRecordEditor,
 	updateRecordContent,
@@ -517,6 +519,82 @@ describe('records: creation ordering, mutation, and not-found edge cases', () =>
 		const targetDoc = new Y.Doc();
 		copyDocumentVerbatim(doc, targetDoc, document.id);
 		expect(getRecord(targetDoc, block.id)?.calloutStyle).toEqual({ kind: 'preset', preset: 'tip' });
+	});
+
+	it('createRecord accepts an initial url/bookmarkMetadata for a bookmark block, and copyDocumentVerbatim preserves them (issue #155)', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(
+			doc,
+			{
+				parentId: document.id,
+				blockType: 'bookmark',
+				url: 'https://example.com/article',
+				bookmarkMetadata: { status: 'pending' }
+			},
+			human
+		);
+		expect(getRecord(doc, block.id)?.url).toBe('https://example.com/article');
+		expect(getRecord(doc, block.id)?.bookmarkMetadata).toEqual({ status: 'pending' });
+
+		const targetDoc = new Y.Doc();
+		copyDocumentVerbatim(doc, targetDoc, document.id);
+		expect(getRecord(targetDoc, block.id)?.url).toBe('https://example.com/article');
+		expect(getRecord(targetDoc, block.id)?.bookmarkMetadata).toEqual({ status: 'pending' });
+	});
+
+	it('a bookmark block created with no url is unconfigured, like an unconfigured page_link/collection_view (issue #155)', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(doc, { parentId: document.id, blockType: 'bookmark' }, human);
+		expect(getRecord(doc, block.id)?.url).toBeUndefined();
+		expect(getRecord(doc, block.id)?.bookmarkMetadata).toBeUndefined();
+	});
+
+	it('setRecordUrl sets a bookmark block’s url, throws ValidationError on a non-bookmark block, and NotFoundError for an unknown record (issue #155)', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const bookmark = createRecord(doc, { parentId: document.id, blockType: 'bookmark' }, human);
+		const paragraph = createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+
+		setRecordUrl(doc, bookmark.id, 'https://example.com/', human);
+		expect(getRecord(doc, bookmark.id)?.url).toBe('https://example.com/');
+
+		expect(() => setRecordUrl(doc, paragraph.id, 'https://example.com/', human)).toThrow(
+			ValidationError
+		);
+		expect(() => setRecordUrl(doc, 'missing', 'https://example.com/', human)).toThrow(
+			NotFoundError
+		);
+	});
+
+	it('setRecordBookmarkMetadata replaces the whole metadata value and throws NotFoundError for an unknown record (issue #155)', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const block = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'bookmark', url: 'https://example.com/' },
+			human
+		);
+
+		setRecordBookmarkMetadata(doc, block.id, { status: 'pending' }, human);
+		expect(getRecord(doc, block.id)?.bookmarkMetadata).toEqual({ status: 'pending' });
+
+		setRecordBookmarkMetadata(
+			doc,
+			block.id,
+			{ status: 'ready', title: 'Example', fetchedAt: 12345 },
+			human
+		);
+		expect(getRecord(doc, block.id)?.bookmarkMetadata).toEqual({
+			status: 'ready',
+			title: 'Example',
+			fetchedAt: 12345
+		});
+
+		expect(() => setRecordBookmarkMetadata(doc, 'missing', { status: 'error' }, human)).toThrow(
+			NotFoundError
+		);
 	});
 
 	it('createRecord accepts an initial referencedRecordId/childPagesDepth for a child_pages block, and copyDocumentVerbatim preserves them (issue #43)', () => {
@@ -1190,6 +1268,27 @@ describe('duplicateRecord: block action menu duplicate (#152)', () => {
 		).toBe('Buy milk');
 	});
 
+	it('copies a bookmark block’s url and bookmarkMetadata (issue #155)', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const source = createRecord(
+			doc,
+			{
+				parentId: document.id,
+				blockType: 'bookmark',
+				url: 'https://example.com/',
+				bookmarkMetadata: { status: 'ready', title: 'Example' }
+			},
+			human
+		);
+
+		const copy = duplicateRecord(doc, source.id, human);
+
+		expect(copy.url).toBe('https://example.com/');
+		expect(copy.bookmarkMetadata).toEqual({ status: 'ready', title: 'Example' });
+		expect(getRecord(doc, source.id)!.url).toBe('https://example.com/');
+	});
+
 	it('stamps fresh provenance under the acting actor rather than copying the source’s', () => {
 		const doc = new Y.Doc();
 		const document = createDocument(doc, { title: 'Notes' });
@@ -1482,6 +1581,32 @@ describe('detachSyncedBlock: issue #153 "detach to independent copy"', () => {
 		expect(detached.blockType).toBe('collection_view');
 		expect(detached.referencedRecordId).toBe(collection.id);
 		expect(detached.viewConfig?.viewType).toBe('table');
+	});
+
+	it('copies url and bookmarkMetadata when the source is a bookmark (issue #155)', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const source = createRecord(
+			doc,
+			{
+				parentId: document.id,
+				blockType: 'bookmark',
+				url: 'https://example.com/',
+				bookmarkMetadata: { status: 'ready', title: 'Example' }
+			},
+			human
+		);
+		const instance = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'synced_block', referencedRecordId: source.id },
+			human
+		);
+
+		const detached = detachSyncedBlock(doc, instance.id, human);
+
+		expect(detached.blockType).toBe('bookmark');
+		expect(detached.url).toBe('https://example.com/');
+		expect(detached.bookmarkMetadata).toEqual({ status: 'ready', title: 'Example' });
 	});
 
 	// CodeRabbit finding (PR #244): a synced_block can (unusually) point at

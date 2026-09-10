@@ -30,6 +30,7 @@ import { grantDocumentAccess, tokenAllowsParent } from '$lib/server/token-store'
 import { listWorkspaceDocuments } from '$lib/server/workspace-repository';
 import { resolveInternalLinkTarget, type InternalLinkTarget } from '$lib/data/links';
 import type {
+	BookmarkMetadata,
 	CalloutStyle,
 	ChildPageNode,
 	ChildPagesDepth,
@@ -373,6 +374,16 @@ export interface DocumentRecordData {
 	// only), the same "absent = default" convention calloutStyle/viewConfig
 	// already use.
 	childPagesDepth?: ChildPagesDepth;
+	// Only set for bookmark blocks (issue #155) — read-only in the same sense
+	// as calloutStyle/childPagesDepth above: create_record's initial value is
+	// the only MCP write path (see mcp-tools.md); reconfiguring an existing
+	// bookmark's url is UI-only. Unlike referencedRecordId this never needs
+	// scoping — a bookmark's target is an arbitrary external URL, not another
+	// workspace record, so there's no accessible-target check to apply.
+	url?: string;
+	// Only set for bookmark blocks — the server-fetched preview state (issue
+	// #155). Absent exactly when url is (an unconfigured bookmark).
+	bookmarkMetadata?: BookmarkMetadata;
 	// Undefined both when never configured and when configured but the
 	// target is out of the caller's scope — never leaks an out-of-scope
 	// target's id.
@@ -528,6 +539,8 @@ function resolveDocumentRecordData(
 		viewConfig: isCollectionView && link.linkedTarget ? r.viewConfig : undefined,
 		calloutStyle: r.blockType === 'callout' ? r.calloutStyle : undefined,
 		childPagesDepth: isChildPages ? r.childPagesDepth : undefined,
+		url: r.blockType === 'bookmark' ? r.url : undefined,
+		bookmarkMetadata: r.blockType === 'bookmark' ? r.bookmarkMetadata : undefined,
 		content: r.content,
 		childPages,
 		children: r.childRecordIds

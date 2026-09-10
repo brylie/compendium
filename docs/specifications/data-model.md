@@ -60,6 +60,8 @@ interface WorkspaceRecord {
 	fullWidth?: boolean;
 	calloutStyle?: CalloutStyle; // for callout blocks only — absent renders the pre-#42 neutral default, see collection-views.md's sibling pattern and design-system.md §6
 	childPagesDepth?: ChildPagesDepth; // for child_pages blocks only — absent means depth 1 (immediate children only), see §3
+	url?: string; // for bookmark blocks only (issue #155, §3) — absent means "unconfigured", the same absence convention page_link/collection_view's referencedRecordId already use
+	bookmarkMetadata?: BookmarkMetadata; // for bookmark blocks only — the server-fetched preview state, see §3
 	// Present (possibly empty) only on a container block (columns/column,
 	// issue #148, see §3.1) — its own child records' ids, in order, one
 	// level below this record rather than in its owning Document's own
@@ -91,6 +93,7 @@ type BlockType =
 	| 'synced_block'
 	| 'page_link'
 	| 'embed'
+	| 'bookmark' // rich preview card for a pasted URL, with a plain-link fallback — see §3, issue #155
 	| 'collection_view' // embeds a Table/Board/Calendar view of a Collection — see §2
 	| 'child_pages' // live listing of a Document's sub-pages (Confluence-style page tree) — see §3, issue #43
 	| 'columns' // multi-column layout container — see §3.1, issue #148
@@ -119,6 +122,30 @@ type ColumnChildBlockType = Extract<
 // never an MVC-style page/route. There is no standalone view route — a View
 // is configuration that exists only as a collection_view block's viewConfig.
 type ViewType = 'table' | 'board' | 'calendar';
+
+// A bookmark block's server-fetched preview state (issue #155) — 'pending'
+// right after a url is set (before the fetch resolves), 'ready' once the
+// fetch itself completed without error (title/description/favicon/thumbnail
+// are each independently optional even then — a page with no OpenGraph tags
+// and no <title> is still a successful, 'ready' fetch, just with less to
+// show), 'error' when the fetch itself failed (network error, non-2xx
+// status, non-HTML response, or the SSRF/timeout/size guards in
+// $lib/server/link-preview.ts). The block's own `url` is always present once
+// configured regardless of status, so a plain accessible link is never lost
+// in either the 'pending' or 'error' state.
+type BookmarkFetchStatus = 'pending' | 'ready' | 'error';
+
+// Whole-value, like CalloutStyle: one server-side fetch
+// (refreshBookmarkMetadata, services/records.ts) replaces this atomically as
+// a unit, never edited member-by-member the way viewConfig's members are.
+interface BookmarkMetadata {
+	status: BookmarkFetchStatus;
+	title?: string;
+	description?: string;
+	faviconUrl?: string;
+	thumbnailUrl?: string;
+	fetchedAt?: number; // epoch ms of the last fetch attempt, success or failure
+}
 
 // How many levels of sub-pages a child_pages block renders below its target
 // Document (issue #43) — 1 (the default, absent value) lists immediate
@@ -235,6 +262,7 @@ Blocks are deliberately a small, documentation-oriented set rather than one type
   - **Same-shard scope, today:** this reverse index (`listSyncedBlockInstances`, `links.ts`) is built the same way `listIncomingLinks`' backlink index is — scanning one `Y.Doc` — and since each Document now resolves to its own shard (#120), that's just the current Document. A `synced_block` instance in a _different_ Document can't actually mirror this source's content at all yet regardless (its own `getRecordYText` lookup finds nothing in that Document's own `Y.Doc`), so it couldn't appear in "used in N places" either way — true cross-Document synced blocks need shard-aware resolution first, tracked as issue #242, not attempted here.
 - `collection_view` references a Collection through `referencedRecordId` and carries its rendering configuration in `viewConfig` (§2) — the mechanism behind Table/Board/Calendar embedding, see [`collection-views.md`](./collection-views.md).
 - `embed` is the generic external-content mechanism. Dedicated per-service block types are intentionally out of scope.
+- `bookmark` (issue #155) is a leaf block for a pasted/typed external URL — distinct from `embed` (the PRD's own framing, `docs/prd.md`): pasting a URL into an empty text block, or configuring one via the slash menu, offers a rich preview card (title/description/favicon/thumbnail, fetched server-side — `$lib/server/link-preview.ts`) that always degrades to a plain accessible link (its own `url` field) when the fetch is still pending, failed, or the block is unconfigured. `url` follows the same "absent means unconfigured" convention as `page_link`/`collection_view`'s `referencedRecordId`; `bookmarkMetadata` is a single whole-value field (like `calloutStyle`), replaced atomically by one fetch operation rather than edited member-by-member the way `viewConfig` is, since there is exactly one actor (the fetch) ever writing it. Like `synced_block`, a `bookmark` block is allocated a `content` `Y.Text` at creation (same as every non-container block) but never renders or reads it — its real content lives entirely in `url`/`bookmarkMetadata`; `write_record`'s `markdown` field is rejected outright against a `bookmark` block for exactly this reason (`services/records.ts`), the same "nowhere to go" guard `columns`/`column` blocks already have. There is no MCP write path for reconfiguring an existing bookmark's `url` (only `create_record`'s initial value) — a `url` change needs a fresh async fetch that `write_record`'s synchronous contract doesn't accommodate; see `mcp-tools.md`'s `refresh_bookmark_metadata` tool for re-fetching an already-set `url`'s preview. `bookmarkMetadata.faviconUrl`/`thumbnailUrl` are never rendered as a raw `<img src>` in the UI: `link-preview.ts`'s scrape-time `resolvePublicAssetUrl` check only ever validates a hostname _once_, and a raw external `<img src>` would leave the viewer's own browser to do a fresh DNS resolution and follow any redirect the image host sends — neither controlled by that one-time check. `BookmarkBlock.svelte` instead points at a same-origin proxy (`src/routes/api/records/[id]/bookmark-asset/+server.ts`, backed by `services/records.ts#getBookmarkAssetUrl` and `link-preview.ts#fetchImageAsset`) that re-resolves, re-pins, and re-validates the address on every request — the same guard `requestHop` already applies to the primary HTML fetch, applied again per render instead of once per scrape.
 - `child_pages` (issue #43) is a live, Confluence-style page-tree listing of a target Document's sub-pages, computed from `Document.parentDocumentId`/`order` rather than a copied outline — the same "computed block" category as `table_of_contents`, one level up the hierarchy. `referencedRecordId` names the target Document; absent, it defaults to the block's own containing Document (unlike `page_link`/`collection_view`, where absent means "unconfigured" — see `mcp-tools.md` for how `get_document`/`create_record` handle this distinction). `childPagesDepth` (absent = 1) bounds how many nesting levels are rendered. `src/lib/data/records.ts`'s `resolveChildPages` resolves the listing from a flat `DocumentMeta[]` (client: the catalog-backed `data.documents` load already used for the sidebar/`page_link` picker; server: `listDocuments(caller)`, already permission-scoped) — a child the caller can't see is silently omitted from the listing, not surfaced as broken, since only the block's own _target_ is a single resolved reference the way `page_link`'s is. **Liveness scope, deliberately narrower than `table_of_contents`'s:** on the MCP boundary this is always fully live and correct — `get_document` re-reads the catalog on every call, no caching. In the browser UI it is **not** cross-client live — a Document's title/hierarchy is catalog-backed, not part of any single Document's own Yjs shard (#120), so a `child_pages` block only re-renders when this session's own SvelteKit data is invalidated (creating/deleting a sub-page through the sidebar or the block's own controls), the same explicit, accepted gap `Sidebar.svelte`'s document tree already has pending Phase C's SSE feed (#121) — not something this issue attempts to close.
 - Binary media (`image`, `file`, `pdf`, `video`, and `audio`) is deferred until an asset-storage design defines stable references, backups, and sync behavior; it is not merely another text-block discriminator.
 

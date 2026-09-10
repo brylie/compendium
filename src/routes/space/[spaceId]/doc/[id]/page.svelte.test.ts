@@ -5,7 +5,13 @@ import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import { createDocument, getDocument } from '$lib/data/document-ops';
 import { createCollection } from '$lib/data/collection-ops';
-import { createColumnsBlock, createRecord, getRecord, getRecordYText } from '$lib/data/record-ops';
+import {
+	createColumnsBlock,
+	createRecord,
+	getRecord,
+	getRecordYText,
+	setRecordBookmarkMetadata
+} from '$lib/data/record-ops';
 import { plainText, yTextToRichText } from '$lib/data/richtext';
 import type { ActorId } from '$lib/data/types';
 import Page from './+page.svelte';
@@ -2441,5 +2447,168 @@ describe('doc/[id] +page', () => {
 
 		const yrecord = ydoc.getMap('records').get(record.id) as Y.Map<unknown>;
 		expect(yrecord.get('referencedRecordId')).toBe('target-b');
+	});
+
+	describe('bookmark block (issue #155)', () => {
+		function requestUrl(input: RequestInfo | URL): string {
+			if (typeof input === 'string') return input;
+			if (input instanceof URL) return input.href;
+			return input.url;
+		}
+
+		function renderDoc() {
+			return render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: {
+					spaces: [],
+					spaceId: 'space-1',
+					activeSpaceId: 'space-1',
+					documents: [],
+					collections: [],
+					documentId: 'doc-1',
+					title: 'D'
+				}
+			});
+		}
+
+		it('pasting a bare URL into an empty block converts it to a bookmark and requests a preview', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			const { container } = renderDoc();
+			await flushShardResolution();
+
+			const editor = container.querySelector('[contenteditable]') as HTMLElement;
+			const pasteEvent = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+			Object.defineProperty(pasteEvent, 'clipboardData', {
+				value: { getData: () => 'https://example.com/pasted' }
+			});
+			editor.dispatchEvent(pasteEvent);
+			await tick();
+
+			const doc = getDocument(ydoc, 'doc-1')!;
+			const yrecord = ydoc.getMap('records').get(doc.recordIds[0]) as Y.Map<unknown>;
+			expect(yrecord.get('blockType')).toBe('bookmark');
+			expect(yrecord.get('url')).toBe('https://example.com/pasted');
+
+			await vi.waitFor(() => {
+				const fetchMock = vi.mocked(fetch);
+				expect(
+					fetchMock.mock.calls.some(([url]) => requestUrl(url).includes('/api/records/'))
+				).toBe(true);
+			});
+		});
+
+		it('inserting a bookmark via the slash menu and submitting a URL sets it and requests a preview', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			const user = userEvent.setup();
+			const { container } = renderDoc();
+			await flushShardResolution();
+
+			const editor = container.querySelector('[contenteditable]') as HTMLElement;
+			editor.textContent = '/';
+			editor.dispatchEvent(new InputEvent('input', { bubbles: true }));
+			await tick();
+			expect(screen.getByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
+
+			await user.click(within(screen.getByRole('listbox')).getByText('Bookmark'));
+			expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+
+			await user.type(screen.getByLabelText('Bookmark URL'), 'example.com/via-slash-menu');
+			await user.click(screen.getByRole('button', { name: 'Add bookmark' }));
+
+			const doc = getDocument(ydoc, 'doc-1')!;
+			const yrecord = ydoc.getMap('records').get(doc.recordIds[0]) as Y.Map<unknown>;
+			expect(yrecord.get('blockType')).toBe('bookmark');
+			expect(yrecord.get('url')).toBe('https://example.com/via-slash-menu');
+		});
+
+		it('falls back to an error status when the bookmark-preview request itself fails', async () => {
+			vi.stubGlobal(
+				'fetch',
+				vi.fn(async (input: RequestInfo | URL) => {
+					if (requestUrl(input).includes('/api/records/')) throw new Error('network down');
+					return { ok: true, json: async () => ({ shardId: 'test-shard' }) };
+				})
+			);
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const bookmark = createRecord(ydoc, { parentId: 'doc-1', blockType: 'bookmark' }, HUMAN);
+			const user = userEvent.setup();
+			renderDoc();
+			await flushShardResolution();
+
+			await user.type(screen.getByLabelText('Bookmark URL'), 'https://example.com/broken');
+			await user.click(screen.getByRole('button', { name: 'Add bookmark' }));
+
+			await vi.waitFor(() => {
+				const yrecord = ydoc.getMap('records').get(bookmark.id) as Y.Map<unknown>;
+				expect((yrecord.get('bookmarkMetadata') as { status: string } | undefined)?.status).toBe(
+					'error'
+				);
+			});
+		});
+
+		it('does not let a stale, older preview request overwrite a newer one that already succeeded', async () => {
+			// A first ("stale") request that finally fails *after* a second,
+			// newer request for the same block already landed a result must
+			// not flip the block back to 'error' out from under it — the same
+			// out-of-order-completion race refreshBookmarkMetadata
+			// (services/records.ts) guards against server-side. The second
+			// fetch call below writes 'ready' directly (standing in for the
+			// real server's write, which normally arrives via Yjs sync — not
+			// simulated by this test's mocked `fetch`) *before* the first
+			// call's deferred rejection fires, so a working generation guard
+			// is the only thing that can keep 'ready' from being clobbered.
+			let rejectFirst!: (err: Error) => void;
+			const firstRequest = new Promise<never>((_resolve, reject) => {
+				rejectFirst = reject;
+			});
+			let bookmarkRequestCount = 0;
+			vi.stubGlobal(
+				'fetch',
+				vi.fn((input: RequestInfo | URL) => {
+					if (!requestUrl(input).includes('/api/records/')) {
+						return Promise.resolve({ ok: true, json: async () => ({ shardId: 'test-shard' }) });
+					}
+					bookmarkRequestCount += 1;
+					if (bookmarkRequestCount === 1) return firstRequest;
+					setRecordBookmarkMetadata(ydoc, bookmark.id, { status: 'ready', title: 'Fresh' }, HUMAN);
+					return Promise.resolve({ ok: true, json: async () => ({}) });
+				})
+			);
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const bookmark = createRecord(
+				ydoc,
+				{
+					parentId: 'doc-1',
+					blockType: 'bookmark',
+					url: 'https://example.com/',
+					bookmarkMetadata: { status: 'error' }
+				},
+				HUMAN
+			);
+			renderDoc();
+			await flushShardResolution();
+
+			// Two retries in a row, without awaiting the first (BookmarkBlock's
+			// onRetry is fire-and-forget) — the record stays in its initial
+			// 'error' state (and Retry stays visible) until this test's own
+			// mocked fetch writes something, so both clicks are ordinary UI
+			// interactions here, not a synthetic race.
+			const retryButton = screen.getByRole('button', { name: 'Retry preview' });
+			await fireEvent.click(retryButton);
+			await fireEvent.click(retryButton);
+			await vi.waitFor(() => expect(bookmarkRequestCount).toBe(2));
+
+			rejectFirst(new Error('stale failure'));
+			await tick();
+			await tick();
+
+			const yrecord = ydoc.getMap('records').get(bookmark.id) as Y.Map<unknown>;
+			const metadata = yrecord.get('bookmarkMetadata') as { status: string; title?: string };
+			expect(metadata.status).toBe('ready');
+			expect(metadata.title).toBe('Fresh');
+		});
 	});
 });
