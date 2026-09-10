@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
-	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { getShardAwareness, getShardDoc } from '$lib/client/yjs-client';
@@ -21,11 +21,9 @@
 		parentKindOf,
 		reorderRecord,
 		setBlockType,
-		setRecordBookmarkMetadata,
 		setRecordChecked,
 		setRecordCollapsed,
 		setRecordReferencedId,
-		setRecordUrl,
 		touchRecordEditor
 	} from '$lib/data/record-ops';
 	import {
@@ -59,7 +57,6 @@
 	import SlashMenu from './SlashMenu.svelte';
 	import Toolbar from './Toolbar.svelte';
 	import Icon from '$lib/components/Icon.svelte';
-	import BookmarkBlock from '$lib/components/BookmarkBlock.svelte';
 	import CollectionViewBlock from '$lib/components/CollectionViewBlock.svelte';
 	import CalloutBlock from '$lib/components/CalloutBlock.svelte';
 	import ChildPagesBlock from '$lib/components/ChildPagesBlock.svelte';
@@ -605,7 +602,6 @@
 		'table_of_contents',
 		'page_link',
 		'embed',
-		'bookmark',
 		'synced_block',
 		'collection_view',
 		'child_pages',
@@ -1327,95 +1323,6 @@
 		void tick().then(() => blockRefs[blockId]?.focusEditor(true));
 	}
 
-	// "Pasting a URL offers a rich preview card" (issue #155, docs/prd.md) — an
-	// empty text block converts in place to a bookmark, the same way
-	// selectSlashCommand's default branch converts any structural type
-	// in-place, then kicks off the server-side preview fetch. BlockEditor.svelte
-	// only calls this when the paste is a single bare URL AND the block was
-	// already empty, so a URL pasted mid-sentence (or into non-empty text)
-	// never hijacks a normal paste — see its own onPasteUrl doc comment.
-	async function handlePasteUrl(blockId: string, url: string): Promise<void> {
-		if (!ydoc) return;
-		const currentDoc = ydoc;
-		transactWithOrigin(currentDoc, LOCAL_UI_ORIGIN, () => {
-			setBlockType(currentDoc, blockId, 'bookmark', CURRENT_USER);
-			setRecordUrl(currentDoc, blockId, url, CURRENT_USER);
-			setRecordBookmarkMetadata(currentDoc, blockId, { status: 'pending' }, CURRENT_USER);
-		});
-		await requestBookmarkPreview(blockId);
-	}
-
-	// Triggers the server-side metadata fetch for a bookmark block (issue
-	// #155) via the service layer (services/records.ts#refreshBookmarkMetadata)
-	// — an outbound fetch of a caller-supplied URL has to happen server-side
-	// (both for the SSRF guards in $lib/server/link-preview.ts and because a
-	// browser fetch can't read another origin's response body without CORS
-	// cooperation it can't assume). The written result reaches this client
-	// through the ordinary Yjs sync path, not this call's response body — a
-	// same-origin request to our own server can still fail (offline, a
-	// transient 5xx), in which case the block is marked 'error' so it shows
-	// its plain url plus a "Retry" control rather than silently looking
-	// stuck forever in 'pending'.
-	//
-	// `documentId` is required: this block was created as a direct UI
-	// mutation (no catalog locator of its own, unlike an MCP-created one), so
-	// the service layer needs the owning Document's own (always
-	// locator-tracked) id to resolve the right shard — see
-	// refreshBookmarkMetadata's own doc comment (services/records.ts).
-	//
-	// One block can have more than one preview request outstanding at once —
-	// a slow first attempt still in flight when the user clicks Retry, or
-	// resubmits a different URL before it settles — and they can settle out
-	// of order. Without tracking which request is still current, an older
-	// one failing *after* a newer one already wrote 'ready' would overwrite
-	// good data with 'error'. Mirrors the same-shaped guard
-	// refreshBookmarkMetadata (services/records.ts) applies server-side for
-	// its own out-of-order-completion race.
-	const bookmarkPreviewGeneration = new SvelteMap<string, number>();
-
-	async function requestBookmarkPreview(blockId: string): Promise<void> {
-		const generation = (bookmarkPreviewGeneration.get(blockId) ?? 0) + 1;
-		bookmarkPreviewGeneration.set(blockId, generation);
-		try {
-			const response = await fetch(`/api/records/${encodeURIComponent(blockId)}/bookmark-preview`, {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ documentId: data.documentId })
-			});
-			if (!response.ok) throw new Error(`bookmark preview fetch failed: ${response.status}`);
-		} catch {
-			// The request itself can fail for reasons unrelated to the block
-			// (offline, a transient 5xx) — but the block can also have been
-			// deleted while the request was in flight, in which case the
-			// setter below would itself throw for the missing record. Guard
-			// on its continued existence, and on this still being the latest
-			// request for it, rather than letting that second, unrelated
-			// error escape this intentionally-unawaited call or clobbering a
-			// newer, already-succeeded result.
-			if (
-				ydoc &&
-				getRecord(ydoc, blockId) &&
-				bookmarkPreviewGeneration.get(blockId) === generation
-			) {
-				setRecordBookmarkMetadata(ydoc, blockId, { status: 'error' }, CURRENT_USER);
-			}
-		}
-	}
-
-	// The bookmark block's own inline URL input submits here (BookmarkBlock.svelte)
-	// — the block is already of type 'bookmark' (inserted via the slash menu),
-	// unlike handlePasteUrl above which also has to convert an ordinary text
-	// block's type in the same transaction.
-	async function handleBookmarkUrlSubmit(blockId: string, url: string): Promise<void> {
-		if (!ydoc) return;
-		const currentDoc = ydoc;
-		transactWithOrigin(currentDoc, LOCAL_UI_ORIGIN, () => {
-			setRecordUrl(currentDoc, blockId, url, CURRENT_USER);
-			setRecordBookmarkMetadata(currentDoc, blockId, { status: 'pending' }, CURRENT_USER);
-		});
-		await requestBookmarkPreview(blockId);
-	}
-
 	function toggleTodoCheck(block: WorkspaceRecord): void {
 		if (!ydoc) return;
 		setRecordChecked(ydoc, block.id, !block.checked, CURRENT_USER);
@@ -2127,15 +2034,6 @@
 							</div>
 						{/if}
 					</div>
-				{:else if bt === 'bookmark'}
-					{#if ydoc}
-						<BookmarkBlock
-							{block}
-							documentId={data.documentId}
-							onSubmitUrl={(url) => handleBookmarkUrlSubmit(block.id, url)}
-							onRetry={() => requestBookmarkPreview(block.id)}
-						/>
-					{/if}
 				{:else if bt === 'collection_view'}
 					{#if ydoc}
 						<CollectionViewBlock {block} {ydoc} collections={data.collections} />
@@ -2195,10 +2093,6 @@
 								onFocusBlock={() => handleFocusBlock(block.id)}
 								onSlashKey={() => openSlashMenu(block.id)}
 								onLinkShortcut={() => openLinkComposer(block.id)}
-								onPasteUrl={(url) => {
-									void handlePasteUrl(block.id, url);
-									return true;
-								}}
 								isFirstBlock={index === 0}
 								isLastBlock={index === blocks.length - 1}
 								onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}

@@ -417,8 +417,7 @@ export function createMcpServer(): McpServer {
 			referencedRecordId: z.string().optional(),
 			viewConfig: viewConfigSchema.optional(),
 			childPagesDepth: childPagesDepthSchema.optional(),
-			columnCount: z.number().int().optional(),
-			url: z.string().optional()
+			columnCount: z.number().int().optional()
 		},
 		async (
 			{
@@ -429,8 +428,7 @@ export function createMcpServer(): McpServer {
 				referencedRecordId,
 				viewConfig,
 				childPagesDepth,
-				columnCount,
-				url
+				columnCount
 			},
 			extra
 		) => {
@@ -444,18 +442,8 @@ export function createMcpServer(): McpServer {
 					referencedRecordId,
 					viewConfig: viewConfig as EmbeddedViewConfig | undefined,
 					childPagesDepth,
-					columnCount,
-					url
+					columnCount
 				});
-				// A bookmark created with a url in the same call gets its preview
-				// fetched immediately, so the agent doesn't need a separate
-				// refresh_bookmark_metadata round trip for the common case — see
-				// refreshBookmarkMetadata's own doc comment (services/records.ts)
-				// for why this orchestration lives here rather than inside the
-				// (synchronous) createRecord itself.
-				if (record.blockType === 'bookmark' && record.url) {
-					await serviceModules.records.refreshBookmarkMetadata(token, record.id);
-				}
 				return textResult({ recordId: record.id });
 			} catch (err) {
 				return handleToolError(err);
@@ -463,23 +451,7 @@ export function createMcpServer(): McpServer {
 		}
 	);
 
-	// 13. records.refreshBookmarkMetadata
-	registerFromManifest(
-		server,
-		'records.refreshBookmarkMetadata',
-		{ recordId: z.string() },
-		async ({ recordId }, extra) => {
-			try {
-				const token = requireToken(extra);
-				const record = await serviceModules.records.refreshBookmarkMetadata(token, recordId);
-				return textResult({ recordId: record.id, bookmarkMetadata: record.bookmarkMetadata });
-			} catch (err) {
-				return handleToolError(err);
-			}
-		}
-	);
-
-	// 14. records.deleteRecord
+	// 13. records.deleteRecord
 	registerFromManifest(
 		server,
 		'records.deleteRecord',

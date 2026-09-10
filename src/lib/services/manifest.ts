@@ -78,14 +78,7 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 		ui: true,
 		mcpToolName: 'create_record',
 		mcpDescription:
-			'Create a new block (in a Document) or row (in a Collection). No hold needed. `referencedRecordId` sets a page_link, child_pages, or collection_view block\'s target in the same call — only valid when blockType is one of those three, the parent is a Document, and the target is an accessible Document (page_link/child_pages) or Collection (collection_view); for child_pages and page_link it is optional (absent means "current Document"/"unconfigured link"), and so is collection_view\'s target (an unconfigured embed). `viewConfig` sets a collection_view block\'s view type + filters/sort/visible-properties/grouping (`groupBy`)/swimlane-grouping (`swimlaneBy`) config in the same call — only valid when blockType is "collection_view"; `viewType` ("table", "board", or "calendar") is required within it. `childPagesDepth` (a positive integer, or "unlimited") sets a child_pages block\'s nesting depth — only valid when blockType is "child_pages"; absent defaults to 1 (immediate children only). `columnCount` (an integer 2-6, default 2) sets a columns block\'s initial number of columns — only valid when blockType is "columns"; a columns block can only be created directly inside a Document, and each of its columns is itself a valid `parentId` for a following create_record call (blockType one of paragraph/heading_1-4/bulleted_list_item/numbered_list_item/to_do/quote/divider — the curated set a column can render) to populate it with content. To add another column (2-6 total), call create_record with blockType "column" and the columns block\'s own id as `parentId`. `url` (an absolute http/https URL) sets a bookmark block\'s target in the same call — only valid when blockType is "bookmark"; its rich preview (title/description/favicon/thumbnail) is fetched synchronously before this call returns, degrading to a plain-link fallback (no thrown error) if the fetch fails — absent means an unconfigured bookmark, filled in later via the UI or a follow-up create.'
-	},
-	'records.refreshBookmarkMetadata': {
-		mcp: true,
-		ui: true,
-		mcpToolName: 'refresh_bookmark_metadata',
-		mcpDescription:
-			'Re-fetches an existing bookmark block\'s preview metadata (title/description/favicon/thumbnail) from its current url — use after create_record\'s own automatic fetch failed (bookmarkMetadata.status is "error") or to refresh a stale preview. No hold needed. Errors from the fetch itself never throw back to the caller — they leave the block\'s status as "error" with its plain url still intact.'
+			'Create a new block (in a Document) or row (in a Collection). No hold needed. `referencedRecordId` sets a page_link, child_pages, or collection_view block\'s target in the same call — only valid when blockType is one of those three, the parent is a Document, and the target is an accessible Document (page_link/child_pages) or Collection (collection_view); for child_pages and page_link it is optional (absent means "current Document"/"unconfigured link"), and so is collection_view\'s target (an unconfigured embed). `viewConfig` sets a collection_view block\'s view type + filters/sort/visible-properties/grouping (`groupBy`)/swimlane-grouping (`swimlaneBy`) config in the same call — only valid when blockType is "collection_view"; `viewType` ("table", "board", or "calendar") is required within it. `childPagesDepth` (a positive integer, or "unlimited") sets a child_pages block\'s nesting depth — only valid when blockType is "child_pages"; absent defaults to 1 (immediate children only). `columnCount` (an integer 2-6, default 2) sets a columns block\'s initial number of columns — only valid when blockType is "columns"; a columns block can only be created directly inside a Document, and each of its columns is itself a valid `parentId` for a following create_record call (blockType one of paragraph/heading_1-4/bulleted_list_item/numbered_list_item/to_do/quote/divider — the curated set a column can render) to populate it with content. To add another column (2-6 total), call create_record with blockType "column" and the columns block\'s own id as `parentId`.'
 	},
 	'records.writeRecord': {
 		mcp: true,
@@ -101,10 +94,6 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 		mcpDescription: 'Delete a record. No hold needed.'
 	},
 	'records.getRecord': { mcp: false, ui: true },
-	// UI-only: resolves a bookmark's scraped favicon/thumbnail URL for the
-	// same-origin asset proxy (bookmark-asset/+server.ts, issue #155 follow-up)
-	// — no MCP tool needs this, since an agent never renders an `<img>`.
-	'records.getBookmarkAssetUrl': { mcp: false, ui: true },
 
 	'holds.holdRecords': {
 		mcp: true,
@@ -169,7 +158,6 @@ export const mcpAdapterBindings = {
 	'documents.getDocument': 'get_document',
 	'documents.listDocuments': 'list_documents',
 	'records.createRecord': 'create_record',
-	'records.refreshBookmarkMetadata': 'refresh_bookmark_metadata',
 	'records.writeRecord': 'write_record',
 	'records.deleteRecord': 'delete_record',
 	'holds.holdRecords': 'hold_records',
@@ -186,11 +174,9 @@ export const uiAdapterBindings = {
 	'documents.getDocument': 'src/routes/space/[spaceId]/doc/[id]/+page.server.ts',
 	'documents.listDocuments': 'src/routes/+layout.server.ts',
 	'records.createRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
-	'records.refreshBookmarkMetadata': 'src/routes/api/records/[id]/bookmark-preview/+server.ts',
 	'records.writeRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'records.deleteRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'records.getRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.server.ts',
-	'records.getBookmarkAssetUrl': 'src/routes/api/records/[id]/bookmark-asset/+server.ts',
 	'holds.holdRecords': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'holds.releaseRecords': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'collections.createCollection': 'src/routes/api/collections/+server.ts',
