@@ -92,6 +92,16 @@ function escapeBookmarkLabel(text: string): string {
 	return text.replace(/\\/g, '\\\\').replace(/[[\]]/g, (c) => `\\${c}`);
 }
 
+// The `<...>` form of a Markdown link destination (CommonMark's own
+// "pointy-bracket" syntax) tolerates the unmatched `)` and whitespace that a
+// bare destination cannot — a bare `[Title](https://en.wikipedia.org/wiki/Mercury_(planet))`
+// would otherwise have its destination terminated at the first `)`,
+// truncating the URL. `<` and `>` themselves, plus a literal `\`, need
+// escaping inside this form since they're its own delimiters/escape char.
+function escapeBookmarkDestination(url: string): string {
+	return url.replace(/[\\<>]/g, (c) => `\\${c}`);
+}
+
 // A real Markdown link, not a bracketed placeholder like page_link's `[[Title]]`
 // or collection_view's `[collection view: ...]` — a bookmark's target is a
 // genuine external URL, so `[Title](url)` already *is* the graceful plain-link
@@ -102,7 +112,7 @@ function renderBookmarkMarkdown(data: DocumentRecordData): string {
 	if (!data.url) return '[bookmark: unconfigured]';
 	const trimmedTitle = data.bookmarkMetadata?.title?.trim();
 	const label = trimmedTitle && trimmedTitle.length > 0 ? trimmedTitle : data.url;
-	return `[${escapeBookmarkLabel(label)}](${data.url})`;
+	return `[${escapeBookmarkLabel(label)}](<${escapeBookmarkDestination(data.url)}>)`;
 }
 
 function renderCollectionViewMarkdown(data: DocumentRecordData): string {

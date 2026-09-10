@@ -569,15 +569,30 @@ export async function refreshBookmarkMetadata(
 		throw new Error('This bookmark block has no url set yet.');
 	}
 
+	const fetchedForUrl = record.url;
 	let metadata: BookmarkMetadata;
 	try {
-		const fetched = await fetchLinkPreviewMetadata(record.url);
+		const fetched = await fetchLinkPreviewMetadata(fetchedForUrl);
 		metadata = { status: 'ready', fetchedAt: Date.now(), ...fetched };
 	} catch {
 		metadata = { status: 'error', fetchedAt: Date.now() };
 	}
 
-	const before = record.bookmarkMetadata;
+	// The fetch above can take seconds, during which the record can be
+	// deleted, or (a second refresh/create racing this one) reconfigured with
+	// a *different* url — re-read the current state rather than trusting the
+	// pre-fetch snapshot, so a slow, now-stale completion can't overwrite a
+	// newer one's result with an older site's title/description/images, or
+	// write into a record that no longer exists.
+	const current = crdtGetRecord(doc, recordId);
+	if (!current) {
+		throw new Error(`Record ${recordId} was deleted while its bookmark preview was being fetched.`);
+	}
+	if (current.blockType !== 'bookmark' || current.url !== fetchedForUrl) {
+		return current;
+	}
+
+	const before = current.bookmarkMetadata;
 	transactWithOrigin(doc, SERVICE_ORIGIN, () => {
 		crdtSetRecordBookmarkMetadata(doc, recordId, metadata, actor);
 	});

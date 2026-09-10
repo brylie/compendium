@@ -1485,8 +1485,19 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		expect(deniedRes.isError).toBe(true);
 		expect(getResultText(deniedRes)).toContain('Permission denied');
 
-		// The denied attempt left the record's title unchanged.
+		// The denied attempt left the record's title unchanged, and is itself
+		// recorded in the audit trail (audit-coverage.md §3) — the same
+		// write_record_denied action write_record's own permission boundary
+		// logs, since refreshBookmarkMetadata reuses that guard. Logged against
+		// the *owning Document's* id, not the block's own — requireAccessibleParent
+		// (services/permissions.ts) attributes a denial to the resolved parent
+		// it actually checked, matching create_record_denied/get_document_denied's
+		// own precedent (services.test.ts) for a record that does exist (as
+		// opposed to a wholly unknown record id, which denies against that bare
+		// id instead — see requireAccessibleRecord's early-return branch).
 		record = getRecord(yjs.doc, blockId)!;
 		expect(record.bookmarkMetadata?.title).toBe('Updated Title');
+		const denialLog = queryAuditLog().filter((e) => e.targetRecordId === doc.id);
+		expect(denialLog.some((e) => e.action === 'write_record_denied')).toBe(true);
 	});
 });

@@ -17,7 +17,10 @@ vi.mock('$lib/server/link-preview', () => ({
 }));
 
 beforeEach(() => {
-	fetchLinkPreviewMetadataMock.mockClear();
+	// mockReset (not mockClear): also drops any unconsumed
+	// mockReturnValueOnce queued by a previous test, so it can't be delivered
+	// to a later, unrelated test.
+	fetchLinkPreviewMetadataMock.mockReset();
 });
 
 function createDocument(...args: Parameters<typeof rawCreateDocument>) {
@@ -431,7 +434,7 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 		);
 		expect(record.url).toBe('https://example.com/');
 		expect(record.bookmarkMetadata).toMatchObject({ status: 'ready', title: 'Example Domain' });
-		expect(record.markdown).toBe('[Example Domain](https://example.com/)');
+		expect(record.markdown).toBe('[Example Domain](<https://example.com/>)');
 	});
 
 	it('create_record with a bookmark url degrades to an error status (not a tool error) when the preview fetch fails', async () => {
@@ -460,7 +463,7 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 		);
 		expect(record.bookmarkMetadata.status).toBe('error');
 		// The plain link fallback is preserved in the markdown even on error.
-		expect(record.markdown).toBe('[https://example.com/broken](https://example.com/broken)');
+		expect(record.markdown).toBe('[https://example.com/broken](<https://example.com/broken>)');
 	});
 
 	it('refresh_bookmark_metadata re-fetches an existing bookmark by id', async () => {
@@ -549,7 +552,41 @@ describe('mcp server: document hierarchy and access grant persistence', () => {
 		const record = JSON.parse(getTextContent(getResult)).records.find(
 			(r: { id: string }) => r.id === blockId
 		);
-		expect(record.markdown).toBe('[Weird \\[Title\\] With Brackets](https://example.com/weird)');
+		expect(record.markdown).toBe('[Weird \\[Title\\] With Brackets](<https://example.com/weird>)');
+	});
+
+	it('wraps the markdown destination in angle brackets so a URL containing parentheses does not truncate the link', async () => {
+		fetchLinkPreviewMetadataMock.mockReturnValueOnce(
+			Promise.resolve({ title: 'Mercury (planet)' })
+		);
+		const { doc } = resolveWorkspaceContext();
+		const source = createDocument(doc, { title: 'Source Doc' });
+		const { token } = createToken({
+			clientLabel: 'Bookmark Bot',
+			allowedDocumentIds: [source.id],
+			allowedCollectionIds: []
+		});
+		const mcpServer = createMcpServer();
+
+		const createResult = await invokeTool(
+			mcpServer,
+			'create_record',
+			{
+				parentId: source.id,
+				blockType: 'bookmark',
+				url: 'https://en.wikipedia.org/wiki/Mercury_(planet)'
+			},
+			token
+		);
+		const blockId = JSON.parse(getTextContent(createResult)).recordId;
+
+		const getResult = await invokeTool(mcpServer, 'get_document', { documentId: source.id }, token);
+		const record = JSON.parse(getTextContent(getResult)).records.find(
+			(r: { id: string }) => r.id === blockId
+		);
+		expect(record.markdown).toBe(
+			'[Mercury (planet)](<https://en.wikipedia.org/wiki/Mercury_(planet)>)'
+		);
 	});
 });
 

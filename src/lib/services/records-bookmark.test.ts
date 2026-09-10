@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fetchLinkPreviewMetadataMock = vi.fn();
 vi.mock('$lib/server/link-preview', () => ({
@@ -22,6 +22,14 @@ import type { ActorId } from '$lib/data/types';
 const human: ActorId = { kind: 'human', userId: 'brylie' };
 
 describe('bookmark block service layer (issue #155)', () => {
+	beforeEach(() => {
+		// mockReset (not mockClear): also drops any unconsumed
+		// mockReturnValueOnce/mockResolvedValueOnce queued by a previous test,
+		// so an assertion like "not.toHaveBeenCalled()" can't pass or fail
+		// depending on what ran before it.
+		fetchLinkPreviewMetadataMock.mockReset();
+	});
+
 	it('createRecord rejects a url on a non-bookmark block type', () => {
 		const document = createDocument(human, { title: 'Notes' });
 		expect(() =>

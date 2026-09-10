@@ -23,6 +23,23 @@ function snippetAround(text: string, needle: string): string {
 	return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
 }
 
+// A bookmark block deliberately leaves `content` unused — its meaningful
+// text lives in `url`/`bookmarkMetadata` instead (data-model.md §3) — so the
+// generic `record.content` read below would silently find nothing for every
+// bookmark; a caller searching for its title, description, or URL needs this
+// block-type-specific text instead.
+function searchableTextFor(
+	doc: Y.Doc,
+	record: ReturnType<typeof listRecordsForParent>[number]
+): string {
+	if (record.blockType === 'bookmark') {
+		return [record.bookmarkMetadata?.title, record.bookmarkMetadata?.description, record.url]
+			.filter((value): value is string => !!value)
+			.join(' ');
+	}
+	return record.content ? richTextToMarkdown(doc, record.content) : '';
+}
+
 function searchDocumentRecords(
 	documentDoc: Y.Doc,
 	documentId: string,
@@ -30,7 +47,7 @@ function searchDocumentRecords(
 	results: SearchHit[]
 ): void {
 	for (const record of listRecordsForParent(documentDoc, documentId)) {
-		const text = record.content ? richTextToMarkdown(documentDoc, record.content) : '';
+		const text = searchableTextFor(documentDoc, record);
 		if (text.toLowerCase().includes(needle)) {
 			results.push({ recordId: record.id, snippet: snippetAround(text, needle) });
 		}

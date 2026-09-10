@@ -111,12 +111,15 @@ export type CalloutStyle =
 	| { kind: 'custom'; icon: CalloutIcon; color: string };
 
 // A bookmark block's server-fetched preview state (issue #155) — 'pending'
-// right after a url is set (before the fetch resolves), 'ready' once
-// title/description/favicon/thumbnail were successfully scraped, 'error' when
-// the fetch failed or the page returned no usable metadata. The block's own
-// `url` field is always present once configured regardless of status, so a
-// plain accessible link is never lost even in the 'pending'/'error' states —
-// see markdown-transcoding.md and BookmarkBlock.svelte.
+// right after a url is set (before the fetch resolves), 'ready' once the
+// fetch itself completed without error (title/description/favicon/thumbnail
+// are each independently optional even then — a page with no OpenGraph tags
+// and no <title> is still a successful, 'ready' fetch, just with less to
+// show), 'error' when the fetch itself failed (network error, non-2xx
+// status, non-HTML response, or a guard in $lib/server/link-preview.ts). The
+// block's own `url` field is always present once configured regardless of
+// status, so a plain accessible link is never lost in either the 'pending'
+// or 'error' state — see markdown-transcoding.md and BookmarkBlock.svelte.
 export type BookmarkFetchStatus = 'pending' | 'ready' | 'error';
 
 // Whole-value, like CalloutStyle: one server-side fetch operation

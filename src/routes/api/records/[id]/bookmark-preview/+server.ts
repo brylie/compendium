@@ -1,4 +1,4 @@
-import { json } from '@sveltejs/kit';
+import { error, json } from '@sveltejs/kit';
 import { refreshBookmarkMetadata } from '$lib/services';
 import type { RequestHandler } from './$types';
 
@@ -20,8 +20,19 @@ import type { RequestHandler } from './$types';
  * full explanation.
  */
 export const POST: RequestHandler = async ({ params, request, locals }) => {
-	const body = await request.json();
-	const documentId = String(body.documentId ?? '');
+	let body: unknown;
+	try {
+		body = await request.json();
+	} catch {
+		error(400, 'Request body must be JSON.');
+	}
+	const documentId =
+		typeof body === 'object' && body !== null
+			? (body as Record<string, unknown>).documentId
+			: undefined;
+	if (typeof documentId !== 'string' || documentId === '') {
+		error(400, 'documentId is required.');
+	}
 	const record = await refreshBookmarkMetadata(locals.requestContext.caller, params.id, documentId);
 	return json({ bookmarkMetadata: record.bookmarkMetadata });
 };

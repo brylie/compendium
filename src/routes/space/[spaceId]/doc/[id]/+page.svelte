@@ -1353,9 +1353,9 @@
 	// cooperation it can't assume). The written result reaches this client
 	// through the ordinary Yjs sync path, not this call's response body — a
 	// same-origin request to our own server can still fail (offline, a
-	// transient 5xx), in which case the block is left showing its plain url
-	// with a 'pending' status rather than silently looking stuck; the block's
-	// own "Retry" control (BookmarkBlock.svelte) calls this again.
+	// transient 5xx), in which case the block is marked 'error' so it shows
+	// its plain url plus a "Retry" control rather than silently looking
+	// stuck forever in 'pending'.
 	//
 	// `documentId` is required: this block was created as a direct UI
 	// mutation (no catalog locator of its own, unlike an MCP-created one), so
@@ -1371,7 +1371,13 @@
 			});
 			if (!response.ok) throw new Error(`bookmark preview fetch failed: ${response.status}`);
 		} catch {
-			if (ydoc) {
+			// The request itself can fail for reasons unrelated to the block
+			// (offline, a transient 5xx) — but the block can also have been
+			// deleted while the request was in flight, in which case the
+			// setter below would itself throw for the missing record. Guard
+			// on its continued existence rather than letting that second,
+			// unrelated error escape this intentionally-unawaited call.
+			if (ydoc && getRecord(ydoc, blockId)) {
 				setRecordBookmarkMetadata(ydoc, blockId, { status: 'error' }, CURRENT_USER);
 			}
 		}

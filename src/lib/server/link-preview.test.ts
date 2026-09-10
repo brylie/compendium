@@ -1,20 +1,96 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
 
 const lookupMock = vi.fn();
 vi.mock('node:dns/promises', () => ({
 	default: { lookup: (...args: unknown[]) => lookupMock(...args) }
 }));
 
-// Imported after the mock so link-preview.ts's own `import dns from
-// 'node:dns/promises'` resolves to the mocked module.
+// link-preview.ts talks to node:http/node:https directly (not the global
+// fetch) so it can pin each connection to an already-validated address — see
+// its own doc comment. Mocked here with a small fake request/response pair
+// built on real Node primitives (EventEmitter, Readable) so the module's
+// actual request/response/stream-destroy handling is exercised, not just a
+// pre-resolved Promise the way a global-fetch mock would.
+type FakeResponse = Readable & { statusCode: number; headers: Record<string, string> };
+
+interface QueuedResponse {
+	statusCode: number;
+	headers: Record<string, string>;
+	body?: string;
+	stream?: FakeResponse;
+	error?: Error;
+}
+
+let responseQueue: QueuedResponse[] = [];
+let requestUrls: string[] = [];
+let lastDestroy: ((err?: Error) => void) | undefined;
+let lastLookupOption: ((...args: unknown[]) => void) | undefined;
+
+function makeFakeResponse(
+	statusCode: number,
+	headers: Record<string, string>,
+	body: string
+): FakeResponse {
+	const res = Readable.from([Buffer.from(body)]) as FakeResponse;
+	res.statusCode = statusCode;
+	res.headers = headers;
+	return res;
+}
+
+function fakeRequest(options: Record<string, unknown>) {
+	const req = new EventEmitter() as EventEmitter & {
+		destroy: (err?: Error) => void;
+		end: () => void;
+	};
+	requestUrls.push(`${String(options.hostname)}${(options.path as string | undefined) ?? ''}`);
+	lastLookupOption = options.lookup as (...args: unknown[]) => void;
+	let destroyed = false;
+	let currentRes: FakeResponse | undefined;
+	req.destroy = (err?: Error) => {
+		if (destroyed) return;
+		destroyed = true;
+		if (currentRes) currentRes.destroy(err ?? new Error('destroyed'));
+		else if (err) req.emit('error', err);
+	};
+	lastDestroy = req.destroy;
+	req.end = () => {
+		queueMicrotask(() => {
+			if (destroyed) return;
+			const next = responseQueue.shift();
+			if (!next) {
+				req.emit('error', new Error('no queued response for ' + String(options.path)));
+				return;
+			}
+			if (next.error) {
+				req.emit('error', next.error);
+				return;
+			}
+			const res = next.stream ?? makeFakeResponse(next.statusCode, next.headers, next.body ?? '');
+			currentRes = res;
+			req.emit('response', res);
+		});
+	};
+	return req;
+}
+
+vi.mock('node:http', () => ({ request: (opts: Record<string, unknown>) => fakeRequest(opts) }));
+vi.mock('node:https', () => ({ request: (opts: Record<string, unknown>) => fakeRequest(opts) }));
+
+// Imported after the mocks so link-preview.ts's own imports of
+// node:dns/promises, node:http, and node:https resolve to the mocked modules.
 const { fetchLinkPreviewMetadata, LinkPreviewError } = await import('./link-preview');
 
-function htmlResponse(html: string, contentType = 'text/html; charset=utf-8'): Response {
-	return new Response(html, { status: 200, headers: { 'content-type': contentType } });
+function queueHtml(html: string, contentType = 'text/html; charset=utf-8', statusCode = 200): void {
+	responseQueue.push({ statusCode, headers: { 'content-type': contentType }, body: html });
 }
 
 describe('fetchLinkPreviewMetadata', () => {
 	beforeEach(() => {
+		responseQueue = [];
+		requestUrls = [];
+		lastDestroy = undefined;
 		lookupMock.mockReset();
 		// A stand-in public address for every hostname by default — most tests
 		// only care about HTML parsing/SSRF-guard behavior, not real DNS.
@@ -22,7 +98,7 @@ describe('fetchLinkPreviewMetadata', () => {
 	});
 
 	afterEach(() => {
-		vi.unstubAllGlobals();
+		vi.useRealTimers();
 	});
 
 	it('rejects a non-http(s) scheme before any network call', async () => {
@@ -45,14 +121,22 @@ describe('fetchLinkPreviewMetadata', () => {
 		['http://127.0.0.1/', '127.0.0.1'],
 		['http://10.1.2.3/', '10.1.2.3'],
 		['http://192.168.1.1/', '192.168.1.1'],
-		['http://169.254.1.1/', '169.254.1.1']
+		['http://169.254.1.1/', '169.254.1.1'],
+		['http://100.64.0.1/', '100.64.0.1'], // CGNAT (RFC 6598)
+		['http://192.0.0.1/', '192.0.0.1'] // IETF protocol assignments (RFC 6890)
 	])('refuses to fetch a private IPv4 address (%s)', async (url, address) => {
 		lookupMock.mockResolvedValue([{ address, family: 4 }]);
 		await expect(fetchLinkPreviewMetadata(url)).rejects.toThrow(LinkPreviewError);
 	});
 
-	it('refuses to fetch a private IPv6 address', async () => {
-		lookupMock.mockResolvedValue([{ address: '::1', family: 6 }]);
+	it.each([
+		['::1', 6],
+		['fe80::1', 6], // link-local (fe80::/10)
+		['febf::1', 6], // still within fe80::/10 — a literal "fe80:" prefix match alone would miss this
+		['fc00::1', 6], // unique local (fc00::/7)
+		['::ffff:127.0.0.1', 6] // IPv4-mapped loopback
+	])('refuses to fetch a private IPv6 address (%s)', async (address) => {
+		lookupMock.mockResolvedValue([{ address, family: 6 }]);
 		await expect(fetchLinkPreviewMetadata('http://example.com/')).rejects.toThrow(LinkPreviewError);
 	});
 
@@ -66,19 +150,34 @@ describe('fetchLinkPreviewMetadata', () => {
 		).rejects.toThrow(LinkPreviewError);
 	});
 
+	it('pins the actual connection to the validated address, not a fresh resolution', async () => {
+		// The core DNS-rebinding fix: the request options passed to
+		// node:http/https must carry a `lookup` that always returns the exact
+		// address resolvePublicAddress already validated, never re-resolving
+		// the hostname independently.
+		lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+		queueHtml('<html><head><title>Pinned</title></head></html>');
+
+		await fetchLinkPreviewMetadata('http://example.com/');
+
+		expect(lastLookupOption).toBeTypeOf('function');
+		const callback = vi.fn();
+		lastLookupOption!('example.com', {}, callback);
+		expect(callback).toHaveBeenCalledWith(null, '93.184.216.34', 4);
+		// dns.lookup itself was only ever called once (the validation step) —
+		// the actual connection never triggers a second, independent
+		// resolution that could return a different address.
+		expect(lookupMock).toHaveBeenCalledTimes(1);
+	});
+
 	it('extracts OpenGraph title/description/image and a <link rel="icon">', async () => {
-		vi.stubGlobal(
-			'fetch',
-			vi.fn().mockResolvedValue(
-				htmlResponse(`<!doctype html><html><head>
-					<title>Fallback Title</title>
-					<meta property="og:title" content="Rich Title">
-					<meta property="og:description" content="A nice description.">
-					<meta property="og:image" content="/images/preview.png">
-					<link rel="icon" href="/favicon.png">
-				</head><body></body></html>`)
-			)
-		);
+		queueHtml(`<!doctype html><html><head>
+			<title>Fallback Title</title>
+			<meta property="og:title" content="Rich Title">
+			<meta property="og:description" content="A nice description.">
+			<meta property="og:image" content="/images/preview.png">
+			<link rel="icon" href="/favicon.png">
+		</head><body></body></html>`);
 
 		const result = await fetchLinkPreviewMetadata('https://example.com/article');
 
@@ -91,15 +190,10 @@ describe('fetchLinkPreviewMetadata', () => {
 	});
 
 	it('parses single-quoted attributes too, preferring a double-quoted duplicate when both are present', async () => {
-		vi.stubGlobal(
-			'fetch',
-			vi.fn().mockResolvedValue(
-				htmlResponse(`<html><head>
-					<meta property='og:title' content='Single Quoted Title'>
-					<link rel='icon' href='/single-quoted-favicon.png'>
-				</head></html>`)
-			)
-		);
+		queueHtml(`<html><head>
+			<meta property='og:title' content='Single Quoted Title'>
+			<link rel='icon' href='/single-quoted-favicon.png'>
+		</head></html>`);
 
 		const result = await fetchLinkPreviewMetadata('https://example.com/single-quotes');
 
@@ -108,15 +202,10 @@ describe('fetchLinkPreviewMetadata', () => {
 	});
 
 	it('omits a thumbnail whose og:image content is not a resolvable URL', async () => {
-		vi.stubGlobal(
-			'fetch',
-			vi.fn().mockResolvedValue(
-				htmlResponse(`<html><head>
-					<title>No Thumbnail</title>
-					<meta property="og:image" content="http://">
-				</head></html>`)
-			)
-		);
+		queueHtml(`<html><head>
+			<title>No Thumbnail</title>
+			<meta property="og:image" content="http://">
+		</head></html>`);
 
 		const result = await fetchLinkPreviewMetadata('https://example.com/bad-image');
 
@@ -124,11 +213,32 @@ describe('fetchLinkPreviewMetadata', () => {
 		expect(result.thumbnailUrl).toBeUndefined();
 	});
 
+	it('drops a scraped thumbnail/favicon that resolves to a private address, instead of persisting it', async () => {
+		// A malicious (or compromised) public page can still put a private
+		// address in its own og:image/<link rel="icon"> — those must be
+		// checked independently of the primary fetch's own SSRF guard, since
+		// they're rendered as <img src> directly in every future viewer's
+		// browser (BookmarkBlock.svelte), not fetched server-side again.
+		queueHtml(`<html><head>
+			<title>Malicious Page</title>
+			<meta property="og:image" content="http://internal.example/probe.png">
+			<link rel="icon" href="http://internal.example/favicon.png">
+		</head></html>`);
+		lookupMock
+			.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }]) // the page itself: public
+			.mockResolvedValue([{ address: '10.0.0.5', family: 4 }]); // every asset host: private
+
+		const result = await fetchLinkPreviewMetadata('https://example.com/malicious');
+
+		expect(result.title).toBe('Malicious Page');
+		expect(result.thumbnailUrl).toBeUndefined();
+		// Falls back to the page's own (already-validated-public) origin
+		// rather than the malicious <link rel="icon">.
+		expect(result.faviconUrl).toBe('https://example.com/favicon.ico');
+	});
+
 	it('falls back to <title> and a guessed /favicon.ico when no OpenGraph tags are present', async () => {
-		vi.stubGlobal(
-			'fetch',
-			vi.fn().mockResolvedValue(htmlResponse('<html><head><title>Plain Page</title></head></html>'))
-		);
+		queueHtml('<html><head><title>Plain Page</title></head></html>');
 
 		const result = await fetchLinkPreviewMetadata('https://example.com/plain');
 
@@ -138,13 +248,11 @@ describe('fetchLinkPreviewMetadata', () => {
 	});
 
 	it('re-validates the SSRF guard on every redirect hop', async () => {
-		const fetchMock = vi.fn().mockResolvedValueOnce(
-			new Response(null, {
-				status: 302,
-				headers: { location: 'http://internal.example/next' }
-			})
-		);
-		vi.stubGlobal('fetch', fetchMock);
+		responseQueue.push({
+			statusCode: 302,
+			headers: { location: 'http://internal.example/next' },
+			body: ''
+		});
 		lookupMock
 			.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }]) // first hop: public
 			.mockResolvedValueOnce([{ address: '10.0.0.5', family: 4 }]); // redirect target: private
@@ -152,29 +260,59 @@ describe('fetchLinkPreviewMetadata', () => {
 		await expect(fetchLinkPreviewMetadata('https://example.com/redirect')).rejects.toThrow(
 			LinkPreviewError
 		);
-		// Only the first hop's response was fetched — the redirect target was
-		// rejected before a second fetch call.
-		expect(fetchMock).toHaveBeenCalledTimes(1);
+		// Only the first hop's request was made — the redirect target was
+		// rejected before a second request.
+		expect(requestUrls).toHaveLength(1);
 	});
 
 	it('rejects a non-HTML response', async () => {
-		vi.stubGlobal(
-			'fetch',
-			vi
-				.fn()
-				.mockResolvedValue(
-					new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
-				)
-		);
+		responseQueue.push({
+			statusCode: 200,
+			headers: { 'content-type': 'application/json' },
+			body: '{}'
+		});
 		await expect(fetchLinkPreviewMetadata('https://example.com/data.json')).rejects.toThrow(
 			LinkPreviewError
 		);
 	});
 
 	it('wraps a network failure in LinkPreviewError', async () => {
-		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network unreachable')));
+		responseQueue.push({
+			statusCode: 0,
+			headers: {},
+			error: new Error('network unreachable')
+		});
 		await expect(fetchLinkPreviewMetadata('https://example.com/')).rejects.toThrow(
 			LinkPreviewError
 		);
+	});
+
+	it('aborts a request whose body stalls past the deadline, instead of hanging indefinitely', async () => {
+		vi.useFakeTimers();
+		// A body stream that never pushes data and never ends — simulates a
+		// server that sends headers, then stalls the stream. Only the
+		// connect-through-body-read deadline (not a separate, already-cleared
+		// per-connect timeout) can bound this.
+		const stalledBody = new Readable({ read() {} }) as FakeResponse;
+		stalledBody.statusCode = 200;
+		stalledBody.headers = { 'content-type': 'text/html' };
+		responseQueue.push({
+			statusCode: 200,
+			headers: { 'content-type': 'text/html' },
+			stream: stalledBody
+		});
+
+		const pending = fetchLinkPreviewMetadata('https://example.com/slow');
+		const assertion = expect(pending).rejects.toThrow(LinkPreviewError);
+
+		// Let the queued microtask emit the 'response' event before advancing
+		// timers, then advance past FETCH_TIMEOUT_MS (5000ms) to trigger the
+		// deadline.
+		await Promise.resolve();
+		await Promise.resolve();
+		await vi.advanceTimersByTimeAsync(6000);
+
+		await assertion;
+		expect(lastDestroy).toBeDefined();
 	});
 });
