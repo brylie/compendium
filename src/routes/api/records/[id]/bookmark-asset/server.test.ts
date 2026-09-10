@@ -116,13 +116,26 @@ describe('routes/api/records/[id]/bookmark-asset', () => {
 		expect(fetchImageAssetMock).not.toHaveBeenCalled();
 	});
 
-	it('returns a 404-shaped error for a bookmark with no favicon to proxy', async () => {
+	it('returns a 404 for a bookmark with no favicon to proxy', async () => {
 		const document = createDocument(CURRENT_USER, { title: 'Notes' });
 		const recordId = createUiBookmark(document.id, 'https://example.com/');
 
 		await expect(
 			GET(getRequest(recordId, { kind: 'favicon', documentId: document.id }))
-		).rejects.toThrow();
+		).rejects.toMatchObject({ status: 404 });
+		expect(fetchImageAssetMock).not.toHaveBeenCalled();
+	});
+
+	it('returns a 404 for a non-bookmark record', async () => {
+		const document = createDocument(CURRENT_USER, { title: 'Notes' });
+		const { doc } = resolveParentWorkspaceContext(document.id);
+		const paragraph = transactWithOrigin(doc, TEST_ORIGIN, () =>
+			crdtCreateRecord(doc, { parentId: document.id, blockType: 'paragraph' }, CURRENT_USER)
+		);
+
+		await expect(
+			GET(getRequest(paragraph.id, { kind: 'favicon', documentId: document.id }))
+		).rejects.toMatchObject({ status: 404 });
 		expect(fetchImageAssetMock).not.toHaveBeenCalled();
 	});
 

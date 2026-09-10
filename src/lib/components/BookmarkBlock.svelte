@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import type { WorkspaceRecord } from '$lib/data/types';
 	import Icon from './Icon.svelte';
 
@@ -89,8 +90,17 @@
 	// which the server's one-time scrape-time hostname check
 	// (resolvePublicAssetUrl, $lib/server/link-preview.ts) can see or control.
 	// See bookmark-asset/+server.ts's doc comment for the full explanation.
+	//
+	// `v` (bookmarkMetadata.fetchedAt) busts the proxy's own hour-long browser
+	// cache whenever refreshBookmarkMetadata replaces the metadata — without
+	// it, the request URL never changes across a refresh, so a stale cached
+	// image could keep rendering for up to an hour after a newer one was
+	// fetched.
 	function assetProxyUrl(kind: 'favicon' | 'thumbnail'): string {
-		const params = new URLSearchParams({ kind, documentId });
+		const params = new SvelteURLSearchParams({ kind, documentId });
+		if (metadata?.fetchedAt !== undefined) {
+			params.set('v', String(metadata.fetchedAt));
+		}
 		return `/api/records/${encodeURIComponent(block.id)}/bookmark-asset?${params.toString()}`;
 	}
 </script>

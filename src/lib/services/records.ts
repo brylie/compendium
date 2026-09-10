@@ -607,6 +607,9 @@ export async function refreshBookmarkMetadata(
 
 export type BookmarkAssetKind = 'favicon' | 'thumbnail';
 
+/** Thrown by `getBookmarkAssetUrl` when there is nothing to proxy — a non-bookmark block, or a bookmark with no scraped asset of the requested kind — so the route handler can map this specific case to a 404, distinct from `LinkPreviewError`'s 502 (the proxied fetch itself failed). */
+export class BookmarkAssetNotFoundError extends Error {}
+
 /**
  * Resolves a bookmark block's scraped favicon/thumbnail URL, after checking the caller may
  * access it — the lookup half of the same-origin asset proxy
@@ -632,14 +635,16 @@ export function getBookmarkAssetUrl(
 		: resolveRecordWorkspaceContext(recordId);
 	const record = requireAccessibleRecordInDoc(doc, caller, recordId, 'get_record');
 	if (record.blockType !== 'bookmark') {
-		throw new Error('Bookmark assets can only be requested for a bookmark block.');
+		throw new BookmarkAssetNotFoundError(
+			'Bookmark assets can only be requested for a bookmark block.'
+		);
 	}
 	const url =
 		kind === 'favicon'
 			? record.bookmarkMetadata?.faviconUrl
 			: record.bookmarkMetadata?.thumbnailUrl;
 	if (!url) {
-		throw new Error(`This bookmark block has no ${kind} to proxy.`);
+		throw new BookmarkAssetNotFoundError(`This bookmark block has no ${kind} to proxy.`);
 	}
 	return url;
 }

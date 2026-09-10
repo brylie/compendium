@@ -14,6 +14,7 @@ const {
 	createRecord,
 	refreshBookmarkMetadata,
 	getBookmarkAssetUrl,
+	BookmarkAssetNotFoundError,
 	writeRecord,
 	getRecord,
 	PermissionDeniedError
@@ -226,21 +227,27 @@ describe('bookmark block service layer (issue #155)', () => {
 			);
 		});
 
-		it('throws for a non-bookmark block', () => {
+		it('throws BookmarkAssetNotFoundError for a non-bookmark block', () => {
 			const document = createDocument(human, { title: 'Notes' });
 			const record = createRecord(human, { parentId: document.id, blockType: 'paragraph' });
+			expect(() => getBookmarkAssetUrl(human, record.id, 'favicon')).toThrow(
+				BookmarkAssetNotFoundError
+			);
 			expect(() => getBookmarkAssetUrl(human, record.id, 'favicon')).toThrow(
 				'Bookmark assets can only be requested for a bookmark block.'
 			);
 		});
 
-		it('throws for a bookmark with no scraped asset of the requested kind', () => {
+		it('throws BookmarkAssetNotFoundError for a bookmark with no scraped asset of the requested kind', () => {
 			const document = createDocument(human, { title: 'Notes' });
 			const record = createRecord(human, {
 				parentId: document.id,
 				blockType: 'bookmark',
 				url: 'https://example.com/'
 			});
+			expect(() => getBookmarkAssetUrl(human, record.id, 'favicon')).toThrow(
+				BookmarkAssetNotFoundError
+			);
 			expect(() => getBookmarkAssetUrl(human, record.id, 'favicon')).toThrow(
 				'This bookmark block has no favicon to proxy.'
 			);

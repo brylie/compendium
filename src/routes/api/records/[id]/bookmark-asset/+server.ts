@@ -1,5 +1,9 @@
 import { error } from '@sveltejs/kit';
-import { getBookmarkAssetUrl, type BookmarkAssetKind } from '$lib/services';
+import {
+	BookmarkAssetNotFoundError,
+	getBookmarkAssetUrl,
+	type BookmarkAssetKind
+} from '$lib/services';
 import { fetchImageAsset, LinkPreviewError } from '$lib/server/link-preview';
 import type { RequestHandler } from './$types';
 
@@ -32,7 +36,15 @@ export const GET: RequestHandler = async ({ params, url, locals }) => {
 	const kind = parseKind(url.searchParams.get('kind'));
 	const documentId = url.searchParams.get('documentId') ?? undefined;
 
-	const assetUrl = getBookmarkAssetUrl(locals.requestContext.caller, params.id, kind, documentId);
+	let assetUrl: string;
+	try {
+		assetUrl = getBookmarkAssetUrl(locals.requestContext.caller, params.id, kind, documentId);
+	} catch (err) {
+		if (err instanceof BookmarkAssetNotFoundError) {
+			error(404, err.message);
+		}
+		throw err;
+	}
 
 	let asset: Awaited<ReturnType<typeof fetchImageAsset>>;
 	try {
@@ -50,7 +62,12 @@ export const GET: RequestHandler = async ({ params, url, locals }) => {
 			// Proxied bytes for a URL the server already resolved once — safe to
 			// let the browser cache for a while without re-proxying every render,
 			// but private (not a shared/CDN cache) since access is still gated by
-			// the caller's own permission check above.
+			// the caller's own permission check above. Long-lived only because
+			// BookmarkBlock.svelte's own request URL carries a `v` cache-buster
+			// (bookmarkMetadata.fetchedAt) that changes whenever
+			// refreshBookmarkMetadata replaces the metadata — without that, a
+			// refreshed favicon/thumbnail could stay masked by a still-cached
+			// response to the *same* request URL for up to an hour.
 			'cache-control': 'private, max-age=3600'
 		}
 	});

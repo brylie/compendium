@@ -144,4 +144,25 @@ describe('BookmarkBlock (issue #155)', () => {
 			expect(src).not.toContain('cdn.example.com');
 		}
 	});
+
+	it('busts the proxy cache with a fetchedAt-derived `v` param, so a refreshed asset gets a fresh request url', () => {
+		const { container } = render(BookmarkBlock, {
+			block: makeBlock({
+				url: 'https://example.com/article',
+				bookmarkMetadata: {
+					status: 'ready',
+					faviconUrl: 'https://cdn.example.com/favicon.ico',
+					fetchedAt: 1700000000000
+				}
+			}),
+			documentId: 'doc-1',
+			onSubmitUrl: vi.fn(),
+			onRetry: vi.fn()
+		});
+
+		const src = container.querySelector('img')?.getAttribute('src');
+		expect(src).toBe(
+			`/api/records/${encodeURIComponent('block-1')}/bookmark-asset?kind=favicon&documentId=doc-1&v=1700000000000`
+		);
+	});
 });
