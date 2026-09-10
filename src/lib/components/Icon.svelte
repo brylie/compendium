@@ -56,8 +56,7 @@
 			| 'convert'
 			| 'list-view'
 			| 'unlink'
-			| 'expand'
-			| 'bookmark';
+			| 'expand';
 		size?: number;
 		class?: string;
 	} = $props();
@@ -232,7 +231,5 @@
 		<path
 			d="M3 7.5V4a1 1 0 0 1 1-1h3.5M12.5 3H16a1 1 0 0 1 1 1v3.5M17 12.5V16a1 1 0 0 1-1 1h-3.5M7.5 17H4a1 1 0 0 1-1-1v-3.5"
 		/>
-	{:else if name === 'bookmark'}
-		<path d="M5.5 3h9a1 1 0 0 1 1 1v13l-5.5-3.5L4.5 17V4a1 1 0 0 1 1-1Z" stroke-linejoin="round" />
 	{/if}
 </svg>

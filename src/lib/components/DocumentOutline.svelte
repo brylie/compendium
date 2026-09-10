@@ -45,7 +45,6 @@
 		page_link: 'Page link',
 		embed: 'Embed',
 		collection_view: 'Collection view',
-		bookmark: 'Bookmark',
 		child_pages: 'Child pages',
 		columns: 'Columns',
 		column: 'Column'
@@ -60,12 +59,6 @@
 	}
 
 	function labelFor(record: WorkspaceRecord): string {
-		if (record.blockType === 'bookmark') {
-			const trimmedTitle = record.bookmarkMetadata?.title?.trim();
-			if (trimmedTitle) return trimmedTitle;
-			if (record.url) return record.url;
-			return STRUCTURAL_LABELS.bookmark!;
-		}
 		const structural = record.blockType ? STRUCTURAL_LABELS[record.blockType] : undefined;
 		if (structural) return structural;
 		if (!ydoc) return '';

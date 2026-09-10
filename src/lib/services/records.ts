@@ -14,7 +14,6 @@ import {
 	MIN_COLUMN_COUNT,
 	parentKindOf,
 	patchRecordViewConfig as crdtPatchRecordViewConfig,
-	setRecordBookmarkMetadata as crdtSetRecordBookmarkMetadata,
 	setRecordReferencedId as crdtSetRecordReferencedId,
 	setRecordViewConfig as crdtSetRecordViewConfig,
 	updateRecordContent,
@@ -23,14 +22,12 @@ import {
 import { resolveInternalLinkTarget } from '$lib/data/links';
 import { logAudit } from '$lib/server/audit';
 import { reserveRecordLocator, releaseRecordLocator } from '$lib/server/catalog';
-import { fetchLinkPreviewMetadata } from '$lib/server/link-preview';
 import { markdownToRichText } from '$lib/data/markdown-transcode';
 import { yTextToRichText } from '$lib/data/richtext';
 import { tokenAllowsParent } from '$lib/server/token-store';
 import {
 	columnChildBlockTypes,
 	type BlockType,
-	type BookmarkMetadata,
 	type ChildPagesDepth,
 	type EmbeddedViewConfig,
 	type PropertyValue,
@@ -43,7 +40,6 @@ import {
 	isAccessToken,
 	requireAccessibleParent,
 	requireAccessibleRecord,
-	requireAccessibleRecordInDoc,
 	resolveOwningParentId,
 	resolveParentWorkspaceContext,
 	resolveRecordWorkspaceContext,
@@ -227,22 +223,6 @@ function validateBlockTypeForParent(doc: Y.Doc, parentId: string, blockType: Blo
 	}
 }
 
-/** Validates a bookmark block's initial `url` (issue #155) — only accepted alongside that block type, and restricted to http(s) so a bookmark can never be created pointing at a scheme the server-side preview fetch (fetchLinkPreviewMetadata, $lib/server/link-preview.ts) would reject anyway. */
-function validateBookmarkUrl(blockType: BlockType | undefined, url: string): void {
-	if (blockType !== 'bookmark') {
-		throw new Error('url is only valid on a bookmark block.');
-	}
-	let parsed: URL;
-	try {
-		parsed = new URL(url);
-	} catch {
-		throw new Error('url must be an absolute http(s) URL.');
-	}
-	if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-		throw new Error('url must be an absolute http(s) URL.');
-	}
-}
-
 function validateChildPagesDepth(depth: ChildPagesDepth): void {
 	if (depth === 'unlimited') return;
 	if (!Number.isSafeInteger(depth) || depth < 1) {
@@ -299,7 +279,6 @@ interface CreateRecordServiceInput {
 	viewConfig?: EmbeddedViewConfig;
 	childPagesDepth?: ChildPagesDepth;
 	columnCount?: number; // for columns blocks only (issue #148) — default 2
-	url?: string; // for bookmark blocks only (issue #155)
 }
 
 // Extracted from createRecord purely to keep its own cognitive complexity
@@ -347,10 +326,6 @@ function validateCreateRecordInput(
 	if (input.columnCount !== undefined) {
 		validateColumnCount(input.blockType, input.columnCount);
 	}
-
-	if (input.url !== undefined) {
-		validateBookmarkUrl(input.blockType, input.url);
-	}
 }
 
 // The actual CRDT write createRecord performs, split out so the try/catch
@@ -380,15 +355,7 @@ function performCreateRecord(
 			properties: input.properties,
 			referencedRecordId: input.referencedRecordId,
 			viewConfig: input.viewConfig,
-			childPagesDepth: input.childPagesDepth,
-			url: input.url,
-			// Set immediately so the record is never missing a status once a url
-			// is present — the MCP tool handler (server.ts) awaits
-			// refreshBookmarkMetadata right after this call and replaces it with
-			// the real fetch result before responding to the caller; a UI-created
-			// bookmark (direct client mutation, bypassing this service entirely)
-			// sets this itself the same way (BookmarkBlock.svelte).
-			bookmarkMetadata: input.url ? { status: 'pending' } : undefined
+			childPagesDepth: input.childPagesDepth
 		},
 		actor
 	);
@@ -514,139 +481,6 @@ export function createRecord(
 
 	logAudit({ actor, action: 'create_record', targetRecordId: record.id });
 	return record;
-}
-
-/**
- * Fetches (or re-fetches) a bookmark block's preview metadata and writes the
- * result — the one async, I/O-performing service function in this module
- * (issue #155). Kept separate from `createRecord`/`writeRecord` (both stay
- * synchronous) rather than making either of those async: `createRecord` has
- * dozens of synchronous call sites across the UI/test suite, and doing an
- * uncontrolled outbound fetch inside a Yjs transaction is unsafe regardless
- * (transactions must stay synchronous). The MCP create_record tool handler
- * (server.ts) awaits this immediately after a bookmark-with-url create, so an
- * agent gets a fully-previewed bookmark in one round trip; the UI's
- * equivalent is BookmarkBlock.svelte calling the bookmark-preview API route
- * (src/routes/api/records/[id]/bookmark-preview), which calls this same
- * function server-side.
- *
- * `documentId`, when supplied, resolves the record's shard via its owning
- * Document's own (always locator-tracked, `reserveDocumentLocator`) id
- * instead of the record's own bare id — required for a bookmark created as a
- * *direct UI mutation* (BookmarkBlock.svelte's own client-side
- * `crdtCreateRecord`/`setBlockType`, bypassing this service layer entirely —
- * see audit-coverage.md §1), which never gets its own locator the way an
- * MCP-created one does (this module's own `createRecord`, via
- * `reserveRecordLocator`). Without the hint, `resolveRecordWorkspaceContext`'s
- * "not found" fallback resolves to the wrong (default) shard once Documents
- * are individually sharded (#120), and the call 404s even though the record
- * genuinely exists — see `requireAccessibleRecordInDoc`'s own doc comment
- * (services/permissions.ts). The MCP `refresh_bookmark_metadata` tool omits
- * it: an agent-created bookmark already has its own locator, so the default
- * bare-id resolution already finds the right shard.
- *
- * Never throws for a fetch/parse failure — that degrades to an error status
- * instead, per the PRD's "always retains an accessible plain link as a
- * fallback" requirement (the block's own url is untouched either way). Only a
- * permission failure or a call against a non-bookmark/url-less block throws,
- * before any fetch is attempted.
- */
-export async function refreshBookmarkMetadata(
-	caller: CallerIdentity,
-	recordId: string,
-	documentId?: string
-): Promise<WorkspaceRecord> {
-	const { doc } = documentId
-		? resolveParentWorkspaceContext(documentId)
-		: resolveRecordWorkspaceContext(recordId);
-	const actor = actorForCaller(caller);
-	const record = requireAccessibleRecordInDoc(doc, caller, recordId, 'write_record');
-
-	if (record.blockType !== 'bookmark') {
-		throw new Error('refreshBookmarkMetadata can only be called on a bookmark block.');
-	}
-	if (!record.url) {
-		throw new Error('This bookmark block has no url set yet.');
-	}
-
-	const fetchedForUrl = record.url;
-	let metadata: BookmarkMetadata;
-	try {
-		const fetched = await fetchLinkPreviewMetadata(fetchedForUrl);
-		metadata = { status: 'ready', fetchedAt: Date.now(), ...fetched };
-	} catch {
-		metadata = { status: 'error', fetchedAt: Date.now() };
-	}
-
-	// The fetch above can take seconds, during which the record can be
-	// deleted, or (a second refresh/create racing this one) reconfigured with
-	// a *different* url — re-read the current state rather than trusting the
-	// pre-fetch snapshot, so a slow, now-stale completion can't overwrite a
-	// newer one's result with an older site's title/description/images, or
-	// write into a record that no longer exists.
-	const current = crdtGetRecord(doc, recordId);
-	if (!current) {
-		throw new Error(`Record ${recordId} was deleted while its bookmark preview was being fetched.`);
-	}
-	if (current.blockType !== 'bookmark' || current.url !== fetchedForUrl) {
-		return current;
-	}
-
-	const before = current.bookmarkMetadata;
-	transactWithOrigin(doc, SERVICE_ORIGIN, () => {
-		crdtSetRecordBookmarkMetadata(doc, recordId, metadata, actor);
-	});
-	logAudit({
-		actor,
-		action: 'write_record',
-		targetRecordId: recordId,
-		diff: { bookmarkMetadata: { before, after: metadata } }
-	});
-	return crdtGetRecord(doc, recordId)!;
-}
-
-export type BookmarkAssetKind = 'favicon' | 'thumbnail';
-
-/** Thrown by `getBookmarkAssetUrl` when there is nothing to proxy — a non-bookmark block, or a bookmark with no scraped asset of the requested kind — so the route handler can map this specific case to a 404, distinct from `LinkPreviewError`'s 502 (the proxied fetch itself failed). */
-export class BookmarkAssetNotFoundError extends Error {}
-
-/**
- * Resolves a bookmark block's scraped favicon/thumbnail URL, after checking the caller may
- * access it — the lookup half of the same-origin asset proxy
- * (`bookmark-asset/+server.ts`) that fetches and streams the actual image bytes server-side
- * rather than letting `BookmarkBlock.svelte`'s `<img src>` point at the scraped URL directly.
- * `resolvePublicAssetUrl` (`$lib/server/link-preview.ts`) only ever validated that URL's hostname
- * once, at scrape time — routing every render through the proxy (`fetchImageAsset`, same file)
- * re-validates and pins the connection on every request instead, closing the gap where the
- * *viewer's own browser* would otherwise do its own fresh DNS resolution and redirect-following
- * for a raw `<img src>`.
- *
- * `documentId` carries the same locator-hint contract as `refreshBookmarkMetadata` above, for the
- * identical reason: a bookmark created as a direct UI mutation has no catalog locator of its own.
- */
-export function getBookmarkAssetUrl(
-	caller: CallerIdentity,
-	recordId: string,
-	kind: BookmarkAssetKind,
-	documentId?: string
-): string {
-	const { doc } = documentId
-		? resolveParentWorkspaceContext(documentId)
-		: resolveRecordWorkspaceContext(recordId);
-	const record = requireAccessibleRecordInDoc(doc, caller, recordId, 'get_record');
-	if (record.blockType !== 'bookmark') {
-		throw new BookmarkAssetNotFoundError(
-			'Bookmark assets can only be requested for a bookmark block.'
-		);
-	}
-	const url =
-		kind === 'favicon'
-			? record.bookmarkMetadata?.faviconUrl
-			: record.bookmarkMetadata?.thumbnailUrl;
-	if (!url) {
-		throw new BookmarkAssetNotFoundError(`This bookmark block has no ${kind} to proxy.`);
-	}
-	return url;
 }
 
 interface WriteRecordInput {
@@ -863,19 +697,6 @@ export function writeRecord(
 	) {
 		throw new Error(
 			'markdown cannot be written to a columns or column block directly — write to one of its nested blocks instead.'
-		);
-	}
-
-	// A bookmark block's own content Y.Text is allocated like any other leaf
-	// block's (createRecord doesn't special-case it away, unlike columns/
-	// column) but is never rendered anywhere — its real data is url/
-	// bookmarkMetadata (issue #155), and renderBookmarkMarkdown
-	// (document-projection.ts) never reads content. A markdown write here
-	// would silently vanish from both the UI and get_document, the same
-	// "nowhere to go" reasoning as the columns/column guard above.
-	if (input.markdown !== undefined && record.blockType === 'bookmark') {
-		throw new Error(
-			'markdown cannot be written to a bookmark block — set its url via create_record, or refresh its preview via refresh_bookmark_metadata.'
 		);
 	}
 

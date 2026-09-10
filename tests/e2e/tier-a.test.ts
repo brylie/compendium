@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
 import { createCollection } from '$lib/data/collection-ops';
 import { createDocument as createDocumentRaw } from '$lib/data/document-ops';
@@ -26,15 +26,6 @@ import type { ActorId } from '$lib/data/types';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
-
-// Bookmark preview fetching (issue #155) makes a real outbound HTTP request
-// in production (services/records.ts's refreshBookmarkMetadata via
-// $lib/server/link-preview) — mocked here so test 17 below exercises the
-// real MCP+Yjs transport boundary without depending on network access.
-const fetchLinkPreviewMetadataMock = vi.fn();
-vi.mock('$lib/server/link-preview', () => ({
-	fetchLinkPreviewMetadata: (...args: unknown[]) => fetchLinkPreviewMetadataMock(...args)
-}));
 
 // The server-side workspace contexts used by the cross-space tests have
 // projection observers attached. Keep direct fixture mutations explicit so
@@ -72,8 +63,6 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 	let harness: TestHarness;
 
 	beforeEach(async () => {
-		fetchLinkPreviewMetadataMock.mockReset();
-		fetchLinkPreviewMetadataMock.mockResolvedValue({ title: 'Example Domain' });
 		harness = await createTestHarness();
 	});
 
@@ -779,43 +768,9 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					expect(log.some((e) => e.action === 'write_record')).toBe(true);
 					break;
 				}
-				case 'records.refreshBookmarkMetadata': {
-					const bookmark = serviceModules.records.createRecord(human, {
-						parentId: testDoc.id,
-						blockType: 'bookmark',
-						url: 'https://example.com/'
-					});
-					const refreshed = await serviceModules.records.refreshBookmarkMetadata(
-						human,
-						bookmark.id
-					);
-					expect(refreshed.bookmarkMetadata?.status).toBe('ready');
-					const log = queryAuditLog().filter((e) => e.targetRecordId === bookmark.id);
-					expect(log.some((e) => e.action === 'write_record')).toBe(true);
-					break;
-				}
 				case 'records.getRecord': {
 					const r = serviceModules.records.getRecord(human, testBlock.id);
 					expect(r?.id).toBe(testBlock.id);
-					break;
-				}
-				case 'records.getBookmarkAssetUrl': {
-					fetchLinkPreviewMetadataMock.mockResolvedValueOnce({
-						title: 'Manifest Wiring Bookmark',
-						faviconUrl: 'https://example.com/favicon.png'
-					});
-					const bookmark = serviceModules.records.createRecord(human, {
-						parentId: testDoc.id,
-						blockType: 'bookmark',
-						url: 'https://example.com/'
-					});
-					await serviceModules.records.refreshBookmarkMetadata(human, bookmark.id);
-					const assetUrl = serviceModules.records.getBookmarkAssetUrl(
-						human,
-						bookmark.id,
-						'favicon'
-					);
-					expect(assetUrl).toBe('https://example.com/favicon.png');
 					break;
 				}
 				case 'records.deleteRecord': {
@@ -1440,83 +1395,5 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		});
 		expect(deniedRes.isError).toBe(true);
 		expect(getResultText(deniedRes)).toContain('Permission denied');
-	});
-
-	it('17. MCP create_record with blockType bookmark fetches its preview in the same call, visible to a real Yjs client, refresh_bookmark_metadata re-fetches it, and the permission boundary is enforced (issue #155)', async () => {
-		const yjs = harness.getYjsClient();
-		const doc = createDocument(yjs.doc, { title: 'Source Doc' });
-
-		const { token } = harness.createToken({
-			clientLabel: 'Bookmark Agent',
-			allowedDocumentIds: [doc.id],
-			allowedCollectionIds: []
-		});
-		const mcp = await harness.getMcpClient(token);
-
-		const createRes = await mcp.callTool({
-			name: 'create_record',
-			arguments: { parentId: doc.id, blockType: 'bookmark', url: 'https://example.com/' }
-		});
-		expect(createRes.isError).toBeFalsy();
-		const blockId = parseMcpText<{ recordId: string }>(createRes).recordId;
-
-		// The real Yjs websocket client (standing in for the browser UI)
-		// converges on both the url this call set *and* the preview metadata
-		// fetched synchronously within that same create_record call — an agent
-		// gets a fully-previewed bookmark in one round trip (see
-		// refreshBookmarkMetadata's own doc comment, services/records.ts).
-		await harness.waitForCondition(() => {
-			const record = getRecord(yjs.doc, blockId);
-			return record?.bookmarkMetadata?.status === 'ready';
-		});
-		let record = getRecord(yjs.doc, blockId)!;
-		expect(record.url).toBe('https://example.com/');
-		expect(record.bookmarkMetadata?.title).toBe('Example Domain');
-
-		// A second, independent MCP client + call re-fetches on demand — proves
-		// the refresh isn't tied to the same in-process call/connection that
-		// created the block.
-		fetchLinkPreviewMetadataMock.mockResolvedValueOnce({ title: 'Updated Title' });
-		const mcp2 = await harness.getMcpClient(token);
-		const refreshRes = await mcp2.callTool({
-			name: 'refresh_bookmark_metadata',
-			arguments: { recordId: blockId }
-		});
-		expect(refreshRes.isError).toBeFalsy();
-
-		await harness.waitForCondition(() => {
-			const r = getRecord(yjs.doc, blockId);
-			return r?.bookmarkMetadata?.title === 'Updated Title';
-		});
-
-		// A caller with no access to this Document at all cannot refresh its
-		// bookmark either — the same permission boundary write_record enforces.
-		const { token: outsiderToken } = harness.createToken({
-			clientLabel: 'Outsider Agent',
-			allowedDocumentIds: [],
-			allowedCollectionIds: []
-		});
-		const mcpOutsider = await harness.getMcpClient(outsiderToken);
-		const deniedRes = await mcpOutsider.callTool({
-			name: 'refresh_bookmark_metadata',
-			arguments: { recordId: blockId }
-		});
-		expect(deniedRes.isError).toBe(true);
-		expect(getResultText(deniedRes)).toContain('Permission denied');
-
-		// The denied attempt left the record's title unchanged, and is itself
-		// recorded in the audit trail (audit-coverage.md §3) — the same
-		// write_record_denied action write_record's own permission boundary
-		// logs, since refreshBookmarkMetadata reuses that guard. Logged against
-		// the *owning Document's* id, not the block's own — requireAccessibleParent
-		// (services/permissions.ts) attributes a denial to the resolved parent
-		// it actually checked, matching create_record_denied/get_document_denied's
-		// own precedent (services.test.ts) for a record that does exist (as
-		// opposed to a wholly unknown record id, which denies against that bare
-		// id instead — see requireAccessibleRecord's early-return branch).
-		record = getRecord(yjs.doc, blockId)!;
-		expect(record.bookmarkMetadata?.title).toBe('Updated Title');
-		const denialLog = queryAuditLog().filter((e) => e.targetRecordId === doc.id);
-		expect(denialLog.some((e) => e.action === 'write_record_denied')).toBe(true);
 	});
 });

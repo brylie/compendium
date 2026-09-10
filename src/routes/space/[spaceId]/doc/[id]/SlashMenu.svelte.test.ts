@@ -6,7 +6,7 @@ import SlashMenu from './SlashMenu.svelte';
 describe('SlashMenu', () => {
 	it('lists every supported block command when the query is empty', () => {
 		render(SlashMenu, { query: '', onSelect: vi.fn() });
-		expect(screen.getAllByRole('option')).toHaveLength(22);
+		expect(screen.getAllByRole('option')).toHaveLength(21);
 	});
 
 	it('groups commands into the editor categories', () => {
