@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { getShardAwareness, getShardDoc } from '$lib/client/yjs-client';
@@ -1362,7 +1362,20 @@
 	// the service layer needs the owning Document's own (always
 	// locator-tracked) id to resolve the right shard — see
 	// refreshBookmarkMetadata's own doc comment (services/records.ts).
+	//
+	// One block can have more than one preview request outstanding at once —
+	// a slow first attempt still in flight when the user clicks Retry, or
+	// resubmits a different URL before it settles — and they can settle out
+	// of order. Without tracking which request is still current, an older
+	// one failing *after* a newer one already wrote 'ready' would overwrite
+	// good data with 'error'. Mirrors the same-shaped guard
+	// refreshBookmarkMetadata (services/records.ts) applies server-side for
+	// its own out-of-order-completion race.
+	const bookmarkPreviewGeneration = new SvelteMap<string, number>();
+
 	async function requestBookmarkPreview(blockId: string): Promise<void> {
+		const generation = (bookmarkPreviewGeneration.get(blockId) ?? 0) + 1;
+		bookmarkPreviewGeneration.set(blockId, generation);
 		try {
 			const response = await fetch(`/api/records/${encodeURIComponent(blockId)}/bookmark-preview`, {
 				method: 'POST',
@@ -1375,9 +1388,15 @@
 			// (offline, a transient 5xx) — but the block can also have been
 			// deleted while the request was in flight, in which case the
 			// setter below would itself throw for the missing record. Guard
-			// on its continued existence rather than letting that second,
-			// unrelated error escape this intentionally-unawaited call.
-			if (ydoc && getRecord(ydoc, blockId)) {
+			// on its continued existence, and on this still being the latest
+			// request for it, rather than letting that second, unrelated
+			// error escape this intentionally-unawaited call or clobbering a
+			// newer, already-succeeded result.
+			if (
+				ydoc &&
+				getRecord(ydoc, blockId) &&
+				bookmarkPreviewGeneration.get(blockId) === generation
+			) {
 				setRecordBookmarkMetadata(ydoc, blockId, { status: 'error' }, CURRENT_USER);
 			}
 		}

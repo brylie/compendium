@@ -129,9 +129,42 @@ function requestHop(
 			port: url.port || (isHttps ? 443 : 80),
 			path: `${url.pathname}${url.search}`,
 			method: 'GET',
-			headers: { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml,*/*;q=0.5' },
-			lookup: (_hostname, _options, callback) => {
-				callback(null, address, family);
+			headers: {
+				'user-agent': USER_AGENT,
+				accept: 'text/html,application/xhtml+xml,*/*;q=0.5',
+				// readBoundedBody has no gzip/br decoder — without this, a server
+				// that compresses its response (the default for most real sites)
+				// would hand back bytes that decode-as-utf8 into garbage, and the
+				// title/meta-tag extractors would silently find nothing.
+				'accept-encoding': 'identity'
+			},
+			// Node's `autoSelectFamily` (default on since Node 18.13/20) calls a
+			// custom `lookup` with `options.all: true` when it wants every
+			// candidate address for Happy-Eyeballs connection racing, expecting
+			// an array back — not the single-address callback shape `dns.lookup`
+			// itself uses. Handling only the single-address form would silently
+			// break every real connection attempt on a modern Node default.
+			lookup: (
+				_hostname: string,
+				options: { all?: boolean } | ((err: Error | null, ...args: never[]) => void),
+				callback: (err: Error | null, ...args: never[]) => void
+			) => {
+				const resolvedCallback = typeof options === 'function' ? options : callback;
+				const wantsAll = typeof options === 'object' && options.all;
+				if (wantsAll) {
+					(
+						resolvedCallback as unknown as (
+							err: null,
+							addresses: { address: string; family: number }[]
+						) => void
+					)(null, [{ address, family }]);
+					return;
+				}
+				(resolvedCallback as unknown as (err: null, address: string, family: number) => void)(
+					null,
+					address,
+					family
+				);
 			}
 		});
 		req.on('response', (res) => {
@@ -188,9 +221,18 @@ async function fetchWithGuards(
 	);
 	try {
 		const { statusCode, headers, body } = await response;
+		// A plain `resume()` leaves the stream listening for more data with no
+		// error handler of its own — if the still-armed deadline fires while a
+		// redirect/rejected body is draining (or the peer resets the
+		// connection), destroying/erroring that stream would otherwise surface
+		// as an unhandled 'error' event instead of just being discarded.
+		const discard = (): void => {
+			body.on('error', () => {});
+			body.destroy();
+		};
 
 		if (statusCode >= 300 && statusCode < 400) {
-			body.resume(); // discard the redirect body without reading it
+			discard();
 			const location = headers.location;
 			if (!location || redirectsLeft <= 0) {
 				throw new LinkPreviewError('Redirect with no Location header, or too many redirects');
@@ -198,12 +240,12 @@ async function fetchWithGuards(
 			return await fetchWithGuards(new URL(location, url), redirectsLeft - 1);
 		}
 		if (statusCode < 200 || statusCode >= 300) {
-			body.resume();
+			discard();
 			throw new LinkPreviewError(`Fetch failed with status ${statusCode}`);
 		}
 		const contentType = String(headers['content-type'] ?? '');
 		if (!contentType.includes('html')) {
-			body.resume();
+			discard();
 			throw new LinkPreviewError('URL did not return HTML content');
 		}
 		const html = await readBoundedBody(body, MAX_RESPONSE_BYTES);

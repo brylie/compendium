@@ -5,7 +5,13 @@ import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import { createDocument, getDocument } from '$lib/data/document-ops';
 import { createCollection } from '$lib/data/collection-ops';
-import { createColumnsBlock, createRecord, getRecord, getRecordYText } from '$lib/data/record-ops';
+import {
+	createColumnsBlock,
+	createRecord,
+	getRecord,
+	getRecordYText,
+	setRecordBookmarkMetadata
+} from '$lib/data/record-ops';
 import { plainText, yTextToRichText } from '$lib/data/richtext';
 import type { ActorId } from '$lib/data/types';
 import Page from './+page.svelte';
@@ -2541,6 +2547,68 @@ describe('doc/[id] +page', () => {
 					'error'
 				);
 			});
+		});
+
+		it('does not let a stale, older preview request overwrite a newer one that already succeeded', async () => {
+			// A first ("stale") request that finally fails *after* a second,
+			// newer request for the same block already landed a result must
+			// not flip the block back to 'error' out from under it — the same
+			// out-of-order-completion race refreshBookmarkMetadata
+			// (services/records.ts) guards against server-side. The second
+			// fetch call below writes 'ready' directly (standing in for the
+			// real server's write, which normally arrives via Yjs sync — not
+			// simulated by this test's mocked `fetch`) *before* the first
+			// call's deferred rejection fires, so a working generation guard
+			// is the only thing that can keep 'ready' from being clobbered.
+			let rejectFirst!: (err: Error) => void;
+			const firstRequest = new Promise<never>((_resolve, reject) => {
+				rejectFirst = reject;
+			});
+			let bookmarkRequestCount = 0;
+			vi.stubGlobal(
+				'fetch',
+				vi.fn((input: RequestInfo | URL) => {
+					if (!requestUrl(input).includes('/api/records/')) {
+						return Promise.resolve({ ok: true, json: async () => ({ shardId: 'test-shard' }) });
+					}
+					bookmarkRequestCount += 1;
+					if (bookmarkRequestCount === 1) return firstRequest;
+					setRecordBookmarkMetadata(ydoc, bookmark.id, { status: 'ready', title: 'Fresh' }, HUMAN);
+					return Promise.resolve({ ok: true, json: async () => ({}) });
+				})
+			);
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const bookmark = createRecord(
+				ydoc,
+				{
+					parentId: 'doc-1',
+					blockType: 'bookmark',
+					url: 'https://example.com/',
+					bookmarkMetadata: { status: 'error' }
+				},
+				HUMAN
+			);
+			renderDoc();
+			await flushShardResolution();
+
+			// Two retries in a row, without awaiting the first (BookmarkBlock's
+			// onRetry is fire-and-forget) — the record stays in its initial
+			// 'error' state (and Retry stays visible) until this test's own
+			// mocked fetch writes something, so both clicks are ordinary UI
+			// interactions here, not a synthetic race.
+			const retryButton = screen.getByRole('button', { name: 'Retry preview' });
+			await fireEvent.click(retryButton);
+			await fireEvent.click(retryButton);
+			await vi.waitFor(() => expect(bookmarkRequestCount).toBe(2));
+
+			rejectFirst(new Error('stale failure'));
+			await tick();
+			await tick();
+
+			const yrecord = ydoc.getMap('records').get(bookmark.id) as Y.Map<unknown>;
+			const metadata = yrecord.get('bookmarkMetadata') as { status: string; title?: string };
+			expect(metadata.status).toBe('ready');
+			expect(metadata.title).toBe('Fresh');
 		});
 	});
 });

@@ -27,6 +27,7 @@ let responseQueue: QueuedResponse[] = [];
 let requestUrls: string[] = [];
 let lastDestroy: ((err?: Error) => void) | undefined;
 let lastLookupOption: ((...args: unknown[]) => void) | undefined;
+let lastHeaders: Record<string, string> | undefined;
 
 function makeFakeResponse(
 	statusCode: number,
@@ -46,6 +47,7 @@ function fakeRequest(options: Record<string, unknown>) {
 	};
 	requestUrls.push(`${String(options.hostname)}${(options.path as string | undefined) ?? ''}`);
 	lastLookupOption = options.lookup as (...args: unknown[]) => void;
+	lastHeaders = options.headers as Record<string, string>;
 	let destroyed = false;
 	let currentRes: FakeResponse | undefined;
 	req.destroy = (err?: Error) => {
@@ -168,6 +170,41 @@ describe('fetchLinkPreviewMetadata', () => {
 		// the actual connection never triggers a second, independent
 		// resolution that could return a different address.
 		expect(lookupMock).toHaveBeenCalledTimes(1);
+	});
+
+	it('answers a Happy-Eyeballs-shaped lookup call (options.all: true) with an address array, not just the single-address form', async () => {
+		// Node's autoSelectFamily (default on since Node 18.13/20) calls a
+		// custom `lookup` with `{all: true}` expecting `(err, addresses[])`
+		// back — a lookup that only ever answers the single-address form
+		// would silently break every real connection attempt.
+		lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+		queueHtml('<html><head><title>Pinned</title></head></html>');
+
+		await fetchLinkPreviewMetadata('http://example.com/');
+
+		const callback = vi.fn();
+		lastLookupOption!('example.com', { all: true }, callback);
+		expect(callback).toHaveBeenCalledWith(null, [{ address: '93.184.216.34', family: 4 }]);
+	});
+
+	it('answers the legacy two-argument lookup(hostname, callback) form too', async () => {
+		lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+		queueHtml('<html><head><title>Pinned</title></head></html>');
+
+		await fetchLinkPreviewMetadata('http://example.com/');
+
+		const callback = vi.fn();
+		lastLookupOption!('example.com', callback);
+		expect(callback).toHaveBeenCalledWith(null, '93.184.216.34', 4);
+	});
+
+	it('requests an unencoded response so the plain-text extractors never see compressed bytes', async () => {
+		lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+		queueHtml('<html><head><title>Plain</title></head></html>');
+
+		await fetchLinkPreviewMetadata('http://example.com/');
+
+		expect(lastHeaders?.['accept-encoding']).toBe('identity');
 	});
 
 	it('extracts OpenGraph title/description/image and a <link rel="icon">', async () => {
