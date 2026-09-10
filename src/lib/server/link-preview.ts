@@ -117,7 +117,8 @@ interface RawResponse {
 function requestHop(
 	url: URL,
 	address: string,
-	family: number
+	family: number,
+	accept: string
 ): { response: Promise<RawResponse>; destroy: (err: Error) => void } {
 	const isHttps = url.protocol === 'https:';
 	const client = isHttps ? https : http;
@@ -131,11 +132,12 @@ function requestHop(
 			method: 'GET',
 			headers: {
 				'user-agent': USER_AGENT,
-				accept: 'text/html,application/xhtml+xml,*/*;q=0.5',
+				accept,
 				// readBoundedBody has no gzip/br decoder — without this, a server
 				// that compresses its response (the default for most real sites)
 				// would hand back bytes that decode-as-utf8 into garbage, and the
-				// title/meta-tag extractors would silently find nothing.
+				// title/meta-tag extractors (or the image-proxy passthrough) would
+				// silently find nothing / mangle the bytes.
 				'accept-encoding': 'identity'
 			},
 			// Node's `autoSelectFamily` (default on since Node 18.13/20) calls a
@@ -178,8 +180,8 @@ function requestHop(
 	return { response, destroy: (err) => req.destroy(err) };
 }
 
-/** Reads at most `maxBytes` from `body`, aborting the connection once exceeded — bounds memory for a caller-supplied URL that could otherwise stream an arbitrarily large response. Any stream error (including a deadline-triggered destroy — see `fetchWithGuards`) surfaces as `LinkPreviewError`. */
-async function readBoundedBody(body: IncomingMessage, maxBytes: number): Promise<string> {
+/** Reads at most `maxBytes` from `body`, aborting the connection once exceeded — bounds memory for a caller-supplied URL that could otherwise stream an arbitrarily large response. Any stream error (including a deadline-triggered destroy — see `fetchResourceWithGuards`) surfaces as `LinkPreviewError`. */
+async function readBoundedBody(body: IncomingMessage, maxBytes: number): Promise<Buffer> {
 	const chunks: Buffer[] = [];
 	let total = 0;
 	try {
@@ -194,7 +196,14 @@ async function readBoundedBody(body: IncomingMessage, maxBytes: number): Promise
 	} catch (err) {
 		throw new LinkPreviewError(err instanceof Error ? err.message : 'Failed reading response body');
 	}
-	return Buffer.concat(chunks).toString('utf-8');
+	return Buffer.concat(chunks);
+}
+
+interface ResourceGuardOptions {
+	accept: string;
+	maxBytes: number;
+	isAcceptableContentType: (contentType: string) => boolean;
+	rejectionMessage: string;
 }
 
 // A plain, non-redirect-following GET per hop, plus this loop, so every hop's
@@ -204,17 +213,21 @@ async function readBoundedBody(body: IncomingMessage, maxBytes: number): Promise
 // full bounded body read, not just until headers arrive — so a server that
 // sends headers and then stalls (or trickles) its body stream can't hold the
 // call open indefinitely; a bare per-connect timeout alone wouldn't catch a
-// slow-but-technically-still-flowing body.
-async function fetchWithGuards(
+// slow-but-technically-still-flowing body. Shared by `fetchLinkPreviewMetadata`
+// (HTML) and `fetchImageAsset` (favicon/thumbnail proxying) — the redirect
+// re-validation and address-pinning are identical for both; only the accept
+// header, content-type gate, and size cap differ.
+async function fetchResourceWithGuards(
 	url: URL,
-	redirectsLeft: number
-): Promise<{ finalUrl: URL; html: string }> {
+	redirectsLeft: number,
+	options: ResourceGuardOptions
+): Promise<{ finalUrl: URL; contentType: string; body: Buffer }> {
 	if (!['http:', 'https:'].includes(url.protocol)) {
 		throw new LinkPreviewError('Only http/https URLs are supported');
 	}
 	const { address, family } = await resolvePublicAddress(url.hostname);
 
-	const { response, destroy } = requestHop(url, address, family);
+	const { response, destroy } = requestHop(url, address, family, options.accept);
 	const deadline = setTimeout(
 		() => destroy(new LinkPreviewError('Request timed out')),
 		FETCH_TIMEOUT_MS
@@ -237,22 +250,35 @@ async function fetchWithGuards(
 			if (!location || redirectsLeft <= 0) {
 				throw new LinkPreviewError('Redirect with no Location header, or too many redirects');
 			}
-			return await fetchWithGuards(new URL(location, url), redirectsLeft - 1);
+			return await fetchResourceWithGuards(new URL(location, url), redirectsLeft - 1, options);
 		}
 		if (statusCode < 200 || statusCode >= 300) {
 			discard();
 			throw new LinkPreviewError(`Fetch failed with status ${statusCode}`);
 		}
 		const contentType = String(headers['content-type'] ?? '');
-		if (!contentType.includes('html')) {
+		if (!options.isAcceptableContentType(contentType)) {
 			discard();
-			throw new LinkPreviewError('URL did not return HTML content');
+			throw new LinkPreviewError(options.rejectionMessage);
 		}
-		const html = await readBoundedBody(body, MAX_RESPONSE_BYTES);
-		return { finalUrl: url, html };
+		const bodyBytes = await readBoundedBody(body, options.maxBytes);
+		return { finalUrl: url, contentType, body: bodyBytes };
 	} finally {
 		clearTimeout(deadline);
 	}
+}
+
+async function fetchWithGuards(
+	url: URL,
+	redirectsLeft: number
+): Promise<{ finalUrl: URL; html: string }> {
+	const { finalUrl, body } = await fetchResourceWithGuards(url, redirectsLeft, {
+		accept: 'text/html,application/xhtml+xml,*/*;q=0.5',
+		maxBytes: MAX_RESPONSE_BYTES,
+		isAcceptableContentType: (contentType) => contentType.includes('html'),
+		rejectionMessage: 'URL did not return HTML content'
+	});
+	return { finalUrl, html: body.toString('utf-8') };
 }
 
 function decodeHtmlEntities(text: string): string {
@@ -385,4 +411,48 @@ export async function fetchLinkPreviewMetadata(rawUrl: string): Promise<FetchedL
 		faviconUrl,
 		thumbnailUrl
 	};
+}
+
+export interface FetchedImageAsset {
+	contentType: string;
+	body: Buffer;
+}
+
+// Generous for a favicon/thumbnail (real-world OG images run a few hundred
+// KB) while still bounding memory for a scraped-URL that could otherwise
+// stream an arbitrarily large response.
+const MAX_IMAGE_BYTES = 5_000_000;
+const IMAGE_CONTENT_TYPE_RE = /^image\//i;
+
+/**
+ * Fetches `rawUrl` server-side and returns raw image bytes, under the same
+ * address-pinning/redirect-revalidation/timeout guards as
+ * `fetchLinkPreviewMetadata`. This exists because those guards alone don't
+ * protect a favicon/thumbnail once its URL is persisted: `resolvePublicAssetUrl`
+ * only ever validates a scraped asset's hostname *once*, at scrape time — if
+ * `BookmarkBlock.svelte` then rendered that URL directly as an `<img src>`,
+ * the *viewer's own browser* would perform a fresh DNS resolution and follow
+ * any redirect the image host sends, neither of which the scrape-time check
+ * can see or control (a public hostname can rebind to a private address
+ * later, or a public asset endpoint can redirect the browser to one). Routing
+ * every render through the same-origin proxy that calls this function closes
+ * that gap the same way `requestHop`'s pinned `lookup` already closes it for
+ * the primary HTML fetch — every hop, including a redirect the *image* host
+ * sends, is re-resolved and re-validated here, server-side, before any bytes
+ * reach the browser.
+ */
+export async function fetchImageAsset(rawUrl: string): Promise<FetchedImageAsset> {
+	let url: URL;
+	try {
+		url = new URL(rawUrl);
+	} catch {
+		throw new LinkPreviewError(`Invalid URL: ${rawUrl}`);
+	}
+	const { contentType, body } = await fetchResourceWithGuards(url, MAX_REDIRECTS, {
+		accept: 'image/*',
+		maxBytes: MAX_IMAGE_BYTES,
+		isAcceptableContentType: (ct) => IMAGE_CONTENT_TYPE_RE.test(ct),
+		rejectionMessage: 'URL did not return image content'
+	});
+	return { contentType, body };
 }

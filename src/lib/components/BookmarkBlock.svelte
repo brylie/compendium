@@ -18,10 +18,12 @@
 	// this component needing to know which case it's in.
 	let {
 		block,
+		documentId,
 		onSubmitUrl,
 		onRetry
 	}: {
 		block: WorkspaceRecord;
+		documentId: string;
 		onSubmitUrl: (url: string) => void;
 		onRetry: () => void;
 	} = $props();
@@ -79,6 +81,18 @@
 			return block.url;
 		}
 	});
+
+	// Routed through the same-origin bookmark-asset proxy rather than pointing
+	// `<img src>` at the scraped favicon/thumbnail URL directly — a raw
+	// external `<img src>` would have the *viewer's own browser* do a fresh
+	// DNS resolution and follow any redirect the image host sends, neither of
+	// which the server's one-time scrape-time hostname check
+	// (resolvePublicAssetUrl, $lib/server/link-preview.ts) can see or control.
+	// See bookmark-asset/+server.ts's doc comment for the full explanation.
+	function assetProxyUrl(kind: 'favicon' | 'thumbnail'): string {
+		const params = new URLSearchParams({ kind, documentId });
+		return `/api/records/${encodeURIComponent(block.id)}/bookmark-asset?${params.toString()}`;
+	}
 </script>
 
 {#if !block.url}
@@ -114,7 +128,7 @@
 		>
 			{#if status === 'ready' && metadata?.faviconUrl}
 				<img
-					src={metadata.faviconUrl}
+					src={assetProxyUrl('favicon')}
 					alt=""
 					class="mt-0.5 h-4 w-4 flex-shrink-0 rounded-sm"
 					onerror={hideBrokenImage}
@@ -140,7 +154,7 @@
 			</div>
 			{#if status === 'ready' && metadata?.thumbnailUrl}
 				<img
-					src={metadata.thumbnailUrl}
+					src={assetProxyUrl('thumbnail')}
 					alt=""
 					class="h-14 w-20 flex-shrink-0 rounded object-cover"
 					onerror={hideBrokenImage}

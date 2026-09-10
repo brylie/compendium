@@ -2131,6 +2131,7 @@
 					{#if ydoc}
 						<BookmarkBlock
 							{block}
+							documentId={data.documentId}
 							onSubmitUrl={(url) => handleBookmarkUrlSubmit(block.id, url)}
 							onRetry={() => requestBookmarkPreview(block.id)}
 						/>

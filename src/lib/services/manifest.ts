@@ -101,6 +101,10 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 		mcpDescription: 'Delete a record. No hold needed.'
 	},
 	'records.getRecord': { mcp: false, ui: true },
+	// UI-only: resolves a bookmark's scraped favicon/thumbnail URL for the
+	// same-origin asset proxy (bookmark-asset/+server.ts, issue #155 follow-up)
+	// — no MCP tool needs this, since an agent never renders an `<img>`.
+	'records.getBookmarkAssetUrl': { mcp: false, ui: true },
 
 	'holds.holdRecords': {
 		mcp: true,
@@ -186,6 +190,7 @@ export const uiAdapterBindings = {
 	'records.writeRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'records.deleteRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'records.getRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.server.ts',
+	'records.getBookmarkAssetUrl': 'src/routes/api/records/[id]/bookmark-asset/+server.ts',
 	'holds.holdRecords': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'holds.releaseRecords': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'collections.createCollection': 'src/routes/api/collections/+server.ts',

@@ -799,6 +799,25 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					expect(r?.id).toBe(testBlock.id);
 					break;
 				}
+				case 'records.getBookmarkAssetUrl': {
+					fetchLinkPreviewMetadataMock.mockResolvedValueOnce({
+						title: 'Manifest Wiring Bookmark',
+						faviconUrl: 'https://example.com/favicon.png'
+					});
+					const bookmark = serviceModules.records.createRecord(human, {
+						parentId: testDoc.id,
+						blockType: 'bookmark',
+						url: 'https://example.com/'
+					});
+					await serviceModules.records.refreshBookmarkMetadata(human, bookmark.id);
+					const assetUrl = serviceModules.records.getBookmarkAssetUrl(
+						human,
+						bookmark.id,
+						'favicon'
+					);
+					expect(assetUrl).toBe('https://example.com/favicon.png');
+					break;
+				}
 				case 'records.deleteRecord': {
 					const r = serviceModules.records.createRecord(human, {
 						parentId: testDoc.id,

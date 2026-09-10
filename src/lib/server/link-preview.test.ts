@@ -82,7 +82,8 @@ vi.mock('node:https', () => ({ request: (opts: Record<string, unknown>) => fakeR
 
 // Imported after the mocks so link-preview.ts's own imports of
 // node:dns/promises, node:http, and node:https resolve to the mocked modules.
-const { fetchLinkPreviewMetadata, LinkPreviewError } = await import('./link-preview');
+const { fetchLinkPreviewMetadata, fetchImageAsset, LinkPreviewError } =
+	await import('./link-preview');
 
 function queueHtml(html: string, contentType = 'text/html; charset=utf-8', statusCode = 200): void {
 	responseQueue.push({ statusCode, headers: { 'content-type': contentType }, body: html });
@@ -351,5 +352,72 @@ describe('fetchLinkPreviewMetadata', () => {
 
 		await assertion;
 		expect(lastDestroy).toBeDefined();
+	});
+});
+
+describe('fetchImageAsset', () => {
+	beforeEach(() => {
+		responseQueue = [];
+		requestUrls = [];
+		lastDestroy = undefined;
+		lookupMock.mockReset();
+		lookupMock.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('fetches image bytes and content-type for a public asset url', async () => {
+		responseQueue.push({
+			statusCode: 200,
+			headers: { 'content-type': 'image/png' },
+			body: 'fake-png-bytes'
+		});
+
+		const result = await fetchImageAsset('https://example.com/favicon.png');
+
+		expect(result.contentType).toBe('image/png');
+		expect(result.body.toString('utf-8')).toBe('fake-png-bytes');
+	});
+
+	it('rejects a non-image content type', async () => {
+		responseQueue.push({
+			statusCode: 200,
+			headers: { 'content-type': 'text/html' },
+			body: '<html></html>'
+		});
+
+		await expect(fetchImageAsset('https://example.com/not-an-image')).rejects.toThrow(
+			LinkPreviewError
+		);
+	});
+
+	// The whole point of this proxy (see fetchImageAsset's own doc comment):
+	// a scraped asset hostname was already validated once, at scrape time, but
+	// a fresh resolution here (as if the viewer's browser had done it) must be
+	// re-checked independently — this is that re-check, on the server side.
+	it('refuses an asset url that resolves to a private address', async () => {
+		lookupMock.mockResolvedValue([{ address: '10.0.0.5', family: 4 }]);
+
+		await expect(fetchImageAsset('https://example.com/favicon.png')).rejects.toThrow(
+			LinkPreviewError
+		);
+	});
+
+	it('re-validates the SSRF guard on a redirect the image host itself sends', async () => {
+		responseQueue.push({
+			statusCode: 302,
+			headers: { location: 'http://internal.example/next.png' },
+			body: ''
+		});
+		lookupMock
+			.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }]) // first hop: public
+			.mockResolvedValueOnce([{ address: '10.0.0.5', family: 4 }]); // redirect target: private
+
+		await expect(fetchImageAsset('https://example.com/redirect.png')).rejects.toThrow(
+			LinkPreviewError
+		);
+		expect(requestUrls).toHaveLength(1);
 	});
 });

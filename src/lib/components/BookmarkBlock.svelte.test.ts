@@ -24,7 +24,12 @@ describe('BookmarkBlock (issue #155)', () => {
 	it('shows a URL input when unconfigured, and submits a normalized url', async () => {
 		const user = userEvent.setup();
 		const onSubmitUrl = vi.fn();
-		render(BookmarkBlock, { block: makeBlock(), onSubmitUrl, onRetry: vi.fn() });
+		render(BookmarkBlock, {
+			block: makeBlock(),
+			documentId: 'doc-1',
+			onSubmitUrl,
+			onRetry: vi.fn()
+		});
 
 		await user.type(screen.getByLabelText('Bookmark URL'), 'example.com/page');
 		await user.click(screen.getByRole('button', { name: 'Add bookmark' }));
@@ -35,7 +40,12 @@ describe('BookmarkBlock (issue #155)', () => {
 	it('rejects an invalid url without calling onSubmitUrl', async () => {
 		const user = userEvent.setup();
 		const onSubmitUrl = vi.fn();
-		render(BookmarkBlock, { block: makeBlock(), onSubmitUrl, onRetry: vi.fn() });
+		render(BookmarkBlock, {
+			block: makeBlock(),
+			documentId: 'doc-1',
+			onSubmitUrl,
+			onRetry: vi.fn()
+		});
 
 		await user.type(screen.getByLabelText('Bookmark URL'), 'not a url at all');
 		await user.click(screen.getByRole('button', { name: 'Add bookmark' }));
@@ -47,6 +57,7 @@ describe('BookmarkBlock (issue #155)', () => {
 	it('always renders a real accessible link to the plain url, even while pending', () => {
 		render(BookmarkBlock, {
 			block: makeBlock({ url: 'https://example.com/', bookmarkMetadata: { status: 'pending' } }),
+			documentId: 'doc-1',
 			onSubmitUrl: vi.fn(),
 			onRetry: vi.fn()
 		});
@@ -66,6 +77,7 @@ describe('BookmarkBlock (issue #155)', () => {
 					description: 'A short summary.'
 				}
 			}),
+			documentId: 'doc-1',
 			onSubmitUrl: vi.fn(),
 			onRetry: vi.fn()
 		});
@@ -80,6 +92,7 @@ describe('BookmarkBlock (issue #155)', () => {
 		const onRetry = vi.fn();
 		render(BookmarkBlock, {
 			block: makeBlock({ url: 'https://example.com/', bookmarkMetadata: { status: 'error' } }),
+			documentId: 'doc-1',
 			onSubmitUrl: vi.fn(),
 			onRetry
 		});
@@ -97,10 +110,38 @@ describe('BookmarkBlock (issue #155)', () => {
 				url: 'https://example.com/no-title',
 				bookmarkMetadata: { status: 'ready' }
 			}),
+			documentId: 'doc-1',
 			onSubmitUrl: vi.fn(),
 			onRetry: vi.fn()
 		});
 
 		expect(screen.getByText('https://example.com/no-title')).toBeInTheDocument();
+	});
+
+	it('proxies favicon/thumbnail images through the same-origin bookmark-asset endpoint rather than the raw scraped url', () => {
+		const { container } = render(BookmarkBlock, {
+			block: makeBlock({
+				url: 'https://example.com/article',
+				bookmarkMetadata: {
+					status: 'ready',
+					faviconUrl: 'https://cdn.example.com/favicon.ico',
+					thumbnailUrl: 'https://cdn.example.com/thumb.png'
+				}
+			}),
+			documentId: 'doc-1',
+			onSubmitUrl: vi.fn(),
+			onRetry: vi.fn()
+		});
+
+		const srcs = [...container.querySelectorAll('img')].map((img) => img.getAttribute('src'));
+		expect(srcs).toContain(
+			`/api/records/${encodeURIComponent('block-1')}/bookmark-asset?kind=favicon&documentId=doc-1`
+		);
+		expect(srcs).toContain(
+			`/api/records/${encodeURIComponent('block-1')}/bookmark-asset?kind=thumbnail&documentId=doc-1`
+		);
+		for (const src of srcs) {
+			expect(src).not.toContain('cdn.example.com');
+		}
 	});
 });

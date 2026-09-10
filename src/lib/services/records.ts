@@ -605,6 +605,45 @@ export async function refreshBookmarkMetadata(
 	return crdtGetRecord(doc, recordId)!;
 }
 
+export type BookmarkAssetKind = 'favicon' | 'thumbnail';
+
+/**
+ * Resolves a bookmark block's scraped favicon/thumbnail URL, after checking the caller may
+ * access it — the lookup half of the same-origin asset proxy
+ * (`bookmark-asset/+server.ts`) that fetches and streams the actual image bytes server-side
+ * rather than letting `BookmarkBlock.svelte`'s `<img src>` point at the scraped URL directly.
+ * `resolvePublicAssetUrl` (`$lib/server/link-preview.ts`) only ever validated that URL's hostname
+ * once, at scrape time — routing every render through the proxy (`fetchImageAsset`, same file)
+ * re-validates and pins the connection on every request instead, closing the gap where the
+ * *viewer's own browser* would otherwise do its own fresh DNS resolution and redirect-following
+ * for a raw `<img src>`.
+ *
+ * `documentId` carries the same locator-hint contract as `refreshBookmarkMetadata` above, for the
+ * identical reason: a bookmark created as a direct UI mutation has no catalog locator of its own.
+ */
+export function getBookmarkAssetUrl(
+	caller: CallerIdentity,
+	recordId: string,
+	kind: BookmarkAssetKind,
+	documentId?: string
+): string {
+	const { doc } = documentId
+		? resolveParentWorkspaceContext(documentId)
+		: resolveRecordWorkspaceContext(recordId);
+	const record = requireAccessibleRecordInDoc(doc, caller, recordId, 'get_record');
+	if (record.blockType !== 'bookmark') {
+		throw new Error('Bookmark assets can only be requested for a bookmark block.');
+	}
+	const url =
+		kind === 'favicon'
+			? record.bookmarkMetadata?.faviconUrl
+			: record.bookmarkMetadata?.thumbnailUrl;
+	if (!url) {
+		throw new Error(`This bookmark block has no ${kind} to proxy.`);
+	}
+	return url;
+}
+
 interface WriteRecordInput {
 	markdown?: string;
 	properties?: Record<string, PropertyValue>;

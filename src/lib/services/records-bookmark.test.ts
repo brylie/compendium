@@ -10,8 +10,14 @@ vi.mock('$lib/server/link-preview', () => ({
 // resolves to the mocked module — mirrors link-preview.test.ts's own
 // mock-then-dynamic-import pattern.
 const { createDocument } = await import('$lib/services/documents');
-const { createRecord, refreshBookmarkMetadata, writeRecord, getRecord, PermissionDeniedError } =
-	await import('$lib/services');
+const {
+	createRecord,
+	refreshBookmarkMetadata,
+	getBookmarkAssetUrl,
+	writeRecord,
+	getRecord,
+	PermissionDeniedError
+} = await import('$lib/services');
 const { createToken } = await import('$lib/mcp/tokens');
 const { queryAuditLog } = await import('$lib/server/audit');
 const { createRecord: crdtCreateRecord } = await import('$lib/data/record-ops');
@@ -194,5 +200,93 @@ describe('bookmark block service layer (issue #155)', () => {
 		return expect(refreshBookmarkMetadata(tokenRecord, record.id)).rejects.toThrow(
 			PermissionDeniedError
 		);
+	});
+
+	describe('getBookmarkAssetUrl (same-origin image-proxy lookup)', () => {
+		it('returns the scraped favicon/thumbnail url after a permission check', async () => {
+			fetchLinkPreviewMetadataMock.mockReturnValueOnce(
+				Promise.resolve({
+					faviconUrl: 'https://example.com/favicon.png',
+					thumbnailUrl: 'https://example.com/thumb.png'
+				})
+			);
+			const document = createDocument(human, { title: 'Notes' });
+			const record = createRecord(human, {
+				parentId: document.id,
+				blockType: 'bookmark',
+				url: 'https://example.com/'
+			});
+			await refreshBookmarkMetadata(human, record.id);
+
+			expect(getBookmarkAssetUrl(human, record.id, 'favicon')).toBe(
+				'https://example.com/favicon.png'
+			);
+			expect(getBookmarkAssetUrl(human, record.id, 'thumbnail')).toBe(
+				'https://example.com/thumb.png'
+			);
+		});
+
+		it('throws for a non-bookmark block', () => {
+			const document = createDocument(human, { title: 'Notes' });
+			const record = createRecord(human, { parentId: document.id, blockType: 'paragraph' });
+			expect(() => getBookmarkAssetUrl(human, record.id, 'favicon')).toThrow(
+				'Bookmark assets can only be requested for a bookmark block.'
+			);
+		});
+
+		it('throws for a bookmark with no scraped asset of the requested kind', () => {
+			const document = createDocument(human, { title: 'Notes' });
+			const record = createRecord(human, {
+				parentId: document.id,
+				blockType: 'bookmark',
+				url: 'https://example.com/'
+			});
+			expect(() => getBookmarkAssetUrl(human, record.id, 'favicon')).toThrow(
+				'This bookmark block has no favicon to proxy.'
+			);
+		});
+
+		it('resolves a direct-UI-created bookmark (no catalog locator of its own) via the documentId hint', async () => {
+			fetchLinkPreviewMetadataMock.mockReturnValueOnce(
+				Promise.resolve({ faviconUrl: 'https://example.com/favicon.png' })
+			);
+			const document = createDocument(human, { title: 'Notes' });
+			const { doc } = resolveParentWorkspaceContext(document.id);
+			const record = transactWithOrigin(doc, TEST_ORIGIN, () =>
+				crdtCreateRecord(
+					doc,
+					{ parentId: document.id, blockType: 'bookmark', url: 'https://example.com/' },
+					human
+				)
+			);
+			await refreshBookmarkMetadata(human, record.id, document.id);
+
+			expect(() => getBookmarkAssetUrl(human, record.id, 'favicon')).toThrow(PermissionDeniedError);
+			expect(getBookmarkAssetUrl(human, record.id, 'favicon', document.id)).toBe(
+				'https://example.com/favicon.png'
+			);
+		});
+
+		it('enforces the same permission boundary as get_record', async () => {
+			fetchLinkPreviewMetadataMock.mockReturnValueOnce(
+				Promise.resolve({ faviconUrl: 'https://example.com/favicon.png' })
+			);
+			const docSecret = createDocument(human, { title: 'Secret Doc' });
+			const record = createRecord(human, {
+				parentId: docSecret.id,
+				blockType: 'bookmark',
+				url: 'https://example.com/'
+			});
+			await refreshBookmarkMetadata(human, record.id);
+			const { record: tokenRecord } = createToken({
+				clientLabel: 'Scoped Bot',
+				allowedDocumentIds: [],
+				allowedCollectionIds: []
+			});
+
+			expect(() => getBookmarkAssetUrl(tokenRecord, record.id, 'favicon')).toThrow(
+				PermissionDeniedError
+			);
+		});
 	});
 });
