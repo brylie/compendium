@@ -80,6 +80,11 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 		mcpToolName: 'list_documents',
 		mcpDescription: 'List Documents this connection has access to, including tree hierarchy.'
 	},
+	// UI-only for now (issue #83): the Document route's own load function
+	// renders a Backlinks panel from this. Not MCP-exposed — #83's own scope
+	// doesn't ask for an agent-facing surface, and this can be added later
+	// without touching the function's own contract.
+	'documents.listBacklinks': { mcp: false, ui: true },
 
 	'records.createRecord': {
 		mcp: true,
@@ -207,6 +212,7 @@ export const uiAdapterBindings = {
 	// see docs/specifications/audit-coverage.md.
 	'documents.updateDocumentTitle': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'documents.listDocuments': 'src/routes/+layout.server.ts',
+	'documents.listBacklinks': 'src/routes/space/[spaceId]/doc/[id]/+page.server.ts',
 	'records.createRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'records.writeRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'records.deleteRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',

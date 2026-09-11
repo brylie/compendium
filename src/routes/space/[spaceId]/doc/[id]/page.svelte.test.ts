@@ -114,6 +114,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'Empty Doc'
 			}
 		});
@@ -134,6 +135,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'Empty Doc'
 			}
 		});
@@ -159,6 +161,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'SSR Title'
 			}
 		});
@@ -179,6 +182,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'Old'
 			}
 		});
@@ -206,6 +210,7 @@ describe('doc/[id] +page', () => {
 				documents: [parent],
 				collections: [],
 				documentId: 'child',
+				backlinks: [],
 				title: 'Child Doc'
 			}
 		});
@@ -227,6 +232,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -250,6 +256,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -300,6 +307,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -344,6 +352,7 @@ describe('doc/[id] +page', () => {
 					documents: [],
 					collections: [],
 					documentId: 'doc-1',
+					backlinks: [],
 					title: 'D'
 				}
 			});
@@ -369,6 +378,7 @@ describe('doc/[id] +page', () => {
 					documents: [],
 					collections: [],
 					documentId: 'doc-1',
+					backlinks: [],
 					title: 'D'
 				}
 			});
@@ -399,6 +409,7 @@ describe('doc/[id] +page', () => {
 					documents: [],
 					collections: [],
 					documentId: 'doc-1',
+					backlinks: [],
 					title: 'D'
 				}
 			});
@@ -433,6 +444,7 @@ describe('doc/[id] +page', () => {
 					documents: [],
 					collections: [],
 					documentId: 'doc-1',
+					backlinks: [],
 					title: 'D'
 				}
 			});
@@ -466,6 +478,7 @@ describe('doc/[id] +page', () => {
 					documents: [],
 					collections: [],
 					documentId: 'doc-1',
+					backlinks: [],
 					title: 'D'
 				}
 			});
@@ -532,6 +545,7 @@ describe('doc/[id] +page', () => {
 					documents: [],
 					collections: [],
 					documentId: 'doc-1',
+					backlinks: [],
 					title: 'D'
 				}
 			});
@@ -559,6 +573,7 @@ describe('doc/[id] +page', () => {
 			documents: [],
 			collections: [],
 			documentId: 'doc-1',
+			backlinks: [],
 			title: 'D'
 		};
 
@@ -660,6 +675,7 @@ describe('doc/[id] +page', () => {
 			documents: [],
 			collections: [],
 			documentId: 'doc-1',
+			backlinks: [],
 			title: 'D'
 		};
 
@@ -884,6 +900,7 @@ describe('doc/[id] +page', () => {
 			documents: [],
 			collections: [],
 			documentId: 'doc-1',
+			backlinks: [],
 			title: 'D'
 		};
 
@@ -933,6 +950,7 @@ describe('doc/[id] +page', () => {
 			documents: [],
 			collections: [],
 			documentId: 'doc-1',
+			backlinks: [],
 			title: 'D'
 		};
 
@@ -1020,6 +1038,7 @@ describe('doc/[id] +page', () => {
 			documents: [],
 			collections: [],
 			documentId: 'doc-1',
+			backlinks: [],
 			title: 'D'
 		};
 
@@ -1194,6 +1213,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1221,6 +1241,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1242,6 +1263,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1263,6 +1285,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1289,6 +1312,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1319,6 +1343,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1342,6 +1367,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1376,6 +1402,7 @@ describe('doc/[id] +page', () => {
 					documents: [],
 					collections: [],
 					documentId: 'doc-1',
+					backlinks: [],
 					title: 'D'
 				}
 			});
@@ -1410,6 +1437,7 @@ describe('doc/[id] +page', () => {
 					documents: [],
 					collections: [],
 					documentId: 'doc-1',
+					backlinks: [],
 					title: 'D'
 				}
 			});
@@ -1445,6 +1473,7 @@ describe('doc/[id] +page', () => {
 					documents: [],
 					collections: [],
 					documentId: 'doc-1',
+					backlinks: [],
 					title: 'D'
 				}
 			});
@@ -1481,6 +1510,7 @@ describe('doc/[id] +page', () => {
 					documents: [],
 					collections: [],
 					documentId: 'doc-1',
+					backlinks: [],
 					title: 'D'
 				}
 			});
@@ -1507,6 +1537,7 @@ describe('doc/[id] +page', () => {
 				documents: [other],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1530,6 +1561,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1568,6 +1600,7 @@ describe('doc/[id] +page', () => {
 				documents: [other],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1597,6 +1630,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1619,6 +1653,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1651,6 +1686,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [collection],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1693,6 +1729,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [collection],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1718,6 +1755,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1742,6 +1780,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1786,6 +1825,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1816,6 +1856,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1859,6 +1900,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1900,6 +1942,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1947,6 +1990,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -1991,6 +2035,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'First'
 			}
 		});
@@ -2008,6 +2053,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-2',
+				backlinks: [],
 				title: 'Second'
 			}
 		});
@@ -2036,6 +2082,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'First'
 			}
 		});
@@ -2051,6 +2098,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-2',
+				backlinks: [],
 				title: 'Second'
 			}
 		});
@@ -2085,6 +2133,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'First'
 			}
 		});
@@ -2105,6 +2154,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-2',
+				backlinks: [],
 				title: 'Second'
 			}
 		});
@@ -2142,6 +2192,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'First'
 			}
 		});
@@ -2168,6 +2219,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-2',
+				backlinks: [],
 				title: 'Second'
 			}
 		});
@@ -2193,6 +2245,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -2223,6 +2276,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -2248,6 +2302,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -2270,6 +2325,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -2296,6 +2352,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -2321,6 +2378,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -2346,6 +2404,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -2374,6 +2433,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -2400,6 +2460,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -2428,6 +2489,7 @@ describe('doc/[id] +page', () => {
 				documents: [],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});
@@ -2485,6 +2547,7 @@ describe('doc/[id] +page', () => {
 				documents: [targetA, targetB],
 				collections: [],
 				documentId: 'doc-1',
+				backlinks: [],
 				title: 'D'
 			}
 		});

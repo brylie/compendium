@@ -64,6 +64,7 @@
 	import PromptDialog from '$lib/components/PromptDialog.svelte';
 	import BlockActionMenu from '$lib/components/BlockActionMenu.svelte';
 	import SyncedBlockUsage from '$lib/components/SyncedBlockUsage.svelte';
+	import BacklinksPanel from '$lib/components/BacklinksPanel.svelte';
 	import DocumentOutline from '$lib/components/DocumentOutline.svelte';
 	import type { PageProps } from './$types';
 
@@ -1633,12 +1634,24 @@
 	<div class="sr-only" role="status" aria-live="polite">{holdAnnouncement}</div>
 
 	<!--
-		Backlinks panel removed (#120): listIncomingLinks builds its reverse
-		index by scanning every Document within one shared Y.Doc, structurally
-		incompatible with per-Document shards. A real workspace-wide backlink
-		index is tracked separately as #21 — this panel comes back once that
-		exists, rather than being served here via an expensive full-shard scan.
+		Backlinks panel (issue #83): re-added after #120 removed the version
+		built on $lib/data/links.ts#listIncomingLinks, whose reverse index
+		can't span per-Document shards. Powered instead by
+		services/documents.ts#listBacklinks, a server-side fan-out across every
+		Document's own shard (the same pattern search_workspace already
+		established, #191) — not the old client-side incremental index. Each
+		entry links to its exact referring block (#block-<id>), not just the
+		referring Document, with the same navigate/reveal/highlight mechanism
+		SyncedBlockUsage.svelte already uses.
 	-->
+	<BacklinksPanel
+		spaceId={page.params.spaceId!}
+		currentDocumentId={data.documentId}
+		backlinks={data.backlinks}
+		onJumpTo={(documentId, recordId) => {
+			if (documentId === data.documentId) void navigateToBlock(recordId);
+		}}
+	/>
 </div>
 
 <!--
