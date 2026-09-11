@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestHarness, type TestHarness } from './harness';
 import { createCollection, getCollection, updateCollectionTitle } from '$lib/data/collection-ops';
@@ -62,6 +64,38 @@ function parseMcpText<T = unknown>(result: unknown): T {
 function getResultText(result: unknown): string {
 	const r = result as { content?: { text?: string }[] };
 	return r.content?.[0]?.text ?? '';
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * For a `uiAdapterBindings` entry the UI reaches by mutating its own Yjs doc
+ * directly rather than calling a service function (see audit-coverage.md) —
+ * a real route/action can't be driven for these the way the other entries
+ * are, so the harness-driven half of this test instead mirrors the exact
+ * data-layer call the bound `.svelte` file performs. That still can't catch
+ * the file's own event handler no longer actually calling it (issue #213's
+ * broader concern, and Qodo review finding 3 on PR #256) — a real DOM
+ * interaction is Tier B's job, not Tier A's. This is the static half: a
+ * source-text check that the bound file both imports `functionName` from
+ * `importedFromModule` and has a call-shaped `functionName(` occurrence
+ * distinct from the import statement itself.
+ */
+function assertRouteFileWiresCall(
+	routeFile: string,
+	functionName: string,
+	importedFromModule: string
+): void {
+	const source = readFileSync(resolve(process.cwd(), routeFile), 'utf-8');
+	const importPattern = new RegExp(
+		`import\\s*\\{[^}]*\\b${functionName}\\b[^}]*\\}\\s*from\\s*['"]${escapeRegExp(importedFromModule)}['"]`
+	);
+	expect(source, `${routeFile} should import ${functionName} from ${importedFromModule}`).toMatch(
+		importPattern
+	);
+	expect(source, `${routeFile} should call ${functionName}(...)`).toContain(`${functionName}(`);
 }
 
 describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
@@ -919,7 +953,7 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 			queryAuditLog().filter((a) => a.action === 'update_record' && a.targetRecordId === block.id)
 		).toHaveLength(1);
 
-		crdtDeleteRecord(yjs.doc, block.id);
+		transactWithOrigin(yjs.doc, LOCAL_UI_ORIGIN, () => crdtDeleteRecord(yjs.doc, block.id));
 		await harness.waitForCondition(() =>
 			queryAuditLog().some((a) => a.action === 'delete_record' && a.targetRecordId === block.id)
 		);
@@ -1427,7 +1461,7 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 			return { status: res.status, text: await res.text() };
 		}
 
-		const { workspaceId, defaultSpaceId } = resolveWorkspaceContext();
+		const { workspaceId } = resolveWorkspaceContext();
 
 		// Shared fixtures for the directly-Yjs-mutated cases below, created via
 		// the real create_document/create_collection routes (not a direct
@@ -1449,6 +1483,38 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 			wiringColClient.doc.getMap('collections').has(wiringCol.id)
 		);
 		const wiringColServerCtx = resolveWorkspaceContext({ workspaceId, shardId: wiringCol.id });
+
+		// Each switch case below independently hard-codes the route/action or
+		// client mutation it exercises, rather than reading `uiAdapterBindings`
+		// to decide what to hit — that's what makes the case shaped exactly
+		// like the real UI path. But it also means the switch alone can't
+		// notice if `uiAdapterBindings[method]` were edited to name a
+		// *different* (still-existing) file: this independently-authored
+		// expectation pins each declared binding to the exact file this test
+		// was actually written against, so that drift fails loudly here
+		// instead of silently passing.
+		const expectedBindings: Record<keyof typeof uiAdapterBindings, string> = {
+			'documents.createDocument': 'src/routes/api/documents/+server.ts',
+			'documents.deleteDocument': 'src/routes/api/documents/[id]/+server.ts',
+			'documents.updateDocumentTitle': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
+			'documents.listDocuments': 'src/routes/+layout.server.ts',
+			'records.createRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
+			'records.writeRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
+			'records.deleteRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
+			'collections.createCollection': 'src/routes/api/collections/+server.ts',
+			'collections.listCollections': 'src/routes/+layout.server.ts',
+			'collections.deleteCollection': 'src/routes/api/collections/[id]/+server.ts',
+			'collections.updateCollectionTitle': 'src/routes/space/[spaceId]/table/[id]/+page.svelte',
+			'spaces.createSpace': 'src/routes/api/spaces/+server.ts',
+			'spaces.listSpaces': 'src/routes/+layout.server.ts',
+			'tokens.createToken': 'src/routes/settings/tokens/+page.server.ts',
+			'tokens.revokeToken': 'src/routes/settings/tokens/+page.server.ts',
+			'tokens.listTokens': 'src/routes/settings/tokens/+page.server.ts',
+			'audit.listAuditHistory': 'src/routes/audit/+page.server.ts'
+		};
+		for (const method of methods) {
+			expect(uiAdapterBindings[method], method).toBe(expectedBindings[method]);
+		}
 
 		for (const method of methods) {
 			switch (method) {
@@ -1475,14 +1541,25 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					break;
 				}
 				case 'documents.listDocuments': {
+					// Fetched via /audit, not /space/[spaceId]: that page's own
+					// +page.server.ts independently calls listDocuments too (for its
+					// card grid), so a title appearing in its __data.json wouldn't
+					// prove the *declared* binding (the root +layout.server.ts) is
+					// the one that ran — /audit's own load only calls
+					// listAuditHistory, so the root layout is the only source.
 					const title = `Route Wiring List Doc ${Date.now()}`;
 					await postJson('/api/documents', { title });
-					const { status, text } = await fetchRouteData(`/space/${defaultSpaceId}`);
+					const { status, text } = await fetchRouteData('/audit');
 					expect(status).toBe(200);
 					expect(text).toContain(title);
 					break;
 				}
 				case 'documents.updateDocumentTitle': {
+					assertRouteFileWiresCall(
+						expectedBindings[method],
+						'updateDocumentTitle',
+						'$lib/data/document-ops'
+					);
 					transactWithOrigin(wiringDocClient.doc, LOCAL_UI_ORIGIN, () =>
 						updateDocumentTitle(wiringDocClient.doc, wiringDoc.id, 'Renamed via UI-mirrored client')
 					);
@@ -1500,6 +1577,11 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					break;
 				}
 				case 'records.createRecord': {
+					assertRouteFileWiresCall(
+						expectedBindings[method],
+						'createRecord',
+						'$lib/data/record-ops'
+					);
 					const record = transactWithOrigin(wiringDocClient.doc, LOCAL_UI_ORIGIN, () =>
 						createRecord(
 							wiringDocClient.doc,
@@ -1518,6 +1600,16 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					break;
 				}
 				case 'records.writeRecord': {
+					// No single function named "writeRecord" exists on the UI's
+					// direct-Yjs path — content edits go through Y.Text mutation
+					// helpers instead, so the static wiring check below pins to
+					// applyRichTextToYText (the one this case itself mirrors)
+					// rather than a function name that wouldn't exist to find.
+					assertRouteFileWiresCall(
+						expectedBindings[method],
+						'applyRichTextToYText',
+						'$lib/data/richtext'
+					);
 					const record = transactWithOrigin(wiringDocClient.doc, LOCAL_UI_ORIGIN, () =>
 						createRecord(
 							wiringDocClient.doc,
@@ -1545,6 +1637,11 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					break;
 				}
 				case 'records.deleteRecord': {
+					assertRouteFileWiresCall(
+						expectedBindings[method],
+						'deleteRecord',
+						'$lib/data/record-ops'
+					);
 					const record = transactWithOrigin(wiringDocClient.doc, LOCAL_UI_ORIGIN, () =>
 						createRecord(
 							wiringDocClient.doc,
@@ -1555,7 +1652,9 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					await harness.waitForCondition(
 						() => getRecord(wiringDocServerCtx.doc, record.id) !== undefined
 					);
-					crdtDeleteRecord(wiringDocClient.doc, record.id);
+					transactWithOrigin(wiringDocClient.doc, LOCAL_UI_ORIGIN, () =>
+						crdtDeleteRecord(wiringDocClient.doc, record.id)
+					);
 					await harness.waitForCondition(() =>
 						queryAuditLog().some(
 							(e) => e.targetRecordId === record.id && e.action === 'delete_record'
@@ -1572,9 +1671,13 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					break;
 				}
 				case 'collections.listCollections': {
+					// Same isolation reasoning as documents.listDocuments above:
+					// /space/[spaceId]'s own page load also independently calls
+					// listCollections, so /audit is used to pin this assertion to
+					// the root +layout.server.ts binding specifically.
 					const title = `Route Wiring List Col ${Date.now()}`;
 					await postJson('/api/collections', { title });
-					const { status, text } = await fetchRouteData(`/space/${defaultSpaceId}`);
+					const { status, text } = await fetchRouteData('/audit');
 					expect(status).toBe(200);
 					expect(text).toContain(title);
 					break;
@@ -1592,6 +1695,11 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					break;
 				}
 				case 'collections.updateCollectionTitle': {
+					assertRouteFileWiresCall(
+						expectedBindings[method],
+						'updateCollectionTitle',
+						'$lib/data/collection-ops'
+					);
 					transactWithOrigin(wiringColClient.doc, LOCAL_UI_ORIGIN, () =>
 						updateCollectionTitle(
 							wiringColClient.doc,
@@ -1621,9 +1729,14 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					break;
 				}
 				case 'spaces.listSpaces': {
+					// Fetched via /audit for the same isolation reasoning as the
+					// two list cases above, even though nothing else on
+					// /space/[spaceId]'s own chain happens to call listSpaces
+					// today — keeping all three list checks on the same isolated
+					// page avoids relying on that staying true.
 					const name = `Route Wiring List Space ${Date.now()}`;
 					await postJson('/api/spaces', { name });
-					const { status, text } = await fetchRouteData(`/space/${defaultSpaceId}`);
+					const { status, text } = await fetchRouteData('/audit');
 					expect(status).toBe(200);
 					expect(text).toContain(name);
 					break;
@@ -1680,11 +1793,13 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 				}
 				default: {
 					// The switch above covers every uiAdapterBindings key, so `method`
-					// is narrowed to `never` here — this exists to fail loudly if a
-					// future manifest entry is added without a matching case, not
-					// because this branch is expected to run today.
-					const unhandled: string = method;
-					throw new Error(`Unhandled uiAdapterBindings entry: ${unhandled}`);
+					// is narrowed to `never` here — assigning it to a `never`-typed
+					// binding (rather than `string`, which `never` would also satisfy
+					// without proving anything) means a future uiAdapterBindings entry
+					// added without a matching case fails `npm run check` at build
+					// time, not just this test at runtime.
+					const exhaustiveCheck: never = method;
+					throw new Error(`Unhandled uiAdapterBindings entry: ${String(exhaustiveCheck)}`);
 				}
 			}
 		}

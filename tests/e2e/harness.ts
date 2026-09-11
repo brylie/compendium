@@ -1,7 +1,8 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import WebSocket, { type RawData } from 'ws';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
@@ -210,30 +211,55 @@ export async function createTestHarness(): Promise<TestHarness> {
 	const httpUrl = `http://127.0.0.1:${port}`;
 	const wsUrl = `ws://127.0.0.1:${port}/ws`;
 
-	try {
-		const buildPath = join(process.cwd(), 'build/handler.js');
-		// `@vite-ignore` (Vite's own supported directive, not an eval trick)
-		// tells Vite's SSR transform to leave this as a plain native dynamic
-		// import instead of trying to resolve `buildPath` through its own
-		// SSR module graph — `build/handler.js` is a separately bundled,
-		// already-built file outside that graph entirely. A `new
-		// Function('p', 'return import(p)')` indirection was tried here
-		// previously for the same reason, but breaks under Vitest: vite-node
-		// runs each test file's own compiled script with Node's
-		// `importModuleDynamically` wired up for *that* script, but code
-		// compiled at runtime via `new Function` gets its own script with no
-		// such hook, so `import()` inside it throws
-		// `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`. This never surfaced
-		// before because no Tier A test previously drove a real
-		// route/action through `appHandler` — Tier B (Playwright, a
-		// different runner with no vm-sandboxed module transform) never hit
-		// it either.
-		const mod = (await import(/* @vite-ignore */ buildPath)) as {
-			handler?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
-		};
-		appHandler = mod.handler ?? null;
-	} catch {
-		// Build directory not present in unit test mode
+	const buildPath = join(process.cwd(), 'build/handler.js');
+	// A missing build/handler.js is the expected, silent "unit test mode"
+	// case (hasAppHandler stays false, see below) — checked before ever
+	// attempting the import, rather than folded into the catch below, so a
+	// real failure loading an *existing* build can't be mistaken for that
+	// case (and mis-reported by the false-hasAppHandler error message a
+	// test throws, instead of surfacing the actual break).
+	if (existsSync(buildPath)) {
+		try {
+			// `@vite-ignore` (Vite's own supported directive, not an eval
+			// trick) tells Vite's SSR transform to leave this as a plain
+			// native dynamic import instead of trying to resolve `buildPath`
+			// through its own SSR module graph — `build/handler.js` is a
+			// separately bundled, already-built file outside that graph
+			// entirely. A `new Function('p', 'return import(p)')`
+			// indirection was tried here previously for the same reason, but
+			// breaks under Vitest: vite-node runs each test file's own
+			// compiled script with Node's `importModuleDynamically` wired up
+			// for *that* script, but code compiled at runtime via `new
+			// Function` gets its own script with no such hook, so `import()`
+			// inside it throws `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`. This
+			// never surfaced before because no Tier A test previously drove
+			// a real route/action through `appHandler` — Tier B (Playwright,
+			// a different runner with no vm-sandboxed module transform)
+			// never hit it either.
+			//
+			// `pathToFileURL(...).href`, not the raw absolute path: on
+			// Windows a bare `C:\...` path is itself a valid-looking URL
+			// whose scheme (`c:`) Node's ESM loader doesn't recognize,
+			// throwing `ERR_UNSUPPORTED_ESM_URL_SCHEME` — irrelevant to CI
+			// (Tier A only runs on `ubuntu-latest`), but this keeps a local
+			// Windows run correct too.
+			const mod = (await import(/* @vite-ignore */ pathToFileURL(buildPath).href)) as {
+				handler?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
+			};
+			appHandler = mod.handler ?? null;
+		} catch (error) {
+			// The build exists but failed to load — a genuine bug in the
+			// built app, not the "build hasn't run yet" case this function's
+			// other failure paths exist to report silently. Clean up the
+			// same way the listenOnLoopback failure above does, so this
+			// doesn't leak a listening server/temp dir past the throw.
+			await new Promise<void>((resolveClose) => wss.close(() => resolveClose()));
+			await closeTestServer(server);
+			closeDb();
+			resetWorkspaceStoreForTests();
+			rmSync(tempDir, { recursive: true, force: true });
+			throw error;
+		}
 	}
 
 	async function getMcpClient(token: string): Promise<Client> {
