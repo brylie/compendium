@@ -38,6 +38,14 @@ export interface TestHarness {
 	httpUrl: string;
 	wsUrl: string;
 	tempDir: string;
+	/**
+	 * Whether `build/handler.js` was found and loaded, so requests to real
+	 * SvelteKit routes/actions (as opposed to `/mcp` or `/ws`) get served
+	 * instead of a blanket 404. Only true after `npm run build` has run —
+	 * CI always builds before Tier A (see `.github/workflows/ci.yml`), but a
+	 * local `npm run test:e2e:tier-a` run skips it unless built first.
+	 */
+	hasAppHandler: boolean;
 	createToken: (input: {
 		clientLabel: string;
 		allowedDocumentIds: string[];
@@ -204,16 +212,23 @@ export async function createTestHarness(): Promise<TestHarness> {
 
 	try {
 		const buildPath = join(process.cwd(), 'build/handler.js');
-		// The indirect-eval-via-new-Function trick, not a code-execution risk:
-		// the function body is this fixed string literal, never derived from
-		// untrusted input, and exists only so bundlers don't statically
-		// resolve/transform `import(p)` at build time — `p` (a plain file
-		// path this codebase computes, not attacker-controlled) is passed as
-		// data, not executed as code.
-		// eslint-disable-next-line @typescript-eslint/no-implied-eval
-		const dynamicImport = new Function('p', 'return import(p)');
-		// eslint-disable-next-line sonarjs/code-eval -- same rationale as above; buildPath is this codebase's own computed path, not untrusted input.
-		const mod = (await dynamicImport(buildPath)) as {
+		// `@vite-ignore` (Vite's own supported directive, not an eval trick)
+		// tells Vite's SSR transform to leave this as a plain native dynamic
+		// import instead of trying to resolve `buildPath` through its own
+		// SSR module graph — `build/handler.js` is a separately bundled,
+		// already-built file outside that graph entirely. A `new
+		// Function('p', 'return import(p)')` indirection was tried here
+		// previously for the same reason, but breaks under Vitest: vite-node
+		// runs each test file's own compiled script with Node's
+		// `importModuleDynamically` wired up for *that* script, but code
+		// compiled at runtime via `new Function` gets its own script with no
+		// such hook, so `import()` inside it throws
+		// `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`. This never surfaced
+		// before because no Tier A test previously drove a real
+		// route/action through `appHandler` — Tier B (Playwright, a
+		// different runner with no vm-sandboxed module transform) never hit
+		// it either.
+		const mod = (await import(/* @vite-ignore */ buildPath)) as {
 			handler?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
 		};
 		appHandler = mod.handler ?? null;
@@ -340,6 +355,7 @@ export async function createTestHarness(): Promise<TestHarness> {
 		httpUrl,
 		wsUrl,
 		tempDir,
+		hasAppHandler: appHandler !== null,
 		createToken,
 		getMcpClient,
 		getYjsClient,

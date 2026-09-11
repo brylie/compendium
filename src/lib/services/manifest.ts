@@ -60,9 +60,17 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 		mcpDescription: 'Delete a Document and its child tree.'
 	},
 	'documents.updateDocumentTitle': { mcp: false, ui: true },
+	// Not actually reachable from the UI: the Document route's own load
+	// function (src/routes/space/[spaceId]/doc/[id]/+page.server.ts) reads
+	// the title via the plain data-layer $lib/data/document-ops#getDocument,
+	// not this service function — and the live block content the editor
+	// renders comes from the browser's own real-time Yjs client, never a
+	// synchronous, markdown-transcoded read. Discovered while implementing
+	// the harness-driven UI-wiring test (issue #213) — corrected here rather
+	// than left declaring a binding nothing exercises.
 	'documents.getDocument': {
 		mcp: true,
-		ui: true,
+		ui: false,
 		mcpToolName: 'get_document',
 		mcpDescription: "Get a Document's ordered blocks, with content transcoded to Markdown."
 	},
@@ -93,18 +101,28 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 		mcpToolName: 'delete_record',
 		mcpDescription: 'Delete a record. No hold needed.'
 	},
-	'records.getRecord': { mcp: false, ui: true },
+	// Not actually reachable from the UI: the block editor reads records via
+	// the plain data-layer $lib/data/record-ops#getRecord against its own
+	// live Yjs doc, never this service function. Discovered while
+	// implementing the harness-driven UI-wiring test (issue #213).
+	'records.getRecord': { mcp: false, ui: false },
 
+	// Holds are an MCP/agent-only concept (collaboration.md): a human's
+	// cursor is an *implicit* hold, conveyed only via Yjs Awareness — the UI
+	// never issues an explicit hold_records/release_records call, or
+	// anything equivalent to one. Nothing in src/routes calls either
+	// function. Discovered while implementing the harness-driven UI-wiring
+	// test (issue #213).
 	'holds.holdRecords': {
 		mcp: true,
-		ui: true,
+		ui: false,
 		mcpToolName: 'hold_records',
 		mcpDescription:
 			'Request a hold on a set of block/record IDs before writing — advisory, per-record.'
 	},
 	'holds.releaseRecords': {
 		mcp: true,
-		ui: true,
+		ui: false,
 		mcpToolName: 'release_records',
 		mcpDescription: 'Release a hold on a set of record IDs without writing.'
 	},
@@ -116,9 +134,17 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 		mcpToolName: 'list_collections',
 		mcpDescription: 'List Collections this connection has access to.'
 	},
+	// Not actually reachable from the UI: the Table view's live grid was
+	// always meant to read directly off Yjs observers (see the top-level
+	// CLAUDE.md's persistence note), and the Collection route's own load
+	// function (src/routes/space/[spaceId]/table/[id]/+page.server.ts) reads
+	// only the title via the plain data-layer
+	// $lib/data/collection-ops#getCollection — never this service function.
+	// Discovered while implementing the harness-driven UI-wiring test
+	// (issue #213).
 	'collections.queryCollection': {
 		mcp: true,
-		ui: true,
+		ui: false,
 		mcpToolName: 'query_collection',
 		mcpDescription: 'Query rows from a Collection.'
 	},
@@ -130,9 +156,13 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 	// import of $lib/data/records to resolve a Collection's primary field).
 	'collections.resolvePrimaryFieldKey': { mcp: false, ui: false },
 
+	// Not actually reachable from the UI: there is no search box or other
+	// UI feature calling this today — it's exposed to MCP callers only.
+	// Discovered while implementing the harness-driven UI-wiring test
+	// (issue #213).
 	'search.searchWorkspace': {
 		mcp: true,
-		ui: true,
+		ui: false,
 		mcpToolName: 'search_workspace',
 		mcpDescription:
 			'Search all Documents and Collections the caller has access to, returning matching record IDs and short snippets.'
@@ -170,21 +200,23 @@ export const mcpAdapterBindings = {
 export const uiAdapterBindings = {
 	'documents.createDocument': 'src/routes/api/documents/+server.ts',
 	'documents.deleteDocument': 'src/routes/api/documents/[id]/+server.ts',
-	'documents.updateDocumentTitle': 'src/routes/space/[spaceId]/doc/[id]/+page.server.ts',
-	'documents.getDocument': 'src/routes/space/[spaceId]/doc/[id]/+page.server.ts',
+	// The route file, not +page.server.ts: the title edit is a direct
+	// client-side Yjs mutation ($lib/data/document-ops#updateDocumentTitle),
+	// audited by the server's generic audit observer as `update_document`
+	// rather than this service function's own `update_document_title` —
+	// see docs/specifications/audit-coverage.md.
+	'documents.updateDocumentTitle': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'documents.listDocuments': 'src/routes/+layout.server.ts',
 	'records.createRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'records.writeRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'records.deleteRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
-	'records.getRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.server.ts',
-	'holds.holdRecords': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
-	'holds.releaseRecords': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 	'collections.createCollection': 'src/routes/api/collections/+server.ts',
 	'collections.listCollections': 'src/routes/+layout.server.ts',
-	'collections.queryCollection': 'src/routes/space/[spaceId]/table/[id]/+page.server.ts',
 	'collections.deleteCollection': 'src/routes/api/collections/[id]/+server.ts',
+	// Same shape as documents.updateDocumentTitle above:
+	// $lib/data/collection-ops#updateCollectionTitle, audited as
+	// `update_collection` by the observer.
 	'collections.updateCollectionTitle': 'src/routes/space/[spaceId]/table/[id]/+page.svelte',
-	'search.searchWorkspace': 'src/routes/space/[spaceId]/+page.server.ts',
 	'spaces.createSpace': 'src/routes/api/spaces/+server.ts',
 	'spaces.listSpaces': 'src/routes/+layout.server.ts',
 	'tokens.createToken': 'src/routes/settings/tokens/+page.server.ts',
