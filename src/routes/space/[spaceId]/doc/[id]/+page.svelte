@@ -705,21 +705,23 @@
 	// deleted with its content silently lost.
 	async function handleBackspace(block: WorkspaceRecord, index: number): Promise<void> {
 		if (!ydoc) return;
+		const currentDoc = ydoc;
 		const previous = blocks[index - 1];
 		if (!previous) return;
 
-		const currentYtext = getRecordYText(ydoc, block.id);
+		const currentYtext = getRecordYText(currentDoc, block.id);
 		const currentIsEmpty = !currentYtext || currentYtext.length === 0;
 		const previousHoldsText = blockHoldsFreeformText(previous.blockType);
 		if (!currentIsEmpty && !previousHoldsText) return;
 
-		const previousYtext = previousHoldsText ? getRecordYText(ydoc, previous.id) : undefined;
+		const previousYtext = previousHoldsText ? getRecordYText(currentDoc, previous.id) : undefined;
 		const joinOffset = previousYtext?.length ?? 0;
-		if (!currentIsEmpty && previousYtext && currentYtext) {
-			appendRichTextToYText(previousYtext, yTextToRichText(currentYtext));
-		}
-
-		deleteRecord(ydoc, block.id);
+		transactWithOrigin(currentDoc, LOCAL_UI_ORIGIN, () => {
+			if (!currentIsEmpty && previousYtext && currentYtext) {
+				appendRichTextToYText(previousYtext, yTextToRichText(currentYtext));
+			}
+			deleteRecord(currentDoc, block.id);
+		});
 		await tick();
 		blockRefs[previous.id]?.focusEditor(joinOffset);
 	}
@@ -1004,7 +1006,7 @@
 		if (!ydoc) return;
 		const ids = orderedSelection().map((r) => r.id);
 		if (ids.length === 0) return;
-		ydoc.transact(() => {
+		transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () => {
 			for (const id of ids) deleteRecord(ydoc!, id);
 		});
 		clearSelection();
@@ -1392,12 +1394,13 @@
 	// empty block.
 	function deleteBlockViaMenu(blockId: string): void {
 		if (!ydoc) return;
-		const record = getRecord(ydoc, blockId);
+		const currentDoc = ydoc;
+		const record = getRecord(currentDoc, blockId);
 		if (!record) return;
-		const siblings = listRecordsForParent(ydoc, record.parentId);
+		const siblings = listRecordsForParent(currentDoc, record.parentId);
 		const index = siblings.findIndex((s) => s.id === blockId);
 		const fallback = siblings[index - 1] ?? siblings[index + 1];
-		deleteRecord(ydoc, blockId);
+		transactWithOrigin(currentDoc, LOCAL_UI_ORIGIN, () => deleteRecord(currentDoc, blockId));
 		selectedBlockIds.delete(blockId);
 		if (fallback) void tick().then(() => blockRefs[fallback.id]?.focusEditor(false));
 	}

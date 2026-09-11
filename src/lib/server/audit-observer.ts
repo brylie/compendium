@@ -98,7 +98,23 @@ function resolveOwningEntry(
 // contain a record with the same id. A single flat `${kind}:${id}` → timer
 // map would let a debounced update on one workspace's doc clobber another's
 // in-flight timer for the "same" key, silently dropping an audit event.
-const pendingUpdateTimers = new Map<Y.Doc, Map<string, ReturnType<typeof setTimeout>>>();
+//
+// Lives on globalThis, not a module-scoped variable, for the same reason
+// workspace-store.ts's own context registry does (see that file's top
+// comment): tests/e2e/harness.ts loads the WebSocket/MCP layers from source
+// but SvelteKit routes/actions from the separately bundled build/handler.js,
+// so this module is evaluated through two separate module-resolution graphs
+// in the same test process. `attachDocAuditObserver` is only ever called
+// once per Y.Doc (workspace-store.ts's context creation), so whichever
+// graph's copy of this module happens to run first "owns" the closure that
+// schedules a doc's debounce timers — a module-scoped Map here would leave
+// the *other* graph's `flushPendingAuditEvents()` looking at an empty map
+// for that doc, silently unable to force-flush an event it never scheduled.
+declare global {
+	var __auditObserverPendingUpdateTimers:
+		Map<Y.Doc, Map<string, ReturnType<typeof setTimeout>>> | undefined;
+}
+const pendingUpdateTimers = (globalThis.__auditObserverPendingUpdateTimers ??= new Map());
 
 function timersFor(doc: Y.Doc): Map<string, ReturnType<typeof setTimeout>> {
 	let timers = pendingUpdateTimers.get(doc);

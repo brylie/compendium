@@ -33,7 +33,7 @@ npx vitest                    # watch mode
 npx vitest run src/lib/services/search.test.ts   # single file
 npx vitest run --project server                  # one vitest project only (server|client|component)
 
-npm run test:e2e:tier-a       # vitest, protocol-level MCP+Yjs parity tests (tests/e2e/tier-a.test.ts)
+npm run test:e2e:tier-a       # vitest, protocol-level MCP+Yjs parity tests (tests/e2e/tier-a.test.ts; the manifest UI-wiring test also requires `npm run build` first — see below)
 npm run test:e2e:tier-b       # playwright, DOM-level (requires `npm run build` first — serves via build/handler.js)
 npm run test:e2e              # both tiers
 
