@@ -83,6 +83,18 @@
 	// remote title edits — untrack() here just tells Svelte that's deliberate.
 	let title = $state(untrack(() => data.title));
 	let blocks: WorkspaceRecord[] = $state([]);
+	// Which Document `blocks` (and `ydoc`) actually reflect right now — set
+	// only by refresh(), once the shard for that Document has genuinely
+	// resolved. Distinct from `data.documentId` itself: client-side navigation
+	// updates `data.documentId` synchronously, but `blocks`/`ydoc` still lag
+	// behind it until the async shard-resolution fetch below completes. The
+	// hash-navigation $effect (issue #152) reads this, not just
+	// `blocks.length`, so it can tell "no blocks because this Document is
+	// genuinely empty" apart from "no blocks yet because the *previous*
+	// Document's blocks haven't been replaced" — the latter previously let it
+	// search the wrong Document's DOM and never retry once the real
+	// destination blocks loaded (CodeRabbit review, PR #257).
+	let blocksDocumentId: string | undefined = $state();
 	let slashMenuBlockId: string | null = $state(null);
 	let slashQuery = $state('');
 	let heldByOthers: Map<string, ActorId> = $state(new Map());
@@ -188,6 +200,7 @@
 		if (!ydoc) return;
 		const nextBlocks = listRecordsForParent(ydoc, data.documentId);
 		blocks = nextBlocks;
+		blocksDocumentId = data.documentId;
 		const docMeta = getDocument(ydoc, data.documentId);
 		title = docMeta?.title ?? data.title;
 		if (docMeta?.parentDocumentId) {
@@ -526,9 +539,22 @@
 	// subsequent blocks refresh (any later edit anywhere in the Document also
 	// reassigns `blocks`, which would otherwise re-trigger this on every
 	// keystroke).
+	//
+	// Gated on `blocksDocumentId === data.documentId`, not just `blocks.length
+	// === 0`: this effect also reads `data.documentId`, so a client-side
+	// navigation to a different Document (e.g. a cross-document Backlinks/
+	// SyncedBlockUsage link, which sets the hash and navigates in the same
+	// step) re-runs it immediately — before the shard-resolution $effect
+	// above has replaced `blocks` with the *new* Document's own. Checking
+	// `blocks.length` alone couldn't tell "not loaded yet" apart from "the
+	// previous Document's (non-empty) blocks, still stale" — it would search
+	// the previous Document's DOM, find nothing, and — because it marks
+	// `hashNavigatedForDocument` for the new id regardless — never retry once
+	// the real destination blocks actually did load (CodeRabbit review,
+	// PR #257).
 	let hashNavigatedForDocument: string | null = $state(null);
 	$effect(() => {
-		if (!ydoc || blocks.length === 0) return;
+		if (!ydoc || blocksDocumentId !== data.documentId) return;
 		if (hashNavigatedForDocument === data.documentId) return;
 		hashNavigatedForDocument = data.documentId;
 		const match = /^#block-(.+)$/.exec(page.url.hash);

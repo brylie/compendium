@@ -76,6 +76,35 @@ describe('SyncedBlockUsage (#153, #83)', () => {
 		expect(props.onJumpTo).not.toHaveBeenCalled();
 	});
 
+	// The pointer-click test above only proves the onclick handler's own
+	// preventDefault branch is skipped for a cross-document usage — it
+	// doesn't rule out some *other* handler (e.g. a keydown listener) doing
+	// the same thing only for keyboard activation. Enter-on-a-focused-anchor
+	// dispatches a real click event the same way a browser does, so this
+	// listens for that event directly to confirm nothing prevented it.
+	it('does not intercept keyboard (Enter) activation when the usage is in a different document', async () => {
+		const user = userEvent.setup();
+		const props = baseProps({
+			currentDocumentId: 'doc-current',
+			instances: [instance({ sourceDocumentId: 'doc-other' })]
+		});
+		render(SyncedBlockUsage, props);
+
+		await user.click(screen.getByRole('button', { name: 'Used in 1 place' }));
+		const link = screen.getByRole('menuitem', { name: /Source Doc/ });
+		let clickEvent: MouseEvent | undefined;
+		link.addEventListener('click', (e) => {
+			clickEvent = e as MouseEvent;
+		});
+
+		link.focus();
+		await user.keyboard('{Enter}');
+
+		expect(clickEvent).toBeDefined();
+		expect(clickEvent?.defaultPrevented).toBe(false);
+		expect(props.onJumpTo).not.toHaveBeenCalled();
+	});
+
 	it('shows a placeholder instead of a link list when there are no other usages', async () => {
 		const user = userEvent.setup();
 		render(SyncedBlockUsage, baseProps({ instances: [] }));

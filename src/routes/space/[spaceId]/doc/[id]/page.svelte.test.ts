@@ -1025,8 +1025,93 @@ describe('doc/[id] +page', () => {
 
 			expect(scrollIntoView).not.toHaveBeenCalled();
 			expect(document.querySelector('[data-block-row]')).not.toHaveClass('outline');
+			expect(document.querySelector(`#block-${first.id} [contenteditable]`)).not.toHaveFocus();
 			// The Document itself still rendered normally.
 			expect(document.querySelector(`#block-${first.id}`)).toBeInTheDocument();
+		});
+
+		// CodeRabbit review (PR #257): a cross-document Backlinks/SyncedBlockUsage
+		// link sets data.documentId *and* the #block-<id> hash in the same
+		// client-side navigation. The hash-navigation $effect also depends on
+		// data.documentId, so it re-runs immediately when the id changes — but
+		// ydoc/blocks still hold the *previous* Document's data until the
+		// shard-resolution fetch (started by a separate $effect) resolves. If
+		// hash-navigation runs first, its `blocks.length === 0` guard doesn't
+		// catch this (the previous Document's blocks are non-empty), so it
+		// searches the previous Document's DOM, finds nothing, and — because
+		// hashNavigatedForDocument is now marked for the new id — never retries
+		// once the real destination blocks actually load.
+		it('reveals and highlights a #block-<id> fragment after client-side navigation to a different document, even when shard resolution is slow', async () => {
+			createDocument(ydoc, { id: 'doc-1', title: 'First' });
+			createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			createDocument(ydoc, { id: 'doc-2', title: 'Second' });
+			const targetBlock = createRecord(ydoc, { parentId: 'doc-2', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, targetBlock.id)!.insert(0, 'Target in doc two');
+
+			const scrollIntoView = vi.fn();
+			Element.prototype.scrollIntoView = scrollIntoView;
+
+			const { rerender } = render(Page, {
+				params: { spaceId: 'space-1', id: 'doc-1' },
+				form: null,
+				data: {
+					spaces: [],
+					spaceId: 'space-1',
+					activeSpaceId: 'space-1',
+					documents: [],
+					collections: [],
+					documentId: 'doc-1',
+					backlinks: [],
+					title: 'First'
+				}
+			});
+			await flushShardResolution();
+
+			// The hash already names the destination block, exactly like clicking
+			// a real cross-document Backlinks/SyncedBlockUsage link.
+			pageUrl.current = new URL(`http://localhost/space/space-1/doc/doc-2#block-${targetBlock.id}`);
+
+			// Controls exactly when the *next* shard-resolution fetch resolves,
+			// to open the race window between data.documentId changing and
+			// ydoc/blocks actually catching up to it.
+			let resolveShardFetch: (() => void) | undefined;
+			const shardReady = new Promise<void>((resolve) => {
+				resolveShardFetch = resolve;
+			});
+			vi.stubGlobal(
+				'fetch',
+				vi.fn(async () => {
+					await shardReady;
+					return { ok: true, json: async () => ({ shardId: 'test-shard' }) };
+				})
+			);
+
+			await rerender({
+				data: {
+					spaces: [],
+					spaceId: 'space-1',
+					activeSpaceId: 'space-1',
+					documents: [],
+					collections: [],
+					documentId: 'doc-2',
+					backlinks: [],
+					title: 'Second'
+				}
+			});
+			// One tick — enough for Svelte's effects to re-run against
+			// data.documentId's new value, but *before* the deferred shard fetch
+			// resolves. This is the exact window the race lives in.
+			await tick();
+
+			resolveShardFetch!();
+			await flushShardResolution();
+			await tick();
+
+			expect(scrollIntoView).toHaveBeenCalled();
+			const editor = document.querySelector(
+				`#block-${targetBlock.id} [contenteditable]`
+			) as HTMLElement;
+			expect(document.activeElement).toBe(editor);
 		});
 	});
 
