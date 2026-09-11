@@ -148,7 +148,27 @@ export default defineConfig(
 		files: ['**/*.svelte', '**/*.svelte.ts', '**/*.svelte.js'],
 		languageOptions: {
 			parserOptions: {
-				projectService: true,
+				// Must repeat the root-level allowDefaultProject list from
+				// above, not just `projectService: true` — typescript-eslint's
+				// project service is one shared instance for the whole run, and
+				// linting .ts and .svelte files together in a single
+				// (whole-repo, order-nondeterministic) invocation caused a real
+				// flake: a file allowed under the default project by the first
+				// block (e.g. drizzle.config.ts) could later be reported as
+				// "not found by the project service" once a .svelte file's
+				// narrower settings became active for that shared instance.
+				// Reproduced reliably via `prek run eslint --all-files`, not
+				// via `eslint .`/`npm run lint`, which lint fewer/differently-
+				// ordered files per invocation.
+				projectService: {
+					allowDefaultProject: [
+						'eslint.config.js',
+						'prettier.config.js',
+						'drizzle.config.ts',
+						'server.ts',
+						'scripts/*.ts'
+					]
+				},
 				extraFileExtensions: ['.svelte'],
 				parser: ts.parser
 			}
