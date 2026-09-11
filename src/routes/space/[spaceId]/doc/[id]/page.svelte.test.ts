@@ -954,6 +954,62 @@ describe('doc/[id] +page', () => {
 			const editor = document.querySelector(`#block-${target.id} [contenteditable]`) as HTMLElement;
 			expect(document.activeElement).toBe(editor);
 		});
+
+		// issue #83: the destination highlight must not rely on color alone —
+		// `outline`/`outline-2` are a shape/border change, not just the
+		// `outline-accent` color utility alongside them — and must be temporary.
+		it('gives the deep-linked block a temporary outline highlight, not color alone, then clears it', async () => {
+			Element.prototype.scrollIntoView = vi.fn();
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const target = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, target.id)!.insert(0, 'Target');
+			pageUrl.current = new URL(`http://localhost/space/space-1/doc/d1#block-${target.id}`);
+
+			vi.useFakeTimers();
+			try {
+				render(Page, { params: { spaceId: 'space-1', id: 'doc-1' }, form: null, data: pageData });
+				// flushShardResolution's own real-timer wait doesn't apply under
+				// fake timers — advancing 0ms here settles the same async chain
+				// (shard resolution's two microtask awaits + Svelte's reactive
+				// flush) that a real setTimeout(0) would.
+				await vi.advanceTimersByTimeAsync(0);
+				await tick();
+
+				const row = document.querySelector(`#block-${target.id}`) as HTMLElement;
+				expect(row).toHaveClass('outline', 'outline-2', 'outline-accent');
+
+				await vi.advanceTimersByTimeAsync(1500);
+				await tick();
+
+				expect(row).not.toHaveClass('outline');
+				expect(row).not.toHaveClass('outline-accent');
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		// issue #83: a stale (deleted) source-block reference must open the
+		// Document without throwing and without focusing/highlighting an
+		// unrelated block — `navigateToBlock`'s DOM lookup and blockRefs access
+		// are both optional-chained, so a missing id is a safe no-op rather than
+		// a special case that needs its own handling.
+		it('opens the Document without focusing or highlighting anything when the #block-<id> target no longer exists', async () => {
+			const scrollIntoView = vi.fn();
+			Element.prototype.scrollIntoView = scrollIntoView;
+			createDocument(ydoc, { id: 'doc-1', title: 'D' });
+			const first = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, first.id)!.insert(0, 'First');
+			pageUrl.current = new URL('http://localhost/space/space-1/doc/d1#block-does-not-exist');
+
+			render(Page, { params: { spaceId: 'space-1', id: 'doc-1' }, form: null, data: pageData });
+			await flushShardResolution();
+			await tick();
+
+			expect(scrollIntoView).not.toHaveBeenCalled();
+			expect(document.querySelector('[data-block-row]')).not.toHaveClass('outline');
+			// The Document itself still rendered normally.
+			expect(document.querySelector(`#block-${first.id}`)).toBeInTheDocument();
+		});
 	});
 
 	describe('columns block (#148)', () => {
