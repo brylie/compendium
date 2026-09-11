@@ -1017,6 +1017,13 @@ describe('doc/[id] +page', () => {
 			createDocument(ydoc, { id: 'doc-1', title: 'D' });
 			const first = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
 			getRecordYText(ydoc, first.id)!.insert(0, 'First');
+			// A second block, so "focuses nothing" and "incorrectly falls back to
+			// focusing some *other* block" are actually distinguishable — with
+			// only one block in the Document, a broken fallback that focuses it
+			// would satisfy the single not.toHaveFocus() assertion below by
+			// coincidence (CodeRabbit review, PR #257).
+			const second = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+			getRecordYText(ydoc, second.id)!.insert(0, 'Second');
 			pageUrl.current = new URL('http://localhost/space/space-1/doc/d1#block-does-not-exist');
 
 			render(Page, { params: { spaceId: 'space-1', id: 'doc-1' }, form: null, data: pageData });
@@ -1026,6 +1033,7 @@ describe('doc/[id] +page', () => {
 			expect(scrollIntoView).not.toHaveBeenCalled();
 			expect(document.querySelector('[data-block-row]')).not.toHaveClass('outline');
 			expect(document.querySelector(`#block-${first.id} [contenteditable]`)).not.toHaveFocus();
+			expect(document.querySelector(`#block-${second.id} [contenteditable]`)).not.toHaveFocus();
 			// The Document itself still rendered normally.
 			expect(document.querySelector(`#block-${first.id}`)).toBeInTheDocument();
 		});
