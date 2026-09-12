@@ -85,6 +85,11 @@
 	});
 
 	function handleSnapshot(snapshot: CollectionViewSnapshot): void {
+		// A fresh shard connection emits an initial empty snapshot before the
+		// WebSocket sync completes (snapshot.collection is undefined) — running
+		// autoPickGroupBy or announcer.notify against that empty doc would wipe
+		// an already-persisted date groupBy and falsely baseline event diffs (issue #217).
+		if (!snapshot.collection) return;
 		announcer.notify(snapshot.collectionId, snapshot.rows);
 		if (autoGroupByAttempted) return;
 		autoGroupByAttempted = true;
