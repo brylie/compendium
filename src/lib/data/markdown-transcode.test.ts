@@ -33,6 +33,24 @@ describe('markdown transcoding', () => {
 		expect(richTextToMarkdown(doc, richText)).toBe('Paragraph one\\.\n\nParagraph two\\.');
 	});
 
+	it.each([
+		'> Paragraph one.\n>\n> Paragraph two.',
+		'- Paragraph one.\n\n  Paragraph two.',
+		'> > Paragraph one.\n> >\n> > Paragraph two.'
+	])('preserves nested block separators in %s', (markdown) => {
+		const richText = markdownToRichText(new Y.Doc(), markdown);
+		expect(richText.runs.map((run) => run.text).join('')).toBe('Paragraph one.\n\nParagraph two.');
+	});
+
+	it('keeps inline formatting adjacent inside a blockquote', () => {
+		const richText = markdownToRichText(
+			new Y.Doc(),
+			'> plain **bold** [link](https://example.com)'
+		);
+		expect(richText.runs.map((run) => run.text).join('')).toBe('plain bold link');
+		expect(richText.runs.find((run) => run.text === 'bold')?.marks.bold).toBe(true);
+	});
+
 	it('parses @mention into a mention-marked run', () => {
 		const doc = new Y.Doc();
 		const richText = markdownToRichText(doc, 'ping @local please');

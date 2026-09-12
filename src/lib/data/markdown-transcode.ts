@@ -105,7 +105,10 @@ export function markdownToRichText(doc: Y.Doc, markdown: string): RichText {
 function collectRuns(doc: Y.Doc, node: MdastNode, marks: TextMarks, runs: MutableRun[]): void {
 	switch (node.type) {
 		case 'root':
-			collectRootRuns(doc, node.children ?? [], marks, runs);
+		case 'blockquote':
+		case 'list':
+		case 'listItem':
+			collectBlockRuns(doc, node.children ?? [], marks, runs);
 			return;
 		case 'text':
 			splitSpecialTokens(doc, node.value ?? '', marks, runs);
@@ -132,7 +135,7 @@ function collectRuns(doc: Y.Doc, node: MdastNode, marks: TextMarks, runs: Mutabl
 	}
 }
 
-function collectRootRuns(
+function collectBlockRuns(
 	doc: Y.Doc,
 	children: MdastNode[],
 	marks: TextMarks,
