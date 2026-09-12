@@ -3,6 +3,7 @@ import { createDocument as rawCrdtCreateDocument } from '$lib/data/document-ops'
 import { createCollection as rawCrdtCreateCollection } from '$lib/data/collection-ops';
 import {
 	createRecord as rawCrdtCreateRecord,
+	getRecord,
 	updateRecordContent as rawUpdateRecordContent
 } from '$lib/data/record-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
@@ -15,6 +16,7 @@ import {
 	SpaceMismatchError
 } from '../services/documents';
 import { createCollection, listCollections } from '../services/collections';
+import { createRecord } from '../services/records';
 import { searchWorkspace } from '../services/search';
 import {
 	createSpace,
@@ -371,6 +373,37 @@ describe('space isolation: audit history', () => {
 		expect(entries).not.toHaveLength(0);
 		expect(entries.every((entry) => entry.targetRecordId === docA.id)).toBe(true);
 		expect(entries.some((entry) => entry.targetRecordId === docB.id)).toBe(false);
+	});
+
+	it("a record created under a non-default Space's Document is scoped to that Space, not the workspace's first Space (PR #284 review regression)", () => {
+		// docB lives in Space B, with its own real shard (#120). Before this
+		// fix, createRecord's locator reservation always used the resolved
+		// context's bare defaultSpaceId (the workspace's *first* Space, Space
+		// A here) regardless of which Space the record's own parent Document
+		// actually belonged to — so this record's audit trail would wrongly
+		// surface under Space A and be invisible under its real Space B.
+		const { workspaceId, spaceAId, spaceBId, docB, docBShard } = seedTwoSpaces();
+
+		const record = createRecord(CURRENT_USER, { parentId: docB.id, blockType: 'paragraph' });
+
+		// The CRDT mutation itself landed in docB's own shard, not just an
+		// audit row with nothing behind it — otherwise every assertion below
+		// would still pass for a service call that audited a write it never
+		// actually persisted.
+		const persisted = getRecord(docBShard.doc, record.id);
+		expect(persisted?.id).toBe(record.id);
+		expect(persisted?.parentId).toBe(docB.id);
+		expect(persisted?.blockType).toBe('paragraph');
+
+		const spaceBEntries = queryAuditLogForSpace(workspaceId, spaceBId, {
+			targetRecordId: record.id
+		});
+		expect(spaceBEntries.some((e) => e.targetRecordId === record.id)).toBe(true);
+
+		const spaceAEntries = queryAuditLogForSpace(workspaceId, spaceAId, {
+			targetRecordId: record.id
+		});
+		expect(spaceAEntries.some((e) => e.targetRecordId === record.id)).toBe(false);
 	});
 });
 

@@ -21,7 +21,11 @@ import {
 } from '$lib/data/record-ops';
 import { resolveInternalLinkTarget } from '$lib/data/links';
 import { logAudit } from '$lib/server/audit';
-import { reserveRecordLocator, releaseRecordLocator } from '$lib/server/catalog';
+import {
+	reserveRecordLocator,
+	releaseRecordLocator,
+	resolveSpaceForShard
+} from '$lib/server/catalog';
 import { markdownToRichText } from '$lib/data/markdown-transcode';
 import { yTextToRichText } from '$lib/data/richtext';
 import { tokenAllowsParent } from '$lib/server/token-store';
@@ -383,16 +387,16 @@ function reserveDescendantLocators(
 	doc: Y.Doc,
 	record: WorkspaceRecord,
 	workspaceId: string,
-	defaultSpaceId: string,
+	spaceId: string,
 	shardId: string,
 	reserved: string[]
 ): void {
 	for (const childId of record.childRecordIds ?? []) {
-		reserveRecordLocator(workspaceId, defaultSpaceId, childId, shardId);
+		reserveRecordLocator(workspaceId, spaceId, childId, shardId);
 		reserved.push(childId);
 		const child = crdtGetRecord(doc, childId);
 		if (child) {
-			reserveDescendantLocators(doc, child, workspaceId, defaultSpaceId, shardId, reserved);
+			reserveDescendantLocators(doc, child, workspaceId, spaceId, shardId, reserved);
 		}
 	}
 }
@@ -427,6 +431,13 @@ export function createRecord(
 	const { doc, workspaceId, shardId, defaultSpaceId } = resolveParentWorkspaceContext(
 		input.parentId
 	);
+	// The Document/Collection that owns this shard usually has its own real
+	// Space already (#120: shardId is that entity's own id) — resolved fresh
+	// here rather than trusting the bare defaultSpaceId, which is just the
+	// workspace's first-ever Space and would otherwise mis-tag every record
+	// created outside that one Space (queryAuditLogForSpace filters on this
+	// exact field).
+	const spaceId = resolveSpaceForShard(workspaceId, shardId, defaultSpaceId);
 	const actor = actorForCaller(caller);
 
 	// A container record (columns/column) isn't itself catalog-navigable —
@@ -448,7 +459,7 @@ export function createRecord(
 	// "not found" fallback would route every later write_record/delete_record/
 	// hold_records call for this block to the wrong (default) shard.
 	const id = nanoid();
-	reserveRecordLocator(workspaceId, defaultSpaceId, id, shardId);
+	reserveRecordLocator(workspaceId, spaceId, id, shardId);
 
 	// Both container-creating blockTypes seed at least one descendant that
 	// needs its own locator: 'columns' seeds N columns (each with its own
@@ -463,14 +474,7 @@ export function createRecord(
 			performCreateRecord(doc, id, input, actor)
 		);
 		if (isContainerCreate) {
-			reserveDescendantLocators(
-				doc,
-				record,
-				workspaceId,
-				defaultSpaceId,
-				shardId,
-				reservedChildIds
-			);
+			reserveDescendantLocators(doc, record, workspaceId, spaceId, shardId, reservedChildIds);
 		}
 	} catch (err) {
 		releaseRecordLocator(workspaceId, id);

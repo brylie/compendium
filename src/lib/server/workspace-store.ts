@@ -21,7 +21,8 @@ import { aggregateHolds, initHoldEviction, resetHoldEvictionForTests } from './h
 import {
 	backfillRecordLocators,
 	ensureCatalogBootstrapped,
-	reconcileCatalogMetadata
+	reconcileCatalogMetadata,
+	resolveSpaceForShard
 } from './catalog.js';
 import { getInstanceWorkspaceId } from './instance.js';
 import { REPLAY_ORIGIN } from '../mutation-origin.js';
@@ -119,8 +120,14 @@ function createContext(workspaceId: string, shardId: string): InternalContext {
 	reconcileCatalogMetadata(workspaceId, doc);
 	// Repairs any record created via direct UI mutation before this shard was
 	// last resolved (the observer below only reacts to new transactions) —
-	// see catalog.ts's backfillRecordLocators and issue #253.
-	backfillRecordLocators(workspaceId, defaultSpaceId, shardId, doc);
+	// see catalog.ts's backfillRecordLocators and issue #253. Resolved via
+	// resolveSpaceForShard, not the bare defaultSpaceId: a shard with
+	// existing records to backfill was necessarily already fully created
+	// (including its own Document/Collection locator), so this always finds
+	// the real owning Space rather than mis-tagging every backfilled record
+	// with the workspace's first Space.
+	const backfillSpaceId = resolveSpaceForShard(workspaceId, shardId, defaultSpaceId);
+	backfillRecordLocators(workspaceId, backfillSpaceId, shardId, doc);
 	attachDocAuditObserver(doc);
 	attachCatalogMirrorObserver(workspaceId, doc);
 	attachRecordLocatorObserver(workspaceId, defaultSpaceId, shardId, doc);

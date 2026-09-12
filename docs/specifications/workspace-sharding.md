@@ -87,11 +87,19 @@ and authorize a Workspace without subscribing to its content shards:
 Document titles and hierarchy are catalog fields. They are not duplicated into a
 Document Y.Doc and derived later, because the sidebar needs them before opening
 the Document. Record IDs remain stable global identities; a title is never an
-identity or authorization key. Creating a record reserves its supplied or
-generated ID in the workspace-wide locator transaction before inserting it into
-the target shard. A duplicate `(workspace_id, record_id)` is rejected; a retry
-with the same operation ID returns its original result rather than creating a
-second record. The hold coordinator resolves this locator before using its
+identity or authorization key. A record created through the service layer (any
+MCP `create_record` call) reserves its generated ID in the workspace-wide
+locator transaction _before_ inserting it into the target shard — a duplicate
+`(workspace_id, record_id)` is rejected there before any content is written.
+A record created via a direct UI mutation (the block editor's own Yjs write,
+bypassing the service layer entirely for latency — see `audit-coverage.md`
+§1) has no such pre-write guard: it commits straight to the shard's Y.Doc,
+and `record-locator-observer.ts` reserves its locator reactively, immediately
+after that transaction lands (plus a one-time backfill pass for content
+already in a shard the first time this process resolves it — see issue
+#253). A collision on that path is vanishingly unlikely (record ids are
+generated nanoids) but not structurally prevented the way the service-layer
+path prevents it. The hold coordinator resolves this locator before using its
 `(workspaceId, recordId)` key, so a hold cannot conflate records in different
 shards.
 

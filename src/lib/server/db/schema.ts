@@ -1,6 +1,7 @@
 import {
 	blob,
 	foreignKey,
+	index,
 	integer,
 	primaryKey,
 	sqliteTable,
@@ -155,6 +156,12 @@ export const recordLocator = sqliteTable(
 	},
 	(t) => [
 		uniqueIndex('record_locator_workspace_record_unique').on(t.workspaceId, t.recordId),
+		// Backs catalog.ts's backfillRecordLocators, which filters by
+		// (workspaceId, shardId) on every shard load — without this, the
+		// unique index above (ordered by recordId, not shardId, after
+		// workspaceId) can only narrow to the workspace before a full scan of
+		// its locator range, defeating the point of that shard-scoped query.
+		index('record_locator_workspace_shard').on(t.workspaceId, t.shardId),
 		foreignKey({
 			columns: [t.workspaceId, t.spaceId],
 			foreignColumns: [spaces.workspaceId, spaces.id]

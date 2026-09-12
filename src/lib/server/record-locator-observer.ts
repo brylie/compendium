@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import { reserveRecordLocator, resolveShardForRecord } from './catalog.js';
+import { reserveRecordLocator, resolveShardForRecord, resolveSpaceForShard } from './catalog.js';
 import { mutationSource, UnknownMutationOriginError } from '../mutation-origin.js';
 
 // The service layer's own createRecord (services/records.ts) reserves a
@@ -33,10 +33,20 @@ type AnyYType = Y.AbstractType<any>;
  * observer to one resolved shard's Y.Doc. Call once per Y.Doc instance
  * (workspace-store.ts's createContext(), alongside backfillRecordLocators
  * for content that predates this observer).
+ *
+ * `fallbackSpaceId` (the workspace's first-ever Space, aka the context's own
+ * `defaultSpaceId`) is resolved against `resolveSpaceForShard` fresh on
+ * *every* reservation rather than once at attach time: for a brand-new
+ * per-Document shard, this observer is attached (by createContext) before
+ * services/documents.ts's createDocument has reserved that Document's own
+ * locator a few lines later — capturing the fallback once here would permanently
+ * mis-tag every future record in that Document with the wrong Space.
+ * Resolving lazily means every reservation after that point sees the
+ * Document's real Space as soon as it exists.
  */
 export function attachRecordLocatorObserver(
 	workspaceId: string,
-	spaceId: string,
+	fallbackSpaceId: string,
 	shardId: string,
 	doc: Y.Doc
 ): void {
@@ -57,10 +67,16 @@ export function attachRecordLocatorObserver(
 		const topKeys = transaction.changed.get(recordsTop);
 		if (!topKeys) return;
 
+		// Resolved at most once per transaction, not once per key: every key
+		// touched here belongs to this same fixed shard, so they all resolve
+		// to the identical Space — a multi-block insert (e.g. a columns block)
+		// would otherwise re-run the same lookup once per created record.
+		let spaceId: string | undefined;
 		for (const key of topKeys) {
 			if (key == null) continue;
 			if (!recordsMap.has(key)) continue; // a deletion, not a creation
 			if (resolveShardForRecord(workspaceId, key)) continue; // already reserved
+			spaceId ??= resolveSpaceForShard(workspaceId, shardId, fallbackSpaceId);
 			reserveRecordLocator(workspaceId, spaceId, key, shardId);
 		}
 	});

@@ -16,7 +16,9 @@ import {
 } from './db/schema.js';
 import { listDocuments as crdtListDocuments } from '../data/document-ops.js';
 import { listCollections as crdtListCollections } from '../data/collection-ops.js';
+import { listAllRecordIds } from '../data/record-ops.js';
 import { copyCollectionVerbatim, copyDocumentVerbatim } from '../data/migration-copy.js';
+import { resolveShardForParent } from './catalog.js';
 import type { CollectionMeta, DocumentMeta } from '../data/types.js';
 import { MIGRATION_ORIGIN, transactWithOrigin } from '../mutation-origin.js';
 
@@ -204,6 +206,44 @@ function migrateTarget(
 				set: { shardId }
 			})
 			.run();
+
+		// Every record (block/row) just copied into this shard needs its own
+		// locator pointing here too — copyDocumentVerbatim/copyCollectionVerbatim
+		// only copy content, never locators. If #253's backfill/observer had
+		// already reserved one against the *legacy* default shard before this
+		// migration ran, it would otherwise keep pointing at the wrong shard
+		// forever: this shard's own future backfill treats a locator scoped to
+		// a different shard as a real inconsistency and throws rather than
+		// silently re-adopting it (catalog.ts's backfillRecordLocators), so
+		// every later createContext for this shard would crash without this
+		// reconciliation.
+		//
+		// resolveShardForParent (not resolveSpaceForShard's own fallback) is
+		// called directly here so an unresolved parent — the parent's own
+		// upsert above only ever changes `shardId` on conflict, so a locator
+		// row that already existed at this id under kind 'record' would stay
+		// 'record' and never resolve as this shard's parent — updates only
+		// `shardId` below, never overwriting an existing record's real spaceId
+		// with defaultSpaceId. A fresh insert (no prior row) still needs some
+		// concrete value, so it falls back to defaultSpaceId there only.
+		const resolvedSpaceId = resolveShardForParent(workspaceId, shardId)?.spaceId;
+		const recordSpaceId = resolvedSpaceId ?? defaultSpaceId;
+		for (const recordId of listAllRecordIds(shardDoc)) {
+			tx.insert(recordLocator)
+				.values({
+					workspaceId,
+					recordId,
+					kind: 'record',
+					spaceId: recordSpaceId,
+					shardId,
+					createdAt: now
+				})
+				.onConflictDoUpdate({
+					target: [recordLocator.workspaceId, recordLocator.recordId],
+					set: resolvedSpaceId !== undefined ? { shardId, spaceId: resolvedSpaceId } : { shardId }
+				})
+				.run();
+		}
 
 		tx.insert(migrationTargets)
 			.values({
