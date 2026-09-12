@@ -150,12 +150,16 @@
 	const titleProperty = $derived(resolvePrimaryField(schema, primaryFieldKey));
 	// Issue #104: when the primary field is also the grouping property, the
 	// title cell and the "Move to column" select below it would otherwise be
-	// two separate editable controls for the identical underlying value. The
-	// column select stays the one editable control in that case; the title
-	// renders as the same plain, non-editable label already used when there's
-	// no primary field at all (cardTitle below).
+	// two separate editable controls for the identical underlying value —
+	// and the same collision applies to the "Move to swimlane" select when
+	// the primary field is the swimlane property instead. Whichever select
+	// stays the one editable control in that case; the title renders as the
+	// same plain, non-editable label already used when there's no primary
+	// field at all (cardTitle below).
 	const titleEditableViaCell = $derived(
-		titleProperty != null && titleProperty.key !== groupProperty?.key
+		titleProperty != null &&
+			titleProperty.key !== groupProperty?.key &&
+			titleProperty.key !== swimlaneProperty?.key
 	);
 	const cardFields = $derived(
 		visibleProperties(schema, config).filter(
