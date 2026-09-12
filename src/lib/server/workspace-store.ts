@@ -16,8 +16,13 @@ import {
 	resetRecordIndexObserverForTests
 } from './record-index-observer.js';
 import { rebuildRecordIndexForShard } from './record-index.js';
+import { attachRecordLocatorObserver } from './record-locator-observer.js';
 import { aggregateHolds, initHoldEviction, resetHoldEvictionForTests } from './holds.js';
-import { ensureCatalogBootstrapped, reconcileCatalogMetadata } from './catalog.js';
+import {
+	backfillRecordLocators,
+	ensureCatalogBootstrapped,
+	reconcileCatalogMetadata
+} from './catalog.js';
 import { getInstanceWorkspaceId } from './instance.js';
 import { REPLAY_ORIGIN } from '../mutation-origin.js';
 
@@ -112,8 +117,13 @@ function createContext(workspaceId: string, shardId: string): InternalContext {
 	// observer attaches (so it never produces a spurious audit trail).
 	const { defaultSpaceId } = ensureCatalogBootstrapped(workspaceId, shardId, doc);
 	reconcileCatalogMetadata(workspaceId, doc);
+	// Repairs any record created via direct UI mutation before this shard was
+	// last resolved (the observer below only reacts to new transactions) —
+	// see catalog.ts's backfillRecordLocators and issue #253.
+	backfillRecordLocators(workspaceId, defaultSpaceId, shardId, doc);
 	attachDocAuditObserver(doc);
 	attachCatalogMirrorObserver(workspaceId, doc);
+	attachRecordLocatorObserver(workspaceId, defaultSpaceId, shardId, doc);
 	// Rebuild before attaching the live observer, matching the catalog's own
 	// bootstrap-then-mirror ordering above: this shard's record_index rows
 	// always start correct for whatever the snapshot just loaded (or empty,

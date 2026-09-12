@@ -13,6 +13,7 @@ import {
 } from './db/schema.js';
 import { listDocuments as crdtListDocuments } from '../data/document-ops.js';
 import { listCollections as crdtListCollections } from '../data/collection-ops.js';
+import { listAllRecordIds } from '../data/record-ops.js';
 import type { CollectionMeta, DocumentMeta, ParentKind, SpaceMeta } from '../data/types.js';
 
 // The transaction handle drizzle's better-sqlite3 driver passes into a
@@ -137,14 +138,19 @@ export function reserveCollectionLocator(
 }
 
 /**
- * Reserves a locator entry for one record/row within a sharded Collection —
- * unlike Documents/Collections, individual records aren't catalog-navigable
- * entities (§3.1), so this exists purely so write_record/delete_record/
- * hold_records/release_records (which only ever receive a bare recordId, no
- * parent hint) can resolve which shard to operate against. Document blocks
- * are never locator-tracked — they're always in the default shard as long
- * as Documents themselves aren't sharded, so resolveShardForRecord's
- * "not found" fallback already routes them correctly.
+ * Reserves a locator entry for one record/row, whether it lives in a sharded
+ * Collection or a per-Document shard (#120: "a Document's shard is its own
+ * id") — unlike Documents/Collections, individual records aren't
+ * catalog-navigable entities (§3.1), so this exists purely so
+ * write_record/delete_record/hold_records/release_records (which only ever
+ * receive a bare recordId, no parent hint) can resolve which shard to
+ * operate against. Every record needs one now that Documents have their own
+ * real shard — resolveShardForRecord's "not found" fallback routes to the
+ * *default* shard, which is only correct for a workspace with no per-Document
+ * sharding at all. The service layer's own createRecord (services/records.ts)
+ * reserves one itself before writing; a direct UI creation (record-ops.ts,
+ * bypassing the service layer) doesn't, so record-locator-observer.ts and
+ * backfillRecordLocators below close that gap generically (issue #253).
  */
 export function reserveRecordLocator(
 	workspaceId: string,
@@ -198,6 +204,35 @@ export function resolveShardForRecord(
 		.where(and(eq(recordLocator.workspaceId, workspaceId), eq(recordLocator.recordId, recordId)))
 		.get();
 	return row ? { shardId: row.shardId } : undefined;
+}
+
+/**
+ * Reserves a locator for every record in `doc` that doesn't already have one
+ * — repairs a shard resolved for the first time in this process that already
+ * contains records created via direct UI mutation before
+ * record-locator-observer.ts existed (or before this process last restarted;
+ * the locator table is durable SQLite, the observer only reacts to *new*
+ * transactions). Safe to call on every context load: only issues a write for
+ * an id actually missing a locator, so an already-fully-tracked shard costs
+ * one SELECT and no writes. See issue #253.
+ */
+export function backfillRecordLocators(
+	workspaceId: string,
+	spaceId: string,
+	shardId: string,
+	doc: Y.Doc
+): void {
+	const alreadyTracked = new Set(
+		getDb()
+			.select({ recordId: recordLocator.recordId })
+			.from(recordLocator)
+			.where(eq(recordLocator.workspaceId, workspaceId))
+			.all()
+			.map((row) => row.recordId)
+	);
+	for (const id of listAllRecordIds(doc)) {
+		if (!alreadyTracked.has(id)) reserveRecordLocator(workspaceId, spaceId, id, shardId);
+	}
 }
 
 /**

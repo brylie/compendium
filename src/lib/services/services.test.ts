@@ -62,7 +62,6 @@ import {
 	listCatalogDocuments,
 	RecordIdConflictError,
 	reserveCollectionLocator,
-	reserveRecordLocator,
 	recordCatalogCollectionCreated,
 	resolveShardForRecord
 } from '$lib/server/catalog';
@@ -295,7 +294,6 @@ describe('service layer: centralized business rules & side effects', () => {
 
 	it('renders a page_link block with rich text but no referencedRecordId via its own content', () => {
 		const docPublic = createDocument(human, { title: 'Public Handbook' });
-		const { workspaceId, defaultSpaceId } = resolveWorkspaceContext({ shardId: docPublic.id });
 		const link = crdtCreateRecord(
 			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
 			{ parentId: docPublic.id, blockType: 'page_link' },
@@ -303,9 +301,8 @@ describe('service layer: centralized business rules & side effects', () => {
 		);
 		// A record created directly against the CRDT layer (bypassing the
 		// service layer's createRecord, and therefore its locator reservation)
-		// needs its own locator entry too, mirroring what real content always
-		// has — writeRecord below resolves it by bare recordId alone.
-		reserveRecordLocator(workspaceId, defaultSpaceId, link.id, docPublic.id);
+		// still gets one automatically, via record-locator-observer.ts (#253)
+		// — writeRecord below resolves it by bare recordId alone.
 		writeRecord(human, link.id, { markdown: 'unresolved link text' });
 
 		const result = getDocument(human, docPublic.id);

@@ -302,6 +302,68 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		expect(workspaceClient.doc.getMap('documents').has(newDoc.id)).toBe(false);
 	});
 
+	it('3b-2. A record created via direct UI mutation in a per-Document shard is still reachable by MCP write_record/hold_records/delete_record, not silently misrouted to the default shard (issue #253)', async () => {
+		const { token } = harness.createToken({
+			clientLabel: 'Locator Gap Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+		const mcp = await harness.getMcpClient(token);
+
+		// create_document goes through the service layer, so this Document gets
+		// a real, distinct shard — its own id (see services/documents.ts, #120).
+		const createRes = await mcp.callTool({
+			name: 'create_document',
+			arguments: { title: 'Human-Typed Doc' }
+		});
+		const newDoc = parseMcpText<{ id: string }>(createRes);
+
+		// A real Yjs client connects to the Document's own shard room and types
+		// a block directly via the raw data-layer createRecord — the same path
+		// BlockEditor.svelte uses (no MCP/service call), so no locator would be
+		// reserved for this block without record-locator-observer.ts.
+		const shardClient = harness.getYjsClient({ room: `shard-${newDoc.id}` });
+		await harness.waitForCondition(() => shardClient.doc.getMap('documents').has(newDoc.id));
+		const block = createRecord(
+			shardClient.doc,
+			{ parentId: newDoc.id, blockType: 'paragraph' },
+			human
+		);
+
+		// Before the fix, requireAccessibleRecord's shard resolution falls back
+		// to the *default* shard for this bare recordId (no locator reserved),
+		// where the record doesn't exist, so every one of these calls 404s
+		// forever rather than eventually succeeding once sync catches up.
+		await harness.waitForCondition(
+			async () => {
+				const holdRes = await mcp.callTool({
+					name: 'hold_records',
+					arguments: { recordIds: [block.id] }
+				});
+				return parseMcpText<{ granted: string[] }>(holdRes).granted.includes(block.id);
+			},
+			{ timeoutMs: 1500 }
+		);
+
+		const writeRes = await mcp.callTool({
+			name: 'write_record',
+			arguments: { recordId: block.id, markdown: 'Written by an agent' }
+		});
+		expect((writeRes as { isError?: boolean }).isError).not.toBe(true);
+
+		await harness.waitForCondition(() => {
+			const ytext = getRecordYText(shardClient.doc, block.id);
+			if (!ytext) return false;
+			return plainText(yTextToRichText(ytext)).includes('Written by an agent');
+		});
+
+		const deleteRes = await mcp.callTool({
+			name: 'delete_record',
+			arguments: { recordId: block.id }
+		});
+		expect((deleteRes as { isError?: boolean }).isError).not.toBe(true);
+	});
+
 	it("3c. MCP search_workspace's space_id never crosses a Space boundary (#114/#133)", async () => {
 		const { token, record } = harness.createToken({
 			clientLabel: 'Space Isolation Bot',

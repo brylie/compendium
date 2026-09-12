@@ -104,10 +104,12 @@ export function requireAccessibleRecord(
  * collectionId, create_record's parentId). See catalog.ts's
  * resolveShardForParent. A record-kind id isn't itself catalog-navigable
  * (§3.1), so it falls back to `resolveShardForRecord` — every record,
- * container or not, gets its own locator entry at creation (see
- * services/records.ts#createRecord) — before finally falling back to the
- * default context for anything still untracked (content written directly to
- * the Y.Doc, bypassing the service layer and therefore the locator).
+ * container or not, gets its own locator entry, either reserved by the
+ * service layer at creation (services/records.ts#createRecord) or by
+ * record-locator-observer.ts for a record created via direct UI mutation
+ * (issue #253) — before finally falling back to the default context for the
+ * rare case a locator is still genuinely missing (e.g. a shard resolved
+ * before the observer/backfill existed and not yet reconciled).
  */
 export function resolveParentWorkspaceContext(
 	parentId: string
