@@ -315,6 +315,38 @@ describe('BoardCollectionView', () => {
 		expect(await screen.findByDisplayValue('Still primary')).toBeInTheDocument();
 	});
 
+	it('falls back to a plain, non-editable title label when the primary field is also the grouping property (issue #104)', async () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Board',
+			schema: [
+				{
+					key: 'status',
+					label: 'Status',
+					type: 'select',
+					options: [{ id: 'todo', label: 'To do' }]
+				}
+			]
+		});
+		setPrimaryField(ydoc, 'col-1', 'status');
+		createRecord(
+			ydoc,
+			{ parentId: 'col-1', properties: { status: { type: 'select', value: 'todo' } } },
+			actor
+		);
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
+
+		const moveSelect = await screen.findByLabelText('Move To do to column');
+		const card = moveSelect.closest('[draggable="true"]') as HTMLElement;
+
+		// The title reads the resolved primary field's display value, but as
+		// plain text rather than its own editable control...
+		expect(within(card).getByText('To do', { selector: 'span' })).toBeInTheDocument();
+		// ...so the "Move to column" select is the only editable control for
+		// this value anywhere on the card.
+		expect(within(card).getAllByRole('combobox')).toHaveLength(1);
+	});
+
 	it('adds a new option to a non-grouping select field from a card without touching the grouping property', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',

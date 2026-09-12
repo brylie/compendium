@@ -148,6 +148,15 @@
 			: null
 	);
 	const titleProperty = $derived(resolvePrimaryField(schema, primaryFieldKey));
+	// Issue #104: when the primary field is also the grouping property, the
+	// title cell and the "Move to column" select below it would otherwise be
+	// two separate editable controls for the identical underlying value. The
+	// column select stays the one editable control in that case; the title
+	// renders as the same plain, non-editable label already used when there's
+	// no primary field at all (cardTitle below).
+	const titleEditableViaCell = $derived(
+		titleProperty != null && titleProperty.key !== groupProperty?.key
+	);
 	const cardFields = $derived(
 		visibleProperties(schema, config).filter(
 			(p) =>
@@ -467,7 +476,7 @@
 							ondrop={(e) => handleCardDrop(e, column, row.id, swimlane)}
 						>
 							<div class="mb-1.5 flex items-start justify-between gap-2">
-								{#if titleProperty}
+								{#if titleEditableViaCell && titleProperty}
 									<div class="flex-1">
 										<PropertyValueCell
 											property={titleProperty}
