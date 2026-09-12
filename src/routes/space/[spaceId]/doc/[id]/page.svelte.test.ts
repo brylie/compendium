@@ -283,6 +283,46 @@ describe('doc/[id] +page', () => {
 		expect(document.activeElement).toBe(firstEditor);
 	});
 
+	it('leaves Tab/Shift+Tab to native focus order inside a block editor (issue #162)', async () => {
+		// Deliberate no-op, not a gap: see rich-text-toolbar.md §5.5. Block-to-
+		// block keyboard movement is already covered by ArrowUp/ArrowDown
+		// (#158) above, and Tab has no indent semantics to fall back to since
+		// list nesting doesn't exist in the data model yet. This test pins
+		// that BlockEditor never starts intercepting Tab by accident.
+		createDocument(ydoc, { id: 'doc-1', title: 'D' });
+		const first = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		getRecordYText(ydoc, first.id)!.insert(0, 'First block');
+		const second = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);
+		getRecordYText(ydoc, second.id)!.insert(0, 'Second block');
+		const { container } = render(Page, {
+			params: { spaceId: 'space-1', id: 'doc-1' },
+			form: null,
+			data: {
+				spaces: [],
+				spaceId: 'space-1',
+				activeSpaceId: 'space-1',
+				documents: [],
+				collections: [],
+				documentId: 'doc-1',
+				backlinks: [],
+				title: 'D'
+			}
+		});
+		await flushShardResolution();
+
+		const firstEditor = container.querySelector(
+			`[data-block-editor-id="${first.id}"]`
+		) as HTMLElement;
+		firstEditor.focus();
+
+		const tabEvent = await fireEvent.keyDown(firstEditor, { key: 'Tab' });
+		expect(tabEvent).toBe(true); // not prevented — native tab order applies
+		expect(document.activeElement).toBe(firstEditor); // jsdom doesn't move focus itself
+
+		const shiftTabEvent = await fireEvent.keyDown(firstEditor, { key: 'Tab', shiftKey: true });
+		expect(shiftTabEvent).toBe(true);
+	});
+
 	it('leaves ArrowUp/ArrowDown to native behavior when the only reachable neighbor is a held placeholder', async () => {
 		createDocument(ydoc, { id: 'doc-1', title: 'D' });
 		const held = createRecord(ydoc, { parentId: 'doc-1', blockType: 'paragraph' }, HUMAN);

@@ -92,6 +92,19 @@ This only intercepts an unmodified arrow key with a **collapsed** caret — a no
 
 A held block (another actor's placeholder — `collaboration.md`) has no mounted editor to focus, so navigation skips past it to the next block that does. At the document's effective start/end — including when every block on the remaining side is held — the key is left to whatever native behavior applies, rather than being silently swallowed.
 
+### 5.5 Tab/Shift+Tab are left to native focus order (issue #162)
+
+Unlike Enter, Backspace, and ArrowUp/ArrowDown above, `BlockEditor`'s `handleKeydown` does **not** branch on Tab or Shift+Tab — this is a deliberate decision, not an oversight, and is the outcome of issue #162's "decide what Tab should do" checklist item. Pressing Tab inside a block's rich-text content moves focus to whatever the browser's native tab order reaches next: typically the next block's move handle (`design-system.md`'s "Block move handle" — already documented as Tab-focusable, with its own ArrowUp/ArrowDown/Home/End keyboard contract once focused) or block action menu, and eventually the "Add block" button once the block list is exhausted. Shift+Tab walks the same order in reverse.
+
+Two considerations rule out intercepting the key here instead:
+
+- **No block-to-block focus move is needed.** Issue #158 (§5.4 above) already gives a keyboard-only user full block-to-block movement via ArrowUp/ArrowDown, which was #158's actual "Done when" bar. Repurposing Tab for the same thing would be a redundant second binding for a solved problem.
+- **Indent has no data-model representation.** The obvious alternative meaning — Tab indents a list item, Shift+Tab outdents it, the outline/word-processor convention — has no home in today's `WorkspaceRecord`/`ViewConfig` shape (`data-model.md`): there is no list-nesting concept to indent _into_. Building one is a real data-model change, not a keyboard-handler change, and the 0.4.0 editor research brief (`docs/research/collaborative-editor-ux-brief-2026-09-01.md`) explicitly scopes the block-actions/outline work to move/duplicate/delete/convert and multi-select, "not arbitrary nested data semantics yet." Implementing indent here would mean designing that data model as a side effect of a keyboard-shortcut issue rather than as its own considered piece of work.
+
+Leaving Tab alone also keeps it doing the job `design-system.md`'s move handle and the bulk-action bar (`+page.svelte`'s block-selection toolbar) already rely on it for: reaching every other block-row control via native focus order. Intercepting Tab inside the text editor would have to special-case around that existing reliance instead of coexisting with it.
+
+This satisfies issue #162's own acceptance bar — "an intentional, documented, tested behavior (even if that behavior is 'left to native focus order, and here's why')" — via this section plus the regression test pinning "no `preventDefault` on Tab" in `page.svelte.test.ts`. List indentation remains open backlog work, gated on a future data-model decision, not on this issue.
+
 ## 6. Extension point
 
 [`toolbar-controls.ts`](../../src/routes/space/[spaceId]/doc/[id]/toolbar-controls.ts) is the sole registration list for the current toolbar. A registration declares a stable ID, group, accessible label, compact label, and either a `TextMarks` key (`format`) or `BlockType` (`insert`). `Toolbar.svelte` renders controls generically from that list; adding a button within either category does not require changing the toolbar layout or branching its markup.
