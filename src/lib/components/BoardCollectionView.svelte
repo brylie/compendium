@@ -502,6 +502,7 @@
 											property={titleProperty}
 											value={row.properties?.[titleProperty.key]}
 											oninput={(value) => setCell(row, titleProperty, value)}
+											label={titleProperty.label}
 										/>
 									</div>
 								{:else}

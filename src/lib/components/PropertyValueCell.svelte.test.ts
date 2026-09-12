@@ -130,6 +130,23 @@ describe('PropertyValueCell', () => {
 		expect(screen.queryByTitle('Add option')).not.toBeInTheDocument();
 	});
 
+	it("exposes the optional label prop as the input's accessible name (issue #273)", () => {
+		const property: PropertyDefinition = { key: 'title', label: 'Title', type: 'text' };
+		render(PropertyValueCell, {
+			property,
+			value: { type: 'text', value: 'Ship it' },
+			oninput: vi.fn(),
+			label: property.label
+		});
+		expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Ship it');
+	});
+
+	it('has no accessible name for an input when label is omitted', () => {
+		const property: PropertyDefinition = { key: 'title', label: 'Title', type: 'text' };
+		render(PropertyValueCell, { property, value: undefined, oninput: vi.fn() });
+		expect(screen.getByRole('textbox')).not.toHaveAccessibleName();
+	});
+
 	describe('relation property (issue #15)', () => {
 		it('shows a placeholder instead of a picker when no target collection is configured', () => {
 			const property: PropertyDefinition = { key: 'links', label: 'Links', type: 'relation' };
