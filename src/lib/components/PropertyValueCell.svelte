@@ -7,13 +7,15 @@
 		value,
 		oninput,
 		onAddOption,
-		compact = false
+		compact = false,
+		label
 	}: {
 		property: PropertyDefinition;
 		value: PropertyValue | undefined;
 		oninput: (value: PropertyValue) => void;
 		onAddOption?: () => void;
 		compact?: boolean;
+		label?: string;
 	} = $props();
 
 	const fieldClass = $derived(
@@ -29,6 +31,7 @@
 		value={(value as { value?: string })?.value ?? ''}
 		onchange={(e) => oninput({ type: 'text', value: (e.target as HTMLInputElement).value })}
 		class={fieldClass}
+		aria-label={label}
 	/>
 {:else if property.type === 'number'}
 	<input
@@ -42,6 +45,7 @@
 			oninput({ type: 'number', value: Number(raw) });
 		}}
 		class={fieldClass}
+		aria-label={label}
 	/>
 {:else if property.type === 'date'}
 	<input
@@ -49,6 +53,7 @@
 		value={(value as { value?: string })?.value ?? ''}
 		onchange={(e) => oninput({ type: 'date', value: (e.target as HTMLInputElement).value })}
 		class={fieldClass}
+		aria-label={label}
 	/>
 {:else if property.type === 'checkbox'}
 	<div class="flex items-center justify-center py-1">
@@ -57,6 +62,7 @@
 			checked={(value as { value?: boolean })?.value ?? false}
 			onchange={(e) => oninput({ type: 'checkbox', value: (e.target as HTMLInputElement).checked })}
 			class="h-4 w-4 rounded border-border text-accent focus:ring-accent"
+			aria-label={label}
 		/>
 	</div>
 {:else if property.type === 'select'}
@@ -65,6 +71,7 @@
 			value={(value as { value?: string })?.value ?? ''}
 			onchange={(e) => oninput({ type: 'select', value: (e.target as HTMLSelectElement).value })}
 			class="{fieldClass} flex-1"
+			aria-label={label}
 		>
 			<option value="">—</option>
 			{#each property.options ?? [] as option (option.id)}

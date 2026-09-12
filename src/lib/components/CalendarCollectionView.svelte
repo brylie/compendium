@@ -405,6 +405,7 @@
 													property={titleProperty}
 													value={row.properties?.[titleProperty.key]}
 													oninput={(value) => setCell(row, titleProperty, value)}
+													label={titleProperty.label}
 													compact
 												/>
 											</div>
@@ -470,6 +471,7 @@
 									property={titleProperty}
 									value={row.properties?.[titleProperty.key]}
 									oninput={(value) => setCell(row, titleProperty, value)}
+									label={titleProperty.label}
 									compact
 								/>
 							</div>

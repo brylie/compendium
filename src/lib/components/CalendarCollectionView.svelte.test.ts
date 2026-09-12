@@ -247,6 +247,7 @@ describe('CalendarCollectionView', () => {
 		renderCalendar('col-1', { groupBy: 'due' });
 
 		const titleInput = await screen.findByDisplayValue('Launch');
+		expect(screen.getByRole('textbox', { name: 'Title' })).toBe(titleInput);
 		await fireEvent.change(titleInput, { target: { value: 'Launch v2' } });
 
 		expect(getRecord(ydoc, record.id)?.properties?.title).toEqual({
@@ -272,6 +273,7 @@ describe('CalendarCollectionView', () => {
 		renderCalendar('col-1', { groupBy: 'due' });
 
 		const titleInput = await screen.findByDisplayValue('Needs a date');
+		expect(screen.getByRole('textbox', { name: 'Title' })).toBe(titleInput);
 		await fireEvent.change(titleInput, { target: { value: 'Still needs a date' } });
 
 		expect(getRecord(ydoc, record.id)?.properties?.title).toEqual({

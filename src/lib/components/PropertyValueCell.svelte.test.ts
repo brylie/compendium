@@ -45,10 +45,12 @@ describe('PropertyValueCell', () => {
 		render(PropertyValueCell, {
 			property,
 			value: { type: 'number', value: 1 },
-			oninput
+			oninput,
+			label: property.label
 		});
 
-		const input = screen.getByDisplayValue('1');
+		const input = screen.getByRole('spinbutton', { name: 'Qty' });
+		expect(input).toHaveValue(1);
 		await user.clear(input);
 		await user.type(input, '9');
 		await user.tab();
@@ -77,9 +79,10 @@ describe('PropertyValueCell', () => {
 		const oninput = vi.fn();
 		const user = userEvent.setup();
 		const property: PropertyDefinition = { key: 'due', label: 'Due', type: 'date' };
-		render(PropertyValueCell, { property, value: undefined, oninput });
+		render(PropertyValueCell, { property, value: undefined, oninput, label: property.label });
 
 		const input = screen.getByDisplayValue('');
+		expect(input).toHaveAccessibleName('Due');
 		await user.type(input, '2026-03-15');
 		await user.tab();
 
@@ -93,10 +96,12 @@ describe('PropertyValueCell', () => {
 		render(PropertyValueCell, {
 			property,
 			value: { type: 'checkbox', value: false },
-			oninput
+			oninput,
+			label: property.label
 		});
 
-		await user.click(screen.getByRole('checkbox'));
+		const checkbox = screen.getByRole('checkbox', { name: 'Done' });
+		await user.click(checkbox);
 		expect(oninput).toHaveBeenCalledWith({ type: 'checkbox', value: true });
 	});
 
@@ -110,9 +115,16 @@ describe('PropertyValueCell', () => {
 			type: 'select',
 			options: [{ id: 'opt-1', label: 'Open' }]
 		};
-		render(PropertyValueCell, { property, value: undefined, oninput, onAddOption });
+		render(PropertyValueCell, {
+			property,
+			value: undefined,
+			oninput,
+			onAddOption,
+			label: property.label
+		});
 
-		await user.selectOptions(screen.getByRole('combobox'), 'opt-1');
+		const select = screen.getByRole('combobox', { name: 'Status' });
+		await user.selectOptions(select, 'opt-1');
 		expect(oninput).toHaveBeenCalledWith({ type: 'select', value: 'opt-1' });
 
 		await user.click(screen.getByTitle('Add option'));
@@ -128,6 +140,23 @@ describe('PropertyValueCell', () => {
 		};
 		render(PropertyValueCell, { property, value: undefined, oninput: vi.fn() });
 		expect(screen.queryByTitle('Add option')).not.toBeInTheDocument();
+	});
+
+	it("exposes the optional label prop as the input's accessible name (issue #273)", () => {
+		const property: PropertyDefinition = { key: 'title', label: 'Title', type: 'text' };
+		render(PropertyValueCell, {
+			property,
+			value: { type: 'text', value: 'Ship it' },
+			oninput: vi.fn(),
+			label: property.label
+		});
+		expect(screen.getByRole('textbox', { name: 'Title' })).toHaveValue('Ship it');
+	});
+
+	it('has no accessible name for an input when label is omitted', () => {
+		const property: PropertyDefinition = { key: 'title', label: 'Title', type: 'text' };
+		render(PropertyValueCell, { property, value: undefined, oninput: vi.fn() });
+		expect(screen.getByRole('textbox')).not.toHaveAccessibleName();
 	});
 
 	describe('relation property (issue #15)', () => {

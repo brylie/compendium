@@ -146,6 +146,7 @@ describe('BoardCollectionView', () => {
 		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' });
 
 		const titleInput = await screen.findByDisplayValue('Ship it');
+		expect(screen.getByRole('textbox', { name: 'Title' })).toBe(titleInput);
 		await user.clear(titleInput);
 		await user.type(titleInput, 'Ship it today');
 		await user.tab();
