@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
-import { createCollection, getCollection } from '$lib/data/collection-ops';
+import { createCollection, getCollection, setPrimaryField } from '$lib/data/collection-ops';
 import {
 	createRecord,
 	deleteRecord,
@@ -113,7 +113,7 @@ describe('CalendarCollectionView', () => {
 		);
 		renderCalendar('col-1', { groupBy: 'due' });
 
-		expect(await screen.findByText('Launch')).toBeInTheDocument();
+		expect(await screen.findByDisplayValue('Launch')).toBeInTheDocument();
 		expect(screen.queryByText('Unscheduled')).not.toBeInTheDocument();
 	});
 
@@ -134,7 +134,7 @@ describe('CalendarCollectionView', () => {
 		renderCalendar('col-1', { groupBy: 'due' });
 
 		expect(await screen.findByText('Unscheduled')).toBeInTheDocument();
-		expect(screen.getByText('No date yet')).toBeInTheDocument();
+		expect(screen.getByDisplayValue('No date yet')).toBeInTheDocument();
 	});
 
 	it("resolves a relation field's value to the target Collection's record title on a scheduled entry (issue #15)", async () => {
@@ -222,6 +222,92 @@ describe('CalendarCollectionView', () => {
 			type: 'date',
 			value: '2026-03-25'
 		});
+	});
+
+	it('edits a scheduled entry title inline via its primary-field cell, matching Board (issue #105)', async () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Cal',
+			schema: [
+				{ key: 'title', label: 'Title', type: 'text' },
+				{ key: 'due', label: 'Due', type: 'date' }
+			]
+		});
+		const record = createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: {
+					title: { type: 'text', value: 'Launch' },
+					due: { type: 'date', value: '2026-03-05' }
+				}
+			},
+			actor
+		);
+		renderCalendar('col-1', { groupBy: 'due' });
+
+		const titleInput = await screen.findByDisplayValue('Launch');
+		await fireEvent.change(titleInput, { target: { value: 'Launch v2' } });
+
+		expect(getRecord(ydoc, record.id)?.properties?.title).toEqual({
+			type: 'text',
+			value: 'Launch v2'
+		});
+	});
+
+	it('edits an unscheduled entry title inline via its primary-field cell (issue #105)', async () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Cal',
+			schema: [
+				{ key: 'title', label: 'Title', type: 'text' },
+				{ key: 'due', label: 'Due', type: 'date' }
+			]
+		});
+		const record = createRecord(
+			ydoc,
+			{ parentId: 'col-1', properties: { title: { type: 'text', value: 'Needs a date' } } },
+			actor
+		);
+		renderCalendar('col-1', { groupBy: 'due' });
+
+		const titleInput = await screen.findByDisplayValue('Needs a date');
+		await fireEvent.change(titleInput, { target: { value: 'Still needs a date' } });
+
+		expect(getRecord(ydoc, record.id)?.properties?.title).toEqual({
+			type: 'text',
+			value: 'Still needs a date'
+		});
+	});
+
+	it('falls back to a plain non-editable title when the primary field is also the groupBy date property (issue #105)', async () => {
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Cal',
+			schema: [
+				{ key: 'due', label: 'Due', type: 'date' },
+				{ key: 'notes', label: 'Notes', type: 'text' }
+			]
+		});
+		setPrimaryField(ydoc, 'col-1', 'due');
+		createRecord(
+			ydoc,
+			{
+				parentId: 'col-1',
+				properties: {
+					due: { type: 'date', value: '2026-03-20' },
+					notes: { type: 'text', value: 'Kickoff' }
+				}
+			},
+			actor
+		);
+		renderCalendar('col-1', { groupBy: 'due' });
+
+		// The date value shows up as exactly one editable control (the date
+		// PropertyValueCell) — the title renders the same value as static text
+		// instead of a second, redundant editable cell for the same field.
+		expect(await screen.findByText('2026-03-20')).toBeInTheDocument();
+		expect(screen.getAllByDisplayValue('2026-03-20')).toHaveLength(1);
 	});
 
 	it('sets a date on an unscheduled record from its inline date field', async () => {
