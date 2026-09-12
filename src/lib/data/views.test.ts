@@ -510,12 +510,14 @@ describe('primaryFieldDisplayValue', () => {
 		);
 	});
 
-	it('renders a checkbox value as Checked or empty', () => {
+	it('renders checkbox values as Checked or Unchecked', () => {
 		const checkboxProperty: PropertyDefinition = { key: 'done', label: 'Done', type: 'checkbox' };
 		expect(primaryFieldDisplayValue({ type: 'checkbox', value: true }, checkboxProperty)).toBe(
 			'Checked'
 		);
-		expect(primaryFieldDisplayValue({ type: 'checkbox', value: false }, checkboxProperty)).toBe('');
+		expect(primaryFieldDisplayValue({ type: 'checkbox', value: false }, checkboxProperty)).toBe(
+			'Unchecked'
+		);
 	});
 
 	it('returns an empty string for a select value with no matching option', () => {
