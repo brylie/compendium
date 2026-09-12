@@ -315,7 +315,7 @@ export function primaryFieldDisplayValue(
 		case 'date':
 			return value.value;
 		case 'checkbox':
-			return value.value ? 'Checked' : '';
+			return value.value ? 'Checked' : 'Unchecked';
 		case 'select':
 			return property.options?.find((o) => o.id === value.value)?.label ?? '';
 		case 'relation':
