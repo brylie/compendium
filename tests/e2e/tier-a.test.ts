@@ -17,7 +17,7 @@ import {
 	touchRecordEditor,
 	updateRecordContent
 } from '$lib/data/record-ops';
-import { queryAuditLog } from '$lib/server/audit';
+import { queryAuditLog, queryAuditLogForSpace } from '$lib/server/audit';
 import {
 	createSpace,
 	recordCatalogDocumentCreated,
@@ -551,6 +551,54 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		const list = parseMcpText<{ id: string }[]>(listRes);
 		expect(list.map((d) => d.id)).toContain(docA.id);
 		expect(list.map((d) => d.id)).not.toContain(docB.id);
+	});
+
+	it("3d-2. MCP create_record on a Document in a non-default Space attributes the resulting record's audit history to that Space, not the workspace's first Space (PR #284/#289 review regression)", async () => {
+		// No MCP tool lets a caller choose a Space when creating a Document
+		// (that's #6's still-unbuilt surface) — Space B's Document is
+		// constructed the same way test 3d's fixture is, via the raw
+		// data/catalog primitives. create_record itself, the thing actually
+		// under test, goes through the real MCP transport.
+		const { workspaceId, defaultSpaceId: spaceAId } = resolveWorkspaceContext();
+		const spaceB = createSpace(workspaceId, 'Space B');
+
+		const docBShard = resolveWorkspaceContext({ workspaceId, shardId: 'tier-a-3d-2-space-b-doc' });
+		const docB = createDocument(docBShard.doc, {
+			id: 'tier-a-3d-2-space-b-doc',
+			title: 'Space B Doc'
+		});
+		reserveDocumentLocator(workspaceId, spaceB.id, docB.id, docBShard.shardId);
+		recordCatalogDocumentCreated({
+			workspaceId,
+			spaceId: spaceB.id,
+			id: docB.id,
+			title: docB.title,
+			order: docB.order,
+			shardId: docBShard.shardId
+		});
+
+		const { token } = harness.createToken({
+			clientLabel: 'Space B Writer',
+			allowedDocumentIds: [docB.id],
+			allowedCollectionIds: []
+		});
+		const mcp = await harness.getMcpClient(token);
+
+		const createRes = await mcp.callTool({
+			name: 'create_record',
+			arguments: { parentId: docB.id, blockType: 'paragraph' }
+		});
+		const record = parseMcpText<{ recordId: string }>(createRes);
+
+		const spaceBEntries = queryAuditLogForSpace(workspaceId, spaceB.id, {
+			targetRecordId: record.recordId
+		});
+		expect(spaceBEntries.some((e) => e.targetRecordId === record.recordId)).toBe(true);
+
+		const spaceAEntries = queryAuditLogForSpace(workspaceId, spaceAId, {
+			targetRecordId: record.recordId
+		});
+		expect(spaceAEntries.some((e) => e.targetRecordId === record.recordId)).toBe(false);
 	});
 
 	it('4. MCP hold_records on block where human cursor is -> denied for that block, granted for others', async () => {

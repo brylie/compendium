@@ -16,7 +16,9 @@ import {
 } from './db/schema.js';
 import { listDocuments as crdtListDocuments } from '../data/document-ops.js';
 import { listCollections as crdtListCollections } from '../data/collection-ops.js';
+import { listAllRecordIds } from '../data/record-ops.js';
 import { copyCollectionVerbatim, copyDocumentVerbatim } from '../data/migration-copy.js';
+import { resolveSpaceForShard } from './catalog.js';
 import type { CollectionMeta, DocumentMeta } from '../data/types.js';
 import { MIGRATION_ORIGIN, transactWithOrigin } from '../mutation-origin.js';
 
@@ -204,6 +206,36 @@ function migrateTarget(
 				set: { shardId }
 			})
 			.run();
+
+		// Every record (block/row) just copied into this shard needs its own
+		// locator pointing here too — copyDocumentVerbatim/copyCollectionVerbatim
+		// only copy content, never locators. If #253's backfill/observer had
+		// already reserved one against the *legacy* default shard before this
+		// migration ran, it would otherwise keep pointing at the wrong shard
+		// forever: this shard's own future backfill treats a locator scoped to
+		// a different shard as a real inconsistency and throws rather than
+		// silently re-adopting it (catalog.ts's backfillRecordLocators), so
+		// every later createContext for this shard would crash without this
+		// reconciliation. Resolved after the parent's own locator write above,
+		// so a pre-existing real Space survives untouched (onConflictDoUpdate's
+		// `set` above never touches spaceId) and this correctly inherits it.
+		const recordSpaceId = resolveSpaceForShard(workspaceId, shardId, defaultSpaceId);
+		for (const recordId of listAllRecordIds(shardDoc)) {
+			tx.insert(recordLocator)
+				.values({
+					workspaceId,
+					recordId,
+					kind: 'record',
+					spaceId: recordSpaceId,
+					shardId,
+					createdAt: now
+				})
+				.onConflictDoUpdate({
+					target: [recordLocator.workspaceId, recordLocator.recordId],
+					set: { shardId, spaceId: recordSpaceId }
+				})
+				.run();
+		}
 
 		tx.insert(migrationTargets)
 			.values({

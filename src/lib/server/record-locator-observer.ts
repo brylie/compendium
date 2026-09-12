@@ -67,11 +67,16 @@ export function attachRecordLocatorObserver(
 		const topKeys = transaction.changed.get(recordsTop);
 		if (!topKeys) return;
 
+		// Resolved at most once per transaction, not once per key: every key
+		// touched here belongs to this same fixed shard, so they all resolve
+		// to the identical Space — a multi-block insert (e.g. a columns block)
+		// would otherwise re-run the same lookup once per created record.
+		let spaceId: string | undefined;
 		for (const key of topKeys) {
 			if (key == null) continue;
 			if (!recordsMap.has(key)) continue; // a deletion, not a creation
 			if (resolveShardForRecord(workspaceId, key)) continue; // already reserved
-			const spaceId = resolveSpaceForShard(workspaceId, shardId, fallbackSpaceId);
+			spaceId ??= resolveSpaceForShard(workspaceId, shardId, fallbackSpaceId);
 			reserveRecordLocator(workspaceId, spaceId, key, shardId);
 		}
 	});

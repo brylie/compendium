@@ -3,6 +3,7 @@ import { createDocument as rawCrdtCreateDocument } from '$lib/data/document-ops'
 import { createCollection as rawCrdtCreateCollection } from '$lib/data/collection-ops';
 import {
 	createRecord as rawCrdtCreateRecord,
+	getRecord,
 	updateRecordContent as rawUpdateRecordContent
 } from '$lib/data/record-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
@@ -381,9 +382,18 @@ describe('space isolation: audit history', () => {
 		// A here) regardless of which Space the record's own parent Document
 		// actually belonged to — so this record's audit trail would wrongly
 		// surface under Space A and be invisible under its real Space B.
-		const { workspaceId, spaceAId, spaceBId, docB } = seedTwoSpaces();
+		const { workspaceId, spaceAId, spaceBId, docB, docBShard } = seedTwoSpaces();
 
 		const record = createRecord(CURRENT_USER, { parentId: docB.id, blockType: 'paragraph' });
+
+		// The CRDT mutation itself landed in docB's own shard, not just an
+		// audit row with nothing behind it — otherwise every assertion below
+		// would still pass for a service call that audited a write it never
+		// actually persisted.
+		const persisted = getRecord(docBShard.doc, record.id);
+		expect(persisted?.id).toBe(record.id);
+		expect(persisted?.parentId).toBe(docB.id);
+		expect(persisted?.blockType).toBe('paragraph');
 
 		const spaceBEntries = queryAuditLogForSpace(workspaceId, spaceBId, {
 			targetRecordId: record.id

@@ -1,0 +1,1 @@
+CREATE INDEX `record_locator_workspace_shard` ON `record_locator` (`workspace_id`,`shard_id`);

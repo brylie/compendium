@@ -230,9 +230,13 @@ export function resolveSpaceForShard(
  * contains records created via direct UI mutation before
  * record-locator-observer.ts existed (or before this process last restarted;
  * the locator table is durable SQLite, the observer only reacts to *new*
- * transactions). Safe to call on every context load: only issues a write for
- * an id actually missing a locator, so an already-fully-tracked shard costs
- * one SELECT and no writes. See issue #253.
+ * transactions). Also repairs a *mismatched* spaceId on an already-tracked
+ * record — e.g. one reserved under the pre-resolveSpaceForShard default-Space
+ * bug — so historical audit history (queryAuditLogForSpace, keyed on this
+ * exact field) surfaces under the record's real owning Space, not wherever it
+ * was first (mis)recorded. Safe to call on every context load: only issues a
+ * write for an id actually missing or mismatched, so an already-correct
+ * shard costs one SELECT and no writes. See issue #253.
  *
  * The "already tracked" check is scoped to this `shardId`, not the whole
  * workspace: a record can only physically live in one Y.Doc, so a locator
@@ -246,16 +250,25 @@ export function backfillRecordLocators(
 	shardId: string,
 	doc: Y.Doc
 ): void {
-	const alreadyTracked = new Set(
+	const tracked = new Map(
 		getDb()
-			.select({ recordId: recordLocator.recordId })
+			.select({ recordId: recordLocator.recordId, spaceId: recordLocator.spaceId })
 			.from(recordLocator)
 			.where(and(eq(recordLocator.workspaceId, workspaceId), eq(recordLocator.shardId, shardId)))
 			.all()
-			.map((row) => row.recordId)
+			.map((row) => [row.recordId, row.spaceId] as const)
 	);
 	for (const id of listAllRecordIds(doc)) {
-		if (!alreadyTracked.has(id)) reserveRecordLocator(workspaceId, spaceId, id, shardId);
+		const trackedSpaceId = tracked.get(id);
+		if (trackedSpaceId === undefined) {
+			reserveRecordLocator(workspaceId, spaceId, id, shardId);
+		} else if (trackedSpaceId !== spaceId) {
+			getDb()
+				.update(recordLocator)
+				.set({ spaceId })
+				.where(and(eq(recordLocator.workspaceId, workspaceId), eq(recordLocator.recordId, id)))
+				.run();
+		}
 	}
 }
 
