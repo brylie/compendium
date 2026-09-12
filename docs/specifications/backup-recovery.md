@@ -46,7 +46,14 @@ written to — unlike copying the main file and its `-wal`/`-shm` sidecars with
 plain filesystem calls, which can capture a torn, inconsistent read across
 the three files. It refuses to overwrite an existing path, so every backup
 file gets a unique, sortable name:
-`compendium-<workspaceId>-<ISO timestamp>-<sequence>.db`.
+`compendium-<workspaceId>-<hash>-<ISO timestamp>-<sequence>.db`, where
+`<hash>` is the first 8 hex characters of a SHA-256 of the raw (unsanitized)
+workspace id. That hash isn't for security — it exists because filesystem-
+safe sanitization alone isn't collision-resistant (`a/b` and `a_b` both
+sanitize to the same string), and retention pruning (below) must never treat
+two different instances' backups as interchangeable just because their ids
+happen to sanitize identically, e.g. if more than one Compendium instance is
+ever pointed at the same synced or mounted `BACKUP_DIR`.
 
 Before vacuuming, `runBackup()` (`src/lib/server/backup.ts`) flushes, in
 order: `audit-observer.ts`'s `flushPendingAuditEvents()`,
@@ -76,7 +83,11 @@ Retention pruning happens after a successful backup is already recorded in
 `backup_runs`, and its own failure is caught and logged separately rather
 than rewritten as a second, contradictory outcome row for the same attempt —
 a directory-read or unlink error while trimming old backups is real, but it
-is not evidence that the backup which already succeeded didn't.
+is not evidence that the backup which already succeeded didn't. Pruning is
+scoped to the current instance's own filename namespace (the `<workspaceId>-
+<hash>` component above), never to every `compendium-*.db` file in the
+directory — a shared `BACKUP_DIR` must not let one instance's retention
+policy delete another instance's backups.
 
 `BACKUP_INTERVAL_MS`/`BACKUP_RETENTION_COUNT`/`BACKUP_DIR` are all read fresh
 on every call (§3), including by the scheduled job itself: `wireBackupScheduleOnce`

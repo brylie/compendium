@@ -18,6 +18,7 @@ import {
 	existsSync
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { backupDatabaseTo, getDb } from './db/index.js';
 import { backupRuns } from './db/schema.js';
@@ -101,10 +102,27 @@ function sanitizeForFilename(value: string): string {
 	return value.replace(/[^A-Za-z0-9_-]/g, '_');
 }
 
+/**
+ * A collision-resistant filename component for one instance's backups.
+ * `sanitizeForFilename` alone isn't enough to scope `pruneOldBackups` to
+ * only this instance's files: two different raw workspace ids that
+ * sanitize to the same string (e.g. "a/b" and "a_b") would otherwise share
+ * one namespace, letting one instance prune another's backups if they're
+ * ever pointed at the same BACKUP_DIR (a synced or mounted directory
+ * shared across instances). Appending a short hash of the *unsanitized* id
+ * disambiguates them.
+ */
+function instanceNamespace(workspaceId: string): string {
+	const hash = createHash('sha256').update(workspaceId).digest('hex').slice(0, 8);
+	return `${sanitizeForFilename(workspaceId)}-${hash}`;
+}
+
 function backupFilePath(dir: string, workspaceId: string): string {
 	const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-	const safeWorkspaceId = sanitizeForFilename(workspaceId);
-	return join(dir, `${FILENAME_PREFIX}${safeWorkspaceId}-${stamp}-${sequence++}${FILENAME_SUFFIX}`);
+	return join(
+		dir,
+		`${FILENAME_PREFIX}${instanceNamespace(workspaceId)}-${stamp}-${sequence++}${FILENAME_SUFFIX}`
+	);
 }
 
 function recordRun(startedAt: number, result: BackupRunResult, workspaceId: string): void {
@@ -123,21 +141,25 @@ function recordRun(startedAt: number, result: BackupRunResult, workspaceId: stri
 }
 
 /**
- * Deletes the oldest backup files in `dir` beyond `retentionCount`, ranked
- * by filename — safe because every filename embeds an ISO timestamp
- * (zero-padded by `Date.toISOString()`) followed by the disambiguating
- * sequence number, so lexicographic order matches creation order exactly.
- * Only touches files matching this module's own naming convention, so a
- * BACKUP_DIR an operator points at an existing directory never loses
- * unrelated files.
+ * Deletes the oldest backup files belonging to `workspaceId` in `dir`
+ * beyond `retentionCount`, ranked by filename — safe because every
+ * filename embeds an ISO timestamp (zero-padded by `Date.toISOString()`)
+ * followed by the disambiguating sequence number, so lexicographic order
+ * matches creation order exactly. Scoped to this instance's own namespace
+ * (see `instanceNamespace`), not just this module's generic filename
+ * convention — a BACKUP_DIR shared (via a synced or mounted directory)
+ * across more than one Compendium instance must never let one instance's
+ * retention pruning delete another's backups, and an operator pointing
+ * BACKUP_DIR at an existing directory must never lose unrelated files.
  */
-function pruneOldBackups(dir: string, retentionCount: number): void {
+function pruneOldBackups(dir: string, retentionCount: number, workspaceId: string): void {
+	const ownPrefix = `${FILENAME_PREFIX}${instanceNamespace(workspaceId)}-`;
 	// dir is always this module's own getBackupDir() (server config, not
 	// request input) — see the trust-boundary note on db/index.ts's
 	// mkdirSync/backupDatabaseTo, which this mirrors for every fs call below.
 	// eslint-disable-next-line security/detect-non-literal-fs-filename
 	const files = readdirSync(dir)
-		.filter((name) => name.startsWith(FILENAME_PREFIX) && name.endsWith(FILENAME_SUFFIX))
+		.filter((name) => name.startsWith(ownPrefix) && name.endsWith(FILENAME_SUFFIX))
 		.sort((a, b) => a.localeCompare(b));
 	const toDelete = files.slice(0, Math.max(0, files.length - retentionCount));
 	for (const name of toDelete) {
@@ -188,7 +210,7 @@ export function runBackup(): BackupRunResult {
 		const result: BackupRunResult = { status: 'success', filePath, sizeBytes };
 		recordRun(startedAt, result, workspaceId);
 		try {
-			pruneOldBackups(dir, getBackupRetentionCount());
+			pruneOldBackups(dir, getBackupRetentionCount(), workspaceId);
 		} catch (pruneError) {
 			// The backup itself already succeeded and is already recorded as
 			// such — a directory-read or unlink failure while trimming old
@@ -352,24 +374,34 @@ export function restoreFrom(sourcePath: string, targetPath: string): void {
 	// eslint-disable-next-line security/detect-non-literal-fs-filename
 	const targetExisted = existsSync(targetPath);
 	const preRestorePath = `${targetPath}.pre-restore-${stamp}`;
-	if (targetExisted) {
-		// eslint-disable-next-line security/detect-non-literal-fs-filename
-		renameSync(targetPath, preRestorePath);
-		moveSidecarsAside(targetPath, preRestorePath);
-	}
+	// Tracks whether the main file actually got renamed aside — not the same
+	// as targetExisted: if targetExisted but the sidecar move below throws
+	// partway through, the main file has already moved even though the
+	// preservation step as a whole didn't complete. The catch block must
+	// roll back exactly when the main file moved, not merely when a target
+	// existed to begin with.
+	let targetMoved = false;
 
 	try {
+		if (targetExisted) {
+			// eslint-disable-next-line security/detect-non-literal-fs-filename
+			renameSync(targetPath, preRestorePath);
+			targetMoved = true;
+			moveSidecarsAside(targetPath, preRestorePath);
+		}
 		// eslint-disable-next-line security/detect-non-literal-fs-filename
 		renameSync(stagedPath, targetPath);
 	} catch (error) {
 		// Roll back: put the previous database (and its sidecars) back
 		// exactly where they were rather than leaving the configured path
 		// with nothing openable.
-		if (targetExisted) {
+		if (targetMoved) {
 			// eslint-disable-next-line security/detect-non-literal-fs-filename
 			renameSync(preRestorePath, targetPath);
 			moveSidecarsAside(preRestorePath, targetPath);
 		}
+		// eslint-disable-next-line security/detect-non-literal-fs-filename
+		if (existsSync(stagedPath)) unlinkSync(stagedPath);
 		throw error;
 	}
 }

@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Y from 'yjs';
 import Database from 'better-sqlite3';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -120,6 +120,25 @@ describe('backup: runBackup (#19)', () => {
 		expect(remaining).toContain(third.filePath!.split('/').pop());
 	});
 
+	it("never prunes another instance's backups sharing the same BACKUP_DIR", () => {
+		process.env.BACKUP_RETENTION_COUNT = '1';
+		// A filename matching the general naming convention but with a
+		// different <workspaceId>-<hash> namespace than this test's own
+		// instance (default, unset COMPENDIUM_INSTANCE_ID) — simulates a
+		// second Compendium instance pointed at the same synced/mounted
+		// BACKUP_DIR.
+		const foreignFile = join(
+			getBackupDir(),
+			'compendium-other-instance-deadbeef1-2020-01-01T00-00-00-000Z-0.db'
+		);
+		writeFileSync(foreignFile, "not this instance's backup");
+
+		runBackup();
+		runBackup();
+
+		expect(existsSync(foreignFile)).toBe(true);
+	});
+
 	it('flushes a pending debounced audit event before copying the database, so the backup never contains an edit without its audit row', () => {
 		const { doc } = resolveWorkspaceContext();
 		const parent = transactWithOrigin(doc, SERVICE_ORIGIN, () =>
@@ -233,6 +252,54 @@ describe('backup: restoreFrom (#19)', () => {
 		}
 
 		expect(readCatalogTitles(targetPath)).toContain('New Content');
+
+		rmSync(restoreDir, { recursive: true, force: true });
+	});
+
+	it('rolls back a target already moved aside if moving its sidecars fails partway through', () => {
+		createDocument(CURRENT_USER, { title: 'New Content' });
+		const { filePath } = runBackup();
+
+		const restoreDir = mkdtempSync(join(tmpdir(), 'restore-target-'));
+		const targetPath = join(restoreDir, 'existing.db');
+
+		const targetDb = new Database(targetPath);
+		targetDb.pragma('journal_mode = WAL');
+		targetDb.exec('CREATE TABLE marker (v TEXT)');
+		targetDb.prepare('INSERT INTO marker (v) VALUES (?)').run('original-target-content');
+		targetDb.close();
+		writeFileSync(`${targetPath}-wal`, 'wal-sidecar-content');
+
+		// A fixed clock makes restoreFrom's <stamp>-derived pre-restore path
+		// predictable, so a non-empty directory can be pre-created at exactly
+		// the path moveSidecarsAside will try to rename the -wal sidecar
+		// into — renameSync onto a non-empty directory throws (EISDIR/
+		// ENOTEMPTY), simulating a sidecar-move failure *after* the main
+		// database file has already been renamed aside (targetMoved = true)
+		// but before the preservation step as a whole has completed.
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2020-01-01T00:00:00.000Z'));
+		try {
+			const preRestoreWalPath = `${targetPath}.pre-restore-2020-01-01T00-00-00-000Z-wal`;
+			mkdirSync(preRestoreWalPath);
+			writeFileSync(join(preRestoreWalPath, 'blocker'), '');
+
+			expect(() => restoreFrom(filePath!, targetPath)).toThrow();
+		} finally {
+			vi.useRealTimers();
+		}
+
+		// The rollback must leave the original database fully recoverable at
+		// targetPath — not stranded under its pre-restore name just because
+		// the sidecar move failed.
+		expect(existsSync(targetPath)).toBe(true);
+		const db = new Database(targetPath, { readonly: true });
+		try {
+			const row = db.prepare('SELECT v FROM marker').get() as { v: string };
+			expect(row.v).toBe('original-target-content');
+		} finally {
+			db.close();
+		}
 
 		rmSync(restoreDir, { recursive: true, force: true });
 	});
