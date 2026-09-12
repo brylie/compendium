@@ -5,6 +5,65 @@ All notable changes to Compendium will be documented in this file.
 The project follows [Semantic Versioning](https://semver.org/). Git release
 tags use the `vX.Y.Z` convention.
 
+## [0.4.0] - 2026-09-12
+
+The block editor rounds out toward feature-complete and Board/Calendar
+configuration reaches GitHub-Projects-level depth: reordering, layout,
+relations, swimlanes, and a record detail pane, all held to a WCAG 2.1 AA
+accessibility bar. (File/image attachments remain deferred pending a
+storage-backend decision.)
+
+### Added
+
+- Drag-and-drop block reordering, with a full keyboard equivalent.
+- A categorized, searchable slash-command menu.
+- A multi-column layout block with real nested containers.
+- Callout blocks gain style presets plus a custom icon and color picker.
+- A child-pages block that lists a Document's sub-pages live, Confluence-style.
+- A relation property type: pick and display linked records from other
+  Collections directly in Table, Board, and Calendar.
+- Board swimlanes — an optional second grouping dimension, configurable by
+  people and by MCP agents through `viewConfig`.
+- A full-width display toggle for blocks.
+- A block action menu, multi-select, and a List View document outline.
+- Synced blocks now show their provenance and support a "detach" action to
+  break the link deliberately.
+- A record detail pane for Collections, opening a row's full record
+  alongside the view.
+- Backlinks now navigate to the exact referring block instead of just the
+  containing document.
+- Keyboard navigation between Document blocks (Arrow Up/Down), and a
+  documented, native Tab/Shift+Tab focus order.
+- Screen-reader announcements for held-block state changes and for live
+  remote updates in Collection views, closing out a WCAG 2.1 AA accessibility
+  pass across Table, Board, and Calendar.
+- `viewConfig` is now stored as per-member Yjs entries, so concurrent edits
+  to different settings (grouping, filter, sort) merge instead of one
+  silently overwriting the other; MCP's `write_record` gets a matching
+  `viewConfigPatch` for the same per-field merge.
+- New records on a Select field get a sensible default option instead of
+  starting blank; duplicate field labels within a Collection are now
+  rejected.
+- Documents and Collections with duplicate titles are now disambiguated in
+  list and sidebar UIs.
+- MCP access-token grant pickers, and write-path validation for
+  `collection_view` blocks, now cover sharded Documents and Collections
+  correctly.
+
+### Fixed
+
+- Board and Calendar no longer show a redundant duplicate title control
+  when the primary field and the grouping field are the same; Calendar
+  entries now render the primary field as an editable cell, matching Board.
+- A checkbox used as a Collection's primary field displayed as "Untitled"
+  instead of its checked/unchecked state.
+- Board's groupBy columns could render empty after a fresh shard connection
+  until an unrelated interaction nudged reactivity.
+- Editable primary-field title cells and other property-value inputs had no
+  accessible name for assistive technology.
+
+[0.4.0]: https://github.com/brylie/compendium/releases/tag/v0.4.0
+
 ## [0.3.0] - 2026-09-01
 
 Compendium moves from a single implicit workspace to explicit, isolated
