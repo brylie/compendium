@@ -17,6 +17,7 @@ Compendium is a shared, real-time knowledge workspace: one SvelteKit app where a
 - [`rich-text-toolbar.md`](docs/specifications/rich-text-toolbar.md) — editor toolbar / slash-menu contract
 - [`undo-redo.md`](docs/specifications/undo-redo.md) — local, per-actor undo/redo via Y.UndoManager
 - [`persistence.md`](docs/specifications/persistence.md) — SQLite via Drizzle (snapshots, audit, tokens, read model)
+- [`backup-recovery.md`](docs/specifications/backup-recovery.md) — external backup/restore path for the whole SQLite file (RPO/RTO/retention, failure visibility)
 - [`service-layer.md`](docs/specifications/service-layer.md) / [`service-layer-manifest.md`](docs/specifications/service-layer-manifest.md) — where permission+audit logic must live
 - [`e2e-testing.md`](docs/specifications/e2e-testing.md) — why/how the Tier A + Tier B suites exist
 - [`crdt-capacity-baseline-2026-08-30.md`](docs/benchmarks/crdt-capacity-baseline-2026-08-30.md) — current measured global-workspace envelope and sharding decision gates
@@ -48,6 +49,8 @@ npm run format                # prettier --write .
 npm run db:generate           # drizzle-kit generate (after schema.ts changes)
 npm run db:push               # drizzle-kit push
 npm run db:studio             # drizzle-kit studio
+npm run db:backup             # one-off backup now (see docs/specifications/backup-recovery.md)
+npm run db:restore -- --file=<path>  # restore a backup produced by db:backup or the scheduled job
 ```
 
 Pre-commit (`prek`, see `.pre-commit-config.yaml`) runs prettier, `eslint --max-warnings 0`, and `svelte-check` — each hook uses `pass_filenames: false`, so they run across the whole repo rather than only staged files. CI (`.github/workflows/ci.yml`) runs the same plus full coverage, build, and both E2E tiers.

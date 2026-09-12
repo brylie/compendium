@@ -23,6 +23,8 @@
 		"format": "prettier --write .",
 		"start": "tsx server.ts",
 		"migrate:workspace": "tsx scripts/migrate-workspace.ts",
+		"db:backup": "tsx scripts/backup-workspace.ts",
+		"db:restore": "tsx scripts/restore-workspace.ts",
 		"db:push": "drizzle-kit push",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",

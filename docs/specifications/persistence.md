@@ -33,3 +33,17 @@
 - **`query_collection`'s `filter` deliberately does _not_ read from `record_index`.** It's implemented instead with the exact same `applyFilters`/`ViewFilter[]` semantics (`$lib/data/views.ts`) the UI's Table/Board/Calendar views already apply client-side, run directly against the records `queryCollection` was already fetching from that Collection's own single, already-resolved shard. A Collection's own rows are cheap to read and filter in memory — there's no "scan every shard" cost here to amortize with a SQL projection, and reusing `applyFilters` gives real UI/MCP parity for free instead of maintaining a second, SQL-shaped filter language that could drift from the UI's own filter semantics. This closes `collection-views.md` §8's tracked "MCP parity" gap (`filter` was previously accepted-but-unused) without adding a SQLite dependency to a path that didn't need one.
 
 **The Table view's live-updating grid is a different problem and doesn't need `record_index` at all** — it's genuinely reactive (the UI should update as records change while you're looking at it), but that reactivity comes for free from the actual source of truth: a Svelte store derived from `Y.Doc` observers (`ymap.observe(...)`) on the relevant Collection, with filter/sort done client-side in a Svelte reactive statement. That keeps the UI's live-update path directly off Yjs rather than through an intermediate database — one less system to keep in sync, and no need for a reactive-database library at all once the one-shot query path is separated out.
+
+## 3. Backup and disaster recovery
+
+Everything above — `snapshots`, `audit_log`, `access_tokens`, the workspace
+catalog, and the migration manifest — lives in the one SQLite file at
+`DATABASE_URL`. None of it protects against losing that file itself (disk
+failure, an operator's `rm`, a bad upgrade); the in-DB `snapshots` retention
+and #122's idle-unload flush only guard against a process crash losing
+recent unflushed Yjs updates. [`backup-recovery.md`](./backup-recovery.md)
+(#19) is the canonical spec for the external, point-in-time backup and
+tested restore path that closes that gap — including the decision that the
+single-SQLite-file boundary above is exactly the backup unit, resolving the
+"revisit backup unit boundaries" question #19 originally raised against
+#13's (now-shipped) workspace/shard persistence model.

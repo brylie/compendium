@@ -246,3 +246,21 @@ export const migrationTargets = sqliteTable(
 	},
 	(t) => [uniqueIndex('migration_targets_run_legacy_unique').on(t.runId, t.legacyId)]
 );
+
+// --- Backup/disaster-recovery run log (#19, docs/specifications/backup-recovery.md) ---
+//
+// One row per attempted backup (scheduled or manual via `npm run db:backup`).
+// This is the "make backup failures visible" mechanism the issue requires for
+// Phase 0 (a local, queryable log) — not itself part of the backup content:
+// a run's outcome is recorded *after* `VACUUM INTO` completes or fails, so a
+// row here is never captured inside the very backup file it describes.
+export const backupRuns = sqliteTable('backup_runs', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	workspaceId: text('workspace_id').notNull().default('default'),
+	startedAt: integer('started_at').notNull(),
+	finishedAt: integer('finished_at').notNull(),
+	status: text('status').notNull().$type<'success' | 'failure'>(),
+	filePath: text('file_path'),
+	sizeBytes: integer('size_bytes'),
+	error: text('error')
+});
