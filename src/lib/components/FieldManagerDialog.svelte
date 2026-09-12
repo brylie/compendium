@@ -93,11 +93,9 @@
 
 	function addField(event: SubmitEvent): void {
 		event.preventDefault();
-		const label = newFieldLabel.trim();
-		if (!label) return;
 		const field: PropertyDefinition = {
 			key: nanoid(8),
-			label,
+			label: newFieldLabel,
 			type: newFieldType,
 			options: newFieldType === 'select' ? [] : undefined,
 			targetCollectionId:

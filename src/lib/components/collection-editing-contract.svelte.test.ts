@@ -7,7 +7,7 @@
 // and the full-page route silently create duplicate, uncolored options
 // before this fix.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import * as Y from 'yjs';
 import { createCollection, getCollection } from '$lib/data/collection-ops';
@@ -245,6 +245,32 @@ describe('cross-surface field-label validation (issue #205)', () => {
 		await user.click(await screen.findByRole('button', { name: 'Add a date property' }));
 		expect(screen.getByRole('alert')).toHaveTextContent('A field named "Date" already exists');
 		expect(getCollection(ydoc, 'calendar-collection')?.schema).toHaveLength(1);
+	});
+
+	it('Board and Calendar show an inline error for a blank initial field label', async () => {
+		createCollection(ydoc, { id: 'blank-board', title: 'Board', schema: [] });
+		const user = userEvent.setup();
+		const { unmount } = render(BoardCollectionViewHarness, { collectionId: 'blank-board' });
+
+		const boardInput = await screen.findByLabelText('Select property name');
+		await user.clear(boardInput);
+		await user.type(boardInput, '   ');
+		await fireEvent.submit(
+			screen.getByRole('button', { name: 'Add a select property' }).closest('form')!
+		);
+		expect(screen.getByRole('alert')).toHaveTextContent('Field label cannot be blank');
+		unmount();
+
+		createCollection(ydoc, { id: 'blank-calendar', title: 'Calendar', schema: [] });
+		render(CalendarCollectionViewHarness, { collectionId: 'blank-calendar' });
+
+		const calendarInput = await screen.findByLabelText('Date property name');
+		await user.clear(calendarInput);
+		await user.type(calendarInput, '   ');
+		await fireEvent.submit(
+			screen.getByRole('button', { name: 'Add a date property' }).closest('form')!
+		);
+		expect(screen.getByRole('alert')).toHaveTextContent('Field label cannot be blank');
 	});
 
 	it('FieldManagerDialog rejects a duplicate label from its Add field form', async () => {

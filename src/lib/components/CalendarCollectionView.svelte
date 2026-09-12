@@ -206,9 +206,11 @@
 	});
 
 	function addDateProperty(): void {
-		const label = newDatePropertyLabel.trim();
-		if (!label) return;
-		const property: PropertyDefinition = { key: nanoid(8), label, type: 'date' };
+		const property: PropertyDefinition = {
+			key: nanoid(8),
+			label: newDatePropertyLabel,
+			type: 'date'
+		};
 		const result = appendCollectionField(ydoc, collectionId, property);
 		if (result.ok) {
 			newDatePropertyError = '';

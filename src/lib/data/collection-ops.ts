@@ -70,14 +70,37 @@ export function updateCollectionSchema(doc: Y.Doc, id: string, schema: PropertyD
 	ymeta.set('schema', schema);
 }
 
-function assertUniqueFieldLabel(schema: PropertyDefinition[], label: string): string {
+function fieldLabelCollides(
+	schema: PropertyDefinition[],
+	label: string,
+	excludePropertyKey?: string
+): boolean {
+	return schema.some(
+		(property) =>
+			property.key !== excludePropertyKey &&
+			property.label.trim().toLowerCase() === label.toLowerCase()
+	);
+}
+
+function assertUniqueFieldLabel(
+	schema: PropertyDefinition[],
+	label: string,
+	excludePropertyKey?: string
+): string {
 	const trimmed = label.trim();
 	if (!trimmed) throw new ValidationError('Field label cannot be blank');
-	const collides = schema.some(
-		(property) => property.label.trim().toLowerCase() === trimmed.toLowerCase()
-	);
-	if (collides) throw new ValidationError(`A field named "${trimmed}" already exists`);
+	if (fieldLabelCollides(schema, trimmed, excludePropertyKey)) {
+		throw new ValidationError(`A field named "${trimmed}" already exists`);
+	}
 	return trimmed;
+}
+
+function nextAvailableFieldLabel(schema: PropertyDefinition[], baseLabel: string): string {
+	const base = baseLabel.trim();
+	let candidate = base;
+	let suffix = 2;
+	while (fieldLabelCollides(schema, candidate)) candidate = `${base} ${suffix++}`;
+	return candidate;
 }
 
 /** Appends one field to a Collection's schema, rejecting a blank or already-used (case-insensitive) label. Reads the current schema from Yjs inside the same transaction rather than trusting a caller-supplied snapshot — two rapid appends from the same reactive snapshot would otherwise race, with the second silently dropping the first. */
@@ -102,7 +125,8 @@ export function insertCollectionField(
 	collectionId: string,
 	referenceKey: string,
 	direction: 'left' | 'right',
-	field: PropertyDefinition
+	field: PropertyDefinition,
+	options?: { generateUniqueLabel?: boolean }
 ): void {
 	const ymeta = collectionsMap(doc).get(collectionId);
 	if (!ymeta) throw new NotFoundError(`Collection ${collectionId} not found`);
@@ -110,7 +134,9 @@ export function insertCollectionField(
 		const schema = ymeta.get('schema') ?? [];
 		const index = schema.findIndex((p) => p.key === referenceKey);
 		if (index === -1) throw new NotFoundError(`Property ${referenceKey} not found`);
-		const label = assertUniqueFieldLabel(schema, field.label);
+		const label = options?.generateUniqueLabel
+			? nextAvailableFieldLabel(schema, field.label)
+			: assertUniqueFieldLabel(schema, field.label);
 		const insertAt = direction === 'left' ? index : index + 1;
 		ymeta.set('schema', [
 			...schema.slice(0, insertAt),
@@ -341,9 +367,13 @@ export function updateCollectionProperty(
 		} else {
 			nextTargetCollectionId = current.targetCollectionId;
 		}
+		const nextLabel =
+			patch.label !== undefined
+				? assertUniqueFieldLabel(schema, patch.label, propertyKey)
+				: current.label;
 		const next: PropertyDefinition = {
 			...current,
-			label: patch.label ?? current.label,
+			label: nextLabel,
 			type: nextType,
 			options: nextOptions,
 			defaultOptionId: nextDefaultOptionId,
@@ -372,7 +402,7 @@ export function duplicateCollectionProperty(
 		const index = schema.findIndex((p) => p.key === propertyKey);
 		if (index === -1) throw new NotFoundError(`Property ${propertyKey} not found`);
 		const source = schema[index];
-		const label = assertUniqueFieldLabel(schema, `${source.label} copy`);
+		const label = nextAvailableFieldLabel(schema, `${source.label} copy`);
 		const copy: PropertyDefinition = {
 			...source,
 			key: nanoid(8),

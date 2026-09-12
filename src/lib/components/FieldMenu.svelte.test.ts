@@ -42,6 +42,31 @@ describe('FieldMenu', () => {
 		expect(getCollection(ydoc, collection.id)?.schema[0].label).toBe('Full name');
 	});
 
+	it('rejects a duplicate label from the edit form with an inline error', async () => {
+		const collection = createCollection(ydoc, {
+			title: 'T',
+			schema: [
+				{ key: 'name', label: 'Name', type: 'text' },
+				{ key: 'status', label: 'Status', type: 'select' }
+			]
+		});
+		const user = userEvent.setup();
+		render(FieldMenu, {
+			shardId: 'test-shard',
+			collectionId: collection.id,
+			property: collection.schema[0]
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Field options for Name' }));
+		await user.click(screen.getByRole('menuitem', { name: 'Edit field' }));
+		await user.clear(screen.getByLabelText('Label'));
+		await user.type(screen.getByLabelText('Label'), 'status');
+		await user.click(screen.getByRole('button', { name: 'Save' }));
+
+		expect(screen.getByRole('alert')).toHaveTextContent('A field named "status" already exists');
+		expect(getCollection(ydoc, collection.id)?.schema[0].label).toBe('Name');
+	});
+
 	it('warns before a retype that would clear values, and applies the migration on save', async () => {
 		const collection = createCollection(ydoc, {
 			title: 'T',
@@ -90,6 +115,30 @@ describe('FieldMenu', () => {
 		expect(schema.map((p) => p.label)).toEqual(['New field', 'Name']);
 	});
 
+	it('generates an available label for repeated insertions', async () => {
+		const collection = createCollection(ydoc, {
+			title: 'T',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+		const user = userEvent.setup();
+		render(FieldMenu, {
+			shardId: 'test-shard',
+			collectionId: collection.id,
+			property: collection.schema[0]
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Field options for Name' }));
+		await user.click(screen.getByRole('menuitem', { name: 'Insert left' }));
+		await user.click(screen.getByRole('button', { name: 'Field options for Name' }));
+		await user.click(screen.getByRole('menuitem', { name: 'Insert left' }));
+
+		expect(getCollection(ydoc, collection.id)?.schema.map((p) => p.label)).toEqual([
+			'New field',
+			'New field 2',
+			'Name'
+		]);
+	});
+
 	it('duplicates a field, copying its value', async () => {
 		const collection = createCollection(ydoc, {
 			title: 'T',
@@ -116,6 +165,30 @@ describe('FieldMenu', () => {
 			type: 'text',
 			value: 'Alice'
 		});
+	});
+
+	it('generates an available label for repeated duplicates', async () => {
+		const collection = createCollection(ydoc, {
+			title: 'T',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+		const user = userEvent.setup();
+		render(FieldMenu, {
+			shardId: 'test-shard',
+			collectionId: collection.id,
+			property: collection.schema[0]
+		});
+
+		await user.click(screen.getByRole('button', { name: 'Field options for Name' }));
+		await user.click(screen.getByRole('menuitem', { name: 'Duplicate' }));
+		await user.click(screen.getByRole('button', { name: 'Field options for Name' }));
+		await user.click(screen.getByRole('menuitem', { name: 'Duplicate' }));
+
+		expect(getCollection(ydoc, collection.id)?.schema.map((p) => p.label)).toEqual([
+			'Name',
+			'Name copy 2',
+			'Name copy'
+		]);
 	});
 
 	it('offers "Hide in this view" only when onToggleVisible is passed, and calls it', async () => {

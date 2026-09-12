@@ -186,9 +186,12 @@
 	);
 
 	function addGroupingProperty(): void {
-		const label = newGroupingPropertyLabel.trim();
-		if (!label) return;
-		const property: PropertyDefinition = { key: nanoid(8), label, type: 'select', options: [] };
+		const property: PropertyDefinition = {
+			key: nanoid(8),
+			label: newGroupingPropertyLabel,
+			type: 'select',
+			options: []
+		};
 		const result = appendCollectionField(ydoc, collectionId, property);
 		if (result.ok) {
 			newGroupingPropertyError = '';
