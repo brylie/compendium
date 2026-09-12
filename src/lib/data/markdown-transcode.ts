@@ -102,6 +102,7 @@ export function markdownToRichText(doc: Y.Doc, markdown: string): RichText {
 	return { runs: runs.filter((r) => r.text.length > 0) };
 }
 
+/** Append inline text runs for a node, preserving marks and nested block boundaries. */
 function collectRuns(doc: Y.Doc, node: MdastNode, marks: TextMarks, runs: MutableRun[]): void {
 	switch (node.type) {
 		case 'root':
@@ -135,6 +136,7 @@ function collectRuns(doc: Y.Doc, node: MdastNode, marks: TextMarks, runs: Mutabl
 	}
 }
 
+/** Join nonempty block children with blank lines without separating inline siblings. */
 function collectBlockRuns(
 	doc: Y.Doc,
 	children: MdastNode[],
