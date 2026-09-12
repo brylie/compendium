@@ -148,6 +148,26 @@ describe('appendCollectionField: reads the current Yjs schema atomically (issue 
 			'due'
 		]);
 	});
+
+	it('rejects blank and case-insensitively duplicate field labels', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [{ key: 'status', label: 'Status', type: 'select' }]
+		});
+
+		expect(() =>
+			appendCollectionField(doc, collection.id, { key: 'blank', label: '   ', type: 'text' })
+		).toThrow('Field label cannot be blank');
+		expect(() =>
+			appendCollectionField(doc, collection.id, {
+				key: 'duplicate',
+				label: ' status ',
+				type: 'text'
+			})
+		).toThrow('A field named "status" already exists');
+		expect(getCollection(doc, collection.id)?.schema).toHaveLength(1);
+	});
 });
 
 describe('insertCollectionField: reads the current Yjs schema atomically (issue #203)', () => {
@@ -190,6 +210,53 @@ describe('insertCollectionField: reads the current Yjs schema atomically (issue 
 				type: 'text'
 			})
 		).toThrow(NotFoundError);
+	});
+
+	it('rejects a duplicate field label', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+
+		expect(() =>
+			insertCollectionField(doc, collection.id, 'name', 'right', {
+				key: 'duplicate',
+				label: 'name',
+				type: 'text'
+			})
+		).toThrow('A field named "name" already exists');
+	});
+
+	it('generates an available label when requested for a default insertion', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+
+		insertCollectionField(
+			doc,
+			collection.id,
+			'name',
+			'right',
+			{ key: 'new-1', label: 'New field', type: 'text' },
+			{ generateUniqueLabel: true }
+		);
+		insertCollectionField(
+			doc,
+			collection.id,
+			'name',
+			'right',
+			{ key: 'new-2', label: 'New field', type: 'text' },
+			{ generateUniqueLabel: true }
+		);
+
+		expect(getCollection(doc, collection.id)?.schema.map((p) => p.label)).toEqual([
+			'Name',
+			'New field 2',
+			'New field'
+		]);
 	});
 });
 
@@ -272,6 +339,26 @@ describe('collection field lifecycle: rename, retype, duplicate, delete', () => 
 			type: 'text',
 			value: 'Alice'
 		});
+	});
+
+	it('updateCollectionProperty trims labels and rejects blank or duplicate labels', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [
+				{ key: 'name', label: 'Name', type: 'text' },
+				{ key: 'status', label: 'Status', type: 'select' }
+			]
+		});
+
+		updateCollectionProperty(doc, collection.id, 'name', { label: ' Full name ' });
+		expect(getCollection(doc, collection.id)?.schema[0].label).toBe('Full name');
+		expect(() => updateCollectionProperty(doc, collection.id, 'name', { label: '   ' })).toThrow(
+			'Field label cannot be blank'
+		);
+		expect(() => updateCollectionProperty(doc, collection.id, 'name', { label: 'status' })).toThrow(
+			'A field named "status" already exists'
+		);
 	});
 
 	it('updateCollectionProperty retypes a field and migrates coercible values, clearing the rest', () => {
@@ -409,6 +496,21 @@ describe('collection field lifecycle: rename, retype, duplicate, delete', () => 
 			value: 'Alice'
 		});
 		expect(getRecord(doc, withoutValue.id)?.properties?.[copy.key]).toBeUndefined();
+	});
+
+	it('duplicateCollectionProperty generates an available copy label for repeated duplicates', () => {
+		const doc = new Y.Doc();
+		const { collection } = setupCollection(doc);
+
+		duplicateCollectionProperty(doc, collection.id, 'name');
+		const secondCopy = duplicateCollectionProperty(doc, collection.id, 'name');
+
+		expect(secondCopy.label).toBe('Name copy 2');
+		expect(getCollection(doc, collection.id)?.schema.map((p) => p.label)).toEqual([
+			'Name',
+			'Name copy 2',
+			'Name copy'
+		]);
 	});
 
 	it("duplicateCollectionProperty carries a relation field's targetCollectionId over to the copy", () => {

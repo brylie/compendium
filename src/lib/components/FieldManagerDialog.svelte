@@ -93,24 +93,22 @@
 
 	function addField(event: SubmitEvent): void {
 		event.preventDefault();
-		const label = newFieldLabel.trim();
-		if (!label) return;
 		const field: PropertyDefinition = {
 			key: nanoid(8),
-			label,
+			label: newFieldLabel,
 			type: newFieldType,
 			options: newFieldType === 'select' ? [] : undefined,
 			targetCollectionId:
 				newFieldType === 'relation' ? newFieldTargetCollectionId || undefined : undefined
 		};
-		try {
-			appendCollectionField(getShardDoc(shardId), collectionId, field);
+		const result = appendCollectionField(getShardDoc(shardId), collectionId, field);
+		if (result.ok) {
 			newFieldLabel = '';
 			newFieldType = 'text';
 			newFieldTargetCollectionId = '';
 			errorMessage = '';
-		} catch {
-			errorMessage = 'Could not add the field. Please try again.';
+		} else {
+			errorMessage = result.error;
 		}
 	}
 

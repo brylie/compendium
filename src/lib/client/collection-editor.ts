@@ -11,7 +11,7 @@ import type { PropertyDefinition, PropertyValue, WorkspaceRecord } from '$lib/da
 /**
  * Shared row/cell/select-option/field mutation helpers used by every
  * Collection renderer — the embedded Table/Board/Calendar views and the
- * full-page Table route (issue #189). Each wraps a `$lib/data/records.ts`
+ * full-page Table route (issue #189). Each wraps a `$lib/data/collection-ops.ts`
  * primitive with the "no doc yet" guard every renderer previously
  * reimplemented individually; renderer-specific behavior (Board's
  * pre-seeded column value, Calendar's pre-seeded date) stays in the
@@ -48,9 +48,11 @@ export type SelectOptionResult =
 	| { ok: true; option: { id: string; label: string; color?: string } }
 	| { ok: false; error: string };
 
+export type CollectionFieldResult = { ok: true } | { ok: false; error: string };
+
 /**
  * The one path every renderer must use to add a select option — validated,
- * deduped, and palette-colored by `records.ts`'s `addSelectOption`. Before
+ * deduped, and palette-colored by `collection-ops.ts`'s `addSelectOption`. Before
  * issue #189, Calendar and the full-page Table route each rebuilt the
  * schema by hand instead, silently allowing duplicate, uncolored options.
  */
@@ -76,19 +78,28 @@ export function addCollectionSelectOption(
 /**
  * Appends one field to a Collection's schema — the shared path for Board's
  * "add a select property" and Calendar's "add a date property" first-run
- * prompts, and FieldManagerDialog's "Add field" form. Reads the current
- * schema from Yjs itself (`records.ts`'s `appendCollectionField`), not from
+ * prompts, and FieldManagerDialog's "Add field" form. Validates field labels
+ * while reading the current schema from Yjs itself (`collection-ops.ts`'s
+ * `appendCollectionField`), not from
  * a caller-supplied snapshot, so two rapid appends never race. Returns
- * whether the field was actually written — `false` when `doc` isn't
- * connected yet — so a caller doesn't persist a config referencing a field
+ * the validation error when it cannot write, so callers can render it inline;
+ * this also prevents callers from persisting a config referencing a field
  * (e.g. `groupBy`) that was never added.
  */
 export function appendCollectionField(
 	doc: Y.Doc | undefined,
 	collectionId: string,
 	field: PropertyDefinition
-): boolean {
-	if (!doc) return false;
-	appendCollectionFieldToSchema(doc, collectionId, field);
-	return true;
+): CollectionFieldResult {
+	if (!doc) return { ok: false, error: 'Not connected yet. Please try again.' };
+	try {
+		appendCollectionFieldToSchema(doc, collectionId, field);
+		return { ok: true };
+	} catch (err) {
+		return {
+			ok: false,
+			error:
+				err instanceof ValidationError ? err.message : 'Could not add the field. Please try again.'
+		};
+	}
 }

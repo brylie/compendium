@@ -182,8 +182,7 @@
 
 	function saveEdit(event: SubmitEvent): void {
 		event.preventDefault();
-		const label = editLabel.trim();
-		if (!label) return;
+		const label = editLabel;
 		try {
 			updateCollectionProperty(getShardDoc(shardId), collectionId, property.key, {
 				label: label !== property.label ? label : undefined,
@@ -195,18 +194,26 @@
 			});
 			errorMessage = '';
 			closeMenu();
-		} catch {
-			errorMessage = 'Could not update the field. Please try again.';
+		} catch (err) {
+			errorMessage =
+				err instanceof ValidationError
+					? err.message
+					: 'Could not update the field. Please try again.';
 		}
 	}
 
 	function insertField(direction: 'left' | 'right'): void {
 		const field: PropertyDefinition = { key: nanoid(8), label: 'New field', type: 'text' };
 		try {
-			insertCollectionField(getShardDoc(shardId), collectionId, property.key, direction, field);
+			insertCollectionField(getShardDoc(shardId), collectionId, property.key, direction, field, {
+				generateUniqueLabel: true
+			});
 			closeMenu();
-		} catch {
-			errorMessage = 'Could not insert a field. Please try again.';
+		} catch (err) {
+			errorMessage =
+				err instanceof ValidationError
+					? err.message
+					: 'Could not insert a field. Please try again.';
 		}
 	}
 
@@ -214,8 +221,11 @@
 		try {
 			duplicateCollectionProperty(getShardDoc(shardId), collectionId, property.key);
 			closeMenu();
-		} catch {
-			errorMessage = 'Could not duplicate the field. Please try again.';
+		} catch (err) {
+			errorMessage =
+				err instanceof ValidationError
+					? err.message
+					: 'Could not duplicate the field. Please try again.';
 		}
 	}
 

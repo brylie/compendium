@@ -52,6 +52,7 @@
 	let viewYear = $state(today.getFullYear());
 	let viewMonth = $state(today.getMonth()); // 0-11
 	let newDatePropertyLabel = $state('Date');
+	let newDatePropertyError = $state('');
 	let optionDialogPropertyKey: string | null = $state(null);
 	let optionDialogError = $state('');
 	// The side-pane surface for an entry's full schema/backlinks/attribution
@@ -205,11 +206,17 @@
 	});
 
 	function addDateProperty(): void {
-		const label = newDatePropertyLabel.trim();
-		if (!label) return;
-		const property: PropertyDefinition = { key: nanoid(8), label, type: 'date' };
-		if (appendCollectionField(ydoc, collectionId, property)) {
+		const property: PropertyDefinition = {
+			key: nanoid(8),
+			label: newDatePropertyLabel,
+			type: 'date'
+		};
+		const result = appendCollectionField(ydoc, collectionId, property);
+		if (result.ok) {
+			newDatePropertyError = '';
 			onConfigChange({ ...config, groupBy: property.key });
+		} else {
+			newDatePropertyError = result.error;
 		}
 	}
 
@@ -302,6 +309,9 @@
 				<span>Add a date property</span>
 			</button>
 		</form>
+		{#if newDatePropertyError}
+			<p class="mt-2 text-sm text-red-600" role="alert">{newDatePropertyError}</p>
+		{/if}
 	</div>
 {:else}
 	<div class="mb-4 flex flex-wrap items-center gap-3">
