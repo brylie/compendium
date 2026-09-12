@@ -44,18 +44,40 @@ export function getBackupDir(): string {
 	return process.env.BACKUP_DIR ?? DEFAULT_BACKUP_DIR;
 }
 
-/** Milliseconds between scheduled backups (the RPO target). Read fresh — see getBackupDir. */
+/**
+ * Milliseconds between scheduled backups (the RPO target). Read fresh — see
+ * getBackupDir. Throws if `BACKUP_INTERVAL_MS` is set but not a positive
+ * number — an operator who mistypes it must find out, not silently get the
+ * default while believing a different RPO is active. Only absent from the
+ * environment entirely does this fall back to the default.
+ */
 export function getBackupIntervalMs(): number {
 	const raw = process.env.BACKUP_INTERVAL_MS;
-	const parsed = raw ? Number(raw) : NaN;
-	return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BACKUP_INTERVAL_MS;
+	if (raw === undefined) return DEFAULT_BACKUP_INTERVAL_MS;
+	const parsed = Number(raw);
+	if (!Number.isFinite(parsed) || parsed <= 0) {
+		throw new Error(
+			`BACKUP_INTERVAL_MS must be a positive number of milliseconds; got ${JSON.stringify(raw)}.`
+		);
+	}
+	return parsed;
 }
 
-/** Number of backup files to retain before older ones are pruned. Read fresh — see getBackupDir. */
+/**
+ * Number of backup files to retain before older ones are pruned. Read
+ * fresh, with the same "throw if present but invalid" contract as
+ * getBackupIntervalMs — see there for why.
+ */
 export function getBackupRetentionCount(): number {
 	const raw = process.env.BACKUP_RETENTION_COUNT;
-	const parsed = raw ? Number(raw) : NaN;
-	return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BACKUP_RETENTION_COUNT;
+	if (raw === undefined) return DEFAULT_BACKUP_RETENTION_COUNT;
+	const parsed = Number(raw);
+	if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+		throw new Error(
+			`BACKUP_RETENTION_COUNT must be a positive whole number; got ${JSON.stringify(raw)}.`
+		);
+	}
+	return parsed;
 }
 
 export interface BackupRunResult {
@@ -221,6 +243,21 @@ export function wireBackupScheduleOnce(): void {
 }
 
 function scheduleNextBackup(): void {
+	// getBackupIntervalMs() throws on a present-but-invalid env var (by
+	// design, so a typo is visible rather than silently defaulted) — but
+	// this call site drives a recurring timer that must never crash the
+	// server process over a config mistake, so it falls back to the default
+	// interval and logs instead of propagating.
+	let intervalMs: number;
+	try {
+		intervalMs = getBackupIntervalMs();
+	} catch (error) {
+		console.error(
+			'Invalid BACKUP_INTERVAL_MS; using the default backup interval until it is fixed',
+			error
+		);
+		intervalMs = DEFAULT_BACKUP_INTERVAL_MS;
+	}
 	const timer = setTimeout(() => {
 		try {
 			runBackup();
@@ -230,7 +267,7 @@ function scheduleNextBackup(): void {
 		} finally {
 			scheduleNextBackup();
 		}
-	}, getBackupIntervalMs());
+	}, intervalMs);
 	timer.unref?.();
 }
 

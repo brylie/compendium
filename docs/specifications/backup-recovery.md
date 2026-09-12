@@ -9,10 +9,18 @@
 `persistence.md` §1's `snapshots` table and #122's idle-unload flush protect
 against a _process_ dying — the worst case there is losing up to
 `SAVE_INTERVAL_MS` (30s) of unflushed Yjs updates. Neither protects against
-losing the _file_ itself: disk failure, an operator's `rm`, a bad migration,
-or a corrupted upgrade. This spec covers that second failure mode — an
-external, point-in-time copy of the data, independent of the live process
-and its own storage.
+losing the _file_ itself: an operator's `rm`, a bad migration, a corrupted
+upgrade, or disk failure. This spec covers that second failure mode — an
+external, point-in-time copy of the data, independent of the live process.
+
+**The default configuration only covers deletion and logical corruption, not
+disk failure.** `BACKUP_DIR` defaults to `.data/backups/`, a sibling of
+`.data/compendium.db` — normally the same physical disk. A disk failure
+destroys both at once. Recovering from an actual disk failure requires
+pointing `BACKUP_DIR` at separate or replicated storage (a different disk, a
+network mount, a cloud-synced folder — see §3's retention note); Compendium
+does not do this by default and does not implement off-host replication
+itself (§6).
 
 Issue #19 asked to revisit the backup unit boundary once #13's workspace/shard
 persistence model landed (#112/#113, now shipped). That revisit is resolved
@@ -90,6 +98,16 @@ config change without a restart):
 | RPO       | 1 hour (a backup runs every hour)                   | `BACKUP_INTERVAL_MS`     |
 | Retention | last 24 backups (~1 day at the default interval)    | `BACKUP_RETENTION_COUNT` |
 | Location  | `.data/backups/` (sibling to `.data/compendium.db`) | `BACKUP_DIR`             |
+
+`BACKUP_INTERVAL_MS`/`BACKUP_RETENTION_COUNT` fall back to their default only
+when unset entirely — a value that's present but invalid (non-numeric,
+zero, negative, or, for retention, non-integer) throws rather than silently
+applying the default, so a typo is visible instead of leaving an operator
+believing a tighter RPO or larger retention policy is active than actually
+is. The one exception is the recurring scheduler itself
+(`wireBackupScheduleOnce`): a config error there is caught and logged rather
+than propagated, because a background housekeeping job must not crash the
+whole running server over a bad environment variable — see `backup.ts`.
 
 **RTO:** restoring is copying one backup file over the live `DATABASE_URL`
 path and restarting the server — no replay, migration, or reconciliation

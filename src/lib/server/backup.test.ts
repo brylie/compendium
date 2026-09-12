@@ -4,10 +4,13 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDocument as crdtCreateDocument } from '$lib/data/document-ops';
+import {
+	createDocument as crdtCreateDocument,
+	getDocument as crdtGetDocument
+} from '$lib/data/document-ops';
 import { createRecord as crdtCreateRecord } from '$lib/data/record-ops';
 import { remoteUiOrigin, SERVICE_ORIGIN, transactWithOrigin } from '../mutation-origin';
-import { resolveWorkspaceContext } from './workspace-store';
+import { DEFAULT_WORKSPACE_ID, resolveWorkspaceContext } from './workspace-store';
 import { createDocument } from '../services';
 import { CURRENT_USER } from './current-user';
 import { getDb } from './store';
@@ -52,6 +55,30 @@ function readAuditActionsFor(dbPath: string, targetRecordId: string): string[] {
 	} finally {
 		db.close();
 	}
+}
+
+// Reads a Document's title directly out of its own shard's Yjs snapshot
+// (not the catalog's SQL mirror of it) — proves the backup/restore actually
+// carries the CRDT content that's the real source of truth, not just the
+// derived catalog row. A Document's shard is keyed by its own id (see
+// services/documents.ts's createDocument).
+function readDocumentTitleFromCrdtShard(dbPath: string, documentId: string): string | undefined {
+	const db = new Database(dbPath, { readonly: true });
+	let state: Buffer;
+	try {
+		const row = db
+			.prepare(
+				'SELECT state FROM snapshots WHERE workspace_id = ? AND shard_id = ? ORDER BY id DESC LIMIT 1'
+			)
+			.get(DEFAULT_WORKSPACE_ID, documentId) as { state: Buffer } | undefined;
+		if (!row) return undefined;
+		state = row.state;
+	} finally {
+		db.close();
+	}
+	const doc = new Y.Doc();
+	Y.applyUpdate(doc, new Uint8Array(state));
+	return crdtGetDocument(doc, documentId)?.title;
 }
 
 describe('backup: runBackup (#19)', () => {
@@ -132,8 +159,8 @@ describe('backup: runBackup (#19)', () => {
 });
 
 describe('backup: restoreFrom (#19)', () => {
-	it('restores a backup file over a target path and the restored database contains the original content', () => {
-		createDocument(CURRENT_USER, { title: 'Restore Me' });
+	it('restores a backup file over a target path and the restored database contains the original CRDT document content', () => {
+		const document = createDocument(CURRENT_USER, { title: 'Restore Me' });
 		const { filePath } = runBackup();
 
 		const restoreDir = mkdtempSync(join(tmpdir(), 'restore-target-'));
@@ -144,23 +171,68 @@ describe('backup: restoreFrom (#19)', () => {
 		expect(existsSync(targetPath)).toBe(true);
 		expect(existsSync(filePath!)).toBe(true); // restore copies, never consumes the backup
 		expect(readCatalogTitles(targetPath)).toContain('Restore Me');
+		// The catalog row above is a derived SQL mirror — also confirm the
+		// actual Yjs source of truth (the document's own shard) round-tripped,
+		// not just its projection.
+		expect(readDocumentTitleFromCrdtShard(targetPath, document.id)).toBe('Restore Me');
 
 		rmSync(restoreDir, { recursive: true, force: true });
 	});
 
-	it('preserves an existing target file aside instead of deleting it', () => {
+	it('preserves an existing WAL-mode target and its -wal/-shm sidecars aside instead of deleting them', () => {
+		createDocument(CURRENT_USER, { title: 'New Content' });
 		const { filePath } = runBackup();
 
 		const restoreDir = mkdtempSync(join(tmpdir(), 'restore-target-'));
 		const targetPath = join(restoreDir, 'existing.db');
-		writeFileSync(targetPath, 'not a real database, just marking pre-restore content');
+
+		// A real WAL-mode SQLite database as the pre-existing target, not a
+		// placeholder file — proves the pre-restore fallback is a genuinely
+		// openable database with its own recoverable content.
+		const targetDb = new Database(targetPath);
+		targetDb.pragma('journal_mode = WAL');
+		targetDb.exec('CREATE TABLE marker (v TEXT)');
+		targetDb.prepare('INSERT INTO marker (v) VALUES (?)').run('original-target-content');
+		targetDb.close();
+		// Sidecars can still exist after a clean close (e.g. wal_autocheckpoint
+		// hasn't fired) — simulate that explicitly so the test doesn't depend
+		// on exactly when SQLite happens to checkpoint and delete them itself.
+		writeFileSync(`${targetPath}-wal`, 'wal-sidecar-content');
+		writeFileSync(`${targetPath}-shm`, 'shm-sidecar-content');
 
 		restoreFrom(filePath!, targetPath);
 
-		const preserved = readdirSync(restoreDir).find((name) =>
-			name.startsWith('existing.db.pre-restore-')
+		const files = readdirSync(restoreDir);
+		const preRestoreMain = files.find(
+			(name) =>
+				name.startsWith('existing.db.pre-restore-') &&
+				!name.includes('-wal') &&
+				!name.includes('-shm')
 		);
-		expect(preserved).toBeDefined();
+		const preRestoreWal = files.find(
+			(name) => name.startsWith('existing.db.pre-restore-') && name.endsWith('-wal')
+		);
+		const preRestoreShm = files.find(
+			(name) => name.startsWith('existing.db.pre-restore-') && name.endsWith('-shm')
+		);
+
+		expect(preRestoreMain).toBeDefined();
+		expect(preRestoreWal).toBeDefined();
+		expect(preRestoreShm).toBeDefined();
+		// The sidecars were moved aside, not deleted, and none are left
+		// dangling next to the newly restored target.
+		expect(existsSync(`${targetPath}-wal`)).toBe(false);
+		expect(existsSync(`${targetPath}-shm`)).toBe(false);
+
+		const preservedDb = new Database(join(restoreDir, preRestoreMain!), { readonly: true });
+		try {
+			const row = preservedDb.prepare('SELECT v FROM marker').get() as { v: string };
+			expect(row.v).toBe('original-target-content');
+		} finally {
+			preservedDb.close();
+		}
+
+		expect(readCatalogTitles(targetPath)).toContain('New Content');
 
 		rmSync(restoreDir, { recursive: true, force: true });
 	});
