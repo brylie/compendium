@@ -114,7 +114,10 @@ describe('yjs-client: browser', () => {
 		});
 
 		it("fetches the Collection's shard and connects via getShardDoc", async () => {
-			const fetchMock = vi.fn(async () => ({ json: async () => ({ shardId: 'shard-x' }) }));
+			const fetchMock = vi.fn(async () => ({
+				ok: true,
+				json: async () => ({ shardId: 'shard-x' })
+			}));
 			vi.stubGlobal('fetch', fetchMock);
 			const mod = await import('./yjs-client');
 
@@ -126,7 +129,10 @@ describe('yjs-client: browser', () => {
 		});
 
 		it('memoizes the shard lookup per collectionId — one fetch no matter how many calls', async () => {
-			const fetchMock = vi.fn(async () => ({ json: async () => ({ shardId: 'shard-x' }) }));
+			const fetchMock = vi.fn(async () => ({
+				ok: true,
+				json: async () => ({ shardId: 'shard-x' })
+			}));
 			vi.stubGlobal('fetch', fetchMock);
 			const mod = await import('./yjs-client');
 
@@ -139,6 +145,7 @@ describe('yjs-client: browser', () => {
 
 		it('resolves different Collections to their own shard independently', async () => {
 			const fetchMock = vi.fn(async (url: string) => ({
+				ok: true,
 				json: async () => ({ shardId: url.includes('col-a') ? 'shard-a' : 'shard-b' })
 			}));
 			vi.stubGlobal('fetch', fetchMock);
@@ -155,11 +162,41 @@ describe('yjs-client: browser', () => {
 			const fetchMock = vi
 				.fn()
 				.mockRejectedValueOnce(new Error('network error'))
-				.mockImplementation(async () => ({ json: async () => ({ shardId: 'shard-x' }) }));
+				.mockImplementation(async () => ({ ok: true, json: async () => ({ shardId: 'shard-x' }) }));
 			vi.stubGlobal('fetch', fetchMock);
 			const mod = await import('./yjs-client');
 
 			await expect(mod.resolveCollectionDoc('col-1')).rejects.toThrow('network error');
+			const doc = await mod.resolveCollectionDoc('col-1');
+
+			expect(doc).toBe(mod.getShardDoc('shard-x'));
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+		});
+
+		it('rejects and evicts on a non-ok shard-lookup response, so a later call retries instead of caching a doc for an unvalidated shard (issue #204)', async () => {
+			const fetchMock = vi
+				.fn()
+				.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
+				.mockImplementation(async () => ({ ok: true, json: async () => ({ shardId: 'shard-x' }) }));
+			vi.stubGlobal('fetch', fetchMock);
+			const mod = await import('./yjs-client');
+
+			await expect(mod.resolveCollectionDoc('col-1')).rejects.toThrow(/failed: 500/);
+			const doc = await mod.resolveCollectionDoc('col-1');
+
+			expect(doc).toBe(mod.getShardDoc('shard-x'));
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+		});
+
+		it('rejects and evicts on a malformed shard-lookup response with no shardId, so a later call retries instead of caching a doc for an unvalidated shard (issue #204)', async () => {
+			const fetchMock = vi
+				.fn()
+				.mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+				.mockImplementation(async () => ({ ok: true, json: async () => ({ shardId: 'shard-x' }) }));
+			vi.stubGlobal('fetch', fetchMock);
+			const mod = await import('./yjs-client');
+
+			await expect(mod.resolveCollectionDoc('col-1')).rejects.toThrow(/returned no shardId/);
 			const doc = await mod.resolveCollectionDoc('col-1');
 
 			expect(doc).toBe(mod.getShardDoc('shard-x'));

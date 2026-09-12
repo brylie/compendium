@@ -91,9 +91,20 @@ export async function resolveCollectionDoc(collectionId: string): Promise<Y.Doc>
 	let shardIdPromise = collectionShardIds.get(collectionId);
 	if (!shardIdPromise) {
 		shardIdPromise = fetch(`/api/collections/${collectionId}/shard`)
-			.then((res) => res.json())
-			.then((body: { shardId: string }) => body.shardId)
-			// A rejected lookup (network blip, endpoint briefly down) must not
+			.then((res) => {
+				if (!res.ok)
+					throw new Error(`Shard lookup for collection ${collectionId} failed: ${res.status}`);
+				return res.json();
+			})
+			.then((body: { shardId: string }) => {
+				if (typeof body.shardId !== 'string' || !body.shardId) {
+					throw new Error(`Shard lookup for collection ${collectionId} returned no shardId`);
+				}
+				return body.shardId;
+			})
+			// A rejected lookup (network blip, endpoint briefly down, non-ok or
+			// malformed response — see useCollectionConnection's identical
+			// validation, issue #204) must not
 			// stay cached — every later resolveCollectionDoc(collectionId) call
 			// would otherwise keep reusing that same rejection until a full page
 			// reload, even once the endpoint recovers. Evicting on failure lets
