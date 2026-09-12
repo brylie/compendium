@@ -387,19 +387,27 @@ export function restoreFrom(sourcePath: string, targetPath: string): void {
 			// eslint-disable-next-line security/detect-non-literal-fs-filename
 			renameSync(targetPath, preRestorePath);
 			targetMoved = true;
-			moveSidecarsAside(targetPath, preRestorePath);
 		}
+		// Unconditional, not nested inside `if (targetExisted)`: a stale
+		// -wal/-shm sidecar can outlive its main file (e.g. the main file
+		// was deleted manually, or a prior crash left orphaned sidecars) —
+		// leaving those next to the freshly restored main file risks SQLite
+		// treating them as its own WAL on next open. moveSidecarsAside is
+		// already a per-suffix existsSync-guarded no-op when nothing is
+		// there, so calling it regardless of targetExisted is always safe.
+		moveSidecarsAside(targetPath, preRestorePath);
 		// eslint-disable-next-line security/detect-non-literal-fs-filename
 		renameSync(stagedPath, targetPath);
 	} catch (error) {
 		// Roll back: put the previous database (and its sidecars) back
 		// exactly where they were rather than leaving the configured path
-		// with nothing openable.
+		// with nothing openable. Sidecars are rolled back unconditionally
+		// for the same reason they're moved aside unconditionally above.
 		if (targetMoved) {
 			// eslint-disable-next-line security/detect-non-literal-fs-filename
 			renameSync(preRestorePath, targetPath);
-			moveSidecarsAside(preRestorePath, targetPath);
 		}
+		moveSidecarsAside(preRestorePath, targetPath);
 		// eslint-disable-next-line security/detect-non-literal-fs-filename
 		if (existsSync(stagedPath)) unlinkSync(stagedPath);
 		throw error;

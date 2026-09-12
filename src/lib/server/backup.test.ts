@@ -321,4 +321,27 @@ describe('backup: restoreFrom (#19)', () => {
 		// The file must still be exactly where it was — not renamed aside.
 		expect(existsSync(filePath!)).toBe(true);
 	});
+
+	it('moves aside a stale -wal/-shm sidecar even when the main target file is absent', () => {
+		createDocument(CURRENT_USER, { title: 'Fresh Restore' });
+		const { filePath } = runBackup();
+
+		const restoreDir = mkdtempSync(join(tmpdir(), 'restore-target-'));
+		const targetPath = join(restoreDir, 'target.db');
+		// No main file at targetPath — only orphaned sidecars, as could
+		// happen after a manual `rm` of the main file or a prior crash.
+		writeFileSync(`${targetPath}-wal`, 'stale-wal-content');
+		writeFileSync(`${targetPath}-shm`, 'stale-shm-content');
+
+		restoreFrom(filePath!, targetPath);
+
+		// The freshly restored file must not sit next to the stale
+		// sidecars: SQLite could otherwise treat them as its own WAL on
+		// next open and shadow the restored content with old frames.
+		expect(existsSync(`${targetPath}-wal`)).toBe(false);
+		expect(existsSync(`${targetPath}-shm`)).toBe(false);
+		expect(readCatalogTitles(targetPath)).toContain('Fresh Restore');
+
+		rmSync(restoreDir, { recursive: true, force: true });
+	});
 });
