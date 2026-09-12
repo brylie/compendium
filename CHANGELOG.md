@@ -5,6 +5,16 @@ All notable changes to Compendium will be documented in this file.
 The project follows [Semantic Versioning](https://semver.org/). Git release
 tags use the `vX.Y.Z` convention.
 
+## [0.4.1] - 2026-09-12
+
+### Fixed
+
+- The MCP server advertised a hardcoded `0.1.0` identity to every connecting
+  client regardless of the actual release version; it now reports the real
+  package version.
+
+[0.4.1]: https://github.com/brylie/compendium/releases/tag/v0.4.1
+
 ## [0.4.0] - 2026-09-12
 
 The block editor rounds out toward feature-complete and Board/Calendar
