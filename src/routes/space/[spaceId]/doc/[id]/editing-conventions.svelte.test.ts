@@ -114,7 +114,8 @@ async function renderDoc() {
 			documents: [],
 			collections: [],
 			documentId: 'doc-1',
-			title: 'D'
+			title: 'D',
+			backlinks: []
 		}
 	});
 	await new Promise((resolve) => setTimeout(resolve, 0));

@@ -32,7 +32,8 @@ describe('routes/doc/[id]/+page.server', () => {
 			documentId: docMeta.id,
 			title: 'My Doc',
 			documents: [expect.objectContaining({ id: docMeta.id, title: 'My Doc' })],
-			collections: []
+			collections: [],
+			backlinks: []
 		});
 	});
 
@@ -45,7 +46,8 @@ describe('routes/doc/[id]/+page.server', () => {
 			documentId: docMeta.id,
 			title: 'Sharded Doc',
 			documents: [expect.objectContaining({ id: docMeta.id, title: 'Sharded Doc' })],
-			collections: []
+			collections: [],
+			backlinks: []
 		});
 	});
 
@@ -55,7 +57,8 @@ describe('routes/doc/[id]/+page.server', () => {
 			documentId: 'nonexistent',
 			title: 'Untitled',
 			documents: [],
-			collections: []
+			collections: [],
+			backlinks: []
 		});
 	});
 });

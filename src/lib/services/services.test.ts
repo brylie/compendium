@@ -9,6 +9,7 @@ import {
 	getDocument as servicesGetDocument,
 	getRecord,
 	holdRecords,
+	listBacklinks,
 	listCollections,
 	listDocuments,
 	moveDocument,
@@ -1272,6 +1273,123 @@ describe('service layer: documents — unfiltered listing, delete, and rename', 
 			allowedCollectionIds: []
 		});
 		expect(() => deleteDocument(tokenRecord, doc.id)).toThrow(PermissionDeniedError);
+	});
+});
+
+describe('service layer: listBacklinks — cross-shard reverse-link fan-out (issue #83)', () => {
+	it('finds a page_link block in a different Document pointing at the target', () => {
+		const target = createDocument(human, { title: 'Target Doc' });
+		const source = createDocument(human, { title: 'Source Doc' });
+		const block = createRecord(human, {
+			parentId: source.id,
+			blockType: 'page_link',
+			referencedRecordId: target.id
+		});
+
+		const backlinks = listBacklinks(human, target.id);
+
+		expect(backlinks).toHaveLength(1);
+		expect(backlinks[0]).toEqual({
+			sourceDocumentId: source.id,
+			sourceDocumentTitle: 'Source Doc',
+			sourceRecordId: block.id,
+			context: 'Page link'
+		});
+	});
+
+	it('finds an inline [[wiki link]] mark pointing at the target, using the block text as context', () => {
+		const target = createDocument(human, { title: 'Target Doc' });
+		const source = createDocument(human, { title: 'Source Doc' });
+		const block = createRecord(human, { parentId: source.id, blockType: 'paragraph' });
+		writeRecord(human, block.id, { markdown: 'See [[Target Doc]] for more.' });
+
+		const backlinks = listBacklinks(human, target.id);
+
+		expect(backlinks).toHaveLength(1);
+		expect(backlinks[0].sourceDocumentId).toBe(source.id);
+		expect(backlinks[0].sourceRecordId).toBe(block.id);
+		expect(backlinks[0].context).toContain('Target Doc');
+	});
+
+	it('excludes links pointing at a different Document', () => {
+		const target = createDocument(human, { title: 'Target Doc' });
+		const other = createDocument(human, { title: 'Other Doc' });
+		const source = createDocument(human, { title: 'Source Doc' });
+		createRecord(human, {
+			parentId: source.id,
+			blockType: 'page_link',
+			referencedRecordId: other.id
+		});
+
+		expect(listBacklinks(human, target.id)).toEqual([]);
+	});
+
+	it('reflects a source edit live — not a cached title/context', () => {
+		const target = createDocument(human, { title: 'Target Doc' });
+		const source = createDocument(human, { title: 'Source Doc' });
+		createRecord(human, {
+			parentId: source.id,
+			blockType: 'page_link',
+			referencedRecordId: target.id
+		});
+		updateDocumentTitle(human, source.id, 'Renamed Source');
+
+		const backlinks = listBacklinks(human, target.id);
+		expect(backlinks[0].sourceDocumentTitle).toBe('Renamed Source');
+	});
+
+	it('omits a backlink whose source Document a token was not granted', () => {
+		const target = createDocument(human, { title: 'Target Doc' });
+		const source = createDocument(human, { title: 'Source Doc' });
+		createRecord(human, {
+			parentId: source.id,
+			blockType: 'page_link',
+			referencedRecordId: target.id
+		});
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Scoped Backlink Reader',
+			allowedDocumentIds: [target.id],
+			allowedCollectionIds: []
+		});
+
+		expect(listBacklinks(tokenRecord, target.id)).toEqual([]);
+	});
+
+	it('includes the backlink once the token is also granted the source Document', () => {
+		const target = createDocument(human, { title: 'Target Doc' });
+		const source = createDocument(human, { title: 'Source Doc' });
+		createRecord(human, {
+			parentId: source.id,
+			blockType: 'page_link',
+			referencedRecordId: target.id
+		});
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Fully Scoped Backlink Reader',
+			allowedDocumentIds: [target.id, source.id],
+			allowedCollectionIds: []
+		});
+
+		const backlinks = listBacklinks(tokenRecord, target.id);
+		expect(backlinks.some((b) => b.sourceDocumentId === source.id)).toBe(true);
+	});
+
+	it('is denied for a token without access to the target Document itself', () => {
+		const target = createDocument(human, { title: 'Target Doc' });
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'No Access Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+
+		expect(() => listBacklinks(tokenRecord, target.id)).toThrow(PermissionDeniedError);
+	});
+
+	it('logs an audit entry attributed to the target Document', () => {
+		const target = createDocument(human, { title: 'Target Doc' });
+		listBacklinks(human, target.id);
+
+		const entries = queryAuditLog().filter((e) => e.targetRecordId === target.id);
+		expect(entries.some((e) => e.action === 'list_backlinks')).toBe(true);
 	});
 });
 

@@ -4,6 +4,7 @@ import {
 	createDocument as crdtCreateDocument,
 	deleteDocument as crdtDeleteDocument,
 	getDocument as crdtGetDocument,
+	listDocuments as crdtListDocuments,
 	resolveChildPages,
 	updateDocumentParent as crdtUpdateDocumentParent,
 	updateDocumentTitle as crdtUpdateDocumentTitle
@@ -11,8 +12,10 @@ import {
 import { getCollection as crdtGetCollection } from '$lib/data/collection-ops';
 import {
 	createRecord as crdtCreateRecord,
+	getRecord as crdtGetRecord,
 	listRecordsForParent as crdtListRecordsForParent
 } from '$lib/data/record-ops';
+import { plainText } from '$lib/data/richtext';
 import { logAudit } from '$lib/server/audit';
 import {
 	RecordIdConflictError,
@@ -27,8 +30,16 @@ import {
 	resolveShardForParent
 } from '$lib/server/catalog';
 import { grantDocumentAccess, tokenAllowsParent } from '$lib/server/token-store';
-import { listWorkspaceDocuments } from '$lib/server/workspace-repository';
-import { resolveInternalLinkTarget, type InternalLinkTarget } from '$lib/data/links';
+import {
+	fanOutCatalogedAndUncataloged,
+	listWorkspaceDocuments
+} from '$lib/server/workspace-repository';
+import {
+	listOutgoingLinks,
+	resolveInternalLinkTarget,
+	type Backlink,
+	type InternalLinkTarget
+} from '$lib/data/links';
 import type {
 	CalloutStyle,
 	ChildPageNode,
@@ -591,6 +602,70 @@ export function getDocument(
 		parentDocumentId: document.parentDocumentId,
 		records
 	};
+}
+
+/**
+ * Every Document currently pointing at `documentId` via a `page_link` block
+ * or an inline `[[wiki link]]` (`internal-links.md` §5) — the reverse of
+ * `listOutgoingLinks`. Fanned out across every Document's own shard the same
+ * way `search.ts#searchWorkspace` scans for text matches (#191's shared
+ * workspace-repository fan-out): `$lib/data/links.ts#listIncomingLinks`'s own
+ * incremental index is scoped to whatever single `Y.Doc` it's built against
+ * and can't span per-Document shards on its own (#120) — see that module's
+ * doc comment, and the Backlinks panel removal note this replaces in
+ * `+page.svelte`. `listOutgoingLinks` itself has no such limitation: it's a
+ * plain one-shot scan of one already-resolved `doc`, which is exactly what
+ * this function calls it with, once per fanned-out Document.
+ *
+ * Permission-filtered the same way `listDocuments` is: a source Document the
+ * caller can't reach never contributes a backlink entry, per
+ * `internal-links.md` §5's requirement that a viewer only ever sees backlinks
+ * from Documents already within their own access scope. A no-op filter for
+ * Phase 0's unscoped human caller (`isAccessToken` is false), load-bearing
+ * once this is ever reachable by a scoped MCP token.
+ */
+export function listBacklinks(caller: CallerIdentity, documentId: string): Backlink[] {
+	requireAccessibleParent(caller, documentId, 'list_backlinks');
+	const actor = actorForCaller(caller);
+	const { workspaceId, defaultSpaceId, doc: defaultDoc } = resolveWorkspaceContext();
+	const allowed = (id: string, docSpaceId?: string) =>
+		!isAccessToken(caller) || tokenAllowsParent(caller, id, docSpaceId);
+
+	const backlinks: Backlink[] = [];
+	for (const { meta, doc } of fanOutCatalogedAndUncataloged({
+		workspaceId,
+		defaultSpaceId,
+		defaultDoc,
+		listCatalog: listCatalogDocuments,
+		listUncataloged: crdtListDocuments,
+		getId: (m) => m.id,
+		getSpaceId: (m) => m.spaceId,
+		allowed,
+		resolveShardDoc: true
+	})) {
+		for (const link of listOutgoingLinks(doc, meta.id)) {
+			if (link.targetId !== documentId) continue;
+			const sourceRecord = crdtGetRecord(doc, link.sourceRecordId);
+			if (!sourceRecord) continue;
+			const trimmedContent = sourceRecord.content ? plainText(sourceRecord.content).trim() : '';
+			backlinks.push({
+				sourceDocumentId: meta.id,
+				sourceDocumentTitle: meta.title,
+				sourceRecordId: link.sourceRecordId,
+				context:
+					trimmedContent ||
+					(sourceRecord.blockType === 'page_link' ? 'Page link' : 'Untitled block')
+			});
+		}
+	}
+
+	logAudit({
+		actor,
+		action: 'list_backlinks',
+		targetRecordId: documentId,
+		diff: { count: backlinks.length }
+	});
+	return backlinks;
 }
 
 /**

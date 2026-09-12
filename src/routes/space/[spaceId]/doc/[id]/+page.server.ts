@@ -1,7 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import { resolve } from '$app/paths';
 import { getDocument } from '$lib/data/document-ops';
-import { listDocuments, listCollections } from '$lib/services';
+import { listBacklinks, listDocuments, listCollections } from '$lib/services';
 import { resolveParentWorkspaceContext } from '$lib/services/permissions';
 import type { PageServerLoad } from './$types';
 
@@ -31,6 +31,12 @@ export const load: PageServerLoad = ({ params, locals }) => {
 		// page_link target rendering. Not live, same accepted tradeoff as
 		// Sidebar's lists.
 		documents: listDocuments(locals.requestContext.caller),
-		collections: listCollections(locals.requestContext.caller)
+		collections: listCollections(locals.requestContext.caller),
+		// Backlinks panel (issue #83) — SSR-only, not live, same accepted
+		// tradeoff as documents/collections above: a workspace-wide fan-out
+		// scan (see documents.ts#listBacklinks) isn't something to re-run on
+		// every Yjs observer tick, so a new backlink appears on next
+		// navigation/refresh rather than instantly.
+		backlinks: listBacklinks(locals.requestContext.caller, params.id)
 	};
 };

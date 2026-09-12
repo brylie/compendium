@@ -64,6 +64,7 @@
 	import PromptDialog from '$lib/components/PromptDialog.svelte';
 	import BlockActionMenu from '$lib/components/BlockActionMenu.svelte';
 	import SyncedBlockUsage from '$lib/components/SyncedBlockUsage.svelte';
+	import BacklinksPanel from '$lib/components/BacklinksPanel.svelte';
 	import DocumentOutline from '$lib/components/DocumentOutline.svelte';
 	import type { PageProps } from './$types';
 
@@ -82,6 +83,18 @@
 	// remote title edits — untrack() here just tells Svelte that's deliberate.
 	let title = $state(untrack(() => data.title));
 	let blocks: WorkspaceRecord[] = $state([]);
+	// Which Document `blocks` (and `ydoc`) actually reflect right now — set
+	// only by refresh(), once the shard for that Document has genuinely
+	// resolved. Distinct from `data.documentId` itself: client-side navigation
+	// updates `data.documentId` synchronously, but `blocks`/`ydoc` still lag
+	// behind it until the async shard-resolution fetch below completes. The
+	// hash-navigation $effect (issue #152) reads this, not just
+	// `blocks.length`, so it can tell "no blocks because this Document is
+	// genuinely empty" apart from "no blocks yet because the *previous*
+	// Document's blocks haven't been replaced" — the latter previously let it
+	// search the wrong Document's DOM and never retry once the real
+	// destination blocks loaded (CodeRabbit review, PR #257).
+	let blocksDocumentId: string | undefined = $state();
 	let slashMenuBlockId: string | null = $state(null);
 	let slashQuery = $state('');
 	let heldByOthers: Map<string, ActorId> = $state(new Map());
@@ -187,6 +200,7 @@
 		if (!ydoc) return;
 		const nextBlocks = listRecordsForParent(ydoc, data.documentId);
 		blocks = nextBlocks;
+		blocksDocumentId = data.documentId;
 		const docMeta = getDocument(ydoc, data.documentId);
 		title = docMeta?.title ?? data.title;
 		if (docMeta?.parentDocumentId) {
@@ -525,9 +539,22 @@
 	// subsequent blocks refresh (any later edit anywhere in the Document also
 	// reassigns `blocks`, which would otherwise re-trigger this on every
 	// keystroke).
+	//
+	// Gated on `blocksDocumentId === data.documentId`, not just `blocks.length
+	// === 0`: this effect also reads `data.documentId`, so a client-side
+	// navigation to a different Document (e.g. a cross-document Backlinks/
+	// SyncedBlockUsage link, which sets the hash and navigates in the same
+	// step) re-runs it immediately — before the shard-resolution $effect
+	// above has replaced `blocks` with the *new* Document's own. Checking
+	// `blocks.length` alone couldn't tell "not loaded yet" apart from "the
+	// previous Document's (non-empty) blocks, still stale" — it would search
+	// the previous Document's DOM, find nothing, and — because it marks
+	// `hashNavigatedForDocument` for the new id regardless — never retry once
+	// the real destination blocks actually did load (CodeRabbit review,
+	// PR #257).
 	let hashNavigatedForDocument: string | null = $state(null);
 	$effect(() => {
-		if (!ydoc || blocks.length === 0) return;
+		if (!ydoc || blocksDocumentId !== data.documentId) return;
 		if (hashNavigatedForDocument === data.documentId) return;
 		hashNavigatedForDocument = data.documentId;
 		const match = /^#block-(.+)$/.exec(page.url.hash);
@@ -1633,12 +1660,24 @@
 	<div class="sr-only" role="status" aria-live="polite">{holdAnnouncement}</div>
 
 	<!--
-		Backlinks panel removed (#120): listIncomingLinks builds its reverse
-		index by scanning every Document within one shared Y.Doc, structurally
-		incompatible with per-Document shards. A real workspace-wide backlink
-		index is tracked separately as #21 — this panel comes back once that
-		exists, rather than being served here via an expensive full-shard scan.
+		Backlinks panel (issue #83): re-added after #120 removed the version
+		built on $lib/data/links.ts#listIncomingLinks, whose reverse index
+		can't span per-Document shards. Powered instead by
+		services/documents.ts#listBacklinks, a server-side fan-out across every
+		Document's own shard (the same pattern search_workspace already
+		established, #191) — not the old client-side incremental index. Each
+		entry links to its exact referring block (#block-<id>), not just the
+		referring Document, with the same navigate/reveal/highlight mechanism
+		SyncedBlockUsage.svelte already uses.
 	-->
+	<BacklinksPanel
+		spaceId={page.params.spaceId!}
+		currentDocumentId={data.documentId}
+		backlinks={data.backlinks}
+		onJumpTo={(documentId, recordId) => {
+			if (documentId === data.documentId) void navigateToBlock(recordId);
+		}}
+	/>
 </div>
 
 <!--

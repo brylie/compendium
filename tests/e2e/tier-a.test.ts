@@ -776,6 +776,21 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					expect(list.some((d) => d.id === testDoc.id)).toBe(true);
 					break;
 				}
+				case 'documents.listBacklinks': {
+					const linked = serviceModules.documents.createDocument(human, {
+						title: 'Links To Wiring Doc'
+					});
+					serviceModules.records.createRecord(human, {
+						parentId: linked.id,
+						blockType: 'page_link',
+						referencedRecordId: testDoc.id
+					});
+					const backlinks = serviceModules.documents.listBacklinks(human, testDoc.id);
+					expect(backlinks.some((b) => b.sourceDocumentId === linked.id)).toBe(true);
+					const log = queryAuditLog().filter((e) => e.targetRecordId === testDoc.id);
+					expect(log.some((e) => e.action === 'list_backlinks')).toBe(true);
+					break;
+				}
 				case 'documents.deleteDocument': {
 					const toDelete = serviceModules.documents.createDocument(human, { title: 'To Delete' });
 					serviceModules.documents.deleteDocument(human, toDelete.id);
@@ -1461,7 +1476,7 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 			return { status: res.status, text: await res.text() };
 		}
 
-		const { workspaceId } = resolveWorkspaceContext();
+		const { workspaceId, defaultSpaceId } = resolveWorkspaceContext();
 
 		// Shared fixtures for the directly-Yjs-mutated cases below, created via
 		// the real create_document/create_collection routes (not a direct
@@ -1498,6 +1513,7 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 			'documents.deleteDocument': 'src/routes/api/documents/[id]/+server.ts',
 			'documents.updateDocumentTitle': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 			'documents.listDocuments': 'src/routes/+layout.server.ts',
+			'documents.listBacklinks': 'src/routes/space/[spaceId]/doc/[id]/+page.server.ts',
 			'records.createRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 			'records.writeRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
 			'records.deleteRecord': 'src/routes/space/[spaceId]/doc/[id]/+page.svelte',
@@ -1552,6 +1568,42 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					const { status, text } = await fetchRouteData('/audit');
 					expect(status).toBe(200);
 					expect(text).toContain(title);
+					break;
+				}
+				case 'documents.listBacklinks': {
+					const target = (await (
+						await postJson('/api/documents', { title: 'Backlink Target Doc' })
+					).json()) as { id: string };
+					const sourceTitle = `Backlink Source Doc ${Date.now()}`;
+					const source = (await (
+						await postJson('/api/documents', { title: sourceTitle })
+					).json()) as { id: string };
+
+					// The page_link block is authored the same way records.createRecord's
+					// own case in this switch does — a real y-websocket client mirroring
+					// the UI's direct-Yjs create path — since that's genuinely how a
+					// backlink comes to exist; documents.listBacklinks itself is a pure
+					// read with nothing of its own to author.
+					const sourceClient = harness.getYjsClient({ room: `shard-${source.id}` });
+					await harness.waitForCondition(() => sourceClient.doc.getMap('documents').has(source.id));
+					transactWithOrigin(sourceClient.doc, LOCAL_UI_ORIGIN, () =>
+						createRecord(
+							sourceClient.doc,
+							{ parentId: source.id, blockType: 'page_link', referencedRecordId: target.id },
+							CURRENT_USER
+						)
+					);
+
+					// Polls the real route itself (not a server-side doc read) so this
+					// wait also doubles as the first real exercise of the route once the
+					// fan-out scan can actually see the new page_link block.
+					await harness.waitForCondition(async () => {
+						const res = await fetchRouteData(`/space/${defaultSpaceId}/doc/${target.id}`);
+						return res.status === 200 && res.text.includes(sourceTitle);
+					});
+
+					const log = queryAuditLog().filter((e) => e.targetRecordId === target.id);
+					expect(log.some((e) => e.action === 'list_backlinks')).toBe(true);
 					break;
 				}
 				case 'documents.updateDocumentTitle': {
