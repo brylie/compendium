@@ -120,6 +120,26 @@ describe('FieldManagerDialog', () => {
 		]);
 	});
 
+	it('rejects a case-insensitively duplicate field label with an inline error', async () => {
+		const collection = createCollection(ydoc, {
+			title: 'T',
+			schema: [{ key: 'status', label: 'Status', type: 'select' }]
+		});
+		const user = userEvent.setup();
+		render(FieldManagerDialog, {
+			open: true,
+			collectionId: collection.id,
+			shardId: 'test-shard',
+			onClose: vi.fn()
+		});
+
+		await user.type(screen.getByPlaceholderText('Field name…'), ' status ');
+		await user.click(screen.getByRole('button', { name: 'Add field' }));
+
+		expect(screen.getByRole('alert')).toHaveTextContent('A field named "status" already exists');
+		expect(getCollection(ydoc, collection.id)?.schema).toHaveLength(1);
+	});
+
 	it("adds a relation field with a target collection, and doesn't offer the picker for other types (issue #15)", async () => {
 		const people = createCollection(ydoc, { title: 'People', schema: [] });
 		const collection = createCollection(ydoc, { title: 'T', schema: [] });

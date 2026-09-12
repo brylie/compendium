@@ -205,8 +205,11 @@
 		try {
 			insertCollectionField(getShardDoc(shardId), collectionId, property.key, direction, field);
 			closeMenu();
-		} catch {
-			errorMessage = 'Could not insert a field. Please try again.';
+		} catch (err) {
+			errorMessage =
+				err instanceof ValidationError
+					? err.message
+					: 'Could not insert a field. Please try again.';
 		}
 	}
 
@@ -214,8 +217,11 @@
 		try {
 			duplicateCollectionProperty(getShardDoc(shardId), collectionId, property.key);
 			closeMenu();
-		} catch {
-			errorMessage = 'Could not duplicate the field. Please try again.';
+		} catch (err) {
+			errorMessage =
+				err instanceof ValidationError
+					? err.message
+					: 'Could not duplicate the field. Please try again.';
 		}
 	}
 

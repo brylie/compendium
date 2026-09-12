@@ -16,6 +16,7 @@ import { SELECT_OPTION_COLORS } from '$lib/data/select-colors';
 import TableCollectionViewHarness from './TableCollectionViewHarness.svelte';
 import BoardCollectionViewHarness from './BoardCollectionViewHarness.svelte';
 import CalendarCollectionViewHarness from './CalendarCollectionViewHarness.svelte';
+import FieldManagerDialog from './FieldManagerDialog.svelte';
 import FullPageTable from '../../routes/space/[spaceId]/table/[id]/+page.svelte';
 
 const actor = { kind: 'human' as const, userId: 'local' };
@@ -203,6 +204,68 @@ describe('cross-surface select-option contract (issue #189)', () => {
 			within(screen.getByRole('dialog')).getByRole('button', { name: 'Add option' })
 		);
 		expectDuplicateRejection();
+	});
+});
+
+describe('cross-surface field-label validation (issue #205)', () => {
+	beforeEach(() => {
+		ydoc = new Y.Doc();
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => ({ ok: true, json: async () => ({ shardId: 'test-shard' }) }))
+		);
+	});
+
+	afterEach(() => {
+		ydoc.destroy();
+		vi.unstubAllGlobals();
+	});
+
+	it('Board and Calendar reject a field label that duplicates another field', async () => {
+		createCollection(ydoc, {
+			id: 'board-collection',
+			title: 'Board',
+			schema: [{ key: 'existing', label: 'Status', type: 'text' }]
+		});
+		const user = userEvent.setup();
+		const { unmount } = render(BoardCollectionViewHarness, { collectionId: 'board-collection' });
+
+		await user.click(await screen.findByRole('button', { name: 'Add a select property' }));
+		expect(screen.getByRole('alert')).toHaveTextContent('A field named "Status" already exists');
+		expect(getCollection(ydoc, 'board-collection')?.schema).toHaveLength(1);
+		unmount();
+
+		createCollection(ydoc, {
+			id: 'calendar-collection',
+			title: 'Calendar',
+			schema: [{ key: 'existing', label: 'Date', type: 'text' }]
+		});
+		render(CalendarCollectionViewHarness, { collectionId: 'calendar-collection' });
+
+		await user.click(await screen.findByRole('button', { name: 'Add a date property' }));
+		expect(screen.getByRole('alert')).toHaveTextContent('A field named "Date" already exists');
+		expect(getCollection(ydoc, 'calendar-collection')?.schema).toHaveLength(1);
+	});
+
+	it('FieldManagerDialog rejects a duplicate label from its Add field form', async () => {
+		createCollection(ydoc, {
+			id: 'manager-collection',
+			title: 'Manager',
+			schema: [{ key: 'existing', label: 'Status', type: 'text' }]
+		});
+		const user = userEvent.setup();
+		render(FieldManagerDialog, {
+			open: true,
+			collectionId: 'manager-collection',
+			shardId: 'test-shard',
+			onClose: vi.fn()
+		});
+
+		await user.type(screen.getByPlaceholderText('Field name…'), 'status');
+		await user.click(screen.getByRole('button', { name: 'Add field' }));
+
+		expect(screen.getByRole('alert')).toHaveTextContent('A field named "status" already exists');
+		expect(getCollection(ydoc, 'manager-collection')?.schema).toHaveLength(1);
 	});
 });
 

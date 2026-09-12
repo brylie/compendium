@@ -103,14 +103,14 @@
 			targetCollectionId:
 				newFieldType === 'relation' ? newFieldTargetCollectionId || undefined : undefined
 		};
-		try {
-			appendCollectionField(getShardDoc(shardId), collectionId, field);
+		const result = appendCollectionField(getShardDoc(shardId), collectionId, field);
+		if (result.ok) {
 			newFieldLabel = '';
 			newFieldType = 'text';
 			newFieldTargetCollectionId = '';
 			errorMessage = '';
-		} catch {
-			errorMessage = 'Could not add the field. Please try again.';
+		} else {
+			errorMessage = result.error;
 		}
 	}
 

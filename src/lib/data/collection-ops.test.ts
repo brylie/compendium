@@ -148,6 +148,26 @@ describe('appendCollectionField: reads the current Yjs schema atomically (issue 
 			'due'
 		]);
 	});
+
+	it('rejects blank and case-insensitively duplicate field labels', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [{ key: 'status', label: 'Status', type: 'select' }]
+		});
+
+		expect(() =>
+			appendCollectionField(doc, collection.id, { key: 'blank', label: '   ', type: 'text' })
+		).toThrow('Field label cannot be blank');
+		expect(() =>
+			appendCollectionField(doc, collection.id, {
+				key: 'duplicate',
+				label: ' status ',
+				type: 'text'
+			})
+		).toThrow('A field named "status" already exists');
+		expect(getCollection(doc, collection.id)?.schema).toHaveLength(1);
+	});
 });
 
 describe('insertCollectionField: reads the current Yjs schema atomically (issue #203)', () => {
@@ -190,6 +210,22 @@ describe('insertCollectionField: reads the current Yjs schema atomically (issue 
 				type: 'text'
 			})
 		).toThrow(NotFoundError);
+	});
+
+	it('rejects a duplicate field label', () => {
+		const doc = new Y.Doc();
+		const collection = createCollection(doc, {
+			title: 'Tasks',
+			schema: [{ key: 'name', label: 'Name', type: 'text' }]
+		});
+
+		expect(() =>
+			insertCollectionField(doc, collection.id, 'name', 'right', {
+				key: 'duplicate',
+				label: 'name',
+				type: 'text'
+			})
+		).toThrow('A field named "name" already exists');
 	});
 });
 

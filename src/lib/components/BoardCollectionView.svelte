@@ -52,6 +52,7 @@
 	let manualOrder: Record<string, string[]> = $state({});
 	let draggedRecordId: string | null = $state(null);
 	let newGroupingPropertyLabel = $state('Status');
+	let newGroupingPropertyError = $state('');
 	let optionDialogPropertyKey: string | null = $state(null);
 	let optionDialogError = $state('');
 	// The side-pane surface for a card's full schema/backlinks/attribution
@@ -188,8 +189,12 @@
 		const label = newGroupingPropertyLabel.trim();
 		if (!label) return;
 		const property: PropertyDefinition = { key: nanoid(8), label, type: 'select', options: [] };
-		if (appendCollectionField(ydoc, collectionId, property)) {
+		const result = appendCollectionField(ydoc, collectionId, property);
+		if (result.ok) {
+			newGroupingPropertyError = '';
 			onConfigChange({ ...config, groupBy: property.key });
+		} else {
+			newGroupingPropertyError = result.error;
 		}
 	}
 
@@ -377,6 +382,9 @@
 				<span>Add a select property</span>
 			</button>
 		</form>
+		{#if newGroupingPropertyError}
+			<p class="mt-2 text-sm text-red-600" role="alert">{newGroupingPropertyError}</p>
+		{/if}
 	</div>
 {:else}
 	<div class="mb-4 flex flex-wrap items-center gap-4">
