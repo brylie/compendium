@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { version as packageVersion } from '../../../package.json';
 import { verifyToken, type AccessToken } from './tokens';
 import {
 	serviceModules,
@@ -163,7 +164,7 @@ function registerFromManifest<Args extends z.ZodRawShape>(
 
 /** Builds a fresh McpServer with all Phase 0/1 tools registered from serviceSurfaces manifest (service-layer-manifest-specification.md §3.1). */
 export function createMcpServer(): McpServer {
-	const server = new McpServer({ name: 'compendium', version: '0.1.0' });
+	const server = new McpServer({ name: 'compendium', version: packageVersion });
 
 	// 1. documents.listDocuments
 	registerFromManifest(server, 'documents.listDocuments', {}, async (_args, extra) => {
