@@ -3,7 +3,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { Implementation } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpServer } from './server';
 import { createToken } from './tokens';
-import { version as packageVersion } from '../../../package.json';
+import packageJson from '../../../package.json' with { type: 'json' };
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { createDocument as rawCreateDocument } from '$lib/data/document-ops';
 import {
@@ -401,7 +401,7 @@ describe('mcp server: identity', () => {
 	it('advertises the current package version, not a stale literal', () => {
 		const mcpServer = createMcpServer();
 		const serverWithInfo = mcpServer.server as unknown as { _serverInfo: Implementation };
-		expect(serverWithInfo._serverInfo.version).toBe(packageVersion);
+		expect(serverWithInfo._serverInfo.version).toBe(packageJson.version);
 	});
 });
 
