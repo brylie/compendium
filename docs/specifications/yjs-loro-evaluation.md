@@ -23,19 +23,19 @@ Yjs is not an implementation detail isolated behind one module — it is the dat
 - The SQLite snapshot format (`persistence.md`) — currently `Y.encodeStateAsUpdate` binary blobs.
 - Every Tier A/Tier B test and the CRDT capacity benchmark (`e2e-testing.md` §6), all written against Yjs's convergence and merge semantics.
 
-There is no partial-adoption path: Loro's own documentation does not mention Yjs interoperability, compatibility, or a migration story at all. This would be a ground-up rewrite of the sync layer, not an incremental swap.
+There is no path that lets Compendium keep Yjs's data model while adopting Loro. The separate [Loro Protocol](https://loro.dev/blog/loro-protocol) project (`loro-websocket`/`loro-adaptors`) does advertise Yjs compatibility, but that is wire-format transport interoperability only — it lets an existing Yjs sync/Awareness stream run over Loro's room-multiplexed WebSocket protocol. It does not convert or migrate actual `Y.Doc` content, or persisted `Y.encodeStateAsUpdate` snapshots, into Loro's native `LoroText`/`LoroMap`/`LoroList` containers. A CRDT-library swap — replacing the data model itself, which is what this note evaluates — would still be a ground-up rewrite, not an incremental one.
 
 ## 3. The "type safety" premise doesn't hold up
 
-The prompt for this evaluation was Loro's marketing claim of improved type safety. Loro's docs (fetched 2026-09-12) show plain TypeScript type hints on its API (`getText(name: string): LoroText`, etc.) but no schema generation or formal type-safety layer beyond that — no material improvement over raw Yjs.
+The prompt for this evaluation was Loro's marketing claim of improved type safety. Loro's JS API (`loro-crdt@1.13.3`, per the [get-started guide](https://loro.dev/docs/tutorial/get_started) and [API reference](https://loro.dev/docs/api/js) as of 2026-09-12) exposes typed container classes — `getText(name: string): LoroText`, `getMap(name: string): LoroMap`, etc. — and JSON export/import for interop and debugging. None of that is application-schema generation or validation: there is no way to declare that, say, a given `LoroMap` must have a `title: string` field and get a compile error or runtime check when something else writes to it. That is a different kind of type safety than the one Compendium actually needed.
 
-Compendium already solved this gap itself: issue #174 ("Expand typescript-eslint to more of the type-checked rule set via a Yjs type wrapper") added `yjs-typed.ts` specifically to close the same hole Loro claims to address. Migrating for type safety would mean discarding a wrapper that already does the job.
+Compendium already solved _that_ problem itself: issue #174 ("Expand typescript-eslint to more of the type-checked rule set via a Yjs type wrapper") added `yjs-typed.ts`'s `TypedYMap<T>` specifically to give `WorkspaceRecord` fields compile-time shape checking on top of raw Yjs containers. Loro's typed container classes address the same category of gap `TypedYMap<T>` already closes, not a category beyond it — migrating for type safety would mean discarding a wrapper that already does the job for no net gain.
 
 ## 4. Where Loro is structurally different, not just relabeled
 
 - **Different algorithm.** Loro is Fugue-based; Yjs uses YATA. Every merge-semantics bug already found and fixed against Yjs's specific behavior — the `viewConfig` whole-value LWW clobbering in #71/#195/#219, the column-count concurrent-structural-edit invariant in #230 — would need to be independently re-verified under Loro's conflict resolution, not assumed to carry over.
 - **No Awareness-protocol equivalent.** Yjs's Awareness (ephemeral, non-CRDT presence state) is what `collaboration.md`'s hold system is built on directly: a human's cursor is an implicit hold, `hold_records` reads aggregate Awareness across clients, and there are two independent TTLs (y-protocols' 30s `outdatedTimeout` plus a custom 100s `AGENT_HOLD_TTL_MS` in `holds.ts`) tuned against that specific model. Loro's closest primitive, `EphemeralStore`, is a different shape — this is a redesign of the holds system, not a port.
-- **Transport-agnostic either way.** Loro ships no built-in server or WebSocket transport, same as Yjs — Compendium would still own `/ws` wiring itself either way, so there's no simplification to gain here.
+- **Transport-agnostic either way.** The `LoroDoc` library itself ships no built-in server or WebSocket transport, same as Yjs. The separate Loro Protocol project provides reference transport pieces (`loro-websocket`, a minimal `SimpleServer`), but adopting a transport is an independent decision from which CRDT data model Compendium uses, so it doesn't change the migration cost analyzed here.
 
 ## 5. Where Loro is genuinely stronger
 
@@ -46,5 +46,5 @@ Compendium already solved this gap itself: issue #174 ("Expand typescript-eslint
 Reopen this decision if any of the following happens, rather than on a fixed schedule:
 
 - Concurrent structural-edit bugs (reordering, nesting, moves) become a recurring source of user-visible corruption beyond what #230-style fixes can contain.
-- Loro ships a documented Yjs interop or incremental-migration path, changing the "ground-up rewrite" cost in §2.
+- Loro ships a documented path for migrating existing `Y.Doc`/`Y.encodeStateAsUpdate` data into native Loro containers (not just wire-protocol interop), changing the "ground-up rewrite" cost in §2.
 - The workspace/shard sharding work (`workspace-sharding.md`, #112/#113) surfaces a structural limitation in Yjs's document model specifically (not a Compendium-side implementation gap) that Loro's model would avoid.

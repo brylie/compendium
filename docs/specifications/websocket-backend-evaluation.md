@@ -2,13 +2,11 @@
 
 **Depends on:** [`architecture.md`](./architecture.md), [`collaboration.md`](./collaboration.md), [`persistence.md`](./persistence.md), [`e2e-testing.md`](./e2e-testing.md), [`workspace-sharding.md`](./workspace-sharding.md)
 
-**Related:** [`yjs-loro-evaluation.md`](./yjs-loro-evaluation.md) — that note evaluates and rejects replacing the CRDT library itself. This note is narrower: it evaluates replacing only the WebSocket transport/server that sits on top of Yjs, since [Hocuspocus](https://github.com/ueberdosis/hocuspocus) is protocol-compatible with Yjs rather than a competing CRDT.
-
-**Decision:** Do not adopt Hocuspocus in place of the hand-rolled `/ws` server at this time. Unlike the Loro question, this is not a poor fit on the merits — it is premature relative to where Phase 0's single-process constraint currently sits. Revisit per §5.
+**Decision:** Do not adopt [Hocuspocus](https://github.com/ueberdosis/hocuspocus) in place of the hand-rolled `/ws` server at this time. This is not a poor fit on the merits — it is premature relative to where Phase 0's single-process constraint currently sits. Revisit per §5.
 
 ---
 
-## 1. Why this is a materially different question than Loro
+## 1. Why this is a lower-risk kind of change
 
 Hocuspocus is not an alternative CRDT: it is a server built directly on Yjs, speaking the same WebSocket sync protocol and y-protocols Awareness that `src/lib/server/yjs-ws-server.ts` / `attach-ws.ts` already implement by hand. Adopting it would not touch the CRDT/data-model layer at all — `data-model.md`, `Y.Text`-based markdown transcoding, `Y.UndoManager`-based undo/redo, and the holds system built on Awareness (`collaboration.md`) all carry over unchanged. This evaluation is scoped only to the transport/server boundary in `architecture.md` §1.
 
