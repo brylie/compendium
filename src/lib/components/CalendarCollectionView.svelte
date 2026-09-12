@@ -121,6 +121,15 @@
 	const dateProperties = $derived(schema.filter((p) => p.type === 'date'));
 	const dateProperty = $derived(schema.find((p) => p.key === config.groupBy));
 	const titleProperty = $derived(resolvePrimaryField(schema, primaryFieldKey));
+	// Mirrors BoardCollectionView's titleEditableViaCell (issue #104/#105):
+	// when the primary field is also the date property driving groupBy, the
+	// date PropertyValueCell rendered lower in the entry is already the one
+	// editable control for that value — an editable title cell for the same
+	// field would just be a second, redundant control. Calendar has no
+	// swimlaneBy, so groupBy is the only collision to guard against.
+	const titleEditableViaCell = $derived(
+		titleProperty != null && titleProperty.key !== dateProperty?.key
+	);
 	const projected = $derived(projectRecords(rows, schema, config));
 	const entryFields = $derived(
 		visibleProperties(schema, config).filter(
@@ -380,7 +389,18 @@
 							{#each scheduled.get(key) ?? [] as row (row.id)}
 								<div class="rounded border border-border bg-bg px-1.5 py-1 text-xs">
 									<div class="flex items-center justify-between gap-1">
-										<span class="truncate font-medium text-fg">{entryTitle(row)}</span>
+										{#if titleEditableViaCell && titleProperty}
+											<div class="min-w-0 flex-1">
+												<PropertyValueCell
+													property={titleProperty}
+													value={row.properties?.[titleProperty.key]}
+													oninput={(value) => setCell(row, titleProperty, value)}
+													compact
+												/>
+											</div>
+										{:else}
+											<span class="truncate font-medium text-fg">{entryTitle(row)}</span>
+										{/if}
 										<div class="flex flex-shrink-0 items-center gap-0.5">
 											<button
 												type="button"
@@ -434,7 +454,18 @@
 					<div
 						class="flex items-center gap-2 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm"
 					>
-						<span class="flex-1 truncate text-fg">{entryTitle(row)}</span>
+						{#if titleEditableViaCell && titleProperty}
+							<div class="min-w-0 flex-1">
+								<PropertyValueCell
+									property={titleProperty}
+									value={row.properties?.[titleProperty.key]}
+									oninput={(value) => setCell(row, titleProperty, value)}
+									compact
+								/>
+							</div>
+						{:else}
+							<span class="flex-1 truncate text-fg">{entryTitle(row)}</span>
+						{/if}
 						{#if dateProperty}
 							<div class="w-36">
 								<PropertyValueCell
