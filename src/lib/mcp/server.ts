@@ -289,14 +289,19 @@ export function createMcpServer(): McpServer {
 		'collections.queryCollection',
 		{
 			collectionId: z.string(),
-			filter: z.unknown().optional()
+			filter: viewFiltersSchema
+				.optional()
+				.describe(
+					"Keeps only rows matching every filter — the same semantics a human Table/Board/Calendar view applies (see write_record's viewConfig.filters)."
+				)
 		},
-		async ({ collectionId }, extra) => {
+		async ({ collectionId, filter }, extra) => {
 			try {
 				const token = requireToken(extra);
 				const { collection, records } = serviceModules.collections.queryCollection(
 					token,
-					collectionId
+					collectionId,
+					filter
 				);
 				if (!collection) return errorResult(`Collection ${collectionId} not found`);
 

@@ -100,6 +100,37 @@ export function getRecord(doc: Y.Doc, id: string): WorkspaceRecord | undefined {
 	return yrecord ? readRecord(yrecord) : undefined;
 }
 
+/**
+ * Walks a record's `parentId` chain up to its owning Document or Collection
+ * — needed because a container block (columns/column, issue #148) can
+ * itself be a valid `parentId`, but access-token allowlists and the
+ * record-index read model (persistence.md §2) are always keyed by
+ * Document/Collection id (`mcp-tools.md`), never by an arbitrary nested
+ * record id. Returns `id` unchanged once it no longer resolves to a record
+ * at all (i.e. it's already a Document/Collection id, or unknown) — a no-op
+ * for every pre-#148 call site, where `id` was always already top-level.
+ * `guard` bounds the walk against a corrupted/cyclic `parentId` chain (real
+ * nesting is at most a couple of levels deep). A pure data-layer primitive
+ * (no permission logic of its own) shared by services/permissions.ts and
+ * server/record-index-observer.ts.
+ */
+export function resolveOwningParentId(doc: Y.Doc, id: string, guard = 50): string {
+	let current = id;
+	for (let i = 0; i < guard; i++) {
+		const record = getRecord(doc, current);
+		if (!record) return current;
+		current = record.parentId;
+	}
+	return current;
+}
+
+/** Every record id currently in this shard's `Y.Doc`, in no particular order — used by the record-index projection's full rebuild (persistence.md §2). */
+export function listAllRecordIds(doc: Y.Doc): string[] {
+	const ids: string[] = [];
+	recordsMap(doc).forEach((_entry, id) => ids.push(id));
+	return ids;
+}
+
 function readRecord(yrecord: TypedYMap<RecordYShape>): WorkspaceRecord {
 	const content = yrecord.get('content');
 	const properties: Record<string, PropertyValue> = {};

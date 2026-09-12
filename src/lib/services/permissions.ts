@@ -1,10 +1,11 @@
-import type * as Y from 'yjs';
 import type { ActorId, ParentKind } from '$lib/data/types';
 import { resolveWorkspaceContext, type WorkspaceContext } from '$lib/server/workspace-store';
-import { getRecord } from '$lib/data/record-ops';
+import { getRecord, resolveOwningParentId } from '$lib/data/record-ops';
 import { tokenAllowsParent, type AccessToken } from '$lib/server/token-store';
 import { logAudit } from '$lib/server/audit';
 import { resolveShardForParent, resolveShardForRecord } from '$lib/server/catalog';
+
+export { resolveOwningParentId };
 
 export type CallerIdentity = AccessToken | ActorId;
 
@@ -73,27 +74,6 @@ export function requireAccessibleParent(
 			throw new PermissionDeniedError(`Not permitted to access parent ${parentId}`);
 		}
 	}
-}
-
-/**
- * Walks a record's `parentId` chain up to its owning Document or Collection
- * — needed because a container block (columns/column, issue #148) can
- * itself be a valid `parentId`, but access-token allowlists are always keyed
- * by Document/Collection id (`mcp-tools.md`), never by an arbitrary nested
- * record id. Returns `id` unchanged once it no longer resolves to a record
- * at all (i.e. it's already a Document/Collection id, or unknown) — a no-op
- * for every pre-#148 call site, where `id` was always already top-level.
- * `guard` bounds the walk against a corrupted/cyclic `parentId` chain (real
- * nesting is at most a couple of levels deep).
- */
-export function resolveOwningParentId(doc: Y.Doc, id: string, guard = 50): string {
-	let current = id;
-	for (let i = 0; i < guard; i++) {
-		const record = getRecord(doc, current);
-		if (!record) return current;
-		current = record.parentId;
-	}
-	return current;
 }
 
 /**

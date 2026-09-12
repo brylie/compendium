@@ -392,6 +392,46 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 		expect(scopedResults.map((r) => r.recordId)).not.toContain(recordB.id);
 	});
 
+	it("3c-2. MCP query_collection's filter argument round-trips through the real Zod schema and applies the same ViewFilter semantics the UI uses (issue #70)", async () => {
+		const col = serviceModules.collections.createCollection(human, {
+			title: 'Filter Wiring Collection',
+			schema: [{ key: 'status', label: 'Status', type: 'select' }]
+		});
+		const { token } = harness.createToken({
+			clientLabel: 'Filter Wiring Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: [col.id]
+		});
+		const mcp = await harness.getMcpClient(token);
+
+		await mcp.callTool({
+			name: 'create_record',
+			arguments: { parentId: col.id, properties: { status: { type: 'select', value: 'todo' } } }
+		});
+		const doneRow = await mcp.callTool({
+			name: 'create_record',
+			arguments: { parentId: col.id, properties: { status: { type: 'select', value: 'done' } } }
+		});
+		const doneRecord = parseMcpText<{ recordId: string }>(doneRow);
+
+		const filteredRes = await mcp.callTool({
+			name: 'query_collection',
+			arguments: {
+				collectionId: col.id,
+				filter: [{ propertyKey: 'status', op: 'is', value: 'done' }]
+			}
+		});
+		const filtered = parseMcpText<{ rows: { id: string }[] }>(filteredRes);
+		expect(filtered.rows.map((r) => r.id)).toEqual([doneRecord.recordId]);
+
+		const unfilteredRes = await mcp.callTool({
+			name: 'query_collection',
+			arguments: { collectionId: col.id }
+		});
+		const unfiltered = parseMcpText<{ rows: { id: string }[] }>(unfilteredRes);
+		expect(unfiltered.rows).toHaveLength(2);
+	});
+
 	it('3d. A token granted only a Space (#6) reads any Document created directly in it, over the real MCP transport, and is denied a different Space', async () => {
 		const { workspaceId, defaultSpaceId: spaceAId } = resolveWorkspaceContext();
 		const spaceB = createSpace(workspaceId, 'Space B');

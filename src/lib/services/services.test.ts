@@ -215,6 +215,29 @@ describe('service layer: centralized business rules & side effects', () => {
 		});
 	});
 
+	it('queryCollection applies a filter with the same ViewFilter semantics the UI views use (issue #70)', () => {
+		const col = createCollection(human, {
+			title: 'Filtered Backlog',
+			schema: [{ key: 'status', label: 'Status', type: 'select' }]
+		});
+		const inProgress = createRecord(human, {
+			parentId: col.id,
+			properties: { status: { type: 'select', value: 'in_progress' } }
+		});
+		createRecord(human, {
+			parentId: col.id,
+			properties: { status: { type: 'select', value: 'done' } }
+		});
+
+		const filtered = queryCollection(human, col.id, [
+			{ propertyKey: 'status', op: 'is', value: 'in_progress' }
+		]);
+		expect(filtered.records.map((r) => r.id)).toEqual([inProgress.id]);
+
+		const unfiltered = queryCollection(human, col.id);
+		expect(unfiltered.records).toHaveLength(2);
+	});
+
 	it('filters workspace search results by caller permission scope', () => {
 		const docPublic = createDocument(human, { title: 'Public Handbook' });
 		createRecord(human, { parentId: docPublic.id, blockType: 'paragraph' });
