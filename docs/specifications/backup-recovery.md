@@ -40,17 +40,41 @@ the three files. It refuses to overwrite an existing path, so every backup
 file gets a unique, sortable name:
 `compendium-<workspaceId>-<ISO timestamp>-<sequence>.db`.
 
-Before vacuuming, `runBackup()` (`src/lib/server/backup.ts`) calls
-`workspace-store.ts`'s `flush()`, which persists every currently-resolved
-workspace context's dirty Yjs state into the `snapshots` table. Without this,
-a backup could be _older_ than the last successful snapshot flush, undoing
-part of the RPO improvement a backup outside the live process is supposed to
-provide. This still cannot capture updates committed in the instant between
-the flush and the `VACUUM INTO` call — that residual window is bounded by how
-fast a single SQLite statement runs against a personal-scale database (well
-under a second at the sizes in the
+Before vacuuming, `runBackup()` (`src/lib/server/backup.ts`) flushes, in
+order: `audit-observer.ts`'s `flushPendingAuditEvents()`,
+`catalog-mirror-observer.ts`'s `flushPendingCatalogMirrorEvents()` (a
+compatibility no-op today — catalog projections are synchronous — kept for
+symmetry with the same three-step ordering `workspace-store.ts`'s
+`wireShutdownOnce` uses), and finally `workspace-store.ts`'s `flush()`, which
+persists every currently-resolved workspace context's dirty Yjs state into
+the `snapshots` table. The audit flush matters independently of the Yjs
+flush: a direct client-origin edit (the UI bypassing the service layer, a
+normal and supported write path — see `audit-coverage.md`) debounces its
+`update_record`/`update_document`/`update_collection` audit row for up to
+`UPDATE_DEBOUNCE_MS` (3s) before writing it; without flushing that queue
+first, a backup taken inside that window could capture the Yjs edit while
+its audit row was still sitting in memory, producing a restored database
+with content the audit trail never mentions. Skipping the Yjs flush would
+separately mean a backup could be _older_ than the last successful snapshot
+flush, undoing part of the RPO improvement a backup outside the live process
+is supposed to provide. None of this can capture updates committed in the
+instant between the flushes and the `VACUUM INTO` call — that residual
+window is bounded by how fast a single SQLite statement runs against a
+personal-scale database (well under a second at the sizes in the
 [capacity baseline](../benchmarks/crdt-capacity-baseline-2026-08-30.md)), not
 by `SAVE_INTERVAL_MS`.
+
+Retention pruning happens after a successful backup is already recorded in
+`backup_runs`, and its own failure is caught and logged separately rather
+than rewritten as a second, contradictory outcome row for the same attempt —
+a directory-read or unlink error while trimming old backups is real, but it
+is not evidence that the backup which already succeeded didn't.
+
+`BACKUP_INTERVAL_MS`/`BACKUP_RETENTION_COUNT`/`BACKUP_DIR` are all read fresh
+on every call (§3), including by the scheduled job itself: `wireBackupScheduleOnce`
+self-reschedules with `setTimeout` rather than a single fixed `setInterval`
+specifically so a changed `BACKUP_INTERVAL_MS` takes effect from the next
+tick, not only after a restart.
 
 ## 3. RPO, RTO, retention, and location (Phase 0 defaults)
 
@@ -118,13 +142,21 @@ This is a deliberate deferral, not a silently dropped requirement.
    `restoreFrom` in `backup.ts`). It defaults the target to `DATABASE_URL`;
    pass `--target=<path>` to restore somewhere else (e.g. to inspect a backup
    without touching the live file).
-4. `restoreFrom` verifies the backup with `PRAGMA integrity_check` before
-   touching anything, moves any existing file at the target aside to
-   `<target>.pre-restore-<timestamp>` (never deletes it outright), removes
-   any stale `-wal`/`-shm` sidecars next to the target (a leftover WAL from
-   the file being replaced would otherwise reference frames for a database
-   that no longer exists), and copies the backup into place. The backup file
-   itself is copied, not moved, so it remains available for a repeat attempt.
+4. `restoreFrom` verifies the backup with `PRAGMA integrity_check`, rejects a
+   `--file`/`--target` pair that resolve to the same path (restoring a file
+   onto itself is never valid), and only then copies the backup into a
+   staging file next to the target — so a failure partway through the copy
+   (disk full, permissions) never touches an existing target at all. Only
+   once that staging copy has fully succeeded is any existing file at the
+   target (and its `-wal`/`-shm` sidecars, if present) moved aside to
+   `<target>.pre-restore-<timestamp>` (and matching suffixed names) rather
+   than deleted — an unflushed WAL can hold committed frames never
+   checkpointed into the main file, so deleting it would make the
+   pre-restore fallback silently incomplete — and the staged file is renamed
+   into place. If that last rename fails, the pre-restore files are renamed
+   back automatically so the configured path is never left without an
+   openable database. The backup file at `--file` itself is only ever
+   copied, never moved, so it remains available for a repeat attempt.
 5. Start the server and verify the data.
 
 `src/lib/server/backup.test.ts` exercises this procedure directly (backup a

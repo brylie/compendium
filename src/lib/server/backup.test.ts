@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as Y from 'yjs';
 import Database from 'better-sqlite3';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createDocument as crdtCreateDocument } from '$lib/data/document-ops';
+import { createRecord as crdtCreateRecord } from '$lib/data/record-ops';
+import { remoteUiOrigin, SERVICE_ORIGIN, transactWithOrigin } from '../mutation-origin';
+import { resolveWorkspaceContext } from './workspace-store';
 import { createDocument } from '../services';
 import { CURRENT_USER } from './current-user';
 import { getDb } from './store';
@@ -32,6 +37,18 @@ function readCatalogTitles(dbPath: string): string[] {
 			.prepare('SELECT title FROM catalog_documents')
 			.all()
 			.map((row) => (row as { title: string }).title);
+	} finally {
+		db.close();
+	}
+}
+
+function readAuditActionsFor(dbPath: string, targetRecordId: string): string[] {
+	const db = new Database(dbPath, { readonly: true });
+	try {
+		return db
+			.prepare('SELECT action FROM audit_log WHERE target_record_id = ?')
+			.all(targetRecordId)
+			.map((row) => (row as { action: string }).action);
 	} finally {
 		db.close();
 	}
@@ -74,6 +91,29 @@ describe('backup: runBackup (#19)', () => {
 		expect(remaining).not.toContain(first.filePath!.split('/').pop());
 		expect(remaining).toContain(second.filePath!.split('/').pop());
 		expect(remaining).toContain(third.filePath!.split('/').pop());
+	});
+
+	it('flushes a pending debounced audit event before copying the database, so the backup never contains an edit without its audit row', () => {
+		const { doc } = resolveWorkspaceContext();
+		const parent = transactWithOrigin(doc, SERVICE_ORIGIN, () =>
+			crdtCreateDocument(doc, { title: 'Parent' })
+		);
+		const record = transactWithOrigin(doc, SERVICE_ORIGIN, () =>
+			crdtCreateRecord(doc, { parentId: parent.id, blockType: 'paragraph' }, CURRENT_USER)
+		);
+		const yrecord = doc.getMap('records').get(record.id) as Y.Map<unknown>;
+		const content = yrecord.get('content') as Y.Text;
+
+		// A direct client-origin edit (bypassing the service layer, as a real
+		// UI edit does) starts a 3s debounce window before its update_record
+		// audit row is written — see audit-observer.ts. Backing up
+		// immediately, well within that window, must not race it.
+		const REMOTE_UI_ORIGIN = remoteUiOrigin('backup-test');
+		doc.transact(() => content.insert(0, 'edited just before backup'), REMOTE_UI_ORIGIN);
+
+		const { filePath } = runBackup();
+
+		expect(readAuditActionsFor(filePath!, record.id)).toContain('update_record');
 	});
 
 	it('records a failure row and rethrows when the backup destination cannot be created', () => {
@@ -133,5 +173,13 @@ describe('backup: restoreFrom (#19)', () => {
 		expect(existsSync(targetPath)).toBe(false);
 
 		rmSync(restoreDir, { recursive: true, force: true });
+	});
+
+	it('rejects restoring a file onto itself instead of stranding it under a pre-restore name', () => {
+		const { filePath } = runBackup();
+
+		expect(() => restoreFrom(filePath!, filePath!)).toThrow(/restoring a backup onto itself/i);
+		// The file must still be exactly where it was — not renamed aside.
+		expect(existsSync(filePath!)).toBe(true);
 	});
 });

@@ -17,11 +17,13 @@ import {
 	unlinkSync,
 	existsSync
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { backupDatabaseTo, getDb } from './db/index.js';
 import { backupRuns } from './db/schema.js';
 import { flush } from './workspace-store.js';
+import { flushPendingAuditEvents } from './audit-observer.js';
+import { flushPendingCatalogMirrorEvents } from './catalog-mirror-observer.js';
 import { getInstanceWorkspaceId } from './instance.js';
 
 const DEFAULT_BACKUP_DIR = '.data/backups';
@@ -69,9 +71,18 @@ export interface BackupRunResult {
 // so a module-scope counter is sufficient.
 let sequence = 0;
 
+// COMPENDIUM_INSTANCE_ID is operator-configured (instance.ts) for display and
+// as a DB column value, not validated for filesystem safety — sanitize
+// before using it in a path so a value containing "/" or ".." can't create
+// an unintended nested destination or escape BACKUP_DIR.
+function sanitizeForFilename(value: string): string {
+	return value.replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
 function backupFilePath(dir: string, workspaceId: string): string {
 	const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-	return join(dir, `${FILENAME_PREFIX}${workspaceId}-${stamp}-${sequence++}${FILENAME_SUFFIX}`);
+	const safeWorkspaceId = sanitizeForFilename(workspaceId);
+	return join(dir, `${FILENAME_PREFIX}${safeWorkspaceId}-${stamp}-${sequence++}${FILENAME_SUFFIX}`);
 }
 
 function recordRun(startedAt: number, result: BackupRunResult, workspaceId: string): void {
@@ -114,11 +125,19 @@ function pruneOldBackups(dir: string, retentionCount: number): void {
 }
 
 /**
- * Performs one backup attempt: flushes every live workspace context's dirty
- * Yjs state first (so the backup captures the freshest snapshot rows rather
- * than whatever was on disk up to SAVE_INTERVAL_MS ago), then `VACUUM INTO`s
- * a timestamped copy of the whole database into BACKUP_DIR, prunes old
- * backups beyond retention, and records the outcome in `backup_runs`.
+ * Performs one backup attempt: flushes every pending debounced audit event
+ * and catalog mirror write, then every live workspace context's dirty Yjs
+ * state (in that order — the same ordering wireShutdownOnce uses to make a
+ * graceful shutdown durable, since a backup is conceptually "capture durable
+ * state as if the process stopped right now" without actually stopping).
+ * Skipping the audit/catalog flush would let a backup capture a Yjs edit
+ * whose audit_log row is still sitting in the observer's debounce window,
+ * producing a restored database with content the audit trail never
+ * mentions. Then `VACUUM INTO`s a timestamped copy of the whole database
+ * into BACKUP_DIR and records the outcome in `backup_runs` — retention
+ * pruning happens after that record is written and its own failure is
+ * logged, not treated as a failure of the backup that already succeeded
+ * (see pruneOldBackups's caller below).
  *
  * Throws on failure after logging and recording it — callers that must
  * never crash a long-running process (the scheduled tick below) catch and
@@ -132,6 +151,8 @@ export function runBackup(): BackupRunResult {
 	const dir = getBackupDir();
 
 	try {
+		flushPendingAuditEvents();
+		flushPendingCatalogMirrorEvents();
 		flush();
 		// dir is getBackupDir()'s own server config, not request input.
 		// eslint-disable-next-line security/detect-non-literal-fs-filename
@@ -144,7 +165,16 @@ export function runBackup(): BackupRunResult {
 
 		const result: BackupRunResult = { status: 'success', filePath, sizeBytes };
 		recordRun(startedAt, result, workspaceId);
-		pruneOldBackups(dir, getBackupRetentionCount());
+		try {
+			pruneOldBackups(dir, getBackupRetentionCount());
+		} catch (pruneError) {
+			// The backup itself already succeeded and is already recorded as
+			// such — a directory-read or unlink failure while trimming old
+			// backups is a separate, lower-severity problem and must not turn
+			// into a second, contradictory `backup_runs` row or make a
+			// successful backup look like a failed one to the caller.
+			console.error('Backup succeeded but retention pruning failed', pruneError);
+		}
 		return result;
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
@@ -173,45 +203,42 @@ declare global {
  * particular workspace/shard context, unlike the idle sweep/shutdown hooks
  * this mirrors, so it isn't wired from workspace-store.ts's createContext()
  * (which would also create a circular import between the two modules, since
- * runBackup() below calls workspace-store.ts's flush()). The timer is
- * `unref()`'d and the tick swallows its own errors, so calling this is inert
- * overhead in short-lived processes.
+ * runBackup() below calls workspace-store.ts's flush()).
+ *
+ * Self-reschedules with `setTimeout` rather than a single fixed
+ * `setInterval`, re-reading `getBackupIntervalMs()` before scheduling each
+ * next run — every other config getter here is documented as "read fresh on
+ * every call" specifically so an operator can reconfigure a long-running
+ * process without restarting it; a `setInterval` captured once at wire time
+ * would silently keep the old cadence until the next restart instead. Each
+ * timer is `unref()`'d and the tick swallows its own errors, so calling this
+ * is inert overhead in short-lived processes.
  */
 export function wireBackupScheduleOnce(): void {
 	if (globalThis.__backupScheduleWired) return;
 	globalThis.__backupScheduleWired = true;
-	const timer = setInterval(() => {
+	scheduleNextBackup();
+}
+
+function scheduleNextBackup(): void {
+	const timer = setTimeout(() => {
 		try {
 			runBackup();
 		} catch {
 			// Already logged and recorded inside runBackup(); the schedule must
 			// keep ticking regardless.
+		} finally {
+			scheduleNextBackup();
 		}
 	}, getBackupIntervalMs());
 	timer.unref?.();
 }
 
-/**
- * Restores `sourcePath` (a backup produced by runBackup, or any valid
- * standalone SQLite file) over `targetPath` — the live DATABASE_URL path in
- * practice. Verifies the source with `PRAGMA integrity_check` before
- * touching anything. If `targetPath` already exists, it's renamed aside to
- * `<targetPath>.pre-restore-<timestamp>` rather than deleted, so an operator
- * who restores the wrong file can still recover the previous state. Also
- * removes any stale `-wal`/`-shm` sidecars next to `targetPath`: a leftover
- * WAL from the previous database would otherwise contain frames for a file
- * that no longer exists once the main file is replaced.
- */
-export function restoreFrom(sourcePath: string, targetPath: string): void {
-	// sourcePath/targetPath come from an operator invoking scripts/restore-workspace.ts
-	// (CLI args / DATABASE_URL), never from a request — same trust boundary as
-	// DATABASE_URL itself (see db/index.ts).
-	// eslint-disable-next-line security/detect-non-literal-fs-filename
-	if (!existsSync(sourcePath)) {
-		throw new Error(`Backup file not found: ${sourcePath}`);
-	}
+const WAL_SIDECAR_SUFFIXES = ['-wal', '-shm'];
 
-	const check = new Database(sourcePath, { readonly: true });
+/** Throws unless `PRAGMA integrity_check` on `dbPath` reports 'ok'. */
+function assertIntegrity(dbPath: string): void {
+	const check = new Database(dbPath, { readonly: true });
 	let result: string;
 	try {
 		result = check.pragma('integrity_check', { simple: true }) as string;
@@ -221,23 +248,91 @@ export function restoreFrom(sourcePath: string, targetPath: string): void {
 	if (result !== 'ok') {
 		throw new Error(`Backup file failed integrity check: ${result}`);
 	}
+}
+
+/**
+ * Renames `${fromBase}-wal`/`${fromBase}-shm` to `${toBase}-wal`/`${toBase}-shm`
+ * wherever they exist. Used both to carry an existing target's sidecars
+ * along when it's moved aside (so an unflushed WAL's committed-but-not-yet-
+ * checkpointed frames stay recoverable from the pre-restore fallback) and,
+ * symmetrically, to roll that same move back if the final replace fails.
+ */
+function moveSidecarsAside(fromBase: string, toBase: string): void {
+	for (const suffix of WAL_SIDECAR_SUFFIXES) {
+		const from = `${fromBase}${suffix}`;
+		// eslint-disable-next-line security/detect-non-literal-fs-filename
+		if (existsSync(from)) renameSync(from, `${toBase}${suffix}`);
+	}
+}
+
+/**
+ * Restores `sourcePath` (a backup produced by runBackup, or any valid
+ * standalone SQLite file) over `targetPath` — the live DATABASE_URL path in
+ * practice. Verifies the source with `PRAGMA integrity_check` before
+ * touching anything, and rejects a `sourcePath`/`targetPath` pair that
+ * resolve to the same file (restoring a file onto itself is never a valid
+ * operation and would otherwise strand the target under its own
+ * pre-restore name — see below).
+ *
+ * The replacement itself is copy-then-rename, not copy-onto-target
+ * directly: `sourcePath` is first copied to a staging file next to
+ * `targetPath`, so a failure partway through the copy (disk full,
+ * permissions) never touches the existing target at all. Only once that
+ * staging copy has fully succeeded does an existing `targetPath` (and its
+ * `-wal`/`-shm` sidecars, if present — preserved rather than deleted, since
+ * an unflushed WAL can hold committed frames never checkpointed into the
+ * main file, which the pre-restore fallback would otherwise be silently
+ * missing) get renamed aside to `<targetPath>.pre-restore-<timestamp>`
+ * (and matching suffixed names), and the staged file renamed into `targetPath`.
+ * If that final rename fails, the pre-restore files are renamed back into
+ * place so the configured path is never left without an openable database.
+ */
+export function restoreFrom(sourcePath: string, targetPath: string): void {
+	// sourcePath/targetPath come from an operator invoking scripts/restore-workspace.ts
+	// (CLI args / DATABASE_URL), never from a request — same trust boundary as
+	// DATABASE_URL itself (see db/index.ts).
+	// eslint-disable-next-line security/detect-non-literal-fs-filename
+	if (!existsSync(sourcePath)) {
+		throw new Error(`Backup file not found: ${sourcePath}`);
+	}
+	if (resolve(sourcePath) === resolve(targetPath)) {
+		throw new Error(
+			`Source and target both resolve to ${resolve(targetPath)} — restoring a backup onto itself is not supported.`
+		);
+	}
+	assertIntegrity(sourcePath);
 
 	// eslint-disable-next-line security/detect-non-literal-fs-filename
 	mkdirSync(dirname(targetPath), { recursive: true });
 
+	const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+	const stagedPath = `${targetPath}.restoring-${stamp}`;
+	// Copy (never move) from sourcePath: it must remain available in
+	// BACKUP_DIR for a future restore attempt, and a failure here must not
+	// have touched targetPath at all yet.
+	copyFileSync(sourcePath, stagedPath);
+
 	// eslint-disable-next-line security/detect-non-literal-fs-filename
-	if (existsSync(targetPath)) {
-		const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+	const targetExisted = existsSync(targetPath);
+	const preRestorePath = `${targetPath}.pre-restore-${stamp}`;
+	if (targetExisted) {
 		// eslint-disable-next-line security/detect-non-literal-fs-filename
-		renameSync(targetPath, `${targetPath}.pre-restore-${stamp}`);
-	}
-	for (const suffix of ['-wal', '-shm']) {
-		const sidecar = `${targetPath}${suffix}`;
-		// eslint-disable-next-line security/detect-non-literal-fs-filename
-		if (existsSync(sidecar)) unlinkSync(sidecar);
+		renameSync(targetPath, preRestorePath);
+		moveSidecarsAside(targetPath, preRestorePath);
 	}
 
-	// Copy rather than move: the backup file must remain available in
-	// BACKUP_DIR for a future restore attempt.
-	copyFileSync(sourcePath, targetPath);
+	try {
+		// eslint-disable-next-line security/detect-non-literal-fs-filename
+		renameSync(stagedPath, targetPath);
+	} catch (error) {
+		// Roll back: put the previous database (and its sidecars) back
+		// exactly where they were rather than leaving the configured path
+		// with nothing openable.
+		if (targetExisted) {
+			// eslint-disable-next-line security/detect-non-literal-fs-filename
+			renameSync(preRestorePath, targetPath);
+			moveSidecarsAside(preRestorePath, targetPath);
+		}
+		throw error;
+	}
 }
