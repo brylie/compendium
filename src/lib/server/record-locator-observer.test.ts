@@ -74,21 +74,26 @@ describe('record-locator-observer: reserving a locator for direct UI record crea
 	});
 
 	it('does not reserve a locator for a record deletion', () => {
-		const docMeta = transactWithOrigin(doc, REMOTE_UI_ORIGIN, () =>
-			crdtCreateDocument(doc, { title: 'Human Doc' })
+		// A separate, not-yet-observed doc: the record is created before the
+		// observer attaches, so it genuinely starts with no locator at all —
+		// proving deletion doesn't reserve one, rather than merely leaving an
+		// already-reserved one (from the shared beforeEach's own creation)
+		// untouched.
+		const freshDoc = new Y.Doc();
+		const docMeta = transactWithOrigin(freshDoc, REMOTE_UI_ORIGIN, () =>
+			crdtCreateDocument(freshDoc, { title: 'Human Doc' })
 		);
-		const block = transactWithOrigin(doc, REMOTE_UI_ORIGIN, () =>
-			crdtCreateRecord(doc, { parentId: docMeta.id, blockType: 'paragraph' }, human)
+		const block = transactWithOrigin(freshDoc, REMOTE_UI_ORIGIN, () =>
+			crdtCreateRecord(freshDoc, { parentId: docMeta.id, blockType: 'paragraph' }, human)
 		);
-		expect(resolveShardForRecord(WS, block.id)).toEqual({ shardId: SHARD });
+		expect(resolveShardForRecord(WS, block.id)).toBeUndefined();
 
-		transactWithOrigin(doc, REMOTE_UI_ORIGIN, () => crdtDeleteRecord(doc, block.id));
+		attachRecordLocatorObserver(WS, spaceIdFor(freshDoc), SHARD, freshDoc);
+		transactWithOrigin(freshDoc, REMOTE_UI_ORIGIN, () => crdtDeleteRecord(freshDoc, block.id));
 
-		expect(crdtGetDocument(doc, docMeta.id)?.recordIds).not.toContain(block.id);
-		// The locator is left in place (harmless: a later resolve just finds a
-		// genuinely-deleted record and 404s correctly) — this only asserts the
-		// observer didn't throw or misbehave reacting to the deletion itself.
-		expect(resolveShardForRecord(WS, block.id)).toEqual({ shardId: SHARD });
+		expect(crdtGetDocument(freshDoc, docMeta.id)?.recordIds).not.toContain(block.id);
+		expect(resolveShardForRecord(WS, block.id)).toBeUndefined();
+		freshDoc.destroy();
 	});
 
 	it('rejects an unregistered origin even when it has a recognized source name', () => {

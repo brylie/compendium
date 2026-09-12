@@ -207,6 +207,24 @@ export function resolveShardForRecord(
 }
 
 /**
+ * Resolves the Space that actually owns a shard's content — the Document or
+ * Collection whose own id *is* this shardId (#120: "a Document's shard is
+ * its own id"), not just whichever Space happened to bootstrap first in the
+ * workspace. `resolveShardForParent` already stores each Document/
+ * Collection's real spaceId keyed by its own id, so looking `shardId` up as
+ * if it were a parentId finds it directly. Falls back to `fallbackSpaceId`
+ * for the literal default shard (which isn't owned by any single Document/
+ * Collection) or a shard whose owning entity has no catalog locator yet.
+ */
+export function resolveSpaceForShard(
+	workspaceId: string,
+	shardId: string,
+	fallbackSpaceId: string
+): string {
+	return resolveShardForParent(workspaceId, shardId)?.spaceId ?? fallbackSpaceId;
+}
+
+/**
  * Reserves a locator for every record in `doc` that doesn't already have one
  * — repairs a shard resolved for the first time in this process that already
  * contains records created via direct UI mutation before
@@ -215,6 +233,12 @@ export function resolveShardForRecord(
  * transactions). Safe to call on every context load: only issues a write for
  * an id actually missing a locator, so an already-fully-tracked shard costs
  * one SELECT and no writes. See issue #253.
+ *
+ * The "already tracked" check is scoped to this `shardId`, not the whole
+ * workspace: a record can only physically live in one Y.Doc, so a locator
+ * for it anywhere else would itself be a data inconsistency, not a reason to
+ * skip it here — and scanning every locator in the workspace on every shard
+ * load would make loading N Document shards cost O(N × total records).
  */
 export function backfillRecordLocators(
 	workspaceId: string,
@@ -226,7 +250,7 @@ export function backfillRecordLocators(
 		getDb()
 			.select({ recordId: recordLocator.recordId })
 			.from(recordLocator)
-			.where(eq(recordLocator.workspaceId, workspaceId))
+			.where(and(eq(recordLocator.workspaceId, workspaceId), eq(recordLocator.shardId, shardId)))
 			.all()
 			.map((row) => row.recordId)
 	);

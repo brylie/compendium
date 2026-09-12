@@ -11,7 +11,9 @@ import {
 } from './db/schema';
 import { createDocument as crdtCreateDocument } from '$lib/data/document-ops';
 import { createCollection as crdtCreateCollection } from '$lib/data/collection-ops';
+import { createRecord as crdtCreateRecord } from '$lib/data/record-ops';
 import {
+	backfillRecordLocators,
 	createSpace,
 	ensureCatalogBootstrapped,
 	reconcileCatalogMetadata,
@@ -30,11 +32,13 @@ import {
 	reserveRecordLocator,
 	releaseRecordLocator,
 	resolveShardForParent,
-	resolveShardForRecord
+	resolveShardForRecord,
+	resolveSpaceForShard
 } from './catalog';
 
 const WS = 'default';
 const SHARD = 'default';
+const human = { kind: 'human', userId: 'brylie' } as const;
 
 function bootstrap() {
 	const doc = new Y.Doc();
@@ -128,6 +132,83 @@ describe('catalog: bootstrap and backfill', () => {
 		expect(docs.find((d) => d.id === existingDoc.id)?.title).toBe('Pre-existing Doc');
 		expect(collections.find((c) => c.id === existingCollection.id)?.title).toBe(
 			'Pre-existing Table'
+		);
+	});
+});
+
+describe('catalog: resolveSpaceForShard (PR #284 review regression)', () => {
+	it("resolves a per-Document shard's real Space, not the workspace's first Space", () => {
+		const { defaultSpaceId } = bootstrap();
+		const otherSpace = createSpace(WS, 'Other Space');
+		// #120: a Document's shard id is its own id.
+		reserveDocumentLocator(WS, otherSpace.id, 'doc-in-other-space', 'doc-in-other-space');
+
+		expect(
+			resolveSpaceForShard(WS, 'doc-in-other-space', defaultSpaceId /* wrong if returned */)
+		).toBe(otherSpace.id);
+	});
+
+	it('falls back to fallbackSpaceId for the literal default shard, owned by no single entity', () => {
+		const { defaultSpaceId } = bootstrap();
+		expect(resolveSpaceForShard(WS, SHARD, defaultSpaceId)).toBe(defaultSpaceId);
+	});
+
+	it('falls back to fallbackSpaceId for a shard whose owning entity has no catalog locator yet', () => {
+		const { defaultSpaceId } = bootstrap();
+		expect(resolveSpaceForShard(WS, 'not-yet-created-shard', defaultSpaceId)).toBe(defaultSpaceId);
+	});
+});
+
+describe('catalog: backfillRecordLocators (issue #253)', () => {
+	it('reserves a locator, in the shard-owning Space, for every untracked record in the doc', () => {
+		const { doc, defaultSpaceId } = bootstrap();
+		const document = crdtCreateDocument(doc, { id: 'backfill-doc', title: 'Backfill Doc' });
+		reserveDocumentLocator(WS, defaultSpaceId, document.id, SHARD);
+		const otherSpace = createSpace(WS, 'Other Space');
+		const record = crdtCreateRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+
+		expect(resolveShardForRecord(WS, record.id)).toBeUndefined();
+
+		backfillRecordLocators(WS, otherSpace.id, SHARD, doc);
+
+		expect(resolveShardForRecord(WS, record.id)).toEqual({ shardId: SHARD });
+		const row = getDb()
+			.select({ spaceId: recordLocator.spaceId })
+			.from(recordLocator)
+			.where(eq(recordLocator.recordId, record.id))
+			.get();
+		expect(row?.spaceId).toBe(otherSpace.id);
+	});
+
+	it('is a no-op (no write) for a record that already has a locator', () => {
+		const { doc, defaultSpaceId } = bootstrap();
+		const document = crdtCreateDocument(doc, { id: 'already-tracked-doc', title: 'Doc' });
+		reserveDocumentLocator(WS, defaultSpaceId, document.id, SHARD);
+		const record = crdtCreateRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+		reserveRecordLocator(WS, defaultSpaceId, record.id, SHARD);
+
+		expect(() => backfillRecordLocators(WS, defaultSpaceId, SHARD, doc)).not.toThrow();
+		expect(resolveShardForRecord(WS, record.id)).toEqual({ shardId: SHARD });
+	});
+
+	it('surfaces a real cross-shard inconsistency loudly instead of masking it as "already tracked"', () => {
+		// A record already locatored to a *different* shard than the one it
+		// physically lives in is a genuine data inconsistency (a record can
+		// only live in one Y.Doc) — the shard-scoped "already tracked" check
+		// only recognizes a locator for *this* shard, so this id is treated as
+		// untracked-for-this-shard and a fresh reservation is attempted, which
+		// then collides with the existing row's UNIQUE (workspaceId, recordId)
+		// constraint. Surfacing that collision is the intended behavior: a
+		// workspace-wide "already tracked" check would have silently treated
+		// this as fine instead of ever revealing the inconsistency.
+		const { doc, defaultSpaceId } = bootstrap();
+		const document = crdtCreateDocument(doc, { id: 'cross-shard-doc', title: 'Doc' });
+		reserveDocumentLocator(WS, defaultSpaceId, document.id, SHARD);
+		const record = crdtCreateRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+		reserveRecordLocator(WS, defaultSpaceId, record.id, 'a-different-shard');
+
+		expect(() => backfillRecordLocators(WS, defaultSpaceId, SHARD, doc)).toThrow(
+			RecordIdConflictError
 		);
 	});
 });
