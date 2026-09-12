@@ -99,6 +99,29 @@ describe('BoardCollectionView', () => {
 		expect(screen.getByText('No Status')).toBeInTheDocument();
 	});
 
+	it('preserves persisted groupBy and renders columns when collection arrives after initial mount (issue #217)', async () => {
+		const onConfigChange = vi.fn();
+		renderBoard('col-1', { sort: { mode: 'manual' }, groupBy: 'status' }, onConfigChange);
+
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Board',
+			schema: [
+				{
+					key: 'status',
+					label: 'Status',
+					type: 'select',
+					options: [{ id: 'todo', label: 'To do' }]
+				}
+			]
+		});
+
+		expect(await screen.findByText('To do')).toBeInTheDocument();
+		expect(onConfigChange).not.toHaveBeenCalledWith(
+			expect.objectContaining({ groupBy: undefined })
+		);
+	});
+
 	it('makes the card title directly editable via its own field', async () => {
 		createCollection(ydoc, {
 			id: 'col-1',

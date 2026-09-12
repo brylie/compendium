@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createTestHarness, type TestHarness } from './harness';
-import { createDocument, createRecord } from '$lib/services';
+import { createCollection, createDocument, createRecord } from '$lib/services';
 import { flush, resolveWorkspaceContext } from '$lib/server/workspace-store';
 import type { ActorId } from '$lib/data/types';
 
@@ -300,5 +300,147 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 
 		const response = await page.request.get(new URL(faviconHref!, page.url()).toString());
 		expect(response.status()).toBe(200);
+	});
+
+	test('Board view groupBy columns render on initial load after fresh connect (issue #217)', async ({
+		page
+	}) => {
+		const collection = createCollection(human, {
+			title: 'Sprint Tasks',
+			schema: [
+				{
+					key: 'status',
+					label: 'Status',
+					type: 'select',
+					options: [
+						{ id: 'todo', label: 'To Do' },
+						{ id: 'done', label: 'Done' }
+					]
+				}
+			]
+		});
+		createRecord(human, {
+			parentId: collection.id,
+			properties: {
+				status: { type: 'select', value: 'todo' }
+			}
+		});
+
+		const docMeta = createDocument(human, {
+			title: 'Board Page',
+			createInitialBlock: false
+		});
+		createRecord(human, {
+			parentId: docMeta.id,
+			blockType: 'collection_view',
+			referencedRecordId: collection.id,
+			viewConfig: {
+				viewType: 'board',
+				groupBy: 'status'
+			}
+		});
+		flush();
+
+		// Open document fresh in browser
+		await page.goto(`${harness.httpUrl}/space/${defaultSpaceId()}/doc/${docMeta.id}`);
+
+		// Columns should render!
+		await expect(page.getByRole('group', { name: 'To Do column' })).toBeVisible();
+		await expect(page.getByRole('group', { name: 'Done column' })).toBeVisible();
+		await expect(page.getByRole('group', { name: 'No Status column' })).toBeVisible();
+		// No unsaved changes banner
+		await expect(page.getByText('Unsaved changes')).not.toBeVisible();
+	});
+
+	test('Board view auto-picks groupBy on initial load when unset (issue #217)', async ({
+		page
+	}) => {
+		const collection = createCollection(human, {
+			title: 'Sprint Tasks Auto',
+			schema: [
+				{
+					key: 'status',
+					label: 'Status',
+					type: 'select',
+					options: [
+						{ id: 'todo', label: 'To Do' },
+						{ id: 'done', label: 'Done' }
+					]
+				}
+			]
+		});
+		createRecord(human, {
+			parentId: collection.id,
+			properties: {
+				status: { type: 'select', value: 'todo' }
+			}
+		});
+
+		const docMeta = createDocument(human, {
+			title: 'Board Page Auto',
+			createInitialBlock: false
+		});
+		createRecord(human, {
+			parentId: docMeta.id,
+			blockType: 'collection_view',
+			referencedRecordId: collection.id,
+			viewConfig: {
+				viewType: 'board'
+			}
+		});
+		flush();
+
+		// Open document fresh in browser
+		await page.goto(`${harness.httpUrl}/space/${defaultSpaceId()}/doc/${docMeta.id}`);
+
+		// Columns should render automatically via autoPickGroupBy!
+		await expect(page.getByRole('group', { name: 'To Do column' })).toBeVisible();
+		await expect(page.getByRole('group', { name: 'Done column' })).toBeVisible();
+		await expect(page.getByRole('group', { name: 'No Status column' })).toBeVisible();
+	});
+
+	test('Calendar view preserves persisted date groupBy on fresh connect (issue #217)', async ({
+		page
+	}) => {
+		const collection = createCollection(human, {
+			title: 'Sprint Milestones',
+			schema: [
+				{
+					key: 'due',
+					label: 'Due Date',
+					type: 'date'
+				}
+			]
+		});
+		createRecord(human, {
+			parentId: collection.id,
+			properties: {
+				due: { type: 'date', value: '2026-09-15' }
+			}
+		});
+
+		const docMeta = createDocument(human, {
+			title: 'Calendar Page',
+			createInitialBlock: false
+		});
+		createRecord(human, {
+			parentId: docMeta.id,
+			blockType: 'collection_view',
+			referencedRecordId: collection.id,
+			viewConfig: {
+				viewType: 'calendar',
+				groupBy: 'due'
+			}
+		});
+		flush();
+
+		// Open document fresh in browser
+		await page.goto(`${harness.httpUrl}/space/${defaultSpaceId()}/doc/${docMeta.id}`);
+
+		// "Dates from" dropdown should show "Due Date" and no unsaved changes
+		const select = page.locator(`select[id="calendar-date-property-${collection.id}"]`);
+		await expect(select).toBeVisible();
+		await expect(select).toHaveValue('due');
+		await expect(page.getByText('Unsaved changes')).not.toBeVisible();
 	});
 });

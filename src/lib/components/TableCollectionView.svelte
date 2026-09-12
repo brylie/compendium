@@ -91,6 +91,7 @@
 		() => ydoc,
 		() => connection.resolvedCollectionId ?? collectionId,
 		(snapshot) => {
+			if (!snapshot.collection) return;
 			announcer.notify(snapshot.collectionId, snapshot.rows);
 			onSnapshot?.(snapshot);
 		}

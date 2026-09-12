@@ -24,8 +24,12 @@ vi.mock('$lib/client/yjs-client', () => ({
 
 const actor = { kind: 'human' as const, userId: 'local' };
 
-function renderCalendar(collectionId: string, initialConfig: ViewConfig = {}) {
-	return render(CalendarCollectionViewHarness, { collectionId, initialConfig });
+function renderCalendar(
+	collectionId: string,
+	initialConfig: ViewConfig = {},
+	onConfigChange?: (config: ViewConfig) => void
+) {
+	return render(CalendarCollectionViewHarness, { collectionId, initialConfig, onConfigChange });
 }
 
 describe('CalendarCollectionView', () => {
@@ -66,6 +70,25 @@ describe('CalendarCollectionView', () => {
 		expect(getCollection(ydoc, 'col-1')?.schema).toEqual([
 			expect.objectContaining({ label: 'Date', type: 'date' })
 		]);
+	});
+
+	it('preserves persisted groupBy when collection arrives after initial mount (issue #217)', async () => {
+		const onConfigChange = vi.fn();
+		renderCalendar('col-1', { groupBy: 'due' }, onConfigChange);
+
+		createCollection(ydoc, {
+			id: 'col-1',
+			title: 'Cal',
+			schema: [
+				{ key: 'title', label: 'Title', type: 'text' },
+				{ key: 'due', label: 'Due', type: 'date' }
+			]
+		});
+
+		expect(await screen.findByRole('option', { name: 'Due' })).toBeInTheDocument();
+		expect(onConfigChange).not.toHaveBeenCalledWith(
+			expect.objectContaining({ groupBy: undefined })
+		);
 	});
 
 	it('places a record on its matching day cell', async () => {
