@@ -17,6 +17,8 @@ Canonical specification for each implemented subsystem, translating [`prd.md`](.
 - [`service-layer.md`](./service-layer.md) / [`service-layer-manifest.md`](./service-layer-manifest.md) — how permission/audit logic is centralized once and shared by MCP and UI.
 - [`e2e-testing.md`](./e2e-testing.md) — MCP/UI parity and CRDT capacity benchmark strategy.
 - [`design-system.md`](./design-system.md) — UI tokens and conventions.
+- [`yjs-loro-evaluation.md`](./yjs-loro-evaluation.md) — decision to stay on Yjs after evaluating Loro as an alternative CRDT library, and the triggers that would reopen it.
+- [`websocket-backend-evaluation.md`](./websocket-backend-evaluation.md) — decision to stay on the bespoke `/ws` server after evaluating Hocuspocus as a Yjs-compatible sync backend, and the triggers that would reopen it.
 
 ## Out of scope for the current architecture
 
