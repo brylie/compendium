@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createTestHarness, type TestHarness } from './harness';
-import { createCollection, createDocument, createRecord } from '$lib/services';
+import { createCollection, createDocument, createRecord, writeRecord } from '$lib/services';
 import { flush, resolveWorkspaceContext } from '$lib/server/workspace-store';
 import type { ActorId } from '$lib/data/types';
 
@@ -442,5 +442,211 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		await expect(select).toBeVisible();
 		await expect(select).toHaveValue('due');
 		await expect(page.getByText('Unsaved changes')).not.toBeVisible();
+	});
+
+	test('Cross-block ArrowUp/ArrowDown moves focus between blocks with column preservation across single and multi-line paragraphs (issue #163)', async ({
+		page
+	}) => {
+		const docMeta = createDocument(human, {
+			title: 'Cross-block Navigation',
+			createInitialBlock: false
+		});
+		const block1 = createRecord(human, { parentId: docMeta.id, blockType: 'paragraph' });
+		const block2 = createRecord(human, { parentId: docMeta.id, blockType: 'paragraph' });
+		const block3 = createRecord(human, { parentId: docMeta.id, blockType: 'paragraph' });
+		writeRecord(human, block1.id, {
+			markdown: 'Short first block text.'
+		});
+		writeRecord(human, block2.id, {
+			markdown:
+				'This is a much longer paragraph intentionally designed to soft-wrap across multiple visual lines in the browser editor. It needs to span several lines so we can test intra-block line navigation alongside cross-block edge transitions. More words follow to guarantee that this block wraps across at least three distinct lines in standard viewport widths.'
+		});
+		writeRecord(human, block3.id, {
+			markdown: 'Short third block text.'
+		});
+		flush();
+
+		await page.goto(`${harness.httpUrl}/space/${defaultSpaceId()}/doc/${docMeta.id}`);
+
+		const editor1 = page.locator(`[data-block-editor-id="${block1.id}"]`);
+		const editor2 = page.locator(`[data-block-editor-id="${block2.id}"]`);
+		const editor3 = page.locator(`[data-block-editor-id="${block3.id}"]`);
+
+		await expect(editor1).toBeVisible();
+		await expect(editor2).toBeVisible();
+		await expect(editor3).toBeVisible();
+
+		// Ensure editor2 has wrapped into multiple lines
+		const isMultiLine = await editor2.evaluate((el) => {
+			const range = document.createRange();
+			if (el.firstChild) {
+				range.setStart(el.firstChild, 0);
+				range.collapse(true);
+				const rect = range.getBoundingClientRect();
+				return el.clientHeight > rect.height * 1.5;
+			}
+			return false;
+		});
+		expect(isMultiLine).toBe(true);
+
+		// 1. Focus editor1 and place caret at character 10
+		await editor1.evaluate((el) => {
+			el.focus();
+			const range = document.createRange();
+			const textNode = el.firstChild;
+			if (textNode) {
+				range.setStart(textNode, 10);
+				range.collapse(true);
+				const sel = window.getSelection();
+				sel?.removeAllRanges();
+				sel?.addRange(range);
+			}
+		});
+		await expect(editor1).toBeFocused();
+
+		const initialX = await page.evaluate(() => {
+			const sel = window.getSelection();
+			return sel?.getRangeAt(0).getBoundingClientRect().left ?? 0;
+		});
+		expect(initialX).toBeGreaterThan(0);
+
+		// 2. Press ArrowDown: since editor1 is single-line, caret is at last line.
+		// Focus should transition to editor2, landing on its first line near initialX.
+		await page.keyboard.press('ArrowDown');
+		await expect(editor2).toBeFocused();
+
+		const block2FirstLineState = await editor2.evaluate((el) => {
+			const sel = window.getSelection();
+			if (!sel || sel.rangeCount === 0) return null;
+			const r = sel.getRangeAt(0).getBoundingClientRect();
+			const rootRect = el.getBoundingClientRect();
+			return {
+				x: r.left,
+				isFirstLine: r.top - rootRect.top < r.height / 2
+			};
+		});
+		expect(block2FirstLineState?.isFirstLine).toBe(true);
+		expect(Math.abs((block2FirstLineState?.x ?? 0) - initialX)).toBeLessThan(15);
+
+		// 3. Move down through editor2 line by line without escaping to editor3
+		let internalMoves = 0;
+		while (true) {
+			const atLastLine = await editor2.evaluate((el) => {
+				const sel = window.getSelection();
+				if (!sel || sel.rangeCount === 0) return true;
+				const r = sel.getRangeAt(0).getBoundingClientRect();
+				const rootRect = el.getBoundingClientRect();
+				return rootRect.bottom - r.bottom < r.height / 2;
+			});
+			if (atLastLine) break;
+			await page.keyboard.press('ArrowDown');
+			internalMoves++;
+			await expect(editor2).toBeFocused();
+		}
+		expect(internalMoves).toBeGreaterThanOrEqual(1);
+
+		// 4. Once at the bottom visual line of editor2, pressing ArrowDown escapes to editor3
+		const block2LastLineX = await page.evaluate(() => {
+			const sel = window.getSelection();
+			return sel?.getRangeAt(0).getBoundingClientRect().left ?? 0;
+		});
+		await page.keyboard.press('ArrowDown');
+		await expect(editor3).toBeFocused();
+
+		const block3CaretX = await page.evaluate(() => {
+			const sel = window.getSelection();
+			return sel?.getRangeAt(0).getBoundingClientRect().left ?? 0;
+		});
+		expect(Math.abs(block3CaretX - block2LastLineX)).toBeLessThan(15);
+
+		// 5. From editor3 (single-line), pressing ArrowUp crosses into editor2.
+		// It MUST land on editor2's LAST line (not the first line), preserving column.
+		await page.keyboard.press('ArrowUp');
+		await expect(editor2).toBeFocused();
+
+		const block2ReturnState = await editor2.evaluate((el) => {
+			const sel = window.getSelection();
+			if (!sel || sel.rangeCount === 0) return null;
+			const r = sel.getRangeAt(0).getBoundingClientRect();
+			const rootRect = el.getBoundingClientRect();
+			return {
+				x: r.left,
+				isLastLine: rootRect.bottom - r.bottom < r.height / 2
+			};
+		});
+		expect(block2ReturnState?.isLastLine).toBe(true);
+		expect(Math.abs((block2ReturnState?.x ?? 0) - block3CaretX)).toBeLessThan(15);
+
+		// 6. Navigate up through editor2 to its first visual line
+		while (true) {
+			const atFirstLine = await editor2.evaluate((el) => {
+				const sel = window.getSelection();
+				if (!sel || sel.rangeCount === 0) return true;
+				const r = sel.getRangeAt(0).getBoundingClientRect();
+				const rootRect = el.getBoundingClientRect();
+				return r.top - rootRect.top < r.height / 2;
+			});
+			if (atFirstLine) break;
+			await page.keyboard.press('ArrowUp');
+			await expect(editor2).toBeFocused();
+		}
+
+		// 7. ArrowUp from editor2's first line crosses back into editor1
+		await page.keyboard.press('ArrowUp');
+		await expect(editor1).toBeFocused();
+	});
+
+	test('Cross-block ArrowUp/ArrowDown skips over held blocks without stalling (issue #163)', async ({
+		page
+	}) => {
+		const docMeta = createDocument(human, {
+			title: 'Held-block Navigation Skip',
+			createInitialBlock: false
+		});
+		const blockA = createRecord(human, { parentId: docMeta.id, blockType: 'paragraph' });
+		const blockB = createRecord(human, { parentId: docMeta.id, blockType: 'paragraph' });
+		const blockC = createRecord(human, { parentId: docMeta.id, blockType: 'paragraph' });
+		writeRecord(human, blockA.id, { markdown: 'Block A content.' });
+		writeRecord(human, blockB.id, { markdown: 'Block B content held by agent.' });
+		writeRecord(human, blockC.id, { markdown: 'Block C content.' });
+		flush();
+
+		const { token } = harness.createToken({
+			clientLabel: 'Claude Code',
+			allowedDocumentIds: [docMeta.id],
+			allowedCollectionIds: []
+		});
+
+		await page.goto(`${harness.httpUrl}/space/${defaultSpaceId()}/doc/${docMeta.id}`);
+
+		const editorA = page.locator(`[data-block-editor-id="${blockA.id}"]`);
+		const editorC = page.locator(`[data-block-editor-id="${blockC.id}"]`);
+		await expect(editorA).toBeVisible();
+		await expect(editorC).toBeVisible();
+
+		// MCP client acquires hold on block B
+		const mcp = await harness.getMcpClient(token);
+		const holdRes = await mcp.callTool({
+			name: 'hold_records',
+			arguments: { recordIds: [blockB.id] }
+		});
+		const res = holdRes as { content?: { text?: string }[] };
+		expect(res.content?.[0]?.text ?? '').toContain(blockB.id);
+
+		// Browser UI displays held placeholder for Block B, BlockEditor is removed
+		await expect(page.locator('.shimmer-bar')).toBeVisible({ timeout: 5000 });
+		await expect(page.locator(`[data-block-editor-id="${blockB.id}"]`)).not.toBeVisible();
+
+		// Focus Block A
+		await editorA.click();
+		await expect(editorA).toBeFocused();
+
+		// Press ArrowDown: should skip Block B and land directly in Block C
+		await page.keyboard.press('ArrowDown');
+		await expect(editorC).toBeFocused();
+
+		// Press ArrowUp from Block C: should skip Block B and land directly in Block A
+		await page.keyboard.press('ArrowUp');
+		await expect(editorA).toBeFocused();
 	});
 });
