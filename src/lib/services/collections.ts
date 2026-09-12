@@ -8,6 +8,7 @@ import {
 	updateCollectionTitle as crdtUpdateCollectionTitle
 } from '$lib/data/collection-ops';
 import { listRecordsForParent as crdtListRecordsForParent } from '$lib/data/record-ops';
+import { applyFilters } from '$lib/data/views';
 import { logAudit } from '$lib/server/audit';
 import {
 	RecordIdConflictError,
@@ -21,7 +22,12 @@ import {
 } from '$lib/server/catalog';
 import { grantCollectionAccess, tokenAllowsParent } from '$lib/server/token-store';
 import { listWorkspaceCollections } from '$lib/server/workspace-repository';
-import type { CollectionMeta, PropertyDefinition, WorkspaceRecord } from '$lib/data/types';
+import type {
+	CollectionMeta,
+	PropertyDefinition,
+	ViewFilter,
+	WorkspaceRecord
+} from '$lib/data/types';
 import { nanoid } from 'nanoid';
 import { SERVICE_ORIGIN, transactWithOrigin } from '../mutation-origin.js';
 import {
@@ -185,10 +191,21 @@ export function resolvePrimaryFieldKey(
 	return resolvePrimaryField(schema, primaryFieldKey)?.key;
 }
 
-/** Returns a Collection's metadata and all its rows, after checking `caller` may access it. */
+/**
+ * Returns a Collection's metadata and its rows, after checking `caller` may
+ * access it. `filter`, when given, is applied with the exact same
+ * `applyFilters`/`ViewFilter[]` semantics the UI's Table/Board/Calendar
+ * views already use (`$lib/data/views`) — real parity with the human-facing
+ * views, achieved by reading the same already-resolved single-shard records
+ * this function always fetched anyway, not by adding a SQLite dependency to
+ * this path. See docs/specifications/persistence.md §2 for why this is
+ * deliberately different from search_workspace's SQLite/FTS5-backed
+ * read model.
+ */
 export function queryCollection(
 	caller: CallerIdentity,
-	collectionId: string
+	collectionId: string,
+	filter?: ViewFilter[]
 ): {
 	collection: CollectionMeta | undefined;
 	records: WorkspaceRecord[];
@@ -198,7 +215,7 @@ export function queryCollection(
 
 	requireAccessibleParent(caller, collectionId, 'query_collection');
 	const collection = crdtGetCollection(doc, collectionId);
-	const records = crdtListRecordsForParent(doc, collectionId);
+	const records = applyFilters(crdtListRecordsForParent(doc, collectionId), filter);
 
 	logAudit({ actor, action: 'query_collection', targetRecordId: collectionId });
 	return { collection, records };

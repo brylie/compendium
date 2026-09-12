@@ -52,6 +52,19 @@ describe('searchWorkspace: snippet boundaries', () => {
 	});
 });
 
+describe('searchWorkspace: nested container blocks (#234)', () => {
+	it('finds text in a paragraph nested inside a columns/column container, not just top-level Document blocks', () => {
+		const doc = createDocument(human, { title: 'Columns Doc' });
+		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const column = columns.childRecordIds![0];
+		const paragraph = createRecord(human, { parentId: column, blockType: 'paragraph' });
+		writeRecord(human, paragraph.id, { markdown: 'nested column searchable content' });
+
+		const results = searchWorkspace(human, 'searchable');
+		expect(results.some((r) => r.recordId === paragraph.id)).toBe(true);
+	});
+});
+
 describe('searchWorkspace: collection row properties', () => {
 	it('matches a select property and skips non-text/select properties ahead of it', () => {
 		const collection = createCollection(human, {

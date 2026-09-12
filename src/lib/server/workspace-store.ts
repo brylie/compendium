@@ -11,6 +11,11 @@ import {
 	flushPendingCatalogMirrorEvents,
 	resetCatalogMirrorObserverForTests
 } from './catalog-mirror-observer.js';
+import {
+	attachRecordIndexObserver,
+	resetRecordIndexObserverForTests
+} from './record-index-observer.js';
+import { rebuildRecordIndexForShard } from './record-index.js';
 import { aggregateHolds, initHoldEviction, resetHoldEvictionForTests } from './holds.js';
 import { ensureCatalogBootstrapped, reconcileCatalogMetadata } from './catalog.js';
 import { getInstanceWorkspaceId } from './instance.js';
@@ -109,6 +114,13 @@ function createContext(workspaceId: string, shardId: string): InternalContext {
 	reconcileCatalogMetadata(workspaceId, doc);
 	attachDocAuditObserver(doc);
 	attachCatalogMirrorObserver(workspaceId, doc);
+	// Rebuild before attaching the live observer, matching the catalog's own
+	// bootstrap-then-mirror ordering above: this shard's record_index rows
+	// always start correct for whatever the snapshot just loaded (or empty,
+	// for a brand-new shard), so the projection is never stale for content
+	// that existed before this process/context resolved it.
+	rebuildRecordIndexForShard(workspaceId, shardId, doc);
+	attachRecordIndexObserver(workspaceId, shardId, doc);
 
 	const awareness = new Awareness(doc);
 	initHoldEviction(awareness);
@@ -265,5 +277,6 @@ export function resetWorkspaceStoreForTests(): void {
 	globalThis.__workspaceContexts = undefined;
 	resetAuditObserverForTests();
 	resetCatalogMirrorObserverForTests();
+	resetRecordIndexObserverForTests();
 	resetHoldEvictionForTests();
 }

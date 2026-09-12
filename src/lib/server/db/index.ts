@@ -7,6 +7,26 @@ import * as schema from './schema.js';
 
 export type Db = BetterSQLite3Database<typeof schema>;
 
+// `record_index` (persistence.md §2) is a SQLite FTS5 virtual table, not a
+// plain rowid table — drizzle-kit's schema.ts/migration generator has no
+// representation for a virtual table, so it's created here directly with
+// raw DDL instead of going through schema.ts + `npm run db:generate`.
+// Idempotent (`IF NOT EXISTS`) so it's safe to run on every `getDb()` call
+// across restarts and test runs. `record_id` is deliberately UNINDEXED with
+// no uniqueness constraint of its own — FTS5 has no such constraint — see
+// record-index.ts's upsert, which does its own delete-then-insert.
+const CREATE_RECORD_INDEX_TABLE = `
+	CREATE VIRTUAL TABLE IF NOT EXISTS record_index USING fts5(
+		record_id UNINDEXED,
+		workspace_id UNINDEXED,
+		shard_id UNINDEXED,
+		parent_id UNINDEXED,
+		parent_type UNINDEXED,
+		plain_text_content,
+		properties_json UNINDEXED
+	)
+`;
+
 interface DbState {
 	client: Database.Database;
 	db: Db;
@@ -45,6 +65,7 @@ export function getDb(): Db {
 	client.pragma('foreign_keys = ON');
 	const db = drizzle(client, { schema });
 	migrate(db, { migrationsFolder: 'drizzle' });
+	client.exec(CREATE_RECORD_INDEX_TABLE);
 
 	globalThis.__db = { client, db };
 	return db;
