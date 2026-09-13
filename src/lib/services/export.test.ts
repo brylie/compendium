@@ -325,9 +325,9 @@ describe('export service', () => {
 				id: 'rec-1',
 				parentId: 'col-1',
 				order: 'a',
-				createdBy: 'user_test' as ActorId,
+				createdBy: 'user_test' as unknown as ActorId,
 				createdAt: 1000,
-				lastEditedBy: 'user_test' as ActorId,
+				lastEditedBy: 'user_test' as unknown as ActorId,
 				lastEditedAt: 1000,
 				properties: { val: { type: 'text', value: '=CMD("calc")' } }
 			},
@@ -335,9 +335,9 @@ describe('export service', () => {
 				id: 'rec-2',
 				parentId: 'col-1',
 				order: 'b',
-				createdBy: 'user_test' as ActorId,
+				createdBy: 'user_test' as unknown as ActorId,
 				createdAt: 1001,
-				lastEditedBy: 'user_test' as ActorId,
+				lastEditedBy: 'user_test' as unknown as ActorId,
 				lastEditedAt: 1001,
 				properties: { val: { type: 'text', value: '+100' } }
 			}
