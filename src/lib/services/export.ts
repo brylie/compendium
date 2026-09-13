@@ -498,18 +498,77 @@ function cleanupStaleMirrorFiles(
 	previousWrittenPaths: Set<string>
 ): void {
 	for (const prevPath of previousWrittenPaths) {
-		// eslint-disable-next-line security/detect-non-literal-fs-filename
-		if (!writtenPaths.has(prevPath) && fs.existsSync(prevPath)) {
-			try {
+		try {
+			const safePath = ensurePathInRoot(prevPath, resolvedDir);
+			// eslint-disable-next-line security/detect-non-literal-fs-filename
+			if (!writtenPaths.has(safePath) && fs.existsSync(safePath)) {
 				// eslint-disable-next-line security/detect-non-literal-fs-filename
-				fs.unlinkSync(prevPath);
-			} catch {
-				// ignore deletion error
+				fs.unlinkSync(safePath);
 			}
+		} catch {
+			// ignore deletion error or path traversal attempts
 		}
 	}
 
 	removeEmptySubdirs(resolvedDir);
+}
+
+function parseMarkerFilePaths(parsedMarker: unknown, resolvedDir: string): Set<string> {
+	const previousWrittenPaths = new Set<string>();
+	if (!parsedMarker || typeof parsedMarker !== 'object') return previousWrittenPaths;
+	const files = (parsedMarker as { files?: unknown }).files;
+	if (!Array.isArray(files)) return previousWrittenPaths;
+
+	for (const fileItem of files) {
+		if (typeof fileItem !== 'string' || !fileItem.trim()) continue;
+		try {
+			const targetPath = ensurePathInRoot(
+				path.isAbsolute(fileItem) ? fileItem : path.join(resolvedDir, fileItem),
+				resolvedDir
+			);
+			previousWrittenPaths.add(targetPath);
+		} catch {
+			// ignore invalid or out-of-root paths in marker
+		}
+	}
+	return previousWrittenPaths;
+}
+
+function loadPreviousWrittenPaths(manifestMarkerPath: string, resolvedDir: string): Set<string> {
+	// eslint-disable-next-line security/detect-non-literal-fs-filename
+	if (!fs.existsSync(manifestMarkerPath)) return new Set<string>();
+	try {
+		// eslint-disable-next-line security/detect-non-literal-fs-filename
+		const markerContent = fs.readFileSync(manifestMarkerPath, 'utf-8');
+		return parseMarkerFilePaths(JSON.parse(markerContent), resolvedDir);
+	} catch {
+		return new Set<string>();
+	}
+}
+
+function writeExportFilesToDisk(
+	exportFiles: { path: string; content: string | Uint8Array }[],
+	resolvedDir: string
+): Set<string> {
+	const writtenPaths = new Set<string>();
+	for (const file of exportFiles) {
+		const filePath = ensurePathInRoot(path.join(resolvedDir, file.path), resolvedDir);
+		const fileDir = path.dirname(filePath);
+		// eslint-disable-next-line security/detect-non-literal-fs-filename
+		if (!fs.existsSync(fileDir)) {
+			// eslint-disable-next-line security/detect-non-literal-fs-filename
+			fs.mkdirSync(fileDir, { recursive: true });
+		}
+		if (typeof file.content === 'string') {
+			// eslint-disable-next-line security/detect-non-literal-fs-filename
+			fs.writeFileSync(filePath, file.content, 'utf-8');
+		} else {
+			// eslint-disable-next-line security/detect-non-literal-fs-filename
+			fs.writeFileSync(filePath, file.content);
+		}
+		writtenPaths.add(filePath);
+	}
+	return writtenPaths;
 }
 
 /** Performs a one-directional synchronization of workspace content to the Markdown mirror directory. */
@@ -536,50 +595,18 @@ export function syncMarkdownMirror(): {
 		fs.mkdirSync(resolvedDir, { recursive: true });
 	}
 
-	const writtenPaths = new Set<string>();
 	const manifestMarkerPath = path.join(resolvedDir, '.compendium-mirror-manifest.json');
-	let previousWrittenPaths = new Set<string>();
-
-	// eslint-disable-next-line security/detect-non-literal-fs-filename
-	if (fs.existsSync(manifestMarkerPath)) {
-		try {
-			// eslint-disable-next-line security/detect-non-literal-fs-filename
-			const markerContent = fs.readFileSync(manifestMarkerPath, 'utf-8');
-			const parsedMarker = JSON.parse(markerContent);
-			if (Array.isArray(parsedMarker.files)) {
-				previousWrittenPaths = new Set(parsedMarker.files);
-			}
-		} catch {
-			// ignore read/parse errors for mirror marker
-		}
-	}
-
-	for (const file of exportResult.files) {
-		const filePath = ensurePathInRoot(path.join(resolvedDir, file.path), resolvedDir);
-		const fileDir = path.dirname(filePath);
-		// eslint-disable-next-line security/detect-non-literal-fs-filename
-		if (!fs.existsSync(fileDir)) {
-			// eslint-disable-next-line security/detect-non-literal-fs-filename
-			fs.mkdirSync(fileDir, { recursive: true });
-		}
-		if (typeof file.content === 'string') {
-			// eslint-disable-next-line security/detect-non-literal-fs-filename
-			fs.writeFileSync(filePath, file.content, 'utf-8');
-		} else {
-			// eslint-disable-next-line security/detect-non-literal-fs-filename
-			fs.writeFileSync(filePath, file.content);
-		}
-		writtenPaths.add(filePath);
-	}
+	const previousWrittenPaths = loadPreviousWrittenPaths(manifestMarkerPath, resolvedDir);
+	const writtenPaths = writeExportFilesToDisk(exportResult.files, resolvedDir);
 
 	// Clean up only files previously written by the Markdown mirror
 	cleanupStaleMirrorFiles(resolvedDir, writtenPaths, previousWrittenPaths);
 
-	// Write new mirror manifest marker
+	// Write new mirror manifest marker storing relative paths
 	const mirrorMarkerData = {
 		version: '1.0',
 		lastSyncedAt: Date.now(),
-		files: Array.from(writtenPaths)
+		files: exportResult.files.map((f) => f.path)
 	};
 	// eslint-disable-next-line security/detect-non-literal-fs-filename
 	fs.writeFileSync(manifestMarkerPath, JSON.stringify(mirrorMarkerData, null, 2), 'utf-8');

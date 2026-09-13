@@ -1,3 +1,4 @@
+import path from 'path';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import { load, actions } from './+page.server';
@@ -31,6 +32,17 @@ describe('routes/settings/export/+page.server', () => {
 		} else {
 			originalConfigData = null;
 		}
+
+		// Install isolated configuration using testOutputDir with mirroring disabled by default
+		const isolatedConfig = {
+			enabled: false,
+			outputDir: testOutputDir,
+			syncIntervalMs: 86400000
+		};
+		if (!fs.existsSync(path.dirname(configPath))) {
+			fs.mkdirSync(path.dirname(configPath), { recursive: true });
+		}
+		fs.writeFileSync(configPath, JSON.stringify(isolatedConfig, null, 2), 'utf-8');
 	});
 
 	afterEach(() => {
@@ -69,6 +81,9 @@ describe('routes/settings/export/+page.server', () => {
 	});
 
 	it('syncNow triggers mirror sync and returns success', async () => {
+		// Enable mirroring for testOutputDir before triggering syncNow
+		await actions.updateMirror(formEvent({ enabled: 'on', outputDir: testOutputDir }));
+
 		const result = (await actions.syncNow(
 			formEvent({}) as unknown as Parameters<typeof actions.syncNow>[0]
 		)) as unknown as { success: boolean };
