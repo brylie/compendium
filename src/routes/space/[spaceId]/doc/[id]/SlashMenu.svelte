@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { BlockType } from '$lib/data/types';
+	import { BLOCK_CAPABILITIES } from '$lib/data/block-capabilities';
 	import Icon from '$lib/components/Icon.svelte';
 
 	interface Command {
@@ -35,176 +36,147 @@
 
 	const CATEGORY_ORDER: CommandCategory[] = ['Writing', 'Structure', 'Media', 'Data', 'Reuse'];
 
-	const COMMANDS: Command[] = [
+	// Every insertable command's blockType/category/icon/aliases — UI-only
+	// presentation concerns that have no MCP-facing equivalent. `label` and
+	// `description` are deliberately NOT repeated here: they come from
+	// `BLOCK_CAPABILITIES` below (issue #29) so this menu and the MCP
+	// `list_block_types` discovery tool can't drift on that text. `column` has
+	// no entry — it's never directly insertable from this menu (created
+	// automatically as part of a Columns block).
+	const COMMAND_DEFINITIONS: Omit<Command, 'label' | 'description'>[] = [
 		{
 			blockType: 'paragraph',
 			category: 'Writing',
-			label: 'Text',
-			description: 'Just start writing with plain text.',
 			icon: 'document',
 			aliases: ['paragraph', 'text', 'plain', 'p']
 		},
 		{
 			blockType: 'heading_1',
 			category: 'Writing',
-			label: 'Heading 1',
-			description: 'Large section heading.',
 			icon: 'heading-1',
 			aliases: ['heading 1', 'title', 'h1', 'large']
 		},
 		{
 			blockType: 'heading_2',
 			category: 'Writing',
-			label: 'Heading 2',
-			description: 'Medium section heading.',
 			icon: 'heading-2',
 			aliases: ['heading 2', 'section', 'h2', 'medium']
 		},
 		{
 			blockType: 'heading_3',
 			category: 'Writing',
-			label: 'Heading 3',
-			description: 'Small section heading.',
 			icon: 'heading-3',
 			aliases: ['heading 3', 'subhead', 'h3', 'small']
 		},
 		{
 			blockType: 'heading_4',
 			category: 'Writing',
-			label: 'Heading 4',
-			description: 'Sub-heading.',
 			icon: 'heading-4',
 			aliases: ['heading 4', 'h4', 'subheading']
 		},
 		{
 			blockType: 'bulleted_list_item',
 			category: 'Writing',
-			label: 'Bulleted list',
-			description: 'Create a simple bulleted list.',
 			icon: 'list-bullet',
 			aliases: ['bulleted list', 'bullet', 'item', 'ul', 'unordered list']
 		},
 		{
 			blockType: 'numbered_list_item',
 			category: 'Writing',
-			label: 'Numbered list',
-			description: 'Create an ordered numbered list.',
 			icon: 'list-number',
 			aliases: ['numbered list', 'number', 'ordered list', 'item', 'ol']
 		},
 		{
 			blockType: 'to_do',
 			category: 'Writing',
-			label: 'To-do list',
-			description: 'Track tasks with a to-do checkbox.',
 			icon: 'checkbox',
 			aliases: ['to do', 'todo', 'task', 'check', 'checkbox', 'checklist']
 		},
 		{
 			blockType: 'callout',
 			category: 'Writing',
-			label: 'Callout',
-			description: 'Highlight key notes and warnings.',
 			icon: 'callout',
 			aliases: ['callout', 'note', 'alert', 'warning', 'info', 'tip', 'box']
 		},
 		{
 			blockType: 'quote',
 			category: 'Writing',
-			label: 'Quote',
-			description: 'Capture a quotation.',
 			icon: 'quote',
 			aliases: ['quote', 'blockquote', 'citation']
 		},
 		{
 			blockType: 'toggle',
 			category: 'Structure',
-			label: 'Toggle list',
-			description: 'Hide or show content inside.',
 			icon: 'toggle',
 			aliases: ['toggle', 'collapsible', 'collapse', 'expand', 'details']
 		},
 		{
 			blockType: 'columns',
 			category: 'Structure',
-			label: 'Columns',
-			description: 'Lay out content side by side.',
 			icon: 'columns',
 			aliases: ['columns', 'column', 'layout', 'side by side', 'multi-column']
 		},
 		{
 			blockType: 'code',
 			category: 'Media',
-			label: 'Code',
-			description: 'Capture a code snippet with monospace font.',
 			icon: 'code',
 			aliases: ['code', 'snippet', 'pre', 'program']
 		},
 		{
 			blockType: 'divider',
 			category: 'Structure',
-			label: 'Divider',
-			description: 'Visually divide sections with a line.',
 			icon: 'divider',
 			aliases: ['divider', 'hr', 'line', 'rule', 'separator']
 		},
 		{
 			blockType: 'table_of_contents',
 			category: 'Structure',
-			label: 'Table of contents',
-			description: 'Live outline of headings in this document.',
 			icon: 'toc',
 			aliases: ['table of contents', 'toc', 'outline', 'summary', 'headings']
 		},
 		{
 			blockType: 'child_pages',
 			category: 'Structure',
-			label: 'Child pages',
-			description: "Live list of this page's sub-pages.",
 			icon: 'child-pages',
 			aliases: ['child pages', 'page tree', 'subpages', 'sub-pages', 'children', 'index']
 		},
 		{
 			blockType: 'synced_block',
 			category: 'Reuse',
-			label: 'Synced block',
-			description: 'Reference content from another block.',
 			icon: 'sync',
 			aliases: ['synced block', 'sync', 'reference', 'mirror', 'linked block']
 		},
 		{
 			blockType: 'page_link',
 			category: 'Reuse',
-			label: 'Page link',
-			description: 'Link to another document.',
 			icon: 'link',
 			aliases: ['page link', 'document', 'subpage', 'wiki', 'mention', 'reference']
 		},
 		{
 			blockType: 'collection_view',
 			category: 'Data',
-			label: 'Collection view',
-			description: 'Embed a Table, Board, or Calendar view of a collection.',
 			icon: 'table',
 			aliases: ['collection view', 'table view', 'board', 'kanban', 'calendar', 'database']
 		},
 		{
 			blockType: 'table',
 			category: 'Data',
-			label: 'Table',
-			description: 'Add a table for structured information.',
 			icon: 'table',
 			aliases: ['table', 'grid', 'rows', 'columns']
 		},
 		{
 			blockType: 'embed',
 			category: 'Media',
-			label: 'Embed',
-			description: 'Embed content from another source.',
 			icon: 'link',
 			aliases: ['embed', 'media', 'video', 'image', 'url']
 		}
 	];
+
+	const COMMANDS: Command[] = COMMAND_DEFINITIONS.map((definition) => ({
+		...definition,
+		label: BLOCK_CAPABILITIES[definition.blockType].label,
+		description: BLOCK_CAPABILITIES[definition.blockType].description
+	}));
 
 	let {
 		query,

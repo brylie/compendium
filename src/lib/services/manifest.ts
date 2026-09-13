@@ -6,6 +6,7 @@ import * as search from './search';
 import * as spaces from './spaces';
 import * as tokens from './tokens';
 import * as audit from './audit';
+import * as blockTypes from './blockTypes';
 import * as exportModule from './export';
 
 export const serviceModules = {
@@ -17,6 +18,7 @@ export const serviceModules = {
 	spaces,
 	tokens,
 	audit,
+	blockTypes,
 	export: exportModule
 } as const;
 
@@ -181,6 +183,19 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 	'tokens.revokeToken': { mcp: false, ui: true },
 	'tokens.listTokens': { mcp: false, ui: true },
 	'audit.listAuditHistory': { mcp: false, ui: true },
+
+	// Read-only block-type discovery (issue #29) — not UI-exposed, since
+	// SlashMenu.svelte reads BLOCK_CAPABILITIES directly rather than round-
+	// tripping through this service layer the way get_document/query_collection
+	// intentionally do for MCP parity.
+	'blockTypes.listBlockTypes': {
+		mcp: true,
+		ui: false,
+		mcpToolName: 'list_block_types',
+		mcpDescription:
+			"List every currently enabled block type with its label, description, capability flags (isContainer/childBlockTypes/holdsFreeformText), and the create_record/write_record field contract needed to construct a correct request for it (which fields are creatable, writable after creation, or read-only/UI-only), plus referenced-record semantics and Markdown representation where applicable. Reads from the same BLOCK_CAPABILITIES table the UI's slash menu uses, so the two can't drift."
+	},
+
 	'export.exportWorkspace': { mcp: false, ui: true },
 	'export.exportDocument': { mcp: false, ui: true },
 	'export.exportCollection': { mcp: false, ui: true },
@@ -212,7 +227,8 @@ export const mcpAdapterBindings = {
 	'holds.releaseRecords': 'release_records',
 	'collections.listCollections': 'list_collections',
 	'collections.queryCollection': 'query_collection',
-	'search.searchWorkspace': 'search_workspace'
+	'search.searchWorkspace': 'search_workspace',
+	'blockTypes.listBlockTypes': 'list_block_types'
 } as const satisfies Partial<Record<ServiceMethod, string>>;
 
 export const uiAdapterBindings = {

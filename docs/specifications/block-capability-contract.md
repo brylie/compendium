@@ -24,6 +24,8 @@ A `BlockType`'s implementation issue must fill out all eleven fields before it m
 10. **Hold semantics** — whether this block type is safe to hold/replace/patch atomically during an agent write, per `collaboration.md`; a container type must state whether a hold on it implies holds on its children.
 11. **Accessible static/read-only rendering** — screen-reader and keyboard-only access to the block's content independent of any live-editing affordance (e.g., a Mermaid diagram's raw source must remain available to assistive tech, since the rendered SVG isn't meaningfully accessible on its own).
 
+**Update (issue #29):** `BLOCK_CAPABILITIES` now also carries a checked, machine-readable slice of fields 1 (label/description), 8 (a `markdown` descriptor: whether the type's own text is part of `write_record`'s markdown path, plus a one-line representation summary), and part of 9 (a `fields` contract — which `WorkspaceRecord` fields a type accepts via `create_record`/`write_record`, and which are exposed read-only) — surfaced by the MCP `list_block_types` tool (`src/lib/services/blockTypes.ts`, [`mcp-tools.md`](./mcp-tools.md)) and consumed by `SlashMenu.svelte` for its own label/description text, closing this file's own "Make the source of truth shared with the UI slash-menu registry" gap for those three fields. Fields 2, 4–7, 10, and 11 remain prose-only in this file — they describe interaction/accessibility behavior with no MCP-facing equivalent to check against, so a runtime table would just be restating narrative as data.
+
 ## 3. Worked examples
 
 ### Toggle / collapsible (shipped, P0)

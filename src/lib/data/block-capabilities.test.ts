@@ -55,10 +55,74 @@ describe('BLOCK_CAPABILITIES', () => {
 			// a closed union at the type level.
 			const unknown = 'future_block_type' as BlockType;
 			expect(() => blockCapabilitiesFor(unknown)).not.toThrow();
-			expect(blockCapabilitiesFor(unknown)).toEqual({
-				isContainer: false,
-				holdsFreeformText: false
-			});
+			const fallback = blockCapabilitiesFor(unknown);
+			expect(fallback.isContainer).toBe(false);
+			expect(fallback.holdsFreeformText).toBe(false);
+			expect(fallback.fields).toEqual({ creatable: [], writable: [], readOnly: [] });
+			expect(fallback.markdown.writable).toBe(false);
+		});
+	});
+
+	describe('the shared per-type contract (issue #29)', () => {
+		it('gives every BlockType a non-empty label and description', () => {
+			for (const blockType of blockTypes) {
+				const capabilities = BLOCK_CAPABILITIES[blockType];
+				expect(capabilities.label, blockType).not.toBe('');
+				expect(capabilities.description, blockType).not.toBe('');
+			}
+		});
+
+		it("accepts a 'markdown' write_record argument for every non-container type (acceptance, not effect)", () => {
+			// fields.writable is an acceptance question: write_record only
+			// rejects a markdown write outright for a container (isContainer).
+			// collection_view/child_pages accept it without erroring even though
+			// it never changes what get_document renders for them — that's the
+			// separate, effect-based markdown.writable question below.
+			for (const blockType of blockTypes) {
+				const capabilities = BLOCK_CAPABILITIES[blockType];
+				expect(capabilities.fields.writable.includes('markdown'), blockType).toBe(
+					!capabilities.isContainer
+				);
+			}
+		});
+
+		it('never claims a rendering effect for a markdown write write_record does not even accept', () => {
+			for (const blockType of blockTypes) {
+				const capabilities = BLOCK_CAPABILITIES[blockType];
+				if (capabilities.markdown.writable) {
+					expect(capabilities.fields.writable, blockType).toContain('markdown');
+				}
+			}
+		});
+
+		it('never marks a container type as accepting a markdown write', () => {
+			for (const blockType of blockTypes) {
+				const capabilities = BLOCK_CAPABILITIES[blockType];
+				if (capabilities.isContainer) {
+					expect(capabilities.markdown.writable, blockType).toBe(false);
+				}
+			}
+		});
+
+		it('never gives a container type its own creatable/writable content fields', () => {
+			for (const blockType of blockTypes) {
+				const capabilities = BLOCK_CAPABILITIES[blockType];
+				if (capabilities.isContainer) {
+					expect(capabilities.fields.writable, blockType).toEqual([]);
+				}
+			}
+		});
+
+		it('only declares referencedRecordSemantics for a type that actually uses referencedRecordId', () => {
+			const referencingTypes = ['synced_block', 'page_link', 'collection_view', 'child_pages'];
+			for (const blockType of blockTypes) {
+				const capabilities = BLOCK_CAPABILITIES[blockType];
+				if (referencingTypes.includes(blockType)) {
+					expect(capabilities.referencedRecordSemantics, blockType).toBeDefined();
+				} else {
+					expect(capabilities.referencedRecordSemantics, blockType).toBeUndefined();
+				}
+			}
 		});
 	});
 });
