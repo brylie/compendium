@@ -14,9 +14,9 @@ import type { PropertyValue, RichText, WorkspaceRecord } from '../data/types.js'
 // at its own top level (for preview mode) — a context where the `$lib`
 // alias isn't registered yet (see the rest of src/lib/server/*.ts, which
 // only ever imports the data layer via relative paths for exactly this
-// reason). richTextToMarkdown also pulls in resolveParentWorkspaceContext
-// to resolve a cross-shard wiki-link's *display title*, which the plain-text
-// search index has no use for anyway — the raw run text below is both
+// reason). richTextToMarkdown also performs a server-backed lookup to resolve
+// a cross-shard wiki-link's *display title*, which the plain-text search index
+// has no use for anyway — the raw run text below is both
 // simpler and a better search signal (no Markdown escaping/`[[brackets]]`
 // noise in what an agent's query has to match).
 function plainTextFromRichText(richText: RichText): string {

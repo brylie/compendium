@@ -2,7 +2,7 @@ import { getInstanceWorkspaceId } from './instance.js';
 import { listSpaces } from './catalog.js';
 import { resolveWorkspaceContext } from './workspace-store.js';
 import { CURRENT_USER } from './current-user.js';
-import type { AccessToken } from '../mcp/tokens.js';
+import type { AccessToken } from './token-store.js';
 import type { ActorId } from '../data/types.js';
 
 // Who a boundary call is acting as — an access token (MCP) or a plain human
