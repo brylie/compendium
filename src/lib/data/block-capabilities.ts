@@ -44,3 +44,27 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 	columns: { isContainer: true, childBlockTypes: ['column'], holdsFreeformText: false },
 	column: { isContainer: true, childBlockTypes: columnChildBlockTypes, holdsFreeformText: false }
 };
+
+// The safest possible defaults for a `blockType` this table doesn't
+// recognize — leaf, no free-form text — matching what every per-site
+// `===`/`.includes()` check this table replaced already did for an
+// unrecognized value (never throw, never treat it as a container).
+const UNKNOWN_BLOCK_CAPABILITIES: BlockCapabilities = {
+	isContainer: false,
+	holdsFreeformText: false
+};
+
+/**
+ * Looks up `blockType`'s capabilities, falling back to
+ * `UNKNOWN_BLOCK_CAPABILITIES` instead of throwing. `BlockType` is a closed
+ * TypeScript union, but a value read off a live Yjs record (`TypedYMap.get`
+ * only casts, it never validates) can still carry a `blockType` this
+ * client's own code doesn't recognize yet — e.g. a newer block type another,
+ * differently-versioned client already wrote during a rolling deploy. Direct
+ * `BLOCK_CAPABILITIES[blockType]` indexing would throw on that value; every
+ * call site reading a `blockType` off existing record data should go through
+ * this instead of indexing the table directly.
+ */
+export function blockCapabilitiesFor(blockType: BlockType): BlockCapabilities {
+	return BLOCK_CAPABILITIES[blockType] ?? UNKNOWN_BLOCK_CAPABILITIES;
+}

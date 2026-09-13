@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BLOCK_CAPABILITIES } from './block-capabilities';
+import { BLOCK_CAPABILITIES, blockCapabilitiesFor } from './block-capabilities';
 import { blockTypes, columnChildBlockTypes, type BlockType } from './types';
 
 describe('BLOCK_CAPABILITIES', () => {
@@ -38,5 +38,27 @@ describe('BLOCK_CAPABILITIES', () => {
 
 	it('only lets a columns block directly hold column blocks', () => {
 		expect(BLOCK_CAPABILITIES.columns.childBlockTypes).toEqual(['column']);
+	});
+
+	describe('blockCapabilitiesFor', () => {
+		it('returns the table entry for every known BlockType', () => {
+			for (const blockType of blockTypes) {
+				expect(blockCapabilitiesFor(blockType)).toBe(BLOCK_CAPABILITIES[blockType]);
+			}
+		});
+
+		it('falls back to a safe leaf default instead of throwing for an unrecognized value', () => {
+			// A value a live Yjs record could carry that this client's own code
+			// doesn't recognize yet (e.g. a newer block type written by another,
+			// differently-versioned client) — TypedYMap.get only casts, it never
+			// validates, so this is reachable at runtime despite BlockType being
+			// a closed union at the type level.
+			const unknown = 'future_block_type' as BlockType;
+			expect(() => blockCapabilitiesFor(unknown)).not.toThrow();
+			expect(blockCapabilitiesFor(unknown)).toEqual({
+				isContainer: false,
+				holdsFreeformText: false
+			});
+		});
 	});
 });

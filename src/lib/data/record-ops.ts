@@ -14,7 +14,7 @@ import type {
 	ViewConfig,
 	WorkspaceRecord
 } from './types';
-import { BLOCK_CAPABILITIES } from './block-capabilities';
+import { blockCapabilitiesFor } from './block-capabilities';
 import { applyRichTextToYText, yTextToRichText } from './richtext';
 import { type TypedYMap, typedYMap } from './yjs-typed';
 import {
@@ -188,7 +188,7 @@ function applyDocumentKindFields(
 	input: CreateRecordInput,
 	siblingIds: Y.Array<string>
 ): void {
-	const isContainer = BLOCK_CAPABILITIES[blockType].isContainer;
+	const isContainer = blockCapabilitiesFor(blockType).isContainer;
 	yrecord.set('blockType', blockType);
 	// A container never holds its own free-form text — its content lives
 	// entirely in its children (data-model.md §3.1) — so unlike every other
@@ -538,7 +538,7 @@ export function setRecordReferencedId(
 }
 
 // Neither of detachSyncedBlock's blockType/content copy steps below is safe
-// for a container (BLOCK_CAPABILITIES[...].isContainer): it has no content
+// for a container (blockCapabilitiesFor(...).isContainer): it has no content
 // Y.Text at all (createRecord never allocates one — see
 // applyDocumentKindFields) and, more importantly, needs its own
 // childRecordIds array to be a valid columns/column block at all — blindly
@@ -546,7 +546,7 @@ export function setRecordReferencedId(
 // children. The "Set target ID" dialog accepts any pasted record id with no
 // kind check, so this has to be guarded here rather than assumed away.
 function isUndetachableSourceBlockType(blockType: BlockType): boolean {
-	return BLOCK_CAPABILITIES[blockType].isContainer;
+	return blockCapabilitiesFor(blockType).isContainer;
 }
 
 /**

@@ -46,7 +46,7 @@
 		subscribeHeldByOthers
 	} from '$lib/client/presence';
 	import { redo, subscribeUndoRedoState, undo } from '$lib/client/undo';
-	import { BLOCK_CAPABILITIES } from '$lib/data/block-capabilities';
+	import { BLOCK_CAPABILITIES, blockCapabilitiesFor } from '$lib/data/block-capabilities';
 	import {
 		blockTypes,
 		type ActorId,
@@ -625,8 +625,11 @@
 	// meaningful operation. Used to gate both Backspace-joins-the-previous-
 	// block and the toolbar's convert-current-block-in-place behavior.
 	// Driven by BLOCK_CAPABILITIES (issue #229) instead of its own list.
+	// blockCapabilitiesFor (not direct BLOCK_CAPABILITIES indexing) since
+	// `blockType` here can come straight off an existing record's own live
+	// Yjs field, which TypedYMap.get casts but never validates.
 	function blockHoldsFreeformText(blockType?: BlockType): boolean {
-		return !!blockType && BLOCK_CAPABILITIES[blockType].holdsFreeformText;
+		return !!blockType && blockCapabilitiesFor(blockType).holdsFreeformText;
 	}
 
 	function isBlockTextEmpty(blockId: string): boolean {
@@ -1387,9 +1390,22 @@
 		code: 'Code'
 	};
 
+	// Throws rather than silently falling back to the raw `type` discriminator
+	// as a label — a missing entry here should fail loudly (surfacing on any
+	// render of this Document page, including in tests) the same way a
+	// missing BLOCK_CAPABILITIES entry already does via block-capabilities
+	// .test.ts, not leak an internal identifier into the "Convert to" menu.
 	const CONVERTIBLE_BLOCK_TYPES: { type: BlockType; label: string }[] = blockTypes
 		.filter((type) => BLOCK_CAPABILITIES[type].holdsFreeformText)
-		.map((type) => ({ type, label: CONVERTIBLE_BLOCK_TYPE_LABELS[type] ?? type }));
+		.map((type) => {
+			const label = CONVERTIBLE_BLOCK_TYPE_LABELS[type];
+			if (!label) {
+				throw new Error(
+					`CONVERTIBLE_BLOCK_TYPE_LABELS is missing an entry for text-bearing block type "${type}".`
+				);
+			}
+			return { type, label };
+		});
 
 	function isConvertibleBlockType(blockType?: BlockType): boolean {
 		return CONVERTIBLE_BLOCK_TYPES.some((c) => c.type === blockType);

@@ -1,5 +1,6 @@
 import * as Y from 'yjs';
 import type { ParentKind, WorkspaceRecord } from './types';
+import { blockCapabilitiesFor } from './block-capabilities';
 import { applyRichTextToYText } from './richtext';
 import { type TypedYMap, typedYMap } from './yjs-typed';
 import {
@@ -92,12 +93,14 @@ function applyCopiedRecordFields(
 	kind: ParentKind
 ): void {
 	if (kind === 'document' || kind === 'record') {
-		yrecord.set('blockType', record.blockType ?? 'paragraph');
-		// A container (columns/column) has no content Y.Text at all, matching
-		// how createRecord builds one fresh — not a present-but-empty one,
-		// which would round-trip differently through readRecord (an empty
-		// Y.Text is still truthy, so it wouldn't read back as `undefined`).
-		if (record.blockType !== 'columns' && record.blockType !== 'column') {
+		const blockType = record.blockType ?? 'paragraph';
+		yrecord.set('blockType', blockType);
+		// A container (BLOCK_CAPABILITIES[...].isContainer, issue #229) has no
+		// content Y.Text at all, matching how createRecord builds one fresh —
+		// not a present-but-empty one, which would round-trip differently
+		// through readRecord (an empty Y.Text is still truthy, so it wouldn't
+		// read back as `undefined`).
+		if (!blockCapabilitiesFor(blockType).isContainer) {
 			const ytext = new Y.Text();
 			if (record.content) applyRichTextToYText(ytext, record.content);
 			yrecord.set('content', ytext);

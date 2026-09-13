@@ -42,6 +42,8 @@ A `BlockType`'s implementation issue must fill out all eleven fields before it m
 | Hold semantics        | Holding a toggle holds only its summary text by default; holding a specific child holds that child alone                                                                                                          |
 | Accessible rendering  | Native `<details>`/`<summary>` semantics carry keyboard and screen-reader support for free                                                                                                                        |
 
+This row's Content shape describes the intended container-with-children design; the current runtime (`BLOCK_CAPABILITIES.toggle`, issue #229) declares `toggle` a leaf (`isContainer: false`) with no `childBlockTypes` — it stores only its own summary text (`WorkspaceRecord.content`/`collapsed`), the same shape as any other text-bearing block, and creates no `recordIds` array. This is the exact gap issue #227 ("Toggle blocks don't actually nest/hide their children") tracks; flagged here rather than silently perpetuated, left uncorrected since fixing it is that issue's own scope, not this contract doc's.
+
 ### Diagram / Mermaid (#151, new in 0.4.0)
 
 | Field                 | Value                                                                                                                                                                                                                |
