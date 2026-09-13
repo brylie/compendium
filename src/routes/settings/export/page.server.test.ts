@@ -21,7 +21,7 @@ function formEvent(fields: Record<string, string>): Parameters<typeof actions.up
 
 describe('routes/settings/export/+page.server', () => {
 	it('load() returns current mirror configuration', () => {
-		const result = load(loadEvent());
+		const result = load(loadEvent()) as unknown as { mirrorConfig: { enabled: boolean } };
 		expect(result).toHaveProperty('mirrorConfig');
 		expect(result.mirrorConfig).toHaveProperty('enabled');
 	});

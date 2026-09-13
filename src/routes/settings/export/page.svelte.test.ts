@@ -10,8 +10,7 @@ describe('settings/export +page.svelte', () => {
 				mirrorConfig: {
 					enabled: false,
 					outputDir: './markdown-export',
-					syncIntervalMs: 3600000,
-					lastSyncedAt: undefined
+					syncIntervalMs: 3600000
 				}
 			},
 			form: null
@@ -24,17 +23,17 @@ describe('settings/export +page.svelte', () => {
 	});
 
 	it('renders export settings page with enabled mirror status and sync button', () => {
+		const mirrorConfig = {
+			enabled: true,
+			outputDir: '/custom/export/dir',
+			syncIntervalMs: 3600000
+		};
 		render(Page, {
 			params: {},
 			data: {
-				mirrorConfig: {
-					enabled: true,
-					outputDir: '/custom/export/dir',
-					syncIntervalMs: 3600000,
-					lastSyncedAt: 1789230000000
-				}
+				mirrorConfig
 			},
-			form: { success: true }
+			form: { success: true, mirrorConfig }
 		});
 
 		expect(screen.getByText('Sync Now')).toBeInTheDocument();
@@ -48,8 +47,7 @@ describe('settings/export +page.svelte', () => {
 				mirrorConfig: {
 					enabled: false,
 					outputDir: './markdown-export',
-					syncIntervalMs: 3600000,
-					lastSyncedAt: undefined
+					syncIntervalMs: 3600000
 				}
 			},
 			form: { error: 'Failed to update mirror configuration' }
