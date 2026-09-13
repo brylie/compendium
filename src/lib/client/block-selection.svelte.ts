@@ -135,7 +135,7 @@ export function createBlockSelection(options: BlockSelectionOptions) {
 		if (!ydoc) return;
 		const selectedIds = orderedSelection().map((r) => r.id);
 		if (selectedIds.length === 0) return;
-		const copies = ydoc.transact(() =>
+		const copies = transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () =>
 			selectedIds.map((id) => duplicateRecord(ydoc, id, CURRENT_USER))
 		);
 		ids.clear();
@@ -191,7 +191,7 @@ export function createBlockSelection(options: BlockSelectionOptions) {
 		if (!ydoc || !canMoveAsGroup(direction)) return;
 		const { siblings, groupStart, groupEnd } = resolveGroupBounds()!;
 
-		ydoc.transact(() => {
+		transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () => {
 			if (direction === 'up') {
 				reorderRecord(ydoc, siblings[groupStart - 1].id, siblings[groupEnd].id);
 			} else {
