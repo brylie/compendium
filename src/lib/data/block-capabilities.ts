@@ -10,7 +10,12 @@ export interface BlockFieldContract {
 	 */
 	creatable: readonly string[];
 	/**
-	 * MCP argument names `write_record` accepts for this type after creation.
+	 * MCP argument names `write_record` accepts for this type after creation —
+	 * i.e. calling it does not error. This is acceptance, not effect: `markdown`
+	 * is listed here for `collection_view`/`child_pages` because `write_record`
+	 * only rejects a `markdown` write for a container type (`isContainer`), even
+	 * though it never changes what `get_document` renders for those two types —
+	 * see `markdown.writable` below for that separate, effect-based question.
 	 * Overlaps `creatable` for an argument settable both at creation and later
 	 * (e.g. page_link's `referencedRecordId`); an argument in `creatable` but
 	 * not here is set-once-at-creation only (e.g. child_pages' `childPagesDepth`).
@@ -52,16 +57,19 @@ export interface BlockCapabilities {
 	markdown: {
 		/**
 		 * Whether `write_record`'s `markdown` argument can ever change what
-		 * `get_document` renders for this type. False only when a write is
-		 * rejected outright (`isContainer` — `columns`/`column`) or silently
-		 * has zero rendering effect in every state (`collection_view`,
-		 * `child_pages`, whose markdown is always computed from other fields
-		 * instead) — every other type's own `Y.Text` is created at `create_record`
-		 * time (`record-ops.ts`) and rendered verbatim by `get_document`'s
-		 * generic branch (`document-projection.ts`) regardless of
-		 * `holdsFreeformText`, which governs UI Enter/Backspace/conversion
-		 * behavior only, not the MCP write/render path. `page_link` is `true`
-		 * but conditional — see its own `representation`.
+		 * `get_document` renders for this type — a rendering-*effect* question,
+		 * distinct from `fields.writable`'s acceptance question above. False for
+		 * a write rejected outright (`isContainer` — `columns`/`column`) or one
+		 * that's accepted but has zero rendering effect in every state
+		 * (`collection_view`, `child_pages`, whose markdown is always computed
+		 * from other fields instead, even though `write_record` doesn't error on
+		 * it — see `fields.writable`) — every other type's own `Y.Text` is
+		 * created at `create_record` time (`record-ops.ts`) and rendered
+		 * verbatim by `get_document`'s generic branch
+		 * (`document-projection.ts`) regardless of `holdsFreeformText`, which
+		 * governs UI Enter/Backspace/conversion behavior only, not the MCP
+		 * write/render path. `page_link` is `true` but conditional — see its own
+		 * `representation`.
 		 */
 		writable: boolean;
 		/**
@@ -328,7 +336,7 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		description: 'Embed a Table, Board, or Calendar view of a collection.',
 		fields: {
 			creatable: ['referencedRecordId', 'viewConfig'],
-			writable: ['referencedRecordId', 'viewConfig', 'viewConfigPatch'],
+			writable: ['referencedRecordId', 'viewConfig', 'viewConfigPatch', 'markdown'],
 			readOnly: []
 		},
 		referencedRecordSemantics:
@@ -346,7 +354,7 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		description: "Live list of this page's sub-pages.",
 		fields: {
 			creatable: ['referencedRecordId', 'childPagesDepth'],
-			writable: [],
+			writable: ['markdown'],
 			readOnly: []
 		},
 		referencedRecordSemantics:

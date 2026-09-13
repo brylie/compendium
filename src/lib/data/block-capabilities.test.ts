@@ -72,16 +72,26 @@ describe('BLOCK_CAPABILITIES', () => {
 			}
 		});
 
-		it("lists 'markdown' as writable exactly when markdown.writable is true", () => {
-			// Not the same partition as holdsFreeformText: write_record's markdown
-			// argument works for every non-container type except collection_view/
-			// child_pages (always computed, never rendered) — holdsFreeformText
-			// governs UI Enter/Backspace/conversion behavior only.
+		it("accepts a 'markdown' write_record argument for every non-container type (acceptance, not effect)", () => {
+			// fields.writable is an acceptance question: write_record only
+			// rejects a markdown write outright for a container (isContainer).
+			// collection_view/child_pages accept it without erroring even though
+			// it never changes what get_document renders for them — that's the
+			// separate, effect-based markdown.writable question below.
 			for (const blockType of blockTypes) {
 				const capabilities = BLOCK_CAPABILITIES[blockType];
 				expect(capabilities.fields.writable.includes('markdown'), blockType).toBe(
-					capabilities.markdown.writable
+					!capabilities.isContainer
 				);
+			}
+		});
+
+		it('never claims a rendering effect for a markdown write write_record does not even accept', () => {
+			for (const blockType of blockTypes) {
+				const capabilities = BLOCK_CAPABILITIES[blockType];
+				if (capabilities.markdown.writable) {
+					expect(capabilities.fields.writable, blockType).toContain('markdown');
+				}
 			}
 		});
 
