@@ -21,7 +21,6 @@
 		parentKindOf,
 		reorderRecord,
 		setBlockType,
-		setRecordChecked,
 		setRecordCollapsed,
 		setRecordReferencedId,
 		touchRecordEditor
@@ -55,6 +54,7 @@
 		type WorkspaceRecord
 	} from '$lib/data/types';
 	import BlockEditor from '$lib/components/BlockEditor.svelte';
+	import BlockRow, { type BlockEditorHandle } from '$lib/components/BlockRow.svelte';
 	import SlashMenu from './SlashMenu.svelte';
 	import Toolbar from './Toolbar.svelte';
 	import Icon from '$lib/components/Icon.svelte';
@@ -63,7 +63,6 @@
 	import ChildPagesBlock from '$lib/components/ChildPagesBlock.svelte';
 	import ColumnsBlock from '$lib/components/ColumnsBlock.svelte';
 	import PromptDialog from '$lib/components/PromptDialog.svelte';
-	import BlockActionMenu from '$lib/components/BlockActionMenu.svelte';
 	import SyncedBlockUsage from '$lib/components/SyncedBlockUsage.svelte';
 	import BacklinksPanel from '$lib/components/BacklinksPanel.svelte';
 	import DocumentOutline from '$lib/components/DocumentOutline.svelte';
@@ -180,20 +179,6 @@
 			])
 		])
 	);
-
-	interface BlockEditorHandle {
-		render: () => void;
-		applyFormat: (mark: keyof TextMarks, value?: unknown) => void;
-		applyFormatAtRange: (
-			mark: keyof TextMarks,
-			range: { start: number; end: number },
-			value?: unknown
-		) => void;
-		getSelectionRange: () => { start: number; end: number } | null;
-		getFormatState: () => Partial<Record<keyof TextMarks, boolean>>;
-		focusEditor: (position?: boolean | number) => void;
-		focusEditorAtLine: (edge: 'first' | 'last', clientX: number | null) => void;
-	}
 
 	let blockRefs: Record<string, BlockEditorHandle | undefined> = $state({});
 
@@ -1344,11 +1329,6 @@
 		void tick().then(() => blockRefs[blockId]?.focusEditor(true));
 	}
 
-	function toggleTodoCheck(block: WorkspaceRecord): void {
-		if (!ydoc) return;
-		setRecordChecked(ydoc, block.id, !block.checked, CURRENT_USER);
-	}
-
 	function toggleCollapseState(block: WorkspaceRecord): void {
 		if (!ydoc) return;
 		setRecordCollapsed(ydoc, block.id, !block.collapsed, CURRENT_USER);
@@ -1407,10 +1387,6 @@
 			return { type, label };
 		});
 
-	function isConvertibleBlockType(blockType?: BlockType): boolean {
-		return CONVERTIBLE_BLOCK_TYPES.some((c) => c.type === blockType);
-	}
-
 	// A column's own curated child-type subset (data-model.md §3.1) excludes
 	// callout/toggle/code entirely, so those three are dropped from the
 	// "Convert to" list offered *inside* a column — converting a column's
@@ -1420,6 +1396,23 @@
 	const COLUMN_CONVERTIBLE_BLOCK_TYPES = CONVERTIBLE_BLOCK_TYPES.filter((c) =>
 		BLOCK_CAPABILITIES.column.childBlockTypes?.includes(c.type)
 	);
+
+	// The block types BlockRow.svelte's own generic content dispatch doesn't
+	// know how to render (issue #239) — never produced inside a column, since
+	// they all fall outside BLOCK_CAPABILITIES.column.childBlockTypes (the
+	// same curated subset COLUMN_CONVERTIBLE_BLOCK_TYPES above excludes them
+	// from), so only the Document's own top-level flow ever supplies the
+	// `customContent` snippet that handles them.
+	const BLOCK_ROW_CUSTOM_CONTENT_TYPES: readonly BlockType[] = [
+		'callout',
+		'code',
+		'table_of_contents',
+		'synced_block',
+		'page_link',
+		'collection_view',
+		'child_pages',
+		'columns'
+	];
 
 	function duplicateBlock(blockId: string): void {
 		if (!ydoc) return;
@@ -1573,35 +1566,6 @@
 		}
 	}
 
-	// Same per-block-type dispatch shape as getHeadingLevel above, for the
-	// text styling a heading block's own BlockEditor renders with.
-	function headingTextClass(blockType?: BlockType): string {
-		switch (blockType) {
-			case 'heading_1':
-				return 'font-display text-2xl font-bold text-fg';
-			case 'heading_2':
-				return 'font-display text-xl font-semibold text-fg';
-			case 'heading_3':
-				return 'font-display text-lg font-semibold text-fg';
-			case 'heading_4':
-				return 'font-display text-base font-semibold text-fg';
-			default:
-				return 'text-base text-fg';
-		}
-	}
-
-	// Helper for numbered lists to compute sequential item numbers
-	function getNumberedListIndex(currentIndex: number): number {
-		let num = 1;
-		for (let i = currentIndex - 1; i >= 0; i--) {
-			if (blocks[i].blockType === 'numbered_list_item') {
-				num++;
-			} else {
-				break;
-			}
-		}
-		return num;
-	}
 	async function handleTitleKeydown(e: KeyboardEvent): Promise<void> {
 		if (e.key === 'Enter' || e.key === 'ArrowDown') {
 			e.preventDefault();
@@ -1732,178 +1696,17 @@
 		{@const bt = block.blockType ?? 'paragraph'}
 		{@const syncLocations = ydoc ? syncGroupLocations(provenanceRecordId, block.id) : []}
 
-		{#if draggingBlockId && dropIndicatorParentId === data.documentId && dropIndicatorIndex === index}
-			<div class="mx-auto w-full max-w-3xl px-6">
-				<div class="drop-indicator" aria-hidden="true"></div>
-			</div>
-		{/if}
-		<div
-			class="group relative mx-auto flex w-full items-start px-6 py-0.5"
-			class:max-w-3xl={!isBlockFullWidth(block)}
-			class:opacity-50={draggingBlockId === block.id}
-			class:bg-surface={selectedBlockIds.has(block.id)}
-			class:rounded={selectedBlockIds.has(block.id) || justNavigatedBlockId === block.id}
-			class:outline={justNavigatedBlockId === block.id}
-			class:outline-2={justNavigatedBlockId === block.id}
-			class:outline-accent={justNavigatedBlockId === block.id}
-			id="block-{block.id}"
-			data-block-row
-			data-block-parent={data.documentId}
-		>
-			<!-- Move handle: pointer-draggable, or ArrowUp/ArrowDown/Home/End
-					 once focused; Shift/Ctrl-click or Shift+Arrow selects a range
-					 instead (issue #152) — see the block-reordering/selection
-					 functions above. -->
-			<button
-				type="button"
-				class="mt-1 mr-1 flex h-5 w-5 flex-shrink-0 cursor-grab items-center justify-center rounded text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:bg-surface hover:text-fg focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent active:cursor-grabbing"
-				aria-label="Move block. Drag, or use Arrow Up, Arrow Down, Home, and End. Shift-click, Ctrl-click, or Shift-Arrow to select multiple blocks."
-				data-drag-handle={block.id}
-				onpointerdown={(e) => startBlockDrag(e, block.id, data.documentId, index)}
-				onkeydown={(e) => handleDragHandleKeydown(e, block.id)}
-			>
-				<Icon name="grip" size={14} />
-			</button>
-
-			<BlockActionMenu
-				blockType={block.blockType}
-				canMoveUp={index > 0}
-				canMoveDown={index < blocks.length - 1}
-				isConvertible={isConvertibleBlockType(block.blockType)}
-				convertOptions={CONVERTIBLE_BLOCK_TYPES}
-				onDuplicate={() => duplicateBlock(block.id)}
-				onDelete={() => deleteBlockViaMenu(block.id)}
-				onConvert={(blockType) => convertBlockViaMenu(block.id, blockType)}
-				onCopyLink={() => copyBlockLink(block.id)}
-				onMoveUp={() => moveBlock(block.id, 'up')}
-				onMoveDown={() => moveBlock(block.id, 'down')}
-			/>
-
-			<!-- Left Indicator / Control Gutter -->
-			{#if bt === 'to_do'}
-				<button
-					type="button"
-					onclick={() => toggleTodoCheck(block)}
-					class="mt-1 mr-2 flex h-4.5 w-4.5 flex-shrink-0 items-center justify-center rounded border border-border bg-bg text-accent transition-colors hover:border-accent"
-					class:bg-accent={block.checked}
-					class:border-accent={block.checked}
-					title={block.checked ? 'Mark as incomplete' : 'Mark as complete'}
-					aria-label={block.checked ? 'Mark as incomplete' : 'Mark as complete'}
-				>
-					{#if block.checked}
-						<Icon name="check" size={13} class="stroke-[2.5] text-accent-fg" />
-					{/if}
-				</button>
-			{:else if bt === 'bulleted_list_item'}
-				<span
-					class="mt-1 mr-2.5 flex h-4 w-3.5 flex-shrink-0 items-center justify-center font-bold text-muted select-none"
-				>
-					•
-				</span>
-			{:else if bt === 'numbered_list_item'}
-				<span
-					class="mt-1 mr-2 flex w-5 flex-shrink-0 items-center justify-end text-xs font-medium text-muted select-none"
-				>
-					{getNumberedListIndex(index)}.
-				</span>
-			{:else if bt === 'toggle'}
-				<button
-					type="button"
-					onclick={() => toggleCollapseState(block)}
-					class="mt-1 mr-1 flex h-4.5 w-4.5 flex-shrink-0 items-center justify-center rounded text-muted hover:bg-surface hover:text-fg"
-					aria-label={block.collapsed ? 'Expand section' : 'Collapse section'}
-				>
-					<Icon name={block.collapsed ? 'chevron-right' : 'chevron-down'} size={14} />
-				</button>
-			{/if}
-
-			<!-- Block Content -->
-			<div class="min-w-0 flex-1">
-				{#if holder}
-					<!-- Held / Placeholder Block (M1 Design System) -->
-					<!--
-							role="group", not role="status": the persistent live
-							region above is the sole announcement source. A
-							role="status" here would be a second, independent
-							live region — every hold's insertion (and each one's
-							text) would announce a second time on top of the
-							region's own announcement.
-						-->
-					<div
-						class="flex h-7 items-center gap-2 rounded-md bg-surface/40 px-2 py-1"
-						title="{formatActor(holder)} is editing this block"
-						role="group"
-						aria-label="{formatActor(holder)} is editing this block"
-					>
-						<span
-							class="flex h-4.5 w-4.5 flex-shrink-0 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-accent-fg"
-							aria-hidden="true"
-						>
-							{formatActor(holder).slice(0, 1).toUpperCase()}
-						</span>
-						<div class="shimmer-bar h-3 flex-1 rounded bg-surface" aria-hidden="true"></div>
-						<span class="text-[11px] font-medium text-muted" aria-hidden="true"
-							>{formatActor(holder)} editing…</span
-						>
-					</div>
-				{:else if bt === 'divider'}
-					<div class="my-3 border-t border-border"></div>
-				{:else if bt === 'callout'}
-					{#if ydoc}
-						<CalloutBlock {block} {ydoc}>
-							{#if ytext}
-								<BlockEditor
-									bind:this={blockRefs[block.id]}
-									{ytext}
-									recordId={block.id}
-									{linkTargets}
-									placeholder="Callout note…"
-									onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
-									onEnter={(caretOffset) => handleEnter(block, caretOffset)}
-									onBackspaceAtStart={() => handleBackspace(block, index)}
-									onFocusBlock={() => handleFocusBlock(block.id)}
-									onSlashKey={() => openSlashMenu(block.id)}
-									onLinkShortcut={() => openLinkComposer(block.id)}
-									isFirstBlock={index === 0}
-									isLastBlock={index === blocks.length - 1}
-									onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
-									onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
-								/>
-							{/if}
-						</CalloutBlock>
-					{/if}
-				{:else if bt === 'quote'}
-					<div class="border-l-2 border-accent/60 py-0.5 pl-3.5 text-fg/90 italic">
+		{#snippet customContent()}
+			{#if bt === 'callout'}
+				{#if ydoc}
+					<CalloutBlock {block} {ydoc}>
 						{#if ytext}
 							<BlockEditor
 								bind:this={blockRefs[block.id]}
 								{ytext}
 								recordId={block.id}
 								{linkTargets}
-								placeholder="Quote…"
-								onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
-								onEnter={(caretOffset) => handleEnter(block, caretOffset)}
-								onBackspaceAtStart={() => handleBackspace(block, index)}
-								onFocusBlock={() => handleFocusBlock(block.id)}
-								onSlashKey={() => {}}
-								onLinkShortcut={() => openLinkComposer(block.id)}
-								isFirstBlock={index === 0}
-								isLastBlock={index === blocks.length - 1}
-								onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
-								onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
-							/>
-						{/if}
-					</div>
-				{:else if bt === 'code'}
-					<div class="rounded-md border border-border bg-surface p-3 font-mono text-sm">
-						{#if ytext}
-							<BlockEditor
-								bind:this={blockRefs[block.id]}
-								{ytext}
-								recordId={block.id}
-								{linkTargets}
-								class="font-mono text-[13.5px]"
-								placeholder="Code snippet…"
+								placeholder="Callout note…"
 								onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 								onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 								onBackspaceAtStart={() => handleBackspace(block, index)}
@@ -1916,261 +1719,245 @@
 								onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
 							/>
 						{/if}
+					</CalloutBlock>
+				{/if}
+			{:else if bt === 'code'}
+				<div class="rounded-md border border-border bg-surface p-3 font-mono text-sm">
+					{#if ytext}
+						<BlockEditor
+							bind:this={blockRefs[block.id]}
+							{ytext}
+							recordId={block.id}
+							{linkTargets}
+							class="font-mono text-[13.5px]"
+							placeholder="Code snippet…"
+							onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
+							onEnter={(caretOffset) => handleEnter(block, caretOffset)}
+							onBackspaceAtStart={() => handleBackspace(block, index)}
+							onFocusBlock={() => handleFocusBlock(block.id)}
+							onSlashKey={() => openSlashMenu(block.id)}
+							onLinkShortcut={() => openLinkComposer(block.id)}
+							isFirstBlock={index === 0}
+							isLastBlock={index === blocks.length - 1}
+							onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
+							onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
+						/>
+					{/if}
+				</div>
+			{:else if bt === 'table_of_contents'}
+				<div class="my-2 rounded-lg border border-border bg-surface/60 p-4">
+					<div
+						class="flex items-center gap-2 text-xs font-semibold tracking-wider text-muted uppercase"
+					>
+						<Icon name="toc" size={15} class="text-accent" />
+						<span>Table of contents</span>
 					</div>
-				{:else if bt === 'table_of_contents'}
-					<div class="my-2 rounded-lg border border-border bg-surface/60 p-4">
-						<div
-							class="flex items-center gap-2 text-xs font-semibold tracking-wider text-muted uppercase"
-						>
-							<Icon name="toc" size={15} class="text-accent" />
-							<span>Table of contents</span>
-						</div>
-						<div class="mt-2 space-y-1 text-sm">
-							{#each headings as h (h.id)}
-								{@const level = getHeadingLevel(h.blockType)}
-								{@const hText = getHeadingText(h.id)}
-								<a
-									href="#block-{h.id}"
-									class="block text-muted transition-colors hover:text-accent"
-									style="padding-left: {(level - 1) * 16}px;"
-								>
-									{hText || 'Untitled heading'}
-								</a>
-							{:else}
-								<p class="text-xs text-muted italic">Add heading blocks to generate outline.</p>
-							{/each}
-						</div>
+					<div class="mt-2 space-y-1 text-sm">
+						{#each headings as h (h.id)}
+							{@const level = getHeadingLevel(h.blockType)}
+							{@const hText = getHeadingText(h.id)}
+							<a
+								href="#block-{h.id}"
+								class="block text-muted transition-colors hover:text-accent"
+								style="padding-left: {(level - 1) * 16}px;"
+							>
+								{hText || 'Untitled heading'}
+							</a>
+						{:else}
+							<p class="text-xs text-muted italic">Add heading blocks to generate outline.</p>
+						{/each}
 					</div>
-				{:else if bt === 'synced_block'}
-					<div class="rounded-md border border-dashed border-accent/40 bg-surface/30 p-2.5">
-						<div class="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted">
-							<span class="flex items-center gap-1 font-medium text-accent">
-								<Icon name="sync" size={13} />
-								<span>Synced Block</span>
-							</span>
-							<div class="flex items-center gap-2">
-								{#if syncLocations.length > 0}
-									<SyncedBlockUsage
-										spaceId={page.params.spaceId!}
-										currentDocumentId={data.documentId}
-										instances={syncLocations}
-										onJumpTo={(documentId, recordId) => {
-											if (documentId === data.documentId) void navigateToBlock(recordId);
-										}}
-										onDetach={() => handleDetachSyncedBlock(block.id)}
-									/>
-								{:else if block.referencedRecordId}
-									<button
-										type="button"
-										onclick={() => handleDetachSyncedBlock(block.id)}
-										class="flex items-center gap-1 hover:text-accent hover:underline"
-									>
-										<Icon name="unlink" size={12} />
-										<span>Detach</span>
-									</button>
-								{/if}
+				</div>
+			{:else if bt === 'synced_block'}
+				<div class="rounded-md border border-dashed border-accent/40 bg-surface/30 p-2.5">
+					<div class="mb-1 flex items-center justify-between gap-2 text-[11px] text-muted">
+						<span class="flex items-center gap-1 font-medium text-accent">
+							<Icon name="sync" size={13} />
+							<span>Synced Block</span>
+						</span>
+						<div class="flex items-center gap-2">
+							{#if syncLocations.length > 0}
+								<SyncedBlockUsage
+									spaceId={page.params.spaceId!}
+									currentDocumentId={data.documentId}
+									instances={syncLocations}
+									onJumpTo={(documentId, recordId) => {
+										if (documentId === data.documentId) void navigateToBlock(recordId);
+									}}
+									onDetach={() => handleDetachSyncedBlock(block.id)}
+								/>
+							{:else if block.referencedRecordId}
 								<button
 									type="button"
-									onclick={() => handleLinkSyncedBlock(block.id)}
-									class="hover:text-accent hover:underline"
+									onclick={() => handleDetachSyncedBlock(block.id)}
+									class="flex items-center gap-1 hover:text-accent hover:underline"
 								>
-									{block.referencedRecordId
-										? `ID: ${block.referencedRecordId.slice(0, 8)}…`
-										: 'Set target ID'}
+									<Icon name="unlink" size={12} />
+									<span>Detach</span>
 								</button>
-							</div>
+							{/if}
+							<button
+								type="button"
+								onclick={() => handleLinkSyncedBlock(block.id)}
+								class="hover:text-accent hover:underline"
+							>
+								{block.referencedRecordId
+									? `ID: ${block.referencedRecordId.slice(0, 8)}…`
+									: 'Set target ID'}
+							</button>
 						</div>
-						{#if ytext}
-							<BlockEditor
-								bind:this={blockRefs[block.id]}
-								{ytext}
-								recordId={block.id}
-								{linkTargets}
-								placeholder="Synced content…"
-								onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
-								onEnter={() => addBlockAfter(block.id)}
-								onBackspaceAtStart={() => handleBackspace(block, index)}
-								onFocusBlock={() => handleFocusBlock(block.id, provenanceRecordId)}
-								onSlashKey={() => {}}
-								onLinkShortcut={() => openLinkComposer(block.id)}
-								isFirstBlock={index === 0}
-								isLastBlock={index === blocks.length - 1}
-								onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
-								onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
-							/>
-						{:else}
-							<p class="text-xs text-muted italic">
-								Click 'Set target ID' to sync with an existing block record.
-							</p>
-						{/if}
 					</div>
-				{:else if bt === 'page_link'}
-					{@const linkedDoc = block.referencedRecordId
-						? documentMetadataById.get(block.referencedRecordId)
-						: undefined}
-					{@const isBroken = !!block.referencedRecordId && !linkedDoc}
-					<div class="my-1 rounded-lg border border-border bg-surface/50 p-2.5 shadow-xs">
-						{#if linkedDoc}
-							<div class="flex items-center justify-between">
-								<a
-									href={resolve('/space/[spaceId]/doc/[id]', {
-										spaceId: page.params.spaceId!,
-										id: linkedDoc.id
-									})}
-									class="flex items-center gap-2 text-sm font-medium text-fg transition-colors hover:text-accent"
-								>
-									<Icon name="document" size={16} class="flex-shrink-0 text-accent" />
-									<span class="underline underline-offset-2"
-										>{linkedDoc.title || 'Untitled Document'}</span
-									>
-								</a>
-								<select
-									class="rounded border border-border bg-bg px-2 py-1 text-xs text-fg focus:border-accent"
-									aria-label="Change target document"
-									value={linkedDoc.id}
-									onchange={(event) =>
-										setRecordReferencedId(
-											ydoc!,
-											block.id,
-											(event.target as HTMLSelectElement).value,
-											CURRENT_USER
-										)}
-								>
-									{#each data.documents as document (document.id)}
-										{#if document.id !== data.documentId}
-											<option value={document.id}>{documentLocation(document.id)}</option>
-										{/if}
-									{/each}
-								</select>
-							</div>
-						{:else if isBroken}
-							<div class="flex items-center justify-between" role="alert">
-								<span class="flex items-center gap-2 text-sm text-muted italic">
-									<Icon name="link" size={16} class="flex-shrink-0 opacity-50" />
-									Linked page was deleted
-								</span>
-								<select
-									class="rounded border border-border bg-bg px-2 py-1 text-xs text-fg focus:border-accent"
-									aria-label="Choose replacement document"
-									onchange={(event) => {
-										const value = (event.target as HTMLSelectElement).value;
-										if (value) setRecordReferencedId(ydoc!, block.id, value, CURRENT_USER);
-									}}
-								>
-									<option value="">Choose a document…</option>
-									{#each data.documents as document (document.id)}
-										{#if document.id !== data.documentId}
-											<option value={document.id}>{documentLocation(document.id)}</option>
-										{/if}
-									{/each}
-								</select>
-							</div>
-						{:else}
-							<div class="flex items-center gap-2 text-xs text-muted">
-								<Icon name="link" size={15} class="flex-shrink-0 text-accent" />
-								<span>Link to page:</span>
-								{#if ydoc}
-									<select
-										onchange={(e) => {
-											const val = (e.target as HTMLSelectElement).value;
-											if (val) setRecordReferencedId(ydoc!, block.id, val, CURRENT_USER);
-										}}
-										class="rounded border border-border bg-bg px-2 py-1 text-xs text-fg focus:border-accent"
-									>
-										<option value="">Select document…</option>
-										{#each data.documents as d (d.id)}
-											{#if d.id !== data.documentId}
-												<option value={d.id}>{documentLocation(d.id)}</option>
-											{/if}
-										{/each}
-									</select>
-								{/if}
-							</div>
-						{/if}
-					</div>
-				{:else if bt === 'collection_view'}
-					{#if ydoc}
-						<CollectionViewBlock {block} {ydoc} collections={data.collections} />
-					{/if}
-				{:else if bt === 'child_pages'}
-					{#if ydoc}
-						<ChildPagesBlock
-							{block}
-							{ydoc}
-							documents={data.documents}
-							currentDocumentId={data.documentId}
-						/>
-					{/if}
-				{:else if bt === 'columns'}
-					{#if ydoc}
-						<ColumnsBlock
-							{block}
-							{ydoc}
-							{linkTargets}
-							{blockRefs}
-							{draggingBlockId}
-							{dropIndicatorParentId}
-							{dropIndicatorIndex}
-							{selectedBlockIds}
-							{justNavigatedBlockId}
-							convertOptions={COLUMN_CONVERTIBLE_BLOCK_TYPES}
-							onFocusBlock={(blockId) => handleFocusBlock(blockId)}
-							onInputText={(blockId) => handleBlockInput(blockId)}
-							onDragHandlePointerDown={(e, blockId, parentId, blockIndex) =>
-								startBlockDrag(e, blockId, parentId, blockIndex)}
-							onDragHandleKeydown={handleDragHandleKeydown}
-							onDuplicateBlock={duplicateBlock}
-							onDeleteBlock={deleteBlockViaMenu}
-							onConvertBlock={convertBlockViaMenu}
-							onCopyBlockLink={copyBlockLink}
-							onMoveBlockUp={(blockId) => moveBlock(blockId, 'up')}
-							onMoveBlockDown={(blockId) => moveBlock(blockId, 'down')}
-						/>
-					{/if}
-				{:else}
-					<!-- Standard text blocks: headings, paragraph, to_do text, toggle text -->
 					{#if ytext}
-						<div
-							class:line-through={bt === 'to_do' && block.checked}
-							class:text-muted={bt === 'to_do' && block.checked}
-						>
-							<BlockEditor
-								bind:this={blockRefs[block.id]}
-								{ytext}
-								recordId={block.id}
-								{linkTargets}
-								class={headingTextClass(bt)}
-								placeholder={index === 0 ? "Type '/' for commands, or start typing..." : ''}
-								onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
-								onEnter={(caretOffset) => handleEnter(block, caretOffset)}
-								onBackspaceAtStart={() => handleBackspace(block, index)}
-								onFocusBlock={() => handleFocusBlock(block.id)}
-								onSlashKey={() => openSlashMenu(block.id)}
-								onLinkShortcut={() => openLinkComposer(block.id)}
-								isFirstBlock={index === 0}
-								isLastBlock={index === blocks.length - 1}
-								onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
-								onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
-							/>
+						<BlockEditor
+							bind:this={blockRefs[block.id]}
+							{ytext}
+							recordId={block.id}
+							{linkTargets}
+							placeholder="Synced content…"
+							onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
+							onEnter={() => addBlockAfter(block.id)}
+							onBackspaceAtStart={() => handleBackspace(block, index)}
+							onFocusBlock={() => handleFocusBlock(block.id, provenanceRecordId)}
+							onSlashKey={() => {}}
+							onLinkShortcut={() => openLinkComposer(block.id)}
+							isFirstBlock={index === 0}
+							isLastBlock={index === blocks.length - 1}
+							onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
+							onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
+						/>
+					{:else}
+						<p class="text-xs text-muted italic">
+							Click 'Set target ID' to sync with an existing block record.
+						</p>
+					{/if}
+				</div>
+			{:else if bt === 'page_link'}
+				{@const linkedDoc = block.referencedRecordId
+					? documentMetadataById.get(block.referencedRecordId)
+					: undefined}
+				{@const isBroken = !!block.referencedRecordId && !linkedDoc}
+				<div class="my-1 rounded-lg border border-border bg-surface/50 p-2.5 shadow-xs">
+					{#if linkedDoc}
+						<div class="flex items-center justify-between">
+							<a
+								href={resolve('/space/[spaceId]/doc/[id]', {
+									spaceId: page.params.spaceId!,
+									id: linkedDoc.id
+								})}
+								class="flex items-center gap-2 text-sm font-medium text-fg transition-colors hover:text-accent"
+							>
+								<Icon name="document" size={16} class="flex-shrink-0 text-accent" />
+								<span class="underline underline-offset-2"
+									>{linkedDoc.title || 'Untitled Document'}</span
+								>
+							</a>
+							<select
+								class="rounded border border-border bg-bg px-2 py-1 text-xs text-fg focus:border-accent"
+								aria-label="Change target document"
+								value={linkedDoc.id}
+								onchange={(event) =>
+									setRecordReferencedId(
+										ydoc!,
+										block.id,
+										(event.target as HTMLSelectElement).value,
+										CURRENT_USER
+									)}
+							>
+								{#each data.documents as document (document.id)}
+									{#if document.id !== data.documentId}
+										<option value={document.id}>{documentLocation(document.id)}</option>
+									{/if}
+								{/each}
+							</select>
+						</div>
+					{:else if isBroken}
+						<div class="flex items-center justify-between" role="alert">
+							<span class="flex items-center gap-2 text-sm text-muted italic">
+								<Icon name="link" size={16} class="flex-shrink-0 opacity-50" />
+								Linked page was deleted
+							</span>
+							<select
+								class="rounded border border-border bg-bg px-2 py-1 text-xs text-fg focus:border-accent"
+								aria-label="Choose replacement document"
+								onchange={(event) => {
+									const value = (event.target as HTMLSelectElement).value;
+									if (value) setRecordReferencedId(ydoc!, block.id, value, CURRENT_USER);
+								}}
+							>
+								<option value="">Choose a document…</option>
+								{#each data.documents as document (document.id)}
+									{#if document.id !== data.documentId}
+										<option value={document.id}>{documentLocation(document.id)}</option>
+									{/if}
+								{/each}
+							</select>
+						</div>
+					{:else}
+						<div class="flex items-center gap-2 text-xs text-muted">
+							<Icon name="link" size={15} class="flex-shrink-0 text-accent" />
+							<span>Link to page:</span>
+							{#if ydoc}
+								<select
+									onchange={(e) => {
+										const val = (e.target as HTMLSelectElement).value;
+										if (val) setRecordReferencedId(ydoc!, block.id, val, CURRENT_USER);
+									}}
+									class="rounded border border-border bg-bg px-2 py-1 text-xs text-fg focus:border-accent"
+								>
+									<option value="">Select document…</option>
+									{#each data.documents as d (d.id)}
+										{#if d.id !== data.documentId}
+											<option value={d.id}>{documentLocation(d.id)}</option>
+										{/if}
+									{/each}
+								</select>
+							{/if}
 						</div>
 					{/if}
+				</div>
+			{:else if bt === 'collection_view'}
+				{#if ydoc}
+					<CollectionViewBlock {block} {ydoc} collections={data.collections} />
 				{/if}
-
-				<!-- Slash Menu Popup -->
-				{#if slashMenuBlockId === block.id}
-					<SlashMenu
-						query={slashQuery}
-						onSelect={(newType) => selectSlashCommand(block.id, newType)}
-						onClose={() => (slashMenuBlockId = null)}
+			{:else if bt === 'child_pages'}
+				{#if ydoc}
+					<ChildPagesBlock
+						{block}
+						{ydoc}
+						documents={data.documents}
+						currentDocumentId={data.documentId}
 					/>
 				{/if}
-			</div>
+			{:else if bt === 'columns'}
+				{#if ydoc}
+					<ColumnsBlock
+						{block}
+						{ydoc}
+						{linkTargets}
+						{blockRefs}
+						{draggingBlockId}
+						{dropIndicatorParentId}
+						{dropIndicatorIndex}
+						{selectedBlockIds}
+						{justNavigatedBlockId}
+						convertOptions={COLUMN_CONVERTIBLE_BLOCK_TYPES}
+						onFocusBlock={(blockId) => handleFocusBlock(blockId)}
+						onInputText={(blockId) => handleBlockInput(blockId)}
+						onDragHandlePointerDown={(e, blockId, parentId, blockIndex) =>
+							startBlockDrag(e, blockId, parentId, blockIndex)}
+						onDragHandleKeydown={handleDragHandleKeydown}
+						onDuplicateBlock={duplicateBlock}
+						onDeleteBlock={deleteBlockViaMenu}
+						onConvertBlock={convertBlockViaMenu}
+						onCopyBlockLink={copyBlockLink}
+						onMoveBlockUp={(blockId) => moveBlock(blockId, 'up')}
+						onMoveBlockDown={(blockId) => moveBlock(blockId, 'down')}
+					/>
+				{/if}
+			{/if}
+		{/snippet}
 
-			<!-- Synced-block source indicator (issue #153): only a plain block
-					 that at least one synced_block instance currently mirrors gets
-					 this — a distinct treatment from the instance's own dashed-border
-					 "Synced Block" card above, so a source is recognizable even
-					 though it renders like any other block otherwise. -->
+		{#snippet trailingContent()}
 			{#if bt !== 'synced_block' && syncLocations.length > 0}
 				<div class="ml-3 flex flex-shrink-0 items-center gap-1 self-center text-accent">
 					<Icon name="sync" size={12} />
@@ -2185,8 +1972,6 @@
 				</div>
 			{/if}
 
-			<!-- Provenance comes from the record's live CRDT projection; the link
-					 opens the corresponding rows in the shared audit history. -->
 			{#if hasProvenance(provenance)}
 				<a
 					href="{resolve('/audit')}?targetRecordId={encodeURIComponent(provenance.id)}"
@@ -2202,7 +1987,64 @@
 					Editing history unavailable
 				</span>
 			{/if}
-		</div>
+		{/snippet}
+
+		{#snippet insideContent()}
+			{#if slashMenuBlockId === block.id}
+				<SlashMenu
+					query={slashQuery}
+					onSelect={(newType) => selectSlashCommand(block.id, newType)}
+					onClose={() => (slashMenuBlockId = null)}
+				/>
+			{/if}
+		{/snippet}
+
+		{#if draggingBlockId && dropIndicatorParentId === data.documentId && dropIndicatorIndex === index}
+			<div class="mx-auto w-full max-w-3xl px-6">
+				<div class="drop-indicator" aria-hidden="true"></div>
+			</div>
+		{/if}
+		<BlockRow
+			{block}
+			{index}
+			siblings={blocks}
+			parentId={data.documentId}
+			{ydoc}
+			{ytext}
+			{linkTargets}
+			{blockRefs}
+			{draggingBlockId}
+			{selectedBlockIds}
+			{justNavigatedBlockId}
+			convertOptions={CONVERTIBLE_BLOCK_TYPES}
+			rowClass="mx-auto flex w-full items-start px-6 py-0.5{isBlockFullWidth(block)
+				? ''
+				: ' max-w-3xl'}"
+			moveAriaLabel="Move block. Drag, or use Arrow Up, Arrow Down, Home, and End. Shift-click, Ctrl-click, or Shift-Arrow to select multiple blocks."
+			placeholder={index === 0 ? "Type '/' for commands, or start typing..." : ''}
+			heldByActorLabel={holder ? formatActor(holder) : undefined}
+			customBlockTypes={BLOCK_ROW_CUSTOM_CONTENT_TYPES}
+			{customContent}
+			{trailingContent}
+			{insideContent}
+			onDragHandlePointerDown={startBlockDrag}
+			onDragHandleKeydown={handleDragHandleKeydown}
+			onDuplicateBlock={duplicateBlock}
+			onDeleteBlock={deleteBlockViaMenu}
+			onConvertBlock={convertBlockViaMenu}
+			onCopyBlockLink={copyBlockLink}
+			onMoveBlockUp={(blockId) => moveBlock(blockId, 'up')}
+			onMoveBlockDown={(blockId) => moveBlock(blockId, 'down')}
+			onFocusBlock={() => handleFocusBlock(block.id)}
+			onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
+			onEnter={(caretOffset) => handleEnter(block, caretOffset)}
+			onBackspaceAtStart={() => handleBackspace(block, index)}
+			onSlashKey={() => openSlashMenu(block.id)}
+			onLinkShortcut={() => openLinkComposer(block.id)}
+			onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
+			onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
+			onToggleCollapse={toggleCollapseState}
+		/>
 	{/each}
 	{#if draggingBlockId && dropIndicatorParentId === data.documentId && dropIndicatorIndex === blocks.length}
 		<div class="mx-auto w-full max-w-3xl px-6">
@@ -2409,23 +2251,5 @@
 		margin: 2px 0;
 		border-radius: 1px;
 		background: var(--color-accent);
-	}
-	.shimmer-bar {
-		background: linear-gradient(
-			90deg,
-			var(--color-surface) 25%,
-			var(--color-border) 50%,
-			var(--color-surface) 75%
-		);
-		background-size: 200% 100%;
-		animation: shimmer 1.5s ease-in-out infinite;
-	}
-	@keyframes shimmer {
-		0% {
-			background-position: 200% 0;
-		}
-		100% {
-			background-position: -200% 0;
-		}
 	}
 </style>

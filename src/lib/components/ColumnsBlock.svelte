@@ -9,20 +9,13 @@
 		listRecordsForParent,
 		MAX_COLUMN_COUNT,
 		MIN_COLUMN_COUNT,
-		setBlockType,
-		setRecordChecked
+		setBlockType
 	} from '$lib/data/record-ops';
 	import { plainText, yTextToRichText } from '$lib/data/richtext';
 	import type { InternalLinkTarget } from '$lib/data/links';
 	import type { BlockType, WorkspaceRecord } from '$lib/data/types';
-	import BlockEditor from './BlockEditor.svelte';
-	import BlockActionMenu from './BlockActionMenu.svelte';
+	import BlockRow, { type BlockEditorHandle } from './BlockRow.svelte';
 	import Icon from './Icon.svelte';
-
-	interface BlockEditorHandle {
-		focusEditor: (position?: boolean | number) => void;
-		focusEditorAtLine: (edge: 'first' | 'last', clientX: number | null) => void;
-	}
 
 	let {
 		block,
@@ -104,31 +97,6 @@
 		return next;
 	});
 
-	function headingTextClass(blockType?: BlockType): string {
-		switch (blockType) {
-			case 'heading_1':
-				return 'font-display text-2xl font-bold text-fg';
-			case 'heading_2':
-				return 'font-display text-xl font-semibold text-fg';
-			case 'heading_3':
-				return 'font-display text-lg font-semibold text-fg';
-			case 'heading_4':
-				return 'font-display text-base font-semibold text-fg';
-			default:
-				return 'text-base text-fg';
-		}
-	}
-
-	function numberedListIndex(columnId: string, currentIndex: number): number {
-		const siblings = columnBlocks[columnId] ?? [];
-		let num = 1;
-		for (let i = currentIndex - 1; i >= 0; i--) {
-			if (siblings[i].blockType === 'numbered_list_item') num++;
-			else break;
-		}
-		return num;
-	}
-
 	function isBlockTextEmpty(id: string): boolean {
 		const ytext = getRecordYText(ydoc, id);
 		return !ytext || plainText(yTextToRichText(ytext)).length === 0;
@@ -177,10 +145,6 @@
 		}
 	}
 
-	function toggleTodoCheck(columnRecord: WorkspaceRecord): void {
-		setRecordChecked(ydoc, columnRecord.id, !columnRecord.checked, CURRENT_USER);
-	}
-
 	function addColumn(): void {
 		createRecord(ydoc, { parentId: block.id, blockType: 'column' }, CURRENT_USER);
 	}
@@ -213,126 +177,41 @@
 			<div class="flex flex-col gap-1">
 				{#each siblings as columnRecord, index (columnRecord.id)}
 					{@const ytext = getRecordYText(ydoc, columnRecord.id)}
-					{@const bt = columnRecord.blockType ?? 'paragraph'}
 
 					{#if draggingBlockId && dropIndicatorParentId === column.id && dropIndicatorIndex === index}
 						<div class="drop-indicator" aria-hidden="true"></div>
 					{/if}
-					<div
-						class="group relative flex items-start py-0.5"
-						class:opacity-50={draggingBlockId === columnRecord.id}
-						class:bg-surface={selectedBlockIds.has(columnRecord.id)}
-						class:rounded={selectedBlockIds.has(columnRecord.id) ||
-							justNavigatedBlockId === columnRecord.id}
-						class:outline={justNavigatedBlockId === columnRecord.id}
-						class:outline-2={justNavigatedBlockId === columnRecord.id}
-						class:outline-accent={justNavigatedBlockId === columnRecord.id}
-						id="block-{columnRecord.id}"
-						data-block-row
-						data-block-parent={column.id}
-					>
-						<button
-							type="button"
-							class="mt-1 mr-1 flex h-5 w-5 flex-shrink-0 cursor-grab items-center justify-center rounded text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:bg-surface hover:text-fg focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent active:cursor-grabbing"
-							aria-label="Move block in column {columnIndex +
-								1}. Drag, or use Arrow Up, Arrow Down, Home, End, Arrow Left (previous column), and Arrow Right (next column). Shift-click, Ctrl-click, or Shift-Arrow to select multiple blocks."
-							data-drag-handle={columnRecord.id}
-							onpointerdown={(e) => onDragHandlePointerDown(e, columnRecord.id, column.id, index)}
-							onkeydown={(e) => onDragHandleKeydown(e, columnRecord.id)}
-						>
-							<Icon name="grip" size={14} />
-						</button>
-
-						<BlockActionMenu
-							blockType={columnRecord.blockType}
-							canMoveUp={index > 0}
-							canMoveDown={index < siblings.length - 1}
-							isConvertible={convertOptions.some((c) => c.type === bt)}
-							{convertOptions}
-							onDuplicate={() => onDuplicateBlock(columnRecord.id)}
-							onDelete={() => onDeleteBlock(columnRecord.id)}
-							onConvert={(blockType) => onConvertBlock(columnRecord.id, blockType)}
-							onCopyLink={() => onCopyBlockLink(columnRecord.id)}
-							onMoveUp={() => onMoveBlockUp(columnRecord.id)}
-							onMoveDown={() => onMoveBlockDown(columnRecord.id)}
-						/>
-
-						{#if bt === 'to_do'}
-							<button
-								type="button"
-								onclick={() => toggleTodoCheck(columnRecord)}
-								class="mt-1 mr-2 flex h-4.5 w-4.5 flex-shrink-0 items-center justify-center rounded border border-border bg-bg text-accent transition-colors hover:border-accent"
-								class:bg-accent={columnRecord.checked}
-								class:border-accent={columnRecord.checked}
-								title={columnRecord.checked ? 'Mark as incomplete' : 'Mark as complete'}
-								aria-label={columnRecord.checked ? 'Mark as incomplete' : 'Mark as complete'}
-							>
-								{#if columnRecord.checked}
-									<Icon name="check" size={13} class="stroke-[2.5] text-accent-fg" />
-								{/if}
-							</button>
-						{:else if bt === 'bulleted_list_item'}
-							<span
-								class="mt-1 mr-2.5 flex h-4 w-3.5 flex-shrink-0 items-center justify-center font-bold text-muted select-none"
-							>
-								•
-							</span>
-						{:else if bt === 'numbered_list_item'}
-							<span
-								class="mt-1 mr-2 flex w-5 flex-shrink-0 items-center justify-end text-xs font-medium text-muted select-none"
-							>
-								{numberedListIndex(column.id, index)}.
-							</span>
-						{/if}
-
-						<div class="min-w-0 flex-1">
-							{#if bt === 'divider'}
-								<div class="my-3 border-t border-border"></div>
-							{:else if bt === 'quote'}
-								<div class="border-l-2 border-accent/60 py-0.5 pl-3.5 text-fg/90 italic">
-									{#if ytext}
-										<BlockEditor
-											bind:this={blockRefs[columnRecord.id]}
-											{ytext}
-											recordId={columnRecord.id}
-											{linkTargets}
-											placeholder="Quote…"
-											onInputText={() => onInputText(columnRecord.id)}
-											onEnter={() => handleEnter(column.id, columnRecord)}
-											onBackspaceAtStart={() => handleBackspace(column.id, index)}
-											onFocusBlock={() => onFocusBlock(columnRecord.id)}
-											onSlashKey={() => {}}
-											isFirstBlock={index === 0}
-											isLastBlock={index === siblings.length - 1}
-										/>
-									{/if}
-								</div>
-							{:else}
-								<div
-									class:line-through={bt === 'to_do' && columnRecord.checked}
-									class:text-muted={bt === 'to_do' && columnRecord.checked}
-								>
-									{#if ytext}
-										<BlockEditor
-											bind:this={blockRefs[columnRecord.id]}
-											{ytext}
-											recordId={columnRecord.id}
-											{linkTargets}
-											class={headingTextClass(bt)}
-											placeholder={index === 0 ? 'Type in this column…' : ''}
-											onInputText={() => onInputText(columnRecord.id)}
-											onEnter={() => handleEnter(column.id, columnRecord)}
-											onBackspaceAtStart={() => handleBackspace(column.id, index)}
-											onFocusBlock={() => onFocusBlock(columnRecord.id)}
-											onSlashKey={() => {}}
-											isFirstBlock={index === 0}
-											isLastBlock={index === siblings.length - 1}
-										/>
-									{/if}
-								</div>
-							{/if}
-						</div>
-					</div>
+					<BlockRow
+						block={columnRecord}
+						{index}
+						{siblings}
+						parentId={column.id}
+						{ydoc}
+						{ytext}
+						{linkTargets}
+						{blockRefs}
+						{draggingBlockId}
+						{selectedBlockIds}
+						{justNavigatedBlockId}
+						{convertOptions}
+						rowClass="flex items-start py-0.5"
+						moveAriaLabel="Move block in column {columnIndex +
+							1}. Drag, or use Arrow Up, Arrow Down, Home, End, Arrow Left (previous column), and Arrow Right (next column). Shift-click, Ctrl-click, or Shift-Arrow to select multiple blocks."
+						placeholder={index === 0 ? 'Type in this column…' : ''}
+						{onDragHandlePointerDown}
+						{onDragHandleKeydown}
+						{onDuplicateBlock}
+						{onDeleteBlock}
+						{onConvertBlock}
+						{onCopyBlockLink}
+						{onMoveBlockUp}
+						{onMoveBlockDown}
+						onFocusBlock={() => onFocusBlock(columnRecord.id)}
+						onInputText={() => onInputText(columnRecord.id)}
+						onEnter={() => handleEnter(column.id, columnRecord)}
+						onBackspaceAtStart={() => handleBackspace(column.id, index)}
+						onSlashKey={() => {}}
+					/>
 				{/each}
 				{#if draggingBlockId && dropIndicatorParentId === column.id && dropIndicatorIndex === siblings.length}
 					<div class="drop-indicator" aria-hidden="true"></div>
