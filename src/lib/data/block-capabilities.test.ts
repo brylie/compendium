@@ -55,10 +55,52 @@ describe('BLOCK_CAPABILITIES', () => {
 			// a closed union at the type level.
 			const unknown = 'future_block_type' as BlockType;
 			expect(() => blockCapabilitiesFor(unknown)).not.toThrow();
-			expect(blockCapabilitiesFor(unknown)).toEqual({
-				isContainer: false,
-				holdsFreeformText: false
-			});
+			const fallback = blockCapabilitiesFor(unknown);
+			expect(fallback.isContainer).toBe(false);
+			expect(fallback.holdsFreeformText).toBe(false);
+			expect(fallback.fields).toEqual({ creatable: [], writable: [], readOnly: [] });
+			expect(fallback.markdown.writable).toBe(false);
+		});
+	});
+
+	describe('the shared per-type contract (issue #29)', () => {
+		it('gives every BlockType a non-empty label and description', () => {
+			for (const blockType of blockTypes) {
+				const capabilities = BLOCK_CAPABILITIES[blockType];
+				expect(capabilities.label, blockType).not.toBe('');
+				expect(capabilities.description, blockType).not.toBe('');
+			}
+		});
+
+		it("only lists 'content' as writable when the type holds free-form text", () => {
+			for (const blockType of blockTypes) {
+				const capabilities = BLOCK_CAPABILITIES[blockType];
+				expect(capabilities.fields.writable.includes('content'), blockType).toBe(
+					capabilities.holdsFreeformText
+				);
+				expect(capabilities.markdown.writable, blockType).toBe(capabilities.holdsFreeformText);
+			}
+		});
+
+		it('never gives a container type its own creatable/writable content fields', () => {
+			for (const blockType of blockTypes) {
+				const capabilities = BLOCK_CAPABILITIES[blockType];
+				if (capabilities.isContainer) {
+					expect(capabilities.fields.writable, blockType).toEqual([]);
+				}
+			}
+		});
+
+		it('only declares referencedRecordSemantics for a type that actually uses referencedRecordId', () => {
+			const referencingTypes = ['synced_block', 'page_link', 'collection_view', 'child_pages'];
+			for (const blockType of blockTypes) {
+				const capabilities = BLOCK_CAPABILITIES[blockType];
+				if (referencingTypes.includes(blockType)) {
+					expect(capabilities.referencedRecordSemantics, blockType).toBeDefined();
+				} else {
+					expect(capabilities.referencedRecordSemantics, blockType).toBeUndefined();
+				}
+			}
 		});
 	});
 });
