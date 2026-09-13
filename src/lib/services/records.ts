@@ -29,8 +29,8 @@ import {
 import { markdownToRichText } from '$lib/data/markdown-transcode';
 import { yTextToRichText } from '$lib/data/richtext';
 import { tokenAllowsParent } from '$lib/server/token-store';
+import { blockCapabilitiesFor } from '$lib/data/block-capabilities';
 import {
-	columnChildBlockTypes,
 	type BlockType,
 	type ChildPagesDepth,
 	type EmbeddedViewConfig,
@@ -197,10 +197,15 @@ function validateColumnCount(blockType: BlockType | undefined, columnCount: numb
  * block only directly inside a Document (no nested columns-in-columns), a
  * `column` only directly inside an existing `columns` block, and every other
  * block type either directly inside a Document (unchanged, pre-#148
- * behavior) or inside a `column`, where only the curated
- * `columnChildBlockTypes` subset is allowed — a column's own mini
- * block-list renderer (ColumnsBlock.svelte) only knows how to render that
- * subset; reference/structural/container types stay Document-only for v1.
+ * behavior) or inside an existing container record, where only that
+ * container's own `childBlockTypes` (issue #229) is allowed — a column's own
+ * mini block-list renderer (ColumnsBlock.svelte) only knows how to render its
+ * curated subset; reference/structural/container types stay Document-only
+ * for v1. `parentKindOf` only resolves 'record' for a record that already
+ * has its own `recordIds` array — i.e. an actual container — so the generic
+ * branch below never needs to special-case which container type it is;
+ * adding a new container type's `childBlockTypes` entry is enough on its own
+ * for this function to accept the right children under it.
  */
 function validateBlockTypeForParent(doc: Y.Doc, parentId: string, blockType: BlockType): void {
 	const kind = parentKindOf(doc, parentId);
@@ -219,10 +224,12 @@ function validateBlockTypeForParent(doc: Y.Doc, parentId: string, blockType: Blo
 	}
 	if (kind !== 'record') return; // ordinary Document-level block — unchanged, pre-#148 behavior
 	const parent = crdtGetRecord(doc, parentId);
-	const allowed: readonly BlockType[] = columnChildBlockTypes;
-	if (parent?.blockType !== 'column' || !allowed.includes(blockType)) {
+	const allowed = parent?.blockType
+		? blockCapabilitiesFor(parent.blockType).childBlockTypes
+		: undefined;
+	if (!allowed?.includes(blockType)) {
 		throw new Error(
-			`${blockType} blocks cannot be created inside a column — supported column content is ${columnChildBlockTypes.join(', ')}.`
+			`${blockType} blocks cannot be created inside a column — supported column content is ${allowed?.join(', ') ?? ''}.`
 		);
 	}
 }
@@ -466,7 +473,8 @@ export function createRecord(
 	// paragraph), and a bare 'column' (an agent adding one to an existing
 	// columns block) seeds one paragraph of its own — see
 	// reserveDescendantLocators.
-	const isContainerCreate = input.blockType === 'columns' || input.blockType === 'column';
+	const isContainerCreate =
+		input.blockType !== undefined && blockCapabilitiesFor(input.blockType).isContainer;
 	let record: WorkspaceRecord;
 	const reservedChildIds: string[] = [];
 	try {
@@ -697,7 +705,8 @@ export function writeRecord(
 	// block type's content.
 	if (
 		input.markdown !== undefined &&
-		(record.blockType === 'columns' || record.blockType === 'column')
+		record.blockType !== undefined &&
+		blockCapabilitiesFor(record.blockType).isContainer
 	) {
 		throw new Error(
 			'markdown cannot be written to a columns or column block directly — write to one of its nested blocks instead.'

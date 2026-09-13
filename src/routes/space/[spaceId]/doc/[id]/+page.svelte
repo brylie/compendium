@@ -46,8 +46,9 @@
 		subscribeHeldByOthers
 	} from '$lib/client/presence';
 	import { redo, subscribeUndoRedoState, undo } from '$lib/client/undo';
+	import { BLOCK_CAPABILITIES, blockCapabilitiesFor } from '$lib/data/block-capabilities';
 	import {
-		columnChildBlockTypes,
+		blockTypes,
 		type ActorId,
 		type BlockType,
 		type TextMarks,
@@ -584,13 +585,13 @@
 	// Resolves where a *toolbar-triggered* insert (as opposed to Enter/the
 	// slash menu, which both already know their own container) actually
 	// belongs: normally right after the active block, in its own container.
-	// But a column only holds the curated columnChildBlockTypes subset
-	// (issue #148, see services/records.ts's own creation-time validation) —
-	// inserting an unsupported structural type (table, embed, ...) while a
-	// column's block is active instead escalates to right after the
-	// enclosing columns block itself, at the Document's top level, rather
-	// than writing a block type ColumnsBlock.svelte has no idea how to
-	// render into a column's own recordIds array.
+	// But a column only holds its own curated BLOCK_CAPABILITIES.column
+	// .childBlockTypes subset (issue #148/#229, see services/records.ts's own
+	// creation-time validation) — inserting an unsupported structural type
+	// (table, embed, ...) while a column's block is active instead escalates
+	// to right after the enclosing columns block itself, at the Document's
+	// top level, rather than writing a block type ColumnsBlock.svelte has no
+	// idea how to render into a column's own recordIds array.
 	function resolveToolbarInsertTarget(
 		afterId: string | undefined,
 		blockType: BlockType
@@ -602,8 +603,8 @@
 		if (parentKindOf(ydoc, active.parentId) !== 'record') {
 			return { parentId: active.parentId, afterId };
 		}
-		const allowedInColumn: readonly BlockType[] = columnChildBlockTypes;
-		if (allowedInColumn.includes(blockType)) return { parentId: active.parentId, afterId };
+		const allowedInColumn = BLOCK_CAPABILITIES.column.childBlockTypes;
+		if (allowedInColumn?.includes(blockType)) return { parentId: active.parentId, afterId };
 		const column = getRecord(ydoc, active.parentId);
 		const columnsBlock = column ? getRecord(ydoc, column.parentId) : undefined;
 		return { parentId: data.documentId, afterId: columnsBlock?.id ?? afterId };
@@ -623,21 +624,12 @@
 	// another record) where "append/merge plain text into it" isn't a
 	// meaningful operation. Used to gate both Backspace-joins-the-previous-
 	// block and the toolbar's convert-current-block-in-place behavior.
-	const STRUCTURAL_BLOCK_TYPES: readonly BlockType[] = [
-		'divider',
-		'table',
-		'table_of_contents',
-		'page_link',
-		'embed',
-		'synced_block',
-		'collection_view',
-		'child_pages',
-		'columns',
-		'column'
-	];
-
+	// Driven by BLOCK_CAPABILITIES (issue #229) instead of its own list.
+	// blockCapabilitiesFor (not direct BLOCK_CAPABILITIES indexing) since
+	// `blockType` here can come straight off an existing record's own live
+	// Yjs field, which TypedYMap.get casts but never validates.
 	function blockHoldsFreeformText(blockType?: BlockType): boolean {
-		return !!blockType && !STRUCTURAL_BLOCK_TYPES.includes(blockType);
+		return !!blockType && blockCapabilitiesFor(blockType).holdsFreeformText;
 	}
 
 	function isBlockTextEmpty(blockId: string): boolean {
@@ -1196,16 +1188,16 @@
 
 		// Cross-container move (issue #148) — into/out of a column. Dropping
 		// into a column is restricted to the same curated
-		// columnChildBlockTypes set create_record enforces at creation time
-		// (services/records.ts) — the drag path bypasses that service-layer
-		// check entirely (a direct data-layer call, like every other UI
-		// mutation), so it needs its own guard here or an unsupported type
-		// (e.g. a table or another columns block) could be dropped into a
+		// BLOCK_CAPABILITIES.column.childBlockTypes set create_record enforces
+		// at creation time (services/records.ts) — the drag path bypasses that
+		// service-layer check entirely (a direct data-layer call, like every
+		// other UI mutation), so it needs its own guard here or an unsupported
+		// type (e.g. a table or another columns block) could be dropped into a
 		// column with nothing to render it.
 		const targetContainer = getRecord(ydoc, targetParentId);
 		if (targetContainer?.blockType === 'column') {
-			const allowed: readonly BlockType[] = columnChildBlockTypes;
-			if (!allowed.includes(record.blockType ?? 'paragraph')) return;
+			const allowed = BLOCK_CAPABILITIES.column.childBlockTypes;
+			if (!allowed?.includes(record.blockType ?? 'paragraph')) return;
 		}
 		const destSiblings = listRecordsForParent(ydoc, targetParentId);
 		const afterRecordId = targetIndex > 0 ? destSiblings[targetIndex - 1]?.id : undefined;
@@ -1380,20 +1372,40 @@
 	// page_link, synced_block, table_of_contents, child_pages, collection_view,
 	// columns/column) have no in-place conversion target and are excluded from
 	// the menu's "Convert to" list entirely, matching the toolbar's own rule.
-	const CONVERTIBLE_BLOCK_TYPES: { type: BlockType; label: string }[] = [
-		{ type: 'paragraph', label: 'Text' },
-		{ type: 'heading_1', label: 'Heading 1' },
-		{ type: 'heading_2', label: 'Heading 2' },
-		{ type: 'heading_3', label: 'Heading 3' },
-		{ type: 'heading_4', label: 'Heading 4' },
-		{ type: 'bulleted_list_item', label: 'Bulleted list' },
-		{ type: 'numbered_list_item', label: 'Numbered list' },
-		{ type: 'to_do', label: 'To-do' },
-		{ type: 'quote', label: 'Quote' },
-		{ type: 'callout', label: 'Callout' },
-		{ type: 'toggle', label: 'Toggle' },
-		{ type: 'code', label: 'Code' }
-	];
+	// Type membership comes from BLOCK_CAPABILITIES's holdsFreeformText field
+	// (issue #229) — only the display label has no other source of truth and
+	// stays hand-maintained here.
+	const CONVERTIBLE_BLOCK_TYPE_LABELS: Partial<Record<BlockType, string>> = {
+		paragraph: 'Text',
+		heading_1: 'Heading 1',
+		heading_2: 'Heading 2',
+		heading_3: 'Heading 3',
+		heading_4: 'Heading 4',
+		bulleted_list_item: 'Bulleted list',
+		numbered_list_item: 'Numbered list',
+		to_do: 'To-do',
+		quote: 'Quote',
+		callout: 'Callout',
+		toggle: 'Toggle',
+		code: 'Code'
+	};
+
+	// Throws rather than silently falling back to the raw `type` discriminator
+	// as a label — a missing entry here should fail loudly (surfacing on any
+	// render of this Document page, including in tests) the same way a
+	// missing BLOCK_CAPABILITIES entry already does via block-capabilities
+	// .test.ts, not leak an internal identifier into the "Convert to" menu.
+	const CONVERTIBLE_BLOCK_TYPES: { type: BlockType; label: string }[] = blockTypes
+		.filter((type) => BLOCK_CAPABILITIES[type].holdsFreeformText)
+		.map((type) => {
+			const label = CONVERTIBLE_BLOCK_TYPE_LABELS[type];
+			if (!label) {
+				throw new Error(
+					`CONVERTIBLE_BLOCK_TYPE_LABELS is missing an entry for text-bearing block type "${type}".`
+				);
+			}
+			return { type, label };
+		});
 
 	function isConvertibleBlockType(blockType?: BlockType): boolean {
 		return CONVERTIBLE_BLOCK_TYPES.some((c) => c.type === blockType);
@@ -1402,11 +1414,11 @@
 	// A column's own curated child-type subset (data-model.md §3.1) excludes
 	// callout/toggle/code entirely, so those three are dropped from the
 	// "Convert to" list offered *inside* a column — converting a column's
-	// block to one of them would produce a block type that block-capability-
-	// contract.md's column-child rule (and services/records.ts's own
-	// creation-time validation) doesn't allow there.
+	// block to one of them would produce a block type BLOCK_CAPABILITIES
+	// .column.childBlockTypes (and services/records.ts's own creation-time
+	// validation) doesn't allow there.
 	const COLUMN_CONVERTIBLE_BLOCK_TYPES = CONVERTIBLE_BLOCK_TYPES.filter((c) =>
-		(columnChildBlockTypes as readonly BlockType[]).includes(c.type)
+		BLOCK_CAPABILITIES.column.childBlockTypes?.includes(c.type)
 	);
 
 	function duplicateBlock(blockId: string): void {

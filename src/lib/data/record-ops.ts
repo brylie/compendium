@@ -14,6 +14,7 @@ import type {
 	ViewConfig,
 	WorkspaceRecord
 } from './types';
+import { blockCapabilitiesFor } from './block-capabilities';
 import { applyRichTextToYText, yTextToRichText } from './richtext';
 import { type TypedYMap, typedYMap } from './yjs-typed';
 import {
@@ -187,7 +188,7 @@ function applyDocumentKindFields(
 	input: CreateRecordInput,
 	siblingIds: Y.Array<string>
 ): void {
-	const isContainer = blockType === 'columns' || blockType === 'column';
+	const isContainer = blockCapabilitiesFor(blockType).isContainer;
 	yrecord.set('blockType', blockType);
 	// A container never holds its own free-form text — its content lives
 	// entirely in its children (data-model.md §3.1) — so unlike every other
@@ -537,13 +538,16 @@ export function setRecordReferencedId(
 }
 
 // Neither of detachSyncedBlock's blockType/content copy steps below is safe
-// for these: a container has no content Y.Text at all (createRecord never
-// allocates one — see applyDocumentKindFields) and, more importantly, needs
-// its own childRecordIds array to be a valid columns/column block at all —
-// blindly copying just the blockType would produce a broken container with
-// no children. The "Set target ID" dialog accepts any pasted record id with
-// no kind check, so this has to be guarded here rather than assumed away.
-const UNDETACHABLE_SOURCE_BLOCK_TYPES: ReadonlySet<BlockType> = new Set(['columns', 'column']);
+// for a container (blockCapabilitiesFor(...).isContainer): it has no content
+// Y.Text at all (createRecord never allocates one — see
+// applyDocumentKindFields) and, more importantly, needs its own
+// childRecordIds array to be a valid columns/column block at all — blindly
+// copying just the blockType would produce a broken container with no
+// children. The "Set target ID" dialog accepts any pasted record id with no
+// kind check, so this has to be guarded here rather than assumed away.
+function isUndetachableSourceBlockType(blockType: BlockType): boolean {
+	return blockCapabilitiesFor(blockType).isContainer;
+}
 
 /**
  * Resolves a synced_block's referencedRecordId to the first *non*-synced_block
@@ -585,7 +589,7 @@ function resolveSyncedBlockSource(doc: Y.Doc, id: string): WorkspaceRecord | und
  * deleted.
  *
  * A source that no longer resolves (deleted, never set, a reference cycle,
- * or — see UNDETACHABLE_SOURCE_BLOCK_TYPES above — a columns/column
+ * or — see isUndetachableSourceBlockType above — a columns/column
  * container this function can't safely copy) detaches to an empty paragraph
  * rather than throwing: "detach" is meant as an escape hatch, including from
  * a synced_block whose target is already broken.
@@ -600,7 +604,7 @@ export function detachSyncedBlock(doc: Y.Doc, id: string, actor: ActorId): Works
 	const sourceId = yrecord.get('referencedRecordId');
 	const resolved = sourceId ? resolveSyncedBlockSource(doc, sourceId) : undefined;
 	const source =
-		resolved && !UNDETACHABLE_SOURCE_BLOCK_TYPES.has(resolved.blockType ?? 'paragraph')
+		resolved && !isUndetachableSourceBlockType(resolved.blockType ?? 'paragraph')
 			? resolved
 			: undefined;
 	const sourceText = source ? getRecordYText(doc, source.id) : undefined;
