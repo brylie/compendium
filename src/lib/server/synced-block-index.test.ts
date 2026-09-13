@@ -137,4 +137,8 @@ describe('synced-block-index: rebuilding from Y.Doc state (#242)', () => {
 			otherDoc.destroy();
 		}
 	});
+
+	it('returns no rows for an empty source id list, without querying the database', () => {
+		expect(listSyncedBlockInstancesAcrossShards(WS, [])).toEqual([]);
+	});
 });
