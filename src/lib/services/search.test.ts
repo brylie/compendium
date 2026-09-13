@@ -13,6 +13,7 @@ import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { createToken } from '$lib/mcp/tokens';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import type { ActorId } from '$lib/data/types';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
 
@@ -30,22 +31,34 @@ function crdtCreateRecord(...args: Parameters<typeof rawCrdtCreateRecord>) {
 
 describe('searchWorkspace: snippet boundaries', () => {
 	it('omits the leading ellipsis when the match is at the very start of the text', () => {
-		const doc = createDocument(human, { title: 'Snippet Doc', createInitialBlock: true });
-		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
-		writeRecord(human, block.id, { markdown: `needle ${'x'.repeat(100)}` });
+		const doc = createDocument(resolveRequestContext(human), {
+			title: 'Snippet Doc',
+			createInitialBlock: true
+		});
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'paragraph'
+		});
+		writeRecord(resolveRequestContext(human), block.id, { markdown: `needle ${'x'.repeat(100)}` });
 
-		const results = searchWorkspace(human, 'needle');
+		const results = searchWorkspace(resolveRequestContext(human), 'needle');
 		const match = results.find((r) => r.recordId === block.id);
 		expect(match?.snippet.startsWith('…')).toBe(false);
 		expect(match?.snippet.endsWith('…')).toBe(true);
 	});
 
 	it('omits the trailing ellipsis when the match runs to the end of the text', () => {
-		const doc = createDocument(human, { title: 'Snippet Doc 2', createInitialBlock: true });
-		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
-		writeRecord(human, block.id, { markdown: `${'y'.repeat(100)} needle` });
+		const doc = createDocument(resolveRequestContext(human), {
+			title: 'Snippet Doc 2',
+			createInitialBlock: true
+		});
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'paragraph'
+		});
+		writeRecord(resolveRequestContext(human), block.id, { markdown: `${'y'.repeat(100)} needle` });
 
-		const results = searchWorkspace(human, 'needle');
+		const results = searchWorkspace(resolveRequestContext(human), 'needle');
 		const match = results.find((r) => r.recordId === block.id);
 		expect(match?.snippet.startsWith('…')).toBe(true);
 		expect(match?.snippet.endsWith('…')).toBe(false);
@@ -54,27 +67,35 @@ describe('searchWorkspace: snippet boundaries', () => {
 
 describe('searchWorkspace: nested container blocks (#234)', () => {
 	it('finds text in a paragraph nested inside a columns/column container, not just top-level Document blocks', () => {
-		const doc = createDocument(human, { title: 'Columns Doc' });
-		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Columns Doc' });
+		const columns = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'columns'
+		});
 		const column = columns.childRecordIds![0];
-		const paragraph = createRecord(human, { parentId: column, blockType: 'paragraph' });
-		writeRecord(human, paragraph.id, { markdown: 'nested column searchable content' });
+		const paragraph = createRecord(resolveRequestContext(human), {
+			parentId: column,
+			blockType: 'paragraph'
+		});
+		writeRecord(resolveRequestContext(human), paragraph.id, {
+			markdown: 'nested column searchable content'
+		});
 
-		const results = searchWorkspace(human, 'searchable');
+		const results = searchWorkspace(resolveRequestContext(human), 'searchable');
 		expect(results.some((r) => r.recordId === paragraph.id)).toBe(true);
 	});
 });
 
 describe('searchWorkspace: collection row properties', () => {
 	it('matches a select property and skips non-text/select properties ahead of it', () => {
-		const collection = createCollection(human, {
+		const collection = createCollection(resolveRequestContext(human), {
 			title: 'Tasks',
 			schema: [
 				{ key: 'priority', label: 'Priority', type: 'number' },
 				{ key: 'status', label: 'Status', type: 'select' }
 			]
 		});
-		const row = createRecord(human, {
+		const row = createRecord(resolveRequestContext(human), {
 			parentId: collection.id,
 			properties: {
 				priority: { type: 'number', value: 3 },
@@ -82,46 +103,46 @@ describe('searchWorkspace: collection row properties', () => {
 			}
 		});
 
-		const results = searchWorkspace(human, 'alpha');
+		const results = searchWorkspace(resolveRequestContext(human), 'alpha');
 		expect(results.some((r) => r.recordId === row.id)).toBe(true);
 	});
 
 	it('matches a text property value', () => {
-		const collection = createCollection(human, {
+		const collection = createCollection(resolveRequestContext(human), {
 			title: 'Notes',
 			schema: [{ key: 'summary', label: 'Summary', type: 'text' }]
 		});
-		const row = createRecord(human, {
+		const row = createRecord(resolveRequestContext(human), {
 			parentId: collection.id,
 			properties: { summary: { type: 'text', value: 'contains beta keyword' } }
 		});
 
-		const results = searchWorkspace(human, 'beta');
+		const results = searchWorkspace(resolveRequestContext(human), 'beta');
 		expect(results.some((r) => r.recordId === row.id)).toBe(true);
 	});
 
 	it('does not match a row with no text/select property containing the query', () => {
-		const collection = createCollection(human, {
+		const collection = createCollection(resolveRequestContext(human), {
 			title: 'Numbers',
 			schema: [{ key: 'count', label: 'Count', type: 'number' }]
 		});
-		const row = createRecord(human, {
+		const row = createRecord(resolveRequestContext(human), {
 			parentId: collection.id,
 			properties: { count: { type: 'number', value: 42 } }
 		});
 
-		const results = searchWorkspace(human, '42');
+		const results = searchWorkspace(resolveRequestContext(human), '42');
 		expect(results.some((r) => r.recordId === row.id)).toBe(false);
 	});
 });
 
 describe('searchWorkspace: token scoping', () => {
 	it('skips a catalog-listed collection a token has no grant for', () => {
-		const collection = createCollection(human, {
+		const collection = createCollection(resolveRequestContext(human), {
 			title: 'Token Denied Catalog',
 			schema: [{ key: 'summary', label: 'Summary', type: 'text' }]
 		});
-		const row = createRecord(human, {
+		const row = createRecord(resolveRequestContext(human), {
 			parentId: collection.id,
 			properties: { summary: { type: 'text', value: 'gamma keyword' } }
 		});
@@ -131,16 +152,16 @@ describe('searchWorkspace: token scoping', () => {
 			allowedCollectionIds: []
 		});
 
-		const results = searchWorkspace(token, 'gamma');
+		const results = searchWorkspace(resolveRequestContext(token), 'gamma');
 		expect(results.some((r) => r.recordId === row.id)).toBe(false);
 	});
 
 	it('finds a row in a catalog-listed collection the token is granted', () => {
-		const collection = createCollection(human, {
+		const collection = createCollection(resolveRequestContext(human), {
 			title: 'Token Granted Catalog',
 			schema: [{ key: 'summary', label: 'Summary', type: 'text' }]
 		});
-		const row = createRecord(human, {
+		const row = createRecord(resolveRequestContext(human), {
 			parentId: collection.id,
 			properties: { summary: { type: 'text', value: 'delta keyword' } }
 		});
@@ -150,7 +171,7 @@ describe('searchWorkspace: token scoping', () => {
 			allowedCollectionIds: [collection.id]
 		});
 
-		const results = searchWorkspace(token, 'delta');
+		const results = searchWorkspace(resolveRequestContext(token), 'delta');
 		expect(results.some((r) => r.recordId === row.id)).toBe(true);
 	});
 
@@ -160,7 +181,7 @@ describe('searchWorkspace: token scoping', () => {
 			title: 'Uncataloged',
 			schema: [{ key: 'summary', label: 'Summary', type: 'text' }]
 		});
-		const row = createRecord(human, {
+		const row = createRecord(resolveRequestContext(human), {
 			parentId: uncataloged.id,
 			properties: { summary: { type: 'text', value: 'epsilon keyword' } }
 		});
@@ -170,7 +191,7 @@ describe('searchWorkspace: token scoping', () => {
 			allowedCollectionIds: []
 		});
 
-		const results = searchWorkspace(token, 'epsilon');
+		const results = searchWorkspace(resolveRequestContext(token), 'epsilon');
 		expect(results.some((r) => r.recordId === row.id)).toBe(false);
 	});
 
@@ -182,14 +203,14 @@ describe('searchWorkspace: token scoping', () => {
 			{ parentId: uncatalogedDoc.id, blockType: 'paragraph' },
 			human
 		);
-		writeRecord(human, block.id, { markdown: 'eta keyword' });
+		writeRecord(resolveRequestContext(human), block.id, { markdown: 'eta keyword' });
 		const { record: token } = createToken({
 			clientLabel: 'Search Test Bot',
 			allowedDocumentIds: [],
 			allowedCollectionIds: []
 		});
 
-		const results = searchWorkspace(token, 'eta');
+		const results = searchWorkspace(resolveRequestContext(token), 'eta');
 		expect(results.some((r) => r.recordId === block.id)).toBe(false);
 	});
 
@@ -199,7 +220,7 @@ describe('searchWorkspace: token scoping', () => {
 			title: 'Uncataloged Granted',
 			schema: [{ key: 'summary', label: 'Summary', type: 'text' }]
 		});
-		const row = createRecord(human, {
+		const row = createRecord(resolveRequestContext(human), {
 			parentId: uncataloged.id,
 			properties: { summary: { type: 'text', value: 'zeta keyword' } }
 		});
@@ -209,7 +230,7 @@ describe('searchWorkspace: token scoping', () => {
 			allowedCollectionIds: [uncataloged.id]
 		});
 
-		const results = searchWorkspace(token, 'zeta');
+		const results = searchWorkspace(resolveRequestContext(token), 'zeta');
 		expect(results.some((r) => r.recordId === row.id)).toBe(true);
 	});
 
@@ -225,7 +246,7 @@ describe('searchWorkspace: token scoping', () => {
 			title: 'Uncataloged Space-Granted',
 			schema: [{ key: 'summary', label: 'Summary', type: 'text' }]
 		});
-		const row = createRecord(human, {
+		const row = createRecord(resolveRequestContext(human), {
 			parentId: uncataloged.id,
 			properties: { summary: { type: 'text', value: 'theta keyword' } }
 		});
@@ -236,7 +257,7 @@ describe('searchWorkspace: token scoping', () => {
 			allowedSpaceIds: [defaultSpaceId]
 		});
 
-		const results = searchWorkspace(token, 'theta');
+		const results = searchWorkspace(resolveRequestContext(token), 'theta');
 		expect(results.some((r) => r.recordId === row.id)).toBe(true);
 	});
 
@@ -248,7 +269,7 @@ describe('searchWorkspace: token scoping', () => {
 			{ parentId: uncataloged.id, blockType: 'paragraph' },
 			human
 		);
-		writeRecord(human, block.id, { markdown: 'iota keyword' });
+		writeRecord(resolveRequestContext(human), block.id, { markdown: 'iota keyword' });
 		const { record: token } = createToken({
 			clientLabel: 'Search Test Bot',
 			allowedDocumentIds: [],
@@ -256,7 +277,7 @@ describe('searchWorkspace: token scoping', () => {
 			allowedSpaceIds: [defaultSpaceId]
 		});
 
-		const results = searchWorkspace(token, 'iota');
+		const results = searchWorkspace(resolveRequestContext(token), 'iota');
 		expect(results.some((r) => r.recordId === block.id)).toBe(true);
 	});
 
@@ -275,9 +296,9 @@ describe('searchWorkspace: token scoping', () => {
 			{ parentId: uncataloged.id, blockType: 'paragraph' },
 			human
 		);
-		writeRecord(human, block.id, { markdown: 'kappa keyword' });
+		writeRecord(resolveRequestContext(human), block.id, { markdown: 'kappa keyword' });
 
-		const results = searchWorkspace(human, 'kappa', defaultSpaceId);
+		const results = searchWorkspace(resolveRequestContext(human), 'kappa', defaultSpaceId);
 		expect(results.some((r) => r.recordId === block.id)).toBe(true);
 	});
 });

@@ -1,11 +1,12 @@
-import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import type { RequestContext } from '$lib/server/request-context';
+import { getInstanceWorkspaceId } from '$lib/server/instance';
 import {
 	createSpace as catalogCreateSpace,
 	listSpaces as catalogListSpaces
 } from '$lib/server/catalog';
 import { logAudit } from '$lib/server/audit';
 import type { SpaceMeta } from '$lib/data/types';
-import { actorForCaller, type CallerIdentity } from './permissions';
+import { actorForCaller } from './permissions';
 
 /**
  * Creates a new Space in the caller's workspace — the service-layer wrapper
@@ -17,17 +18,15 @@ import { actorForCaller, type CallerIdentity } from './permissions';
  * called directly from routes, same precedent as audit.ts's queryAuditLog
  * and tokens.ts's listTokens.
  */
-export function createSpace(caller: CallerIdentity, name: string): SpaceMeta {
-	const { workspaceId } = resolveWorkspaceContext();
-	const actor = actorForCaller(caller);
+export function createSpace(context: RequestContext, name: string): SpaceMeta {
+	const actor = actorForCaller(context.caller);
 
-	const space = catalogCreateSpace(workspaceId, name);
+	const space = catalogCreateSpace(context.workspaceId, name);
 	logAudit({ actor, action: 'create_space', targetRecordId: space.id });
 	return space;
 }
 
 /** Returns the workspace's catalog Spaces through the application boundary. */
 export function listSpaces(): SpaceMeta[] {
-	const { workspaceId } = resolveWorkspaceContext();
-	return catalogListSpaces(workspaceId);
+	return catalogListSpaces(getInstanceWorkspaceId());
 }

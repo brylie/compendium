@@ -21,6 +21,7 @@ import {
 import type { CallerIdentity } from './permissions';
 import type { DocumentRecordView } from './document-projection';
 import type { ActorId, PropertyDefinition, WorkspaceRecord } from '$lib/data/types';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 describe('export service', () => {
 	const caller: CallerIdentity = { kind: 'human', userId: 'test-user' };
@@ -167,14 +168,14 @@ describe('export service', () => {
 	});
 
 	it('exports a single Document as Markdown', () => {
-		const doc = createDocument(caller, { title: 'Test Export Document' });
-		const block = createRecord(caller, {
+		const doc = createDocument(resolveRequestContext(caller), { title: 'Test Export Document' });
+		const block = createRecord(resolveRequestContext(caller), {
 			parentId: doc.id,
 			blockType: 'paragraph'
 		});
-		writeRecord(caller, block.id, { markdown: 'Hello world' });
+		writeRecord(resolveRequestContext(caller), block.id, { markdown: 'Hello world' });
 
-		const exported = exportDocument(caller, doc.id);
+		const exported = exportDocument(resolveRequestContext(caller), doc.id);
 		expect(exported.title).toBe('Test Export Document');
 		expect(exported.markdown).toContain('# Test Export Document');
 		expect(exported.markdown).toContain('Hello world');
@@ -183,7 +184,7 @@ describe('export service', () => {
 	});
 
 	it('exports a Collection to CSV, JSON, and Markdown table', () => {
-		const col = createCollection(caller, {
+		const col = createCollection(resolveRequestContext(caller), {
 			title: 'Task List',
 			schema: [
 				{ key: 'title', label: 'Title', type: 'text' },
@@ -191,7 +192,7 @@ describe('export service', () => {
 			]
 		});
 
-		createRecord(caller, {
+		createRecord(resolveRequestContext(caller), {
 			parentId: col.id,
 			properties: {
 				title: { type: 'text', value: 'Buy groceries' },
@@ -199,7 +200,7 @@ describe('export service', () => {
 			}
 		});
 
-		const exported = exportCollection(caller, col.id);
+		const exported = exportCollection(resolveRequestContext(caller), col.id);
 		expect(exported.collection.title).toBe('Task List');
 		expect(exported.schemaJson).toContain('"label": "Title"');
 		expect(exported.recordsJson).toContain('Buy groceries');
@@ -209,20 +210,20 @@ describe('export service', () => {
 	});
 
 	it('exports a full Workspace bundle with manifest.json and a valid ZIP buffer', () => {
-		const doc1 = createDocument(caller, { title: 'First Document' });
-		const childDoc = createDocument(caller, {
+		const doc1 = createDocument(resolveRequestContext(caller), { title: 'First Document' });
+		const childDoc = createDocument(resolveRequestContext(caller), {
 			title: 'Nested Child Document',
 			parentDocumentId: doc1.id
 		});
-		const block = createRecord(caller, {
+		const block = createRecord(resolveRequestContext(caller), {
 			parentId: doc1.id,
 			blockType: 'heading_1'
 		});
-		writeRecord(caller, block.id, { markdown: 'Welcome' });
+		writeRecord(resolveRequestContext(caller), block.id, { markdown: 'Welcome' });
 
-		const col1 = createCollection(caller, { title: 'Projects' });
+		const col1 = createCollection(resolveRequestContext(caller), { title: 'Projects' });
 
-		const result = exportWorkspace(caller);
+		const result = exportWorkspace(resolveRequestContext(caller));
 		expect(result.manifest.version).toBe('1.0');
 		expect(result.manifest.documents.some((d) => d.id === doc1.id)).toBe(true);
 		expect(result.manifest.documents.some((d) => d.id === childDoc.id)).toBe(true);
@@ -240,7 +241,7 @@ describe('export service', () => {
 		const initial = getMirrorConfig();
 		expect(typeof initial.enabled).toBe('boolean');
 
-		const updated = updateMirrorConfig(caller, {
+		const updated = updateMirrorConfig(resolveRequestContext(caller), {
 			enabled: true,
 			outputDir: tempDir,
 			syncIntervalMs: 30000
@@ -257,7 +258,7 @@ describe('export service', () => {
 	});
 
 	it('syncs workspace content and cleans stale files in mirror directory', () => {
-		updateMirrorConfig(caller, {
+		updateMirrorConfig(resolveRequestContext(caller), {
 			enabled: true,
 			outputDir: tempDir
 		});
@@ -275,12 +276,12 @@ describe('export service', () => {
 		marker.files.push(staleFilePath);
 		fs.writeFileSync(markerPath, JSON.stringify(marker, null, 2), 'utf-8');
 
-		const doc = createDocument(caller, { title: 'Mirrored Doc' });
-		const block = createRecord(caller, {
+		const doc = createDocument(resolveRequestContext(caller), { title: 'Mirrored Doc' });
+		const block = createRecord(resolveRequestContext(caller), {
 			parentId: doc.id,
 			blockType: 'paragraph'
 		});
-		writeRecord(caller, block.id, { markdown: 'Mirror content' });
+		writeRecord(resolveRequestContext(caller), block.id, { markdown: 'Mirror content' });
 
 		const syncResult = syncMarkdownMirror();
 		expect(syncResult.synced).toBe(true);
@@ -299,7 +300,7 @@ describe('export service', () => {
 	});
 
 	it('returns synced: false when markdown mirror is disabled', () => {
-		updateMirrorConfig(caller, { enabled: false });
+		updateMirrorConfig(resolveRequestContext(caller), { enabled: false });
 		const syncResult = syncMarkdownMirror();
 		expect(syncResult.synced).toBe(false);
 		expect(syncResult.fileCount).toBe(0);
@@ -307,7 +308,7 @@ describe('export service', () => {
 
 	it('handles relative mirror outputDir and cleans empty directories', () => {
 		const relativeDir = `./test-relative-mirror-${Date.now()}`;
-		updateMirrorConfig(caller, {
+		updateMirrorConfig(resolveRequestContext(caller), {
 			enabled: true,
 			outputDir: relativeDir
 		});
@@ -364,10 +365,10 @@ describe('export service', () => {
 	});
 
 	it('disambiguates duplicate document titles in workspace export', () => {
-		createDocument(caller, { title: 'Collision Doc' });
-		const doc2 = createDocument(caller, { title: 'Collision Doc' });
+		createDocument(resolveRequestContext(caller), { title: 'Collision Doc' });
+		const doc2 = createDocument(resolveRequestContext(caller), { title: 'Collision Doc' });
 
-		const result = exportWorkspace(caller);
+		const result = exportWorkspace(resolveRequestContext(caller));
 		const paths = result.files.map((f) => f.path);
 
 		expect(paths).toContain('documents/Collision Doc.md');

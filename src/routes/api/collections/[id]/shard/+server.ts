@@ -9,7 +9,7 @@ import type { RequestHandler } from './$types';
  * collectionId, since a pre-existing Collection (created before the
  * shard-assignment cutover) still resolves to the default shard.
  */
-export const GET: RequestHandler = ({ params }) => {
-	const { shardId } = resolveParentWorkspaceContext(params.id);
+export const GET: RequestHandler = ({ params, locals }) => {
+	const { shardId } = resolveParentWorkspaceContext(locals.requestContext, params.id);
 	return json({ shardId });
 };

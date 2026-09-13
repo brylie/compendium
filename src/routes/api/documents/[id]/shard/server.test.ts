@@ -2,14 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { GET } from './+server';
 import { createDocument } from '$lib/services';
 import { CURRENT_USER } from '$lib/server/current-user';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 function shardRequest(id: string): Parameters<typeof GET>[0] {
-	return { params: { id } } as Parameters<typeof GET>[0];
+	return {
+		params: { id },
+		locals: { requestContext: resolveRequestContext() }
+	} as unknown as Parameters<typeof GET>[0];
 }
 
 describe('routes/api/documents/[id]/shard', () => {
 	it('resolves the real shard for an existing Document', async () => {
-		const document = createDocument(CURRENT_USER, { title: 'Shard Test' });
+		const document = createDocument(resolveRequestContext(CURRENT_USER), { title: 'Shard Test' });
 
 		const response = await GET(shardRequest(document.id));
 		const data = await response.json();

@@ -8,7 +8,7 @@ import type { RequestHandler } from './$types';
  * assumes shardId === documentId, since a pre-existing Document (created
  * before the shard-assignment cutover) still resolves to the default shard.
  */
-export const GET: RequestHandler = ({ params }) => {
-	const { shardId } = resolveParentWorkspaceContext(params.id);
+export const GET: RequestHandler = ({ params, locals }) => {
+	const { shardId } = resolveParentWorkspaceContext(locals.requestContext, params.id);
 	return json({ shardId });
 };

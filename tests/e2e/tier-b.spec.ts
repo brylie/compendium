@@ -3,6 +3,7 @@ import { createTestHarness, type TestHarness } from './harness';
 import { createCollection, createDocument, createRecord, writeRecord } from '$lib/services';
 import { flush, resolveWorkspaceContext } from '$lib/server/workspace-store';
 import type { ActorId } from '$lib/data/types';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
 
@@ -27,11 +28,14 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 	test('Held-block placeholder appears on MCP hold and resolves atomically on MCP write', async ({
 		page
 	}) => {
-		const docMeta = createDocument(human, {
+		const docMeta = createDocument(resolveRequestContext(human), {
 			title: 'Live Browser Collaboration',
 			createInitialBlock: false
 		});
-		const block = createRecord(human, { parentId: docMeta.id, blockType: 'paragraph' });
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: docMeta.id,
+			blockType: 'paragraph'
+		});
 		flush();
 
 		const { token } = harness.createToken({
@@ -79,7 +83,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 	test('Sidebar tree reflects an MCP-created document only after a refresh, not live (#120 accepted tradeoff)', async ({
 		page
 	}) => {
-		const rootDoc = createDocument(human, {
+		const rootDoc = createDocument(resolveRequestContext(human), {
 			title: 'Initial Root Doc',
 			createInitialBlock: false
 		});
@@ -216,16 +220,22 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		page
 	}) => {
 		// 1. Two documents already exist, each with one empty block
-		const docA = createDocument(human, {
+		const docA = createDocument(resolveRequestContext(human), {
 			title: 'Event Planning: Venue',
 			createInitialBlock: false
 		});
-		const blockA = createRecord(human, { parentId: docA.id, blockType: 'paragraph' });
-		const docB = createDocument(human, {
+		const blockA = createRecord(resolveRequestContext(human), {
+			parentId: docA.id,
+			blockType: 'paragraph'
+		});
+		const docB = createDocument(resolveRequestContext(human), {
 			title: 'Event Planning: Catering',
 			createInitialBlock: false
 		});
-		const blockB = createRecord(human, { parentId: docB.id, blockType: 'paragraph' });
+		const blockB = createRecord(resolveRequestContext(human), {
+			parentId: docB.id,
+			blockType: 'paragraph'
+		});
 		flush();
 
 		const { token } = harness.createToken({
@@ -288,7 +298,9 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 		// page's depth-relative href — resolving to a 404 under the deeper
 		// URL. paths.relative: false (vite.config.ts) fixes it by making the
 		// href root-absolute regardless of route depth or navigation history.
-		const docMeta = createDocument(human, { title: 'Favicon Regression Doc' });
+		const docMeta = createDocument(resolveRequestContext(human), {
+			title: 'Favicon Regression Doc'
+		});
 		flush();
 
 		await page.goto(`${harness.httpUrl}/space/${defaultSpaceId()}`);
@@ -305,7 +317,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 	test('Board view groupBy columns render on initial load after fresh connect (issue #217)', async ({
 		page
 	}) => {
-		const collection = createCollection(human, {
+		const collection = createCollection(resolveRequestContext(human), {
 			title: 'Sprint Tasks',
 			schema: [
 				{
@@ -319,18 +331,18 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 				}
 			]
 		});
-		createRecord(human, {
+		createRecord(resolveRequestContext(human), {
 			parentId: collection.id,
 			properties: {
 				status: { type: 'select', value: 'todo' }
 			}
 		});
 
-		const docMeta = createDocument(human, {
+		const docMeta = createDocument(resolveRequestContext(human), {
 			title: 'Board Page',
 			createInitialBlock: false
 		});
-		createRecord(human, {
+		createRecord(resolveRequestContext(human), {
 			parentId: docMeta.id,
 			blockType: 'collection_view',
 			referencedRecordId: collection.id,
@@ -355,7 +367,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 	test('Board view auto-picks groupBy on initial load when unset (issue #217)', async ({
 		page
 	}) => {
-		const collection = createCollection(human, {
+		const collection = createCollection(resolveRequestContext(human), {
 			title: 'Sprint Tasks Auto',
 			schema: [
 				{
@@ -369,18 +381,18 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 				}
 			]
 		});
-		createRecord(human, {
+		createRecord(resolveRequestContext(human), {
 			parentId: collection.id,
 			properties: {
 				status: { type: 'select', value: 'todo' }
 			}
 		});
 
-		const docMeta = createDocument(human, {
+		const docMeta = createDocument(resolveRequestContext(human), {
 			title: 'Board Page Auto',
 			createInitialBlock: false
 		});
-		createRecord(human, {
+		createRecord(resolveRequestContext(human), {
 			parentId: docMeta.id,
 			blockType: 'collection_view',
 			referencedRecordId: collection.id,
@@ -402,7 +414,7 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 	test('Calendar view preserves persisted date groupBy on fresh connect (issue #217)', async ({
 		page
 	}) => {
-		const collection = createCollection(human, {
+		const collection = createCollection(resolveRequestContext(human), {
 			title: 'Sprint Milestones',
 			schema: [
 				{
@@ -412,18 +424,18 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 				}
 			]
 		});
-		createRecord(human, {
+		createRecord(resolveRequestContext(human), {
 			parentId: collection.id,
 			properties: {
 				due: { type: 'date', value: '2026-09-15' }
 			}
 		});
 
-		const docMeta = createDocument(human, {
+		const docMeta = createDocument(resolveRequestContext(human), {
 			title: 'Calendar Page',
 			createInitialBlock: false
 		});
-		createRecord(human, {
+		createRecord(resolveRequestContext(human), {
 			parentId: docMeta.id,
 			blockType: 'collection_view',
 			referencedRecordId: collection.id,
@@ -447,21 +459,30 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 	test('Cross-block ArrowUp/ArrowDown moves focus between blocks with column preservation across single and multi-line paragraphs (issue #163)', async ({
 		page
 	}) => {
-		const docMeta = createDocument(human, {
+		const docMeta = createDocument(resolveRequestContext(human), {
 			title: 'Cross-block Navigation',
 			createInitialBlock: false
 		});
-		const block1 = createRecord(human, { parentId: docMeta.id, blockType: 'paragraph' });
-		const block2 = createRecord(human, { parentId: docMeta.id, blockType: 'paragraph' });
-		const block3 = createRecord(human, { parentId: docMeta.id, blockType: 'paragraph' });
-		writeRecord(human, block1.id, {
+		const block1 = createRecord(resolveRequestContext(human), {
+			parentId: docMeta.id,
+			blockType: 'paragraph'
+		});
+		const block2 = createRecord(resolveRequestContext(human), {
+			parentId: docMeta.id,
+			blockType: 'paragraph'
+		});
+		const block3 = createRecord(resolveRequestContext(human), {
+			parentId: docMeta.id,
+			blockType: 'paragraph'
+		});
+		writeRecord(resolveRequestContext(human), block1.id, {
 			markdown: 'Short first block text.'
 		});
-		writeRecord(human, block2.id, {
+		writeRecord(resolveRequestContext(human), block2.id, {
 			markdown:
 				'This is a much longer paragraph intentionally designed to soft-wrap across multiple visual lines in the browser editor. It needs to span several lines so we can test intra-block line navigation alongside cross-block edge transitions. More words follow to guarantee that this block wraps across at least three distinct lines in standard viewport widths.'
 		});
-		writeRecord(human, block3.id, {
+		writeRecord(resolveRequestContext(human), block3.id, {
 			markdown: 'Short third block text.'
 		});
 		flush();
@@ -599,16 +620,27 @@ test.describe('Tier B: DOM-visible MCP/Browser parity', () => {
 	test('Cross-block ArrowUp/ArrowDown skips over held blocks without stalling (issue #163)', async ({
 		page
 	}) => {
-		const docMeta = createDocument(human, {
+		const docMeta = createDocument(resolveRequestContext(human), {
 			title: 'Held-block Navigation Skip',
 			createInitialBlock: false
 		});
-		const blockA = createRecord(human, { parentId: docMeta.id, blockType: 'paragraph' });
-		const blockB = createRecord(human, { parentId: docMeta.id, blockType: 'paragraph' });
-		const blockC = createRecord(human, { parentId: docMeta.id, blockType: 'paragraph' });
-		writeRecord(human, blockA.id, { markdown: 'Block A content.' });
-		writeRecord(human, blockB.id, { markdown: 'Block B content held by agent.' });
-		writeRecord(human, blockC.id, { markdown: 'Block C content.' });
+		const blockA = createRecord(resolveRequestContext(human), {
+			parentId: docMeta.id,
+			blockType: 'paragraph'
+		});
+		const blockB = createRecord(resolveRequestContext(human), {
+			parentId: docMeta.id,
+			blockType: 'paragraph'
+		});
+		const blockC = createRecord(resolveRequestContext(human), {
+			parentId: docMeta.id,
+			blockType: 'paragraph'
+		});
+		writeRecord(resolveRequestContext(human), blockA.id, { markdown: 'Block A content.' });
+		writeRecord(resolveRequestContext(human), blockB.id, {
+			markdown: 'Block B content held by agent.'
+		});
+		writeRecord(resolveRequestContext(human), blockC.id, { markdown: 'Block C content.' });
 		flush();
 
 		const { token } = harness.createToken({

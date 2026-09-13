@@ -11,6 +11,6 @@ import type { RequestHandler } from './$types';
  * sync (see services/documents.ts's deleteDocument).
  */
 export const DELETE: RequestHandler = ({ params, locals }) => {
-	deleteDocument(locals.requestContext.caller, params.id);
+	deleteDocument(locals.requestContext, params.id);
 	return json({ success: true });
 };

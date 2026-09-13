@@ -23,8 +23,8 @@ import type { Actions, PageServerLoad } from './$types';
 export const load: PageServerLoad = ({ locals }) => {
 	return {
 		tokens: listTokens(),
-		documents: listDocuments(locals.requestContext.caller),
-		collections: listCollections(locals.requestContext.caller),
+		documents: listDocuments(locals.requestContext),
+		collections: listCollections(locals.requestContext),
 		spaces: listSpaces()
 	};
 };
@@ -41,7 +41,7 @@ export const actions: Actions = {
 
 		let token: string;
 		try {
-			({ token } = createToken(locals.requestContext.caller, {
+			({ token } = createToken(locals.requestContext, {
 				clientLabel,
 				allowedDocumentIds,
 				allowedCollectionIds,
@@ -66,7 +66,7 @@ export const actions: Actions = {
 		const data = await request.formData();
 		const tokenHash = formString(data.get('tokenHash'));
 		if (!tokenHash) return fail(400, { error: 'Missing token' });
-		revokeToken(locals.requestContext.caller, tokenHash);
+		revokeToken(locals.requestContext, tokenHash);
 		return { revoked: true };
 	}
 };

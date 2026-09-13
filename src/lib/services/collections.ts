@@ -1,4 +1,4 @@
-import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import type { RequestContext } from '$lib/server/request-context';
 import { getDocument as crdtGetDocument } from '$lib/data/document-ops';
 import {
 	createCollection as crdtCreateCollection,
@@ -34,8 +34,7 @@ import {
 	actorForCaller,
 	isAccessToken,
 	requireAccessibleParent,
-	resolveParentWorkspaceContext,
-	type CallerIdentity
+	resolveParentWorkspaceContext
 } from './permissions';
 
 export interface CreateCollectionInput {
@@ -87,16 +86,18 @@ function assertUniqueCollectionTitleInSpace(
  * the service layer (and therefore the catalog locator) entirely.
  */
 export function createCollection(
-	caller: CallerIdentity,
+	context: RequestContext,
 	input: CreateCollectionInput
 ): CollectionMeta {
+	const caller = context.caller;
 	const actor = actorForCaller(caller);
 	const id = input.id ?? nanoid();
+	const { workspaceId, defaultSpaceId } = context.workspace;
 
 	// Each Collection gets its own shard, keyed by its own id (one Y.Doc per
 	// Collection — see docs/specifications/workspace-sharding.md §1).
-	const { doc, workspaceId, shardId, defaultSpaceId } = resolveWorkspaceContext({ shardId: id });
-	const { doc: defaultDoc } = resolveWorkspaceContext();
+	const { doc, shardId } = context.workspaceStore.resolve({ workspaceId, shardId: id });
+	const { doc: defaultDoc } = context.workspace;
 	const targetSpaceId = input.spaceId ?? defaultSpaceId;
 	// A caller-supplied spaceId must actually exist — otherwise
 	// reserveCollectionLocator's insert below would fail its composite FK
@@ -167,12 +168,20 @@ export function createCollection(
  * `$lib/server/workspace-repository` (#191) — shared with
  * `documents.ts#listDocuments` and `search.ts#searchWorkspace`.
  */
-export function listCollections(caller: CallerIdentity, spaceId?: string): CollectionMeta[] {
-	const { workspaceId, defaultSpaceId, doc: defaultDoc } = resolveWorkspaceContext();
+export function listCollections(context: RequestContext, spaceId?: string): CollectionMeta[] {
+	const caller = context.caller;
+	const { workspaceId, defaultSpaceId, doc: defaultDoc } = context.workspace;
 	const allowed = (id: string, collectionSpaceId?: string) =>
 		!isAccessToken(caller) || tokenAllowsParent(caller, id, collectionSpaceId);
 
-	return listWorkspaceCollections({ workspaceId, spaceId, defaultSpaceId, defaultDoc, allowed });
+	return listWorkspaceCollections({
+		workspaceId,
+		spaceId,
+		defaultSpaceId,
+		defaultDoc,
+		allowed,
+		workspaceStore: context.workspaceStore
+	});
 }
 
 /**
@@ -203,17 +212,17 @@ export function resolvePrimaryFieldKey(
  * read model.
  */
 export function queryCollection(
-	caller: CallerIdentity,
+	context: RequestContext,
 	collectionId: string,
 	filter?: ViewFilter[]
 ): {
 	collection: CollectionMeta | undefined;
 	records: WorkspaceRecord[];
 } {
-	const { doc } = resolveParentWorkspaceContext(collectionId);
-	const actor = actorForCaller(caller);
+	const { doc } = resolveParentWorkspaceContext(context, collectionId);
+	const actor = actorForCaller(context.caller);
 
-	requireAccessibleParent(caller, collectionId, 'query_collection');
+	requireAccessibleParent(context, collectionId, 'query_collection');
 	const collection = crdtGetCollection(doc, collectionId);
 	const records = applyFilters(crdtListRecordsForParent(doc, collectionId), filter);
 
@@ -222,11 +231,11 @@ export function queryCollection(
 }
 
 /** Deletes a Collection (after a permission check), removing it from both the Y.Doc and the catalog, and audits the deletion. */
-export function deleteCollection(caller: CallerIdentity, collectionId: string): void {
-	const { doc, workspaceId } = resolveParentWorkspaceContext(collectionId);
-	const actor = actorForCaller(caller);
+export function deleteCollection(context: RequestContext, collectionId: string): void {
+	const { doc, workspaceId } = resolveParentWorkspaceContext(context, collectionId);
+	const actor = actorForCaller(context.caller);
 
-	requireAccessibleParent(caller, collectionId, 'delete_collection');
+	requireAccessibleParent(context, collectionId, 'delete_collection');
 	transactWithOrigin(doc, SERVICE_ORIGIN, () => crdtDeleteCollection(doc, collectionId));
 	recordCatalogCollectionDeleted(workspaceId, collectionId);
 	logAudit({ actor, action: 'delete_collection', targetRecordId: collectionId });
@@ -234,14 +243,14 @@ export function deleteCollection(caller: CallerIdentity, collectionId: string): 
 
 /** Renames a Collection (after a permission check), updating both the Y.Doc and the catalog, and audits the change. */
 export function updateCollectionTitle(
-	caller: CallerIdentity,
+	context: RequestContext,
 	collectionId: string,
 	title: string
 ): void {
-	const { doc, workspaceId, parentSpaceId } = resolveParentWorkspaceContext(collectionId);
-	const actor = actorForCaller(caller);
+	const { doc, workspaceId, parentSpaceId } = resolveParentWorkspaceContext(context, collectionId);
+	const actor = actorForCaller(context.caller);
 
-	requireAccessibleParent(caller, collectionId, 'update_collection_title');
+	requireAccessibleParent(context, collectionId, 'update_collection_title');
 	// parentSpaceId is undefined only for a legacy/uncataloged Collection (no
 	// locator row) — nothing to scope the uniqueness check to in that case,
 	// consistent with pre-existing duplicates being left alone (issue #78).

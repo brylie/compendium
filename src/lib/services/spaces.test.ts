@@ -5,10 +5,11 @@ import { createToken } from '$lib/mcp/tokens';
 import { queryAuditLog } from '$lib/server/audit';
 import { isKnownSpace } from '$lib/server/catalog';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 describe('service layer: createSpace', () => {
 	it('creates a Space in the caller workspace and logs an audit entry attributed to a human caller', () => {
-		const space = createSpace(CURRENT_USER, 'Marketing');
+		const space = createSpace(resolveRequestContext(CURRENT_USER), 'Marketing');
 
 		expect(space.name).toBe('Marketing');
 		const { workspaceId } = resolveWorkspaceContext();
@@ -27,7 +28,7 @@ describe('service layer: createSpace', () => {
 			allowedCollectionIds: []
 		});
 
-		const space = createSpace(tokenRecord, 'Agent Space');
+		const space = createSpace(resolveRequestContext(tokenRecord), 'Agent Space');
 
 		const { workspaceId } = resolveWorkspaceContext();
 		expect(isKnownSpace(workspaceId, space.id)).toBe(true);

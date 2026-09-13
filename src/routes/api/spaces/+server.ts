@@ -7,6 +7,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const body = await request.json();
 	const name = String(body.name ?? '').trim() || 'Untitled Space';
 
-	const space = createSpace(locals.requestContext.caller, name);
+	const space = createSpace(locals.requestContext, name);
 	return json(space);
 };

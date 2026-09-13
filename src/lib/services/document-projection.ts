@@ -1,6 +1,7 @@
 import type * as Y from 'yjs';
 import { richTextToMarkdown } from '$lib/data/markdown-transcode';
 import { resolveParentWorkspaceContext } from '$lib/services/permissions';
+import type { RequestContext } from '$lib/server/request-context';
 import type { DocumentRecordData } from '$lib/services/documents';
 import type {
 	CalloutPreset,
@@ -169,10 +170,11 @@ export function projectDocumentRecordView(
  * Renders a full `getDocument` result (protocol-neutral) into a projected document view.
  */
 export function projectDocument(
+	context: RequestContext,
 	documentId: string,
 	data: { id: string; title: string; parentDocumentId?: string; records: DocumentRecordData[] }
 ): { id: string; title: string; parentDocumentId?: string; records: DocumentRecordView[] } {
-	const { doc } = resolveParentWorkspaceContext(documentId);
+	const { doc } = resolveParentWorkspaceContext(context, documentId);
 	return {
 		id: data.id,
 		title: data.title,

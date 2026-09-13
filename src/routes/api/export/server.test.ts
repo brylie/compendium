@@ -21,7 +21,7 @@ describe('routes/api/export', () => {
 	});
 
 	it('exports single document as markdown', async () => {
-		const doc = createDocument(CURRENT_USER, { title: 'Export Route Doc' });
+		const doc = createDocument(resolveRequestContext(CURRENT_USER), { title: 'Export Route Doc' });
 		const response = await GET(getRequest({ scope: 'document', id: doc.id }));
 		expect(response.status).toBe(200);
 		expect(response.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
@@ -29,7 +29,10 @@ describe('routes/api/export', () => {
 	});
 
 	it('exports collection as csv by default', async () => {
-		const col = createCollection(CURRENT_USER, { title: 'Export Route Col', schema: [] });
+		const col = createCollection(resolveRequestContext(CURRENT_USER), {
+			title: 'Export Route Col',
+			schema: []
+		});
 		const response = await GET(getRequest({ scope: 'collection', id: col.id }));
 		expect(response.status).toBe(200);
 		expect(response.headers.get('Content-Type')).toBe('text/csv; charset=utf-8');
@@ -37,7 +40,10 @@ describe('routes/api/export', () => {
 	});
 
 	it('exports collection as json when format=json', async () => {
-		const col = createCollection(CURRENT_USER, { title: 'Export Route Col JSON', schema: [] });
+		const col = createCollection(resolveRequestContext(CURRENT_USER), {
+			title: 'Export Route Col JSON',
+			schema: []
+		});
 		const response = await GET(getRequest({ scope: 'collection', id: col.id, format: 'json' }));
 		expect(response.status).toBe(200);
 		expect(response.headers.get('Content-Type')).toBe('application/json; charset=utf-8');

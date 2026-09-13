@@ -9,6 +9,7 @@ import {
 import { CURRENT_USER } from '$lib/server/current-user';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { markdownToRichText, richTextToMarkdown } from './markdown-transcode';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 describe('markdown transcoding', () => {
 	it('round-trips CommonMark inline formatting', () => {
@@ -58,7 +59,9 @@ describe('markdown transcoding', () => {
 		// shard, not the default doc — so resolving a wiki-link to it from a
 		// different doc entirely must fall back to the catalog fan-out rather
 		// than finding it via the target doc's own local Documents map.
-		const target = serviceCreateDocument(CURRENT_USER, { title: 'Sharded Target Doc' });
+		const target = serviceCreateDocument(resolveRequestContext(CURRENT_USER), {
+			title: 'Sharded Target Doc'
+		});
 		const { doc } = resolveWorkspaceContext();
 
 		const richText = markdownToRichText(doc, 'see [[Sharded Target Doc]] for details');
@@ -67,7 +70,9 @@ describe('markdown transcoding', () => {
 	});
 
 	it('renders a wiki-link target only findable in its own shard', () => {
-		const target = serviceCreateDocument(CURRENT_USER, { title: 'Sharded Render Target' });
+		const target = serviceCreateDocument(resolveRequestContext(CURRENT_USER), {
+			title: 'Sharded Render Target'
+		});
 		const { doc } = resolveWorkspaceContext();
 		const richText: Parameters<typeof richTextToMarkdown>[1] = {
 			runs: [{ text: 'Sharded Render Target', marks: { link: `record:${target.id}` } }]
@@ -77,7 +82,7 @@ describe('markdown transcoding', () => {
 	});
 
 	it('resolves [[Title]] to a Collection only findable via the catalog fan-out', () => {
-		const target = serviceCreateCollection(CURRENT_USER, {
+		const target = serviceCreateCollection(resolveRequestContext(CURRENT_USER), {
 			title: 'Sharded Target Collection',
 			schema: []
 		});

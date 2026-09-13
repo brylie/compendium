@@ -4,13 +4,14 @@ import { createCollection as rawCrdtCreateCollection } from '$lib/data/collectio
 import { createDocument, createCollection } from '$lib/services';
 import type { ActorId } from '$lib/data/types';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
-import { resolveWorkspaceContext } from './workspace-store';
+import { getDefaultWorkspaceStore, resolveWorkspaceContext } from './workspace-store';
 import { createSpace, listCatalogDocuments } from './catalog';
 import {
 	fanOutCatalogedAndUncataloged,
 	listWorkspaceDocuments,
 	listWorkspaceCollections
 } from './workspace-repository';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
 const allowAll = () => true;
@@ -26,14 +27,15 @@ function crdtCreateCollection(...args: Parameters<typeof rawCrdtCreateCollection
 describe('listWorkspaceDocuments', () => {
 	it('includes both catalog-listed and uncataloged Documents when spaceId is omitted', () => {
 		const { doc, workspaceId, defaultSpaceId } = resolveWorkspaceContext();
-		const cataloged = createDocument(human, { title: 'Cataloged Doc' });
+		const cataloged = createDocument(resolveRequestContext(human), { title: 'Cataloged Doc' });
 		const uncataloged = crdtCreateDocument(doc, { title: 'Uncataloged Doc' });
 
 		const results = listWorkspaceDocuments({
 			workspaceId,
 			defaultSpaceId,
 			defaultDoc: doc,
-			allowed: allowAll
+			allowed: allowAll,
+			workspaceStore: getDefaultWorkspaceStore()
 		});
 
 		expect(results.some((d) => d.id === cataloged.id)).toBe(true);
@@ -43,7 +45,10 @@ describe('listWorkspaceDocuments', () => {
 	it('skips the uncataloged fallback when a non-default spaceId is requested', () => {
 		const { doc, workspaceId, defaultSpaceId } = resolveWorkspaceContext();
 		const otherSpace = createSpace(workspaceId, 'Other Space');
-		const cataloged = createDocument(human, { title: 'Other-Space Doc', spaceId: otherSpace.id });
+		const cataloged = createDocument(resolveRequestContext(human), {
+			title: 'Other-Space Doc',
+			spaceId: otherSpace.id
+		});
 		const uncataloged = crdtCreateDocument(doc, { title: 'Uncataloged Doc 2' });
 
 		const results = listWorkspaceDocuments({
@@ -51,7 +56,8 @@ describe('listWorkspaceDocuments', () => {
 			spaceId: otherSpace.id,
 			defaultSpaceId,
 			defaultDoc: doc,
-			allowed: allowAll
+			allowed: allowAll,
+			workspaceStore: getDefaultWorkspaceStore()
 		});
 
 		expect(results.some((d) => d.id === cataloged.id)).toBe(true);
@@ -67,7 +73,8 @@ describe('listWorkspaceDocuments', () => {
 			spaceId: defaultSpaceId,
 			defaultSpaceId,
 			defaultDoc: doc,
-			allowed: allowAll
+			allowed: allowAll,
+			workspaceStore: getDefaultWorkspaceStore()
 		});
 
 		expect(results.some((d) => d.id === uncataloged.id)).toBe(true);
@@ -75,14 +82,15 @@ describe('listWorkspaceDocuments', () => {
 
 	it('applies the permission predicate to both catalog and uncataloged items', () => {
 		const { doc, workspaceId, defaultSpaceId } = resolveWorkspaceContext();
-		const cataloged = createDocument(human, { title: 'Denied Doc' });
+		const cataloged = createDocument(resolveRequestContext(human), { title: 'Denied Doc' });
 		const uncataloged = crdtCreateDocument(doc, { title: 'Denied Uncataloged Doc' });
 
 		const results = listWorkspaceDocuments({
 			workspaceId,
 			defaultSpaceId,
 			defaultDoc: doc,
-			allowed: () => false
+			allowed: () => false,
+			workspaceStore: getDefaultWorkspaceStore()
 		});
 
 		expect(results.some((d) => d.id === cataloged.id)).toBe(false);
@@ -93,7 +101,7 @@ describe('listWorkspaceDocuments', () => {
 describe('listWorkspaceCollections', () => {
 	it('hydrates catalog-listed Collections with their full schema, not just the catalog stub', () => {
 		const { doc, workspaceId, defaultSpaceId } = resolveWorkspaceContext();
-		const cataloged = createCollection(human, {
+		const cataloged = createCollection(resolveRequestContext(human), {
 			title: 'Cataloged Collection',
 			schema: [{ key: 'name', label: 'Name', type: 'text' }]
 		});
@@ -102,7 +110,8 @@ describe('listWorkspaceCollections', () => {
 			workspaceId,
 			defaultSpaceId,
 			defaultDoc: doc,
-			allowed: allowAll
+			allowed: allowAll,
+			workspaceStore: getDefaultWorkspaceStore()
 		});
 
 		const found = results.find((c) => c.id === cataloged.id);
@@ -120,7 +129,8 @@ describe('listWorkspaceCollections', () => {
 			workspaceId,
 			defaultSpaceId,
 			defaultDoc: doc,
-			allowed: allowAll
+			allowed: allowAll,
+			workspaceStore: getDefaultWorkspaceStore()
 		});
 
 		expect(results.some((c) => c.id === uncataloged.id)).toBe(true);
@@ -130,7 +140,7 @@ describe('listWorkspaceCollections', () => {
 describe('fanOutCatalogedAndUncataloged', () => {
 	it('resolves each catalog item to the Y.Doc its own shard actually lives in', () => {
 		const { doc, workspaceId, defaultSpaceId } = resolveWorkspaceContext();
-		const cataloged = createDocument(human, { title: 'Fanout Doc' });
+		const cataloged = createDocument(resolveRequestContext(human), { title: 'Fanout Doc' });
 
 		const items = fanOutCatalogedAndUncataloged({
 			workspaceId,
@@ -142,6 +152,7 @@ describe('fanOutCatalogedAndUncataloged', () => {
 			getId: (m) => m.id,
 			getSpaceId: (m) => m.spaceId,
 			allowed: allowAll,
+			workspaceStore: getDefaultWorkspaceStore(),
 			resolveShardDoc: true
 		});
 

@@ -21,8 +21,8 @@ import type { Actions, PageServerLoad } from './$types';
  */
 export const load: PageServerLoad = ({ params, locals }) => {
 	return {
-		documents: listDocuments(locals.requestContext.caller, params.spaceId),
-		collections: listCollections(locals.requestContext.caller, params.spaceId)
+		documents: listDocuments(locals.requestContext, params.spaceId),
+		collections: listCollections(locals.requestContext, params.spaceId)
 	};
 };
 
@@ -35,7 +35,7 @@ export const actions: Actions = {
 
 		let document;
 		try {
-			document = createDocument(locals.requestContext.caller, {
+			document = createDocument(locals.requestContext, {
 				title,
 				parentDocumentId,
 				createInitialBlock: true,
@@ -59,7 +59,7 @@ export const actions: Actions = {
 
 		let collection;
 		try {
-			collection = createCollection(locals.requestContext.caller, {
+			collection = createCollection(locals.requestContext, {
 				title,
 				schema: [],
 				spaceId: params.spaceId

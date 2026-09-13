@@ -1,5 +1,5 @@
 import type * as Y from 'yjs';
-import { resolveWorkspaceContext } from './workspace-store';
+import type { WorkspaceStore } from './workspace-store';
 import { resolveShardForParent, listCatalogCollections, listCatalogDocuments } from './catalog';
 import { listDocuments as crdtListDocuments } from '$lib/data/document-ops';
 import {
@@ -25,13 +25,24 @@ interface FanOutOptions<TMeta> {
 	getSpaceId: (meta: TMeta) => string | undefined;
 	allowed: (id: string, spaceId?: string) => boolean;
 	/**
+	 * The `WorkspaceStore` to resolve a catalog item's own shard through when
+	 * `resolveShardDoc` is set — threaded explicitly from the caller's
+	 * `RequestContext.workspaceStore` rather than imported ambiently, so this
+	 * fan-out never resolves outside whatever store the caller is actually
+	 * scoped to (issue #306). Required unconditionally (not just when
+	 * `resolveShardDoc` is set) so a caller can never silently pass it as
+	 * `undefined` and have `resolveShardDoc` quietly no-op back to `defaultDoc`.
+	 */
+	workspaceStore: WorkspaceStore;
+	/**
 	 * Catalog-listed Documents already carry everything a plain listing needs
 	 * (title/parentDocumentId/order) straight from the catalog row, so
 	 * resolving each one's real shard would be a pure-overhead locator lookup
 	 * with nothing to show for it. Collections' catalog row doesn't carry
 	 * schema/primaryFieldKey, and search needs to scan a shard's actual block
-	 * content — both set this to resolve each catalog item's real `doc`
-	 * (falling back to `defaultDoc` for anything with no locator row).
+	 * content — both set this (and must also pass `workspaceStore`) to
+	 * resolve each catalog item's real `doc` (falling back to `defaultDoc`
+	 * for anything with no locator row).
 	 */
 	resolveShardDoc?: boolean;
 }
@@ -59,6 +70,7 @@ export function fanOutCatalogedAndUncataloged<TMeta>(
 		getId,
 		getSpaceId,
 		allowed,
+		workspaceStore,
 		resolveShardDoc
 	} = opts;
 
@@ -69,11 +81,10 @@ export function fanOutCatalogedAndUncataloged<TMeta>(
 		const id = getId(meta);
 		catalogIds.add(id);
 		if (!allowed(id, getSpaceId(meta))) continue;
-		let doc = defaultDoc;
-		if (resolveShardDoc) {
-			const shard = resolveShardForParent(workspaceId, id);
-			if (shard) doc = resolveWorkspaceContext({ workspaceId, shardId: shard.shardId }).doc;
-		}
+		const shard = resolveShardDoc ? resolveShardForParent(workspaceId, id) : undefined;
+		const doc = shard
+			? workspaceStore.resolve({ workspaceId, shardId: shard.shardId }).doc
+			: defaultDoc;
 		results.push({ meta, doc });
 	}
 
@@ -103,6 +114,7 @@ interface ListWorkspaceItemsOptions {
 	defaultSpaceId: string;
 	defaultDoc: Y.Doc;
 	allowed: (id: string, spaceId?: string) => boolean;
+	workspaceStore: WorkspaceStore;
 }
 
 /** Every Document in the workspace the caller may see — catalog plus uncataloged fallback. */

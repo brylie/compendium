@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { resolveRequestContext } from '$lib/server/request-context';
 import { createTestHarness, type TestHarness } from './harness';
 import { getCollection, updateCollectionTitle } from '$lib/data/collection-ops';
 import { getDocument as getDocumentMeta, updateDocumentTitle } from '$lib/data/document-ops';
@@ -428,7 +429,7 @@ describe('UI Adapter Bindings', () => {
 					break;
 				}
 				case 'tokens.revokeToken': {
-					const { record } = serviceModules.tokens.createToken(human, {
+					const { record } = serviceModules.tokens.createToken(resolveRequestContext(human), {
 						clientLabel: `Route Wiring Token To Revoke ${Date.now()}`,
 						allowedDocumentIds: [],
 						allowedCollectionIds: [],
@@ -444,7 +445,7 @@ describe('UI Adapter Bindings', () => {
 				}
 				case 'tokens.listTokens': {
 					const clientLabel = `Route Wiring Listed Token ${Date.now()}`;
-					serviceModules.tokens.createToken(human, {
+					serviceModules.tokens.createToken(resolveRequestContext(human), {
 						clientLabel,
 						allowedDocumentIds: [],
 						allowedCollectionIds: [],

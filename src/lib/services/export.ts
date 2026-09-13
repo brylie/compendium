@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { zipSync, strToU8 } from 'fflate';
-import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import { resolveRequestContext, type RequestContext } from '$lib/server/request-context';
 import { logAudit } from '$lib/server/audit';
 import { getDocument, listDocuments } from './documents';
 import { listCollections, queryCollection } from './collections';
@@ -10,7 +10,7 @@ import {
 	renderBlockMarkdown,
 	type DocumentRecordView
 } from './document-projection';
-import { actorForCaller, type CallerIdentity } from './permissions';
+import { actorForCaller } from './permissions';
 import type { CollectionMeta, PropertyDefinition, WorkspaceRecord } from '$lib/data/types';
 
 export { renderBlockMarkdown };
@@ -54,7 +54,7 @@ export function getMirrorConfig(): MirrorConfig {
 
 /** Updates Markdown mirror configuration and persists it to disk. */
 export function updateMirrorConfig(
-	caller: CallerIdentity,
+	context: RequestContext,
 	configInput: Partial<MirrorConfig>
 ): MirrorConfig {
 	const current = getMirrorConfig();
@@ -82,7 +82,7 @@ export function updateMirrorConfig(
 		);
 	}
 
-	const actor = actorForCaller(caller);
+	const actor = actorForCaller(context.caller);
 	logAudit({ actor, action: 'update_mirror_config', diff: updated });
 	return updated;
 }
@@ -261,7 +261,7 @@ export interface ExportWorkspaceResult {
 
 /** Exports a single Document (and optionally its sub-pages) as Markdown files. */
 export function exportDocument(
-	caller: CallerIdentity,
+	context: RequestContext,
 	documentId: string,
 	includeChildren = true
 ): {
@@ -270,11 +270,11 @@ export function exportDocument(
 	markdown: string;
 	files: ExportFileEntry[];
 } {
-	const rawDocData = getDocument(caller, documentId);
+	const rawDocData = getDocument(context, documentId);
 	if (!rawDocData) {
 		throw new Error(`Document ${documentId} not found or inaccessible`);
 	}
-	const projected = projectDocument(documentId, rawDocData);
+	const projected = projectDocument(context, documentId, rawDocData);
 	const markdown = renderDocumentFileMarkdown(projected.title, projected.records);
 
 	const files: ExportFileEntry[] = [
@@ -285,7 +285,7 @@ export function exportDocument(
 	];
 
 	if (includeChildren) {
-		const allDocs = listDocuments(caller);
+		const allDocs = listDocuments(context);
 		const childrenMap = new Map<string, string[]>();
 		for (const docMeta of allDocs) {
 			if (docMeta.parentDocumentId) {
@@ -298,9 +298,9 @@ export function exportDocument(
 		const addDescendants = (parentId: string, currentPathPrefix: string) => {
 			const childIds = childrenMap.get(parentId) ?? [];
 			for (const childId of childIds) {
-				const childRaw = getDocument(caller, childId);
+				const childRaw = getDocument(context, childId);
 				if (!childRaw) continue;
-				const childProj = projectDocument(childId, childRaw);
+				const childProj = projectDocument(context, childId, childRaw);
 				const childMd = renderDocumentFileMarkdown(childProj.title, childProj.records);
 				const childPath = `${currentPathPrefix}/${sanitizeFilename(childProj.title)}.md`;
 				files.push({ path: childPath, content: childMd });
@@ -311,7 +311,7 @@ export function exportDocument(
 		addDescendants(documentId, sanitizeFilename(projected.title));
 	}
 
-	const actor = actorForCaller(caller);
+	const actor = actorForCaller(context.caller);
 	logAudit({ actor, action: 'export_document', targetRecordId: documentId });
 
 	return {
@@ -324,7 +324,7 @@ export function exportDocument(
 
 /** Exports a Collection schema, JSON records, CSV records, and Markdown table. */
 export function exportCollection(
-	caller: CallerIdentity,
+	context: RequestContext,
 	collectionId: string
 ): {
 	collection: CollectionMeta;
@@ -333,7 +333,7 @@ export function exportCollection(
 	recordsCsv: string;
 	markdownTable: string;
 } {
-	const { collection, records } = queryCollection(caller, collectionId);
+	const { collection, records } = queryCollection(context, collectionId);
 	if (!collection) {
 		throw new Error(`Collection ${collectionId} not found or inaccessible`);
 	}
@@ -347,7 +347,7 @@ export function exportCollection(
 		records
 	);
 
-	const actor = actorForCaller(caller);
+	const actor = actorForCaller(context.caller);
 	logAudit({ actor, action: 'export_collection', targetRecordId: collectionId });
 
 	return {
@@ -360,12 +360,12 @@ export function exportCollection(
 }
 
 /** Exports all accessible Documents and Collections into a ZIP archive with a manifest. */
-export function exportWorkspace(caller: CallerIdentity, spaceId?: string): ExportWorkspaceResult {
-	const { workspaceId, defaultSpaceId } = resolveWorkspaceContext();
+export function exportWorkspace(context: RequestContext, spaceId?: string): ExportWorkspaceResult {
+	const { workspaceId, defaultSpaceId } = context.workspace;
 	const targetSpaceId = spaceId ?? defaultSpaceId;
 
-	const docMetas = listDocuments(caller, spaceId);
-	const colMetas = listCollections(caller, spaceId);
+	const docMetas = listDocuments(context, spaceId);
+	const colMetas = listCollections(context, spaceId);
 
 	const files: ExportFileEntry[] = [];
 	const manifestDocs: WorkspaceManifest['documents'] = [];
@@ -405,9 +405,9 @@ export function exportWorkspace(caller: CallerIdentity, spaceId?: string): Expor
 
 	for (const meta of docMetas) {
 		const docPath = buildDocPath(meta.id);
-		const rawDocData = getDocument(caller, meta.id);
+		const rawDocData = getDocument(context, meta.id);
 		if (!rawDocData) continue;
-		const projected = projectDocument(meta.id, rawDocData);
+		const projected = projectDocument(context, meta.id, rawDocData);
 		const mdContent = renderDocumentFileMarkdown(projected.title, projected.records);
 
 		files.push({ path: docPath, content: mdContent });
@@ -432,7 +432,7 @@ export function exportWorkspace(caller: CallerIdentity, spaceId?: string): Expor
 		const recordsPath = `${colFolder}/records.json`;
 		const csvPath = `${colFolder}/records.csv`;
 
-		const exportedCol = exportCollection(caller, colMeta.id);
+		const exportedCol = exportCollection(context, colMeta.id);
 		files.push({ path: schemaPath, content: exportedCol.schemaJson });
 		files.push({ path: recordsPath, content: exportedCol.recordsJson });
 		files.push({ path: csvPath, content: exportedCol.recordsCsv });
@@ -468,7 +468,7 @@ export function exportWorkspace(caller: CallerIdentity, spaceId?: string): Expor
 
 	const zipBuffer = zipSync(fflateZipInput);
 
-	const actor = actorForCaller(caller);
+	const actor = actorForCaller(context.caller);
 	logAudit({ actor, action: 'export_workspace' });
 
 	return { manifest, files, zipBuffer };
@@ -582,8 +582,8 @@ export function syncMarkdownMirror(): {
 		return { synced: false, fileCount: 0, outputDir: config.outputDir };
 	}
 
-	const systemCaller: CallerIdentity = { kind: 'human', userId: 'system' };
-	const exportResult = exportWorkspace(systemCaller);
+	const systemContext = resolveRequestContext({ kind: 'human', userId: 'system' });
+	const exportResult = exportWorkspace(systemContext);
 
 	const resolvedDir = path.isAbsolute(config.outputDir)
 		? config.outputDir

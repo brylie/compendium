@@ -3,6 +3,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { verifyToken, type AccessToken } from './tokens';
+import { resolveRequestContext, type RequestContext } from '$lib/server/request-context';
 import {
 	serviceModules,
 	serviceSurfaces,
@@ -169,8 +170,8 @@ export function createMcpServer(): McpServer {
 	// 1. documents.listDocuments
 	registerFromManifest(server, 'documents.listDocuments', {}, async (_args, extra) => {
 		try {
-			const token = requireToken(extra);
-			const docs = serviceModules.documents.listDocuments(token).map((d) => ({
+			const context = requireContext(extra);
+			const docs = serviceModules.documents.listDocuments(context).map((d) => ({
 				id: d.id,
 				title: d.title,
 				parentDocumentId: d.parentDocumentId,
@@ -189,10 +190,10 @@ export function createMcpServer(): McpServer {
 		{ documentId: z.string() },
 		async ({ documentId }, extra) => {
 			try {
-				const token = requireToken(extra);
-				const result = serviceModules.documents.getDocument(token, documentId);
+				const context = requireContext(extra);
+				const result = serviceModules.documents.getDocument(context, documentId);
 				if (!result) return errorResult(`Document ${documentId} not found`);
-				return textResult(projectDocument(documentId, result));
+				return textResult(projectDocument(context, documentId, result));
 			} catch (err) {
 				return handleToolError(err);
 			}
@@ -209,8 +210,8 @@ export function createMcpServer(): McpServer {
 		},
 		async ({ title, parentDocumentId }, extra) => {
 			try {
-				const token = requireToken(extra);
-				const document = serviceModules.documents.createDocument(token, {
+				const context = requireContext(extra);
+				const document = serviceModules.documents.createDocument(context, {
 					title,
 					parentDocumentId
 				});
@@ -236,8 +237,8 @@ export function createMcpServer(): McpServer {
 		},
 		async ({ documentId, parentDocumentId, afterDocumentId }, extra) => {
 			try {
-				const token = requireToken(extra);
-				serviceModules.documents.moveDocument(token, documentId, {
+				const context = requireContext(extra);
+				serviceModules.documents.moveDocument(context, documentId, {
 					parentDocumentId,
 					afterDocumentId
 				});
@@ -259,8 +260,8 @@ export function createMcpServer(): McpServer {
 		{ documentId: z.string() },
 		async ({ documentId }, extra) => {
 			try {
-				const token = requireToken(extra);
-				serviceModules.documents.deleteDocument(token, documentId);
+				const context = requireContext(extra);
+				serviceModules.documents.deleteDocument(context, documentId);
 				return textResult({ success: true, documentId });
 			} catch (err) {
 				return handleToolError(err);
@@ -271,8 +272,8 @@ export function createMcpServer(): McpServer {
 	// 6. collections.listCollections
 	registerFromManifest(server, 'collections.listCollections', {}, async (_args, extra) => {
 		try {
-			const token = requireToken(extra);
-			const collections = serviceModules.collections.listCollections(token).map((c) => ({
+			const context = requireContext(extra);
+			const collections = serviceModules.collections.listCollections(context).map((c) => ({
 				id: c.id,
 				title: c.title,
 				schema: c.schema,
@@ -298,9 +299,9 @@ export function createMcpServer(): McpServer {
 		},
 		async ({ collectionId, filter }, extra) => {
 			try {
-				const token = requireToken(extra);
+				const context = requireContext(extra);
 				const { collection, records } = serviceModules.collections.queryCollection(
-					token,
+					context,
 					collectionId,
 					filter
 				);
@@ -338,8 +339,8 @@ export function createMcpServer(): McpServer {
 		},
 		async ({ query, space_id }, extra) => {
 			try {
-				const token = requireToken(extra);
-				const results = serviceModules.search.searchWorkspace(token, query, space_id);
+				const context = requireContext(extra);
+				const results = serviceModules.search.searchWorkspace(context, query, space_id);
 				return textResult(results);
 			} catch (err) {
 				return handleToolError(err);
@@ -354,8 +355,8 @@ export function createMcpServer(): McpServer {
 		{ recordIds: z.array(z.string()) },
 		async ({ recordIds }, extra) => {
 			try {
-				const token = requireToken(extra);
-				const result = serviceModules.holds.holdRecords(token, recordIds);
+				const context = requireContext(extra);
+				const result = serviceModules.holds.holdRecords(context, recordIds);
 				return textResult(result);
 			} catch (err) {
 				return handleToolError(err);
@@ -370,8 +371,8 @@ export function createMcpServer(): McpServer {
 		{ recordIds: z.array(z.string()) },
 		async ({ recordIds }, extra) => {
 			try {
-				const token = requireToken(extra);
-				serviceModules.holds.releaseRecords(token, recordIds);
+				const context = requireContext(extra);
+				serviceModules.holds.releaseRecords(context, recordIds);
 				return textResult({ success: true });
 			} catch (err) {
 				return handleToolError(err);
@@ -396,8 +397,8 @@ export function createMcpServer(): McpServer {
 			extra
 		) => {
 			try {
-				const token = requireToken(extra);
-				serviceModules.records.writeRecord(token, recordId, {
+				const context = requireContext(extra);
+				serviceModules.records.writeRecord(context, recordId, {
 					markdown,
 					properties,
 					referencedRecordId,
@@ -439,8 +440,8 @@ export function createMcpServer(): McpServer {
 			extra
 		) => {
 			try {
-				const token = requireToken(extra);
-				const record = serviceModules.records.createRecord(token, {
+				const context = requireContext(extra);
+				const record = serviceModules.records.createRecord(context, {
 					parentId,
 					afterRecordId,
 					blockType: blockType as BlockType | undefined,
@@ -464,8 +465,8 @@ export function createMcpServer(): McpServer {
 		{ recordId: z.string() },
 		async ({ recordId }, extra) => {
 			try {
-				const token = requireToken(extra);
-				serviceModules.records.deleteRecord(token, recordId);
+				const context = requireContext(extra);
+				serviceModules.records.deleteRecord(context, recordId);
 				return textResult({ success: true });
 			} catch (err) {
 				return handleToolError(err);
@@ -492,6 +493,11 @@ function requireToken(extra: { authInfo?: { token?: string } }): AccessToken {
 	const token = verifyToken(raw);
 	if (!token) throw new PermissionDeniedError('Invalid or revoked access token');
 	return token;
+}
+
+/** Resolves the trusted RequestContext for one MCP tool call, from its bearer token — each call resolves its own independently, per hooks.server.ts's own doc comment. */
+function requireContext(extra: { authInfo?: { token?: string } }): RequestContext {
+	return resolveRequestContext(requireToken(extra));
 }
 
 function handleToolError(err: unknown): CallToolResult {

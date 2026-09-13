@@ -1,5 +1,6 @@
 import type { ActorId, ParentKind } from '$lib/data/types';
-import { resolveWorkspaceContext, type WorkspaceContext } from '$lib/server/workspace-store';
+import type { RequestContext, Caller } from '$lib/server/request-context';
+import type { WorkspaceContext } from '$lib/server/workspace-store';
 import { getRecord, resolveOwningParentId } from '$lib/data/record-ops';
 import { tokenAllowsParent, type AccessToken } from '$lib/server/token-store';
 import { logAudit } from '$lib/server/audit';
@@ -7,7 +8,8 @@ import { resolveShardForParent, resolveShardForRecord } from '$lib/server/catalo
 
 export { resolveOwningParentId };
 
-export type CallerIdentity = AccessToken | ActorId;
+/** Same shape as `RequestContext`'s own `Caller` — re-exported here since every service function historically named it `CallerIdentity`. */
+export type CallerIdentity = Caller;
 
 /** Thrown by the `require*` guards below when a caller isn't permitted to access a parent or record. */
 export class PermissionDeniedError extends Error {
@@ -53,22 +55,22 @@ function logDenial(
 }
 
 /**
- * Throws `PermissionDeniedError` (and logs a denial for token callers) unless `caller`'s
+ * Throws `PermissionDeniedError` (and logs a denial for token callers) unless `context.caller`'s
  * access token allows `parentId`, resolving through any Space-level grant in addition to
  * the per-ID allowlist. No-ops for the single-tenant UI's own local-user caller.
  */
 export function requireAccessibleParent(
-	caller: CallerIdentity,
+	context: RequestContext,
 	parentId: string,
 	action?: string
 ): void {
+	const caller = context.caller;
 	if (isAccessToken(caller)) {
 		// Resolved for the token's Space-level grant (#6) — the per-ID
 		// allowlist checks alone can't see a Space-wide grant, so a token
 		// scoped only to a Space (never given this specific id directly)
 		// would otherwise always fail here.
-		const { workspaceId } = resolveWorkspaceContext();
-		const spaceId = resolveShardForParent(workspaceId, parentId)?.spaceId;
+		const spaceId = resolveShardForParent(context.workspaceId, parentId)?.spaceId;
 		if (!tokenAllowsParent(caller, parentId, spaceId)) {
 			logDenial(caller, action, parentId);
 			throw new PermissionDeniedError(`Not permitted to access parent ${parentId}`);
@@ -78,22 +80,23 @@ export function requireAccessibleParent(
 
 /**
  * Looks up `recordId` and throws `PermissionDeniedError` (logging a denial) if it doesn't
- * exist or its parent isn't accessible to `caller`; otherwise returns the record. A record
- * nested inside a container block (columns/column) is checked against its owning Document's
- * grant, not the container's own (non-catalog-navigable) id — see resolveOwningParentId.
+ * exist or its parent isn't accessible to `context.caller`; otherwise returns the record. A
+ * record nested inside a container block (columns/column) is checked against its owning
+ * Document's grant, not the container's own (non-catalog-navigable) id — see
+ * resolveOwningParentId.
  */
 export function requireAccessibleRecord(
-	caller: CallerIdentity,
+	context: RequestContext,
 	recordId: string,
 	action?: string
 ): NonNullable<ReturnType<typeof getRecord>> {
-	const { doc } = resolveRecordWorkspaceContext(recordId);
+	const { doc } = resolveRecordWorkspaceContext(context, recordId);
 	const record = getRecord(doc, recordId);
 	if (!record) {
-		logDenial(caller, action, recordId);
+		logDenial(context.caller, action, recordId);
 		throw new PermissionDeniedError(`Record ${recordId} not found`);
 	}
-	requireAccessibleParent(caller, resolveOwningParentId(doc, record.parentId), action);
+	requireAccessibleParent(context, resolveOwningParentId(doc, record.parentId), action);
 	return record;
 }
 
@@ -110,22 +113,27 @@ export function requireAccessibleRecord(
  * (issue #253) — before finally falling back to the default context for the
  * rare case a locator is still genuinely missing (e.g. a shard resolved
  * before the observer/backfill existed and not yet reconciled).
+ *
+ * Resolves through `context.workspaceStore` rather than an ambient import,
+ * so a caller with its own isolated store (a test, most notably) never
+ * silently resolves against the process-wide default (issue #306).
  */
 export function resolveParentWorkspaceContext(
+	context: RequestContext,
 	parentId: string
 ): WorkspaceContext & { parentKind?: ParentKind; parentSpaceId?: string } {
-	const { workspaceId } = resolveWorkspaceContext();
+	const { workspaceId, workspaceStore } = context;
 	const shard = resolveShardForParent(workspaceId, parentId);
 	if (shard) {
-		const ctx = resolveWorkspaceContext({ workspaceId, shardId: shard.shardId });
+		const ctx = workspaceStore.resolve({ workspaceId, shardId: shard.shardId });
 		return { ...ctx, parentKind: shard.kind, parentSpaceId: shard.spaceId };
 	}
 	const recordShard = resolveShardForRecord(workspaceId, parentId);
 	if (recordShard) {
-		const ctx = resolveWorkspaceContext({ workspaceId, shardId: recordShard.shardId });
+		const ctx = workspaceStore.resolve({ workspaceId, shardId: recordShard.shardId });
 		return { ...ctx, parentKind: 'record' };
 	}
-	return { ...resolveWorkspaceContext({ workspaceId }) };
+	return { ...workspaceStore.resolve({ workspaceId }) };
 }
 
 /**
@@ -133,15 +141,22 @@ export function resolveParentWorkspaceContext(
  * that only have a bare recordId (write_record, delete_record, get_record).
  * See catalog.ts's resolveShardForRecord.
  */
-export function resolveRecordWorkspaceContext(recordId: string): WorkspaceContext {
-	const { workspaceId } = resolveWorkspaceContext();
+export function resolveRecordWorkspaceContext(
+	context: RequestContext,
+	recordId: string
+): WorkspaceContext {
+	const { workspaceId, workspaceStore } = context;
 	const shard = resolveShardForRecord(workspaceId, recordId);
-	return resolveWorkspaceContext(shard ? { workspaceId, shardId: shard.shardId } : { workspaceId });
+	return workspaceStore.resolve(shard ? { workspaceId, shardId: shard.shardId } : { workspaceId });
 }
 
 /** Groups recordIds by their resolved shard, for a hold/release call that may legitimately span more than one. */
-export function groupRecordIdsByShard(recordIds: string[]): Map<string, string[]> {
-	const { workspaceId, shardId: defaultShardId } = resolveWorkspaceContext();
+export function groupRecordIdsByShard(
+	context: RequestContext,
+	recordIds: string[]
+): Map<string, string[]> {
+	const { workspaceId, workspace } = context;
+	const defaultShardId = workspace.shardId;
 	const groups = new Map<string, string[]>();
 	for (const id of recordIds) {
 		const shardId = resolveShardForRecord(workspaceId, id)?.shardId ?? defaultShardId;

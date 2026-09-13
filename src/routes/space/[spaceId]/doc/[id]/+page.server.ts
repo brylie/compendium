@@ -12,7 +12,7 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = ({ params, locals }) => {
 	// Resolves the Document's real shard, not the default doc — a Document's
 	// own meta entry lives in its own shard (see #120).
-	const { doc, parentSpaceId } = resolveParentWorkspaceContext(params.id);
+	const { doc, parentSpaceId } = resolveParentWorkspaceContext(locals.requestContext, params.id);
 	// A Document can be linked to from a different Space than the URL's own
 	// [spaceId] segment (page_link targets aren't restricted to the current
 	// Space — #6 Phase A). Self-heal to the real one rather than 404ing or
@@ -30,13 +30,13 @@ export const load: PageServerLoad = ({ params, locals }) => {
 		// page_link/"Add link" pickers, breadcrumb parent title, and
 		// page_link target rendering. Not live, same accepted tradeoff as
 		// Sidebar's lists.
-		documents: listDocuments(locals.requestContext.caller),
-		collections: listCollections(locals.requestContext.caller),
+		documents: listDocuments(locals.requestContext),
+		collections: listCollections(locals.requestContext),
 		// Backlinks panel (issue #83) — SSR-only, not live, same accepted
 		// tradeoff as documents/collections above: a workspace-wide fan-out
 		// scan (see documents.ts#listBacklinks) isn't something to re-run on
 		// every Yjs observer tick, so a new backlink appears on next
 		// navigation/refresh rather than instantly.
-		backlinks: listBacklinks(locals.requestContext.caller, params.id)
+		backlinks: listBacklinks(locals.requestContext, params.id)
 	};
 };

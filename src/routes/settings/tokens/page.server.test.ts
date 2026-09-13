@@ -29,7 +29,7 @@ function formEvent(
 
 describe('routes/settings/tokens/+page.server', () => {
 	it('load() lists tokens, documents, and collections', () => {
-		createDocument(CURRENT_USER, { title: 'Doc for tokens page' });
+		createDocument(resolveRequestContext(CURRENT_USER), { title: 'Doc for tokens page' });
 
 		const result = load(loadEvent()) as unknown as {
 			documents: { title: string }[];
@@ -41,8 +41,10 @@ describe('routes/settings/tokens/+page.server', () => {
 	});
 
 	it('load() lists Documents and Collections created via the service layer, each in their own real shard (#188)', () => {
-		const shardedDoc = createDocument(CURRENT_USER, { title: 'Sharded Doc for tokens page' });
-		const shardedCol = createCollection(CURRENT_USER, {
+		const shardedDoc = createDocument(resolveRequestContext(CURRENT_USER), {
+			title: 'Sharded Doc for tokens page'
+		});
+		const shardedCol = createCollection(resolveRequestContext(CURRENT_USER), {
 			title: 'Sharded Collection for tokens page',
 			schema: []
 		});
@@ -62,7 +64,7 @@ describe('routes/settings/tokens/+page.server', () => {
 	});
 
 	it('create action mints a scoped token and logs the grant', async () => {
-		const docMeta = createDocument(CURRENT_USER, { title: 'Scoped Doc' });
+		const docMeta = createDocument(resolveRequestContext(CURRENT_USER), { title: 'Scoped Doc' });
 
 		const result = (await actions.create(
 			formEvent({ clientLabel: 'Test Client', documentIds: [docMeta.id] })

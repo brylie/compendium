@@ -11,7 +11,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const spaceId = body.spaceId ? String(body.spaceId) : undefined;
 
 	try {
-		const document = createDocument(locals.requestContext.caller, {
+		const document = createDocument(locals.requestContext, {
 			title,
 			parentDocumentId,
 			createInitialBlock: true,
