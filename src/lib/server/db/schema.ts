@@ -93,7 +93,7 @@ export const catalogDocuments = sqliteTable(
 		// Deliberately NOT a foreign key: a Document can be created by a client
 		// writing directly to the Y.Doc over Yjs sync, bypassing the service layer
 		// entirely (a supported pattern — see docs/specifications/audit-coverage.md
-		// and tests/e2e/tier-a.test.ts's direct-Yjs-client cases). Its catalog row
+		// and tests/e2e/holds-attribution.test.ts's direct-Yjs-client cases). Its catalog row
 		// wouldn't exist yet, so a strict FK on a real parentDocumentId would throw
 		// on an otherwise-valid nested create. recordCatalogDocumentDeleted (see
 		// catalog.ts) therefore deletes descendants explicitly rather than relying

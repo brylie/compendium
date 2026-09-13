@@ -54,11 +54,11 @@ Tests do import internal modules directly — `records.ts`, a `services/*.ts` fu
 | MCP holds a block, Yjs client (human) starts editing it → hold releases, human's edit is not overwritten by the agent's in-flight write | "the hold is released and the human's edit is not overwritten by the agent's in-flight write" |
 | MCP holds a block, connection is dropped without writing, TTL elapses → block reverts to prior content | "the block reverts to its pre-hold content automatically, with no manual cleanup required" |
 | Token scoped to one document → MCP calls against any other document return permission-denied | "An agent or client granted access to a single document cannot read or write any other document" |
-| MCP `search_workspace`'s `space_id` (#114/#133) → a real MCP client scoped to one Space never sees another Space's matching content, over the actual HTTP transport (`3c` in `tier-a.test.ts`); `listDocuments`/`listCollections`/`searchWorkspace`'s underlying scoping composes correctly with per-ID token scoping, covered at the unit level (`src/lib/server/space-isolation.test.ts`) — `list_documents`/`list_collections` have no MCP-exposed Space selector yet (only `search_workspace` does; broader MCP/UI Space selection is #6's product-surface job) | `workspace-sharding.md` §9: "UI and MCP operations enforce the same catalog, Space, and shard scope"; PRD's multi-space non-goal-adjacent requirement (#6) |
+| MCP `search_workspace`'s `space_id` (#114/#133) → a real MCP client scoped to one Space never sees another Space's matching content, over the actual HTTP transport (`shard-routing.test.ts`); `listDocuments`/`listCollections`/`searchWorkspace`'s underlying scoping composes correctly with per-ID token scoping, covered at the unit level (`src/lib/server/space-isolation.test.ts`) — `list_documents`/`list_collections` have no MCP-exposed Space selector yet (only `search_workspace` does; broader MCP/UI Space selection is #6's product-surface job) | `workspace-sharding.md` §9: "UI and MCP operations enforce the same catalog, Space, and shard scope"; PRD's multi-space non-goal-adjacent requirement (#6) |
 | Every MCP write/delete call → a corresponding audit log entry exists, correctly attributed | Audit log acceptance criterion |
 | A Yjs client write (the actual browser-UI persistence path — e.g. the `+page.svelte` block editor calling `$lib/data/records.ts` directly, not an MCP call standing in for it) → a corresponding audit log entry exists with the correct actor attribution | Audit log acceptance criterion, UI-originated side — **currently unmet**: the UI's block create/write/delete path calls `$lib/data/records.ts` directly rather than going through `src/lib/services/*.ts`, so no `logAudit` call exists on that path today (only Document-level actions routed through `+page.server.ts`/`api/*/+server.ts` are audited). This test is expected to fail until that gap is closed, tracked as follow-up work rather than fixed here. |
 | MCP `move_document` (once built, per the fix list) → both the mover's own subsequent read and a differently-scoped token's read reflect the correct new permission boundary | Same category as the create_document case — any operation that changes what a token can reach needs this shape of test |
-| For every `serviceSurfaces`/`uiAdapterBindings` entry (`service-layer-manifest.md` §3): the real route/action the manifest declares as its UI binding is exercised — a JSON `+server.ts`/form action over real HTTP, or (for a surface the UI reaches by mutating its own Yjs doc directly, not by calling the service function — see `audit-coverage.md`) the same data-layer call the bound `.svelte` file performs, over a real y-websocket client — and the declared service method's real, observable side effect is asserted (the audit log entry it produces, or the persisted state a subsequent real read reflects); a manifest entry whose bound file doesn't actually produce that effect fails the test, not just a route existence check (`17` in `tier-a.test.ts`, closes #213) | `service-layer-manifest.md` §3/§6: closing the "declared binding vs. actually wired" gap the static manifest alone can't catch |
+| For every `serviceSurfaces`/`uiAdapterBindings` entry (`service-layer-manifest.md` §3): the real route/action the manifest declares as its UI binding is exercised — a JSON `+server.ts`/form action over real HTTP, or (for a surface the UI reaches by mutating its own Yjs doc directly, not by calling the service function — see `audit-coverage.md`) the same data-layer call the bound `.svelte` file performs, over a real y-websocket client — and the declared service method's real, observable side effect is asserted (the audit log entry it produces, or the persisted state a subsequent real read reflects); a manifest entry whose bound file doesn't actually produce that effect fails the test, not just a route existence check (`tests/e2e/ui-adapter-bindings.test.ts`, closes #213) | `service-layer-manifest.md` §3/§6: closing the "declared binding vs. actually wired" gap the static manifest alone can't catch |
 
 ### Tier B — browser-visible behavior (secondary; smaller set)
 
@@ -82,6 +82,67 @@ A shared fixture module, `tests/e2e/harness.ts`, used by both tiers:
 - Exposes `hasAppHandler: boolean` — whether `build/handler.js` was found and loaded, so a real SvelteKit route/action (as opposed to `/mcp` or `/ws`) gets served instead of a blanket 404. This is only `true` after `npm run build`; CI's `npm run test:e2e` always builds first, but a bare local `npm run test:e2e:tier-a` does not, same precondition Tier B already had. A test that drives a real route/action (see the manifest UI-wiring test in §2's required list) should check this and fail with an actionable message rather than a confusing 404 when it's `false`.
 
 This harness is the only thing that should know how to boot a full server instance for tests — individual test files should never construct their own ad hoc server setup, to keep the tiering (and the "no internal shortcuts" rule from §2) consistent across the suite. Loading `build/handler.js` at runtime must go through a plain `import(/* @vite-ignore */ path)`, not a `new Function('p', 'return import(p)')` indirection — the latter compiles its own script with no `importModuleDynamically` hook wired up under Vitest's vm-based module execution and throws `ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`. A route whose response requires rendering Svelte components (a full page, not a `+server.ts`/form-action JSON response) should be fetched via SvelteKit's own `<path>/__data.json` suffix (what the client router requests for a client-side navigation) rather than the plain HTML path: fetching the rendered HTML page from inside Vitest drives `build/handler.js`'s own internal lazy `import()` of that route's compiled `.svelte.js` chunk, which gets caught by the project's `vite-plugin-svelte` (active in Vitest's own module graph for component tests) and mis-recompiled as if it were Svelte source rather than already-compiled output, throwing a `dollar_prefix_invalid` compile error on the chunk's own `$$renderer`-generated variables. `__data.json` returns the route's `load` output (devalue-encoded) without ever touching the page's Svelte components, sidestepping this entirely — and is the more precise tool anyway for asserting "did this load function run and return the right data," as opposed to Tier B's job of asserting what actually renders.
+
+### 3.1 Tier A file organization
+
+Tier A used to live entirely in one `tests/e2e/tier-a.test.ts` (grew to ~2000
+lines / 23 `it()` cases across one `describe` block before #300). It's now
+split by concern into focused files under `tests/e2e/`, each with its own
+`describe` and each still using the shared `createTestHarness()` fixture in
+its own `beforeEach`/`afterEach`:
+
+| File                             | Covers                                                                                                                               |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `sync-parity.test.ts`            | Bidirectional MCP ↔ Yjs write/read convergence (§2's first two required tests)                                                       |
+| `shard-routing.test.ts`          | Document/Collection/Space → shard resolution, cross-shard and cross-Space isolation                                                  |
+| `permissions-grants.test.ts`     | Token scoping and permission-denied enforcement across independent calls                                                             |
+| `holds-attribution.test.ts`      | `hold_records`/`release_records` semantics and audit-log attribution                                                                 |
+| `service-layer-manifest.test.ts` | The `serviceModules`/`serviceSurfaces` manifest wiring check (§2's manifest test, non-UI half)                                       |
+| `collection-views.test.ts`       | `collection_view` block config: `viewConfigPatch`, `groupBy`/`swimlaneBy`                                                            |
+| `markdown-fidelity.test.ts`      | `page_link` authoring/retargeting and nested-block markdown round-tripping                                                           |
+| `ui-adapter-bindings.test.ts`    | The `uiAdapterBindings` half of the manifest check — real route/action or Yjs-mutation wiring (§2's last required test, closes #213) |
+
+Shared test-only helpers (`parseMcpText`, `getResultText`, the `createDocument`
+origin-tagged wrapper, `human`, `assertRouteFileWiresCall`) live in
+`tests/e2e/mcp-parity-helpers.ts`, imported by whichever files need them —
+this is test-support code, not itself a Tier A test file, so it's excluded
+from the `integration` project's `include` pattern by not matching
+`*.test.ts`. Splitting further or merging two of these back together is fine
+as concerns evolve; the constraint is per-concern focus, not a fixed count.
+
+### 3.2 Test isolation model
+
+The `integration` Vitest project (Tier A, `tests/e2e/instance-isolation.test.ts`,
+and `src/routes/mcp/server.test.ts`) runs with `pool: 'forks'`, `isolate: true`,
+and `fileParallelism: true` (`vite.config.ts`). Each test file gets its own
+OS process, which is what makes concurrent test _files_ safe despite every
+file's `beforeEach`/`afterEach` resetting process-wide state: `workspace-store.ts`'s
+`globalThis`-anchored registry, `process.env.DATABASE_URL`, and the `closeDb()`
+connection singleton. None of that state is visible across processes, so two
+files running at the same time never corrupt each other's registry or
+database, even though within a single process the state genuinely is a bare
+singleton.
+
+`fileParallelism` was previously pinned to `false` for this project with no
+recorded rationale (see #300) — plausibly defensive rather than measured,
+since every test already binds an OS-assigned ephemeral port (`listenOnLoopback`)
+and its own temp SQLite file, so nothing here actually depended on serial
+execution. Re-enabling it was verified by running the full `integration`
+project repeatedly (8+ consecutive runs) with no port collisions or flakiness
+observed, cutting wall-clock time roughly 3x.
+
+This isolation is **per-file, not per-test**: within one file, `it()` blocks
+still run sequentially against the same process-wide singletons, and nothing
+in the suite currently uses `test.concurrent`/`describe.concurrent`. Making
+concurrent tests _within_ a single file safe would require replacing
+`workspace-store.ts`'s bare `globalThis` registry with an explicit,
+test-scoped context (e.g. `AsyncLocalStorage`) — tracked separately as
+[#303](https://github.com/brylie/compendium/issues/303), since it also has to
+preserve the dev server's cross-module-graph sharing guarantee that the
+`globalThis` anchor exists for in the first place (see the comment at the top
+of `workspace-store.ts`), and touches ~196 ambient call sites across the
+service layer and MCP handlers — substantially more invasive than the
+file-level isolation described here.
 
 ## 4. Tooling and CI placement
 

@@ -51,7 +51,7 @@ split and the two tiers in `e2e-testing.md`:
 | **`server` project**                    | Vitest, node env      | `src/**` + `tests/**` business logic — CRDT primitives (`records.ts`), service-layer functions, MCP tool logic, persistence.                    |
 | **`client` project**                    | Vitest, jsdom         | `src/lib/client/**` — the y-websocket wrapper UI and MCP code share (`yjs-client.ts`).                                                          |
 | **`component` project**                 | Vitest, jsdom+browser | `src/**/*.svelte.test.ts` — Svelte component behavior via `mount()` (needs the `browser` resolve condition; see the config comment for why).    |
-| **Tier A** (`tests/e2e/tier-a.test.ts`) | Vitest, real server   | Protocol-boundary correctness: two independent real clients (an MCP SDK `Client`, a real `y-websocket` client) against one real running server. |
+| **Tier A** (`tests/e2e/*.test.ts`, split by concern — see `e2e-testing.md` §3.1) | Vitest, real server   | Protocol-boundary correctness: two independent real clients (an MCP SDK `Client`, a real `y-websocket` client) against one real running server. |
 | **Tier B** (`tests/e2e/tier-b.spec.ts`) | Playwright            | Genuinely DOM-only behavior a Tier A test structurally cannot see (rendered pixels, live DOM updates) — kept deliberately small.                |
 
 The three Vitest projects catch business-rule and CRDT bugs fast, in-process.
@@ -197,7 +197,7 @@ and locally.
 `e2e-testing.md` §2 names a specific table of required Tier A tests, each
 mapped to a PRD acceptance criterion. Specs drift the same way any other
 doc does — e.g. that table currently marks the UI-originated audit-log test
-as "expected to fail until that gap is closed," but `tests/e2e/tier-a.test.ts`
+as "expected to fail until that gap is closed," but `tests/e2e/holds-attribution.test.ts`
 test #11 ("A real Yjs websocket client editing directly... is still audited
 exactly once per action (issue #34)") shows that gap was in fact closed —
 the spec's own note is stale. Periodically:
