@@ -262,9 +262,18 @@ describe('export service', () => {
 			outputDir: tempDir
 		});
 
+		// Initial sync to establish mirror manifest marker
+		syncMarkdownMirror();
+
 		const staleFilePath = path.join(tempDir, 'documents', 'Old Stale File.md');
 		fs.mkdirSync(path.dirname(staleFilePath), { recursive: true });
 		fs.writeFileSync(staleFilePath, 'old content', 'utf-8');
+
+		// Include stale file in mirror manifest marker to simulate previous mirror output
+		const markerPath = path.join(tempDir, '.compendium-mirror-manifest.json');
+		const marker = JSON.parse(fs.readFileSync(markerPath, 'utf-8'));
+		marker.files.push(staleFilePath);
+		fs.writeFileSync(markerPath, JSON.stringify(marker, null, 2), 'utf-8');
 
 		const doc = createDocument(caller, { title: 'Mirrored Doc' });
 		const block = createRecord(caller, {
@@ -344,7 +353,7 @@ describe('export service', () => {
 		];
 
 		const csv = collectionRecordsToCsv(schema, records);
-		expect(csv).toContain('rec-1,\'=CMD("calc")');
+		expect(csv).toContain('rec-1,"\'=CMD(""calc"")"');
 		expect(csv).toContain("rec-2,'+100");
 	});
 
