@@ -76,3 +76,20 @@ export function closeDb(): void {
 	globalThis.__db?.client.close();
 	globalThis.__db = undefined;
 }
+
+/**
+ * Writes a complete, consistent copy of the live database to `destPath` via
+ * SQLite's own `VACUUM INTO` — safe to run against a WAL-mode connection
+ * that's actively being written to (unlike a raw file copy, which could
+ * capture a torn read across the main file and its `-wal` sidecar), and the
+ * output is a normal standalone `.db` file needing no separate WAL/SHM
+ * companions to open. `VACUUM INTO` refuses to overwrite an existing file,
+ * so callers must pass a path that doesn't exist yet — see backup.ts's
+ * timestamped filenames. This is the one place backup.ts touches the raw
+ * better-sqlite3 client rather than the drizzle wrapper; see
+ * docs/specifications/backup-recovery.md for the design this implements.
+ */
+export function backupDatabaseTo(destPath: string): void {
+	getDb();
+	globalThis.__db!.client.prepare('VACUUM INTO ?').run(destPath);
+}

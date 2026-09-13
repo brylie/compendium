@@ -7,11 +7,13 @@ import { createServer } from 'node:http';
 import { handler } from './build/handler.js';
 import { attachYjsWebSocket } from './src/lib/server/attach-ws.js';
 import { getInstanceWorkspaceId } from './src/lib/server/instance.js';
+import { wireBackupScheduleOnce } from './src/lib/server/backup.js';
 
 const port = Number(process.env.PORT ?? 3000);
 
 const server = createServer(handler);
 attachYjsWebSocket(server);
+wireBackupScheduleOnce();
 
 // DATABASE_URL is usually a local sqlite file path, but nothing prevents it
 // from being a connection string with embedded credentials — strip

@@ -2,7 +2,7 @@ import { and, desc, eq, notInArray } from 'drizzle-orm';
 import { getDb } from './db/index.js';
 import { snapshots } from './db/schema.js';
 
-export { getDb, closeDb } from './db/index.js';
+export { getDb, closeDb, backupDatabaseTo } from './db/index.js';
 
 const SNAPSHOT_RETENTION = 5;
 
