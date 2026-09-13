@@ -274,7 +274,12 @@ describe('workspace-store: isolation between independently-resolved contexts', (
 // The `await` between the write and the read forces a real interleaving
 // opportunity: with the old bare-globalThis-Map registry (pre-#306), a
 // concurrently-running sibling test's own teardown would have raced this
-// one's read.
+// one's read. None of these tests ever call flush() — resolve()'s own doc
+// comment covers what's still shared across independently-constructed
+// instances even after this fix: the on-disk snapshot for a given
+// {workspaceId, shardId} pair is one row regardless of which store touched
+// it, so this suite only asserts the in-memory Y.Doc/Awareness isolation the
+// registry itself is responsible for.
 describe('WorkspaceStore: independent instances stay isolated under real concurrency (#306)', () => {
 	it.concurrent(
 		"store A never observes store B's content resolved for the identical selector",

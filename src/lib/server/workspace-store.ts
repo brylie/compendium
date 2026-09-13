@@ -89,6 +89,33 @@ function keyFor(workspaceId: string, shardId: string): string {
 	return JSON.stringify([workspaceId, shardId]);
 }
 
+// A single process-level shutdown coordinator shared by every `WorkspaceStore`
+// instance constructed in this module graph, rather than each store wiring
+// its own `SIGINT`/`SIGTERM` listener. A per-instance listener would let two
+// independently-constructed stores with unflushed dirty contexts race: Node
+// invokes listeners for the same signal in registration order, and the first
+// one to call `process.exit()` (as a naive per-instance handler would, right
+// after flushing only its own registry) prevents every later listener —
+// including a second store's own flush — from ever running. One shared `Set`
+// plus exactly one listener pair flushes every live store before exiting,
+// regardless of how many were constructed.
+const liveStoresForShutdown = new Set<WorkspaceStore>();
+let processShutdownWired = false;
+
+function registerStoreForShutdown(store: WorkspaceStore): void {
+	liveStoresForShutdown.add(store);
+	if (processShutdownWired) return;
+	processShutdownWired = true;
+	const shutdown = () => {
+		flushPendingAuditEvents();
+		flushPendingCatalogMirrorEvents();
+		for (const liveStore of liveStoresForShutdown) liveStore.flush();
+		process.exit(0);
+	};
+	process.once('SIGINT', shutdown);
+	process.once('SIGTERM', shutdown);
+}
+
 /**
  * Owns one workspaceId/shardId → WorkspaceContext registry, plus the
  * shutdown/idle-sweep wiring for whatever it resolves — an explicit,
@@ -102,8 +129,7 @@ function keyFor(workspaceId: string, shardId: string): string {
  */
 export class WorkspaceStore {
 	private readonly registry = new Map<string, InternalContext>();
-	private shutdownWired = false;
-	private idleSweepWired = false;
+	private idleSweepTimer: ReturnType<typeof setInterval> | null = null;
 
 	private createContext(workspaceId: string, shardId: string): InternalContext {
 		const doc = new Y.Doc();
@@ -168,7 +194,7 @@ export class WorkspaceStore {
 		}, SAVE_INTERVAL_MS);
 		context.saveTimer.unref?.();
 
-		this.wireShutdownOnce();
+		registerStoreForShutdown(this);
 		this.wireIdleSweepOnce();
 
 		return context;
@@ -179,6 +205,17 @@ export class WorkspaceStore {
 	 * and lazily loading it from its last snapshot on first access. Defaults
 	 * fill in the Phase 0 single-workspace key when a caller omits the selector
 	 * entirely (the common case at every current boundary).
+	 *
+	 * Snapshot persistence (`getSnapshotStore`, `./store.ts`) is a single
+	 * shared SQLite history keyed only by `(workspaceId, shardId)` — not by
+	 * which `WorkspaceStore` instance resolved it. Two independently-constructed
+	 * stores that both resolve the *same* selector each get their own
+	 * in-memory `Y.Doc` (the isolation `workspace-store.test.ts`'s
+	 * `test.concurrent` coverage proves), but if both are ever flushed, they
+	 * write to the same snapshot row and whichever flushes last wins — this
+	 * class doesn't coordinate concurrent writers of one persisted key across
+	 * instances. A caller that wants two stores to persist independently must
+	 * give them distinct `workspaceId`s, not just distinct instances.
 	 */
 	resolve(selector: WorkspaceSelector = {}): WorkspaceContext {
 		const workspaceId = selector.workspaceId ?? getInstanceWorkspaceId();
@@ -251,33 +288,30 @@ export class WorkspaceStore {
 		}
 	}
 
-	private wireShutdownOnce(): void {
-		if (this.shutdownWired) return;
-		this.shutdownWired = true;
-		const shutdown = () => {
-			flushPendingAuditEvents();
-			flushPendingCatalogMirrorEvents();
-			this.flush();
-			process.exit(0);
-		};
-		process.once('SIGINT', shutdown);
-		process.once('SIGTERM', shutdown);
-	}
-
 	private wireIdleSweepOnce(): void {
-		if (this.idleSweepWired) return;
-		this.idleSweepWired = true;
-		const timer = setInterval(() => this.sweepIdleContexts(), IDLE_SWEEP_INTERVAL_MS);
-		timer.unref?.();
+		if (this.idleSweepTimer) return;
+		this.idleSweepTimer = setInterval(() => this.sweepIdleContexts(), IDLE_SWEEP_INTERVAL_MS);
+		this.idleSweepTimer.unref?.();
 	}
 
-	/** Test-only: drop every resolved context so a fresh doc/awareness is created next call. */
+	/**
+	 * Test-only: drop every resolved context so a fresh doc/awareness is created next call, and
+	 * stop this store's own idle-sweep timer and shutdown participation — a short-lived,
+	 * `resetForTests()`-torn-down store (the common case for a `new WorkspaceStore()` a test
+	 * constructs and discards) must not keep sweeping or hold a place in the shared shutdown
+	 * coordinator for the rest of the process's life.
+	 */
 	resetForTests(): void {
 		for (const context of this.registry.values()) {
 			if (context.saveTimer) clearInterval(context.saveTimer);
 			context.awareness.destroy();
 		}
 		this.registry.clear();
+		if (this.idleSweepTimer) {
+			clearInterval(this.idleSweepTimer);
+			this.idleSweepTimer = null;
+		}
+		liveStoresForShutdown.delete(this);
 		resetAuditObserverForTests();
 		resetCatalogMirrorObserverForTests();
 		resetRecordIndexObserverForTests();

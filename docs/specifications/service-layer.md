@@ -43,8 +43,8 @@ src/lib/server/workspace-repository.ts — the one owner of the "catalog-first, 
                                   re-implement independently and had already drifted between.
         ↓
 src/lib/services/*.ts          — one module per aggregate (documents, records, collections,
-                                  holds, tokens). Each exported function takes an actor/
-                                  token and validated input, and is the ONLY place that:
+                                  holds, tokens). Each exported function takes a
+                                  RequestContext and validated input, and is the ONLY place that:
                                     1. checks permission (reuses tokenAllowsParent /
                                        requireAccessibleParent style helpers, moved here)
                                     2. calls into the appropriate data-operation module to mutate the Y.Doc
@@ -96,7 +96,7 @@ src/lib/services/
 
 ## 4. What this fixes, concretely
 
-- **The `create_document` self-grant bug.** `services/documents.ts#createDocument` becomes the single place that creates the document _and_ persists the calling token's new grant (via a real `grantDocumentAccess(tokenHash, documentId)` function added to `tokens.ts`, doing an actual `UPDATE access_tokens SET allowed_document_ids = ...`) _and_ logs the audit entry, as one unit. The MCP tool handler shrinks to: verify token → call `createDocument(token, input)` → return result.
+- **The `create_document` self-grant bug.** `services/documents.ts#createDocument` becomes the single place that creates the document _and_ persists the calling token's new grant (via a real `grantDocumentAccess(tokenHash, documentId)` function added to `tokens.ts`, doing an actual `UPDATE access_tokens SET allowed_document_ids = ...`) _and_ logs the audit entry, as one unit. The MCP tool handler shrinks to: verify token → resolve a `RequestContext` for it → call `createDocument(context, input)` → return result.
 - **The Sidebar audit-log gap.** Now that the MCP/route handlers are the only sanctioned way to reach a mutating service function over the network, `Sidebar.svelte` no longer has a lower-level function to silently fall back to on a fetch failure — that fallback (finding #4) has been removed rather than left as an isolated patch.
 - **Future write operations** (starting with `move_document`, from the same review) get built against this layer from day one instead of accumulating the same inconsistency a fourth time.
 
