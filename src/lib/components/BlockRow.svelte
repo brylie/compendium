@@ -1,18 +1,13 @@
-<script lang="ts">
-	import type { Snippet } from 'svelte';
-	import type * as Y from 'yjs';
-	import { CURRENT_USER } from '$lib/client/actor';
-	import { setRecordChecked } from '$lib/data/record-ops';
-	import type { InternalLinkTarget } from '$lib/data/links';
-	import type { BlockType, TextMarks, WorkspaceRecord } from '$lib/data/types';
-	import BlockEditor from './BlockEditor.svelte';
-	import BlockActionMenu from './BlockActionMenu.svelte';
-	import Icon from './Icon.svelte';
+<script module lang="ts">
+	import type { TextMarks } from '$lib/data/types';
 
 	// Shared shape of the handle a BlockEditor instance binds onto `blockRefs`
 	// — was duplicated (with a narrower, structurally-compatible subset in
 	// ColumnsBlock.svelte) at every container that keeps its own `blockRefs`
-	// map; both containers now import this one definition (issue #239).
+	// map; both containers now import this one definition (issue #239). Lives
+	// in the module script, not the instance script, since a named export
+	// (even a type-only one) is only a real export of the compiled module
+	// from a `<script module>` block per Svelte 5's own component contract.
 	export interface BlockEditorHandle {
 		render: () => void;
 		applyFormat: (mark: keyof TextMarks, value?: unknown) => void;
@@ -26,6 +21,18 @@
 		focusEditor: (position?: boolean | number) => void;
 		focusEditorAtLine: (edge: 'first' | 'last', clientX: number | null) => void;
 	}
+</script>
+
+<script lang="ts">
+	import type { Snippet } from 'svelte';
+	import type * as Y from 'yjs';
+	import { CURRENT_USER } from '$lib/client/actor';
+	import { setRecordChecked } from '$lib/data/record-ops';
+	import type { InternalLinkTarget } from '$lib/data/links';
+	import type { BlockType, WorkspaceRecord } from '$lib/data/types';
+	import BlockEditor from './BlockEditor.svelte';
+	import BlockActionMenu from './BlockActionMenu.svelte';
+	import Icon from './Icon.svelte';
 
 	// The single shared row unit (issue #239) rendered once per block by both
 	// +page.svelte's own top-level flow and ColumnsBlock.svelte's per-column
