@@ -550,9 +550,18 @@
 			<div class="flex items-center justify-between text-xs text-muted">
 				<div class="flex items-center gap-1">
 					<a
+						href={resolve('/settings/export')}
+						class="flex items-center gap-1.5 rounded px-2 py-1.5 text-muted transition-colors hover:bg-surface hover:text-fg"
+						class:text-accent={currentPath === '/settings/export'}
+						title="Export & Backup"
+					>
+						<Icon name="download" size={14} />
+						<span>Export</span>
+					</a>
+					<a
 						href={resolve('/settings/tokens')}
 						class="flex items-center gap-1.5 rounded px-2 py-1.5 text-muted transition-colors hover:bg-surface hover:text-fg"
-						class:text-accent={currentPath.startsWith('/settings')}
+						class:text-accent={currentPath === '/settings/tokens'}
 						title="Access tokens"
 					>
 						<Icon name="key" size={14} />
@@ -580,6 +589,14 @@
 			</div>
 		{:else}
 			<div class="flex flex-col items-center gap-1">
+				<a
+					href={resolve('/settings/export')}
+					class="rounded p-2 text-muted hover:bg-surface hover:text-fg"
+					title="Export & Backup"
+					aria-label="Export & Backup"
+				>
+					<Icon name="download" size={16} />
+				</a>
 				<a
 					href={resolve('/settings/tokens')}
 					class="rounded p-2 text-muted hover:bg-surface hover:text-fg"

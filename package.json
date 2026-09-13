@@ -73,6 +73,7 @@
 		"@lucide/svelte": "^1.33.0",
 		"@modelcontextprotocol/sdk": "^1.30.0",
 		"better-sqlite3": "^13.0.2",
+		"fflate": "^0.8.3",
 		"fractional-indexing": "^4.0.0",
 		"lib0": "^0.2.117",
 		"nanoid": "^5.1.16",

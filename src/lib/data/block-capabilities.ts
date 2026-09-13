@@ -367,7 +367,7 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		markdown: {
 			writable: false,
 			representation:
-				"A Pandoc-style fenced div: `::: columns` wrapping one `::: column ... :::` block per column, each column's body the blank-line-joined markdown of its own children. write_record's markdown argument is rejected outright for this type (`services/records.ts`) — content must be written to one of its nested blocks instead."
+				"A Pandoc-style fenced div: `::: columns` wrapping one `::: column ... :::` block per column, each column's body the blank-line-joined markdown of its own children — each child rendered there with its own block-level Markdown prefix (`#`/`-`/`1.`/`- [ ]`/`> `/fenced code/`---`) via `renderBlockMarkdown`, unlike a record's own standalone `markdown` field (e.g. under `children`), which never gets one. write_record's markdown argument is rejected outright for this type (`services/records.ts`) — content must be written to one of its nested blocks instead."
 		}
 	},
 	column: {
@@ -381,7 +381,7 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		markdown: {
 			writable: false,
 			representation:
-				"Its own children's markdown, blank-line joined and wrapped in a `::: column ... :::` fence by its parent columns block's projection — a column has no markdown representation of its own outside that context. write_record's markdown argument is rejected outright for this type (`services/records.ts`), same as columns."
+				"Its own children's block-prefixed markdown (see columns above), blank-line joined and wrapped in a `::: column ... :::` fence by its parent columns block's projection — a column has no markdown representation of its own outside that context. write_record's markdown argument is rejected outright for this type (`services/records.ts`), same as columns."
 		}
 	}
 };

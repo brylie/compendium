@@ -7,6 +7,7 @@ import * as spaces from './spaces';
 import * as tokens from './tokens';
 import * as audit from './audit';
 import * as blockTypes from './blockTypes';
+import * as exportModule from './export';
 
 export const serviceModules = {
 	documents,
@@ -17,7 +18,8 @@ export const serviceModules = {
 	spaces,
 	tokens,
 	audit,
-	blockTypes
+	blockTypes,
+	export: exportModule
 } as const;
 
 export type ServiceModuleName = keyof typeof serviceModules;
@@ -192,7 +194,19 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 		mcpToolName: 'list_block_types',
 		mcpDescription:
 			"List every currently enabled block type with its label, description, capability flags (isContainer/childBlockTypes/holdsFreeformText), and the create_record/write_record field contract needed to construct a correct request for it (which fields are creatable, writable after creation, or read-only/UI-only), plus referenced-record semantics and Markdown representation where applicable. Reads from the same BLOCK_CAPABILITIES table the UI's slash menu uses, so the two can't drift."
-	}
+	},
+
+	'export.exportWorkspace': { mcp: false, ui: true },
+	'export.exportDocument': { mcp: false, ui: true },
+	'export.exportCollection': { mcp: false, ui: true },
+	'export.getMirrorConfig': { mcp: false, ui: true },
+	'export.updateMirrorConfig': { mcp: false, ui: true },
+	'export.syncMarkdownMirror': { mcp: false, ui: true },
+	'export.sanitizeFilename': { mcp: false, ui: false },
+	'export.renderBlockMarkdown': { mcp: false, ui: false },
+	'export.renderDocumentFileMarkdown': { mcp: false, ui: false },
+	'export.collectionRecordsToCsv': { mcp: false, ui: false },
+	'export.collectionToMarkdownTable': { mcp: false, ui: false }
 };
 
 /**
@@ -243,5 +257,11 @@ export const uiAdapterBindings = {
 	'tokens.createToken': 'src/routes/settings/tokens/+page.server.ts',
 	'tokens.revokeToken': 'src/routes/settings/tokens/+page.server.ts',
 	'tokens.listTokens': 'src/routes/settings/tokens/+page.server.ts',
-	'audit.listAuditHistory': 'src/routes/audit/+page.server.ts'
+	'audit.listAuditHistory': 'src/routes/audit/+page.server.ts',
+	'export.exportWorkspace': 'src/routes/api/export/+server.ts',
+	'export.exportDocument': 'src/routes/api/export/+server.ts',
+	'export.exportCollection': 'src/routes/api/export/+server.ts',
+	'export.getMirrorConfig': 'src/routes/settings/export/+page.server.ts',
+	'export.updateMirrorConfig': 'src/routes/settings/export/+page.server.ts',
+	'export.syncMarkdownMirror': 'src/routes/settings/export/+page.server.ts'
 } as const satisfies Partial<Record<ServiceMethod, string>>;
