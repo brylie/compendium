@@ -72,13 +72,25 @@ describe('BLOCK_CAPABILITIES', () => {
 			}
 		});
 
-		it("only lists 'content' as writable when the type holds free-form text", () => {
+		it("lists 'markdown' as writable exactly when markdown.writable is true", () => {
+			// Not the same partition as holdsFreeformText: write_record's markdown
+			// argument works for every non-container type except collection_view/
+			// child_pages (always computed, never rendered) — holdsFreeformText
+			// governs UI Enter/Backspace/conversion behavior only.
 			for (const blockType of blockTypes) {
 				const capabilities = BLOCK_CAPABILITIES[blockType];
-				expect(capabilities.fields.writable.includes('content'), blockType).toBe(
-					capabilities.holdsFreeformText
+				expect(capabilities.fields.writable.includes('markdown'), blockType).toBe(
+					capabilities.markdown.writable
 				);
-				expect(capabilities.markdown.writable, blockType).toBe(capabilities.holdsFreeformText);
+			}
+		});
+
+		it('never marks a container type as accepting a markdown write', () => {
+			for (const blockType of blockTypes) {
+				const capabilities = BLOCK_CAPABILITIES[blockType];
+				if (capabilities.isContainer) {
+					expect(capabilities.markdown.writable, blockType).toBe(false);
+				}
 			}
 		});
 

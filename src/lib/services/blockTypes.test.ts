@@ -23,15 +23,4 @@ describe('listBlockTypes', () => {
 			expect(descriptor.markdown).toBe(capabilities.markdown);
 		}
 	});
-
-	it('never claims a required field — every extra field is optional at create_record time', () => {
-		// create_record's own MCP schema (mcp/server.ts) makes every block-type
-		// field optional; a descriptor asserting otherwise would mislead an
-		// agent into sending a field create_record doesn't actually require.
-		for (const descriptor of listBlockTypes().blockTypes) {
-			expect(descriptor.fields.creatable).toEqual(expect.any(Array));
-			expect(descriptor.fields.writable).toEqual(expect.any(Array));
-			expect(descriptor.fields.readOnly).toEqual(expect.any(Array));
-		}
-	});
 });

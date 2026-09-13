@@ -1,11 +1,27 @@
 import { columnChildBlockTypes, type BlockType } from './types';
 
 export interface BlockFieldContract {
-	/** WorkspaceRecord fields (beyond id/parentId/order/blockType/createdBy/createdAt/lastEditedBy/lastEditedAt, present on every block) this type accepts via `create_record`. */
+	/**
+	 * MCP argument names (`create_record`'s own zod schema, `mcp/server.ts`) —
+	 * not necessarily the underlying `WorkspaceRecord` field name — this type
+	 * accepts via `create_record`, beyond `parentId`/`afterRecordId`/`blockType`.
+	 * Free-form text is `markdown` here (the actual argument name), not
+	 * `content` (the internal `WorkspaceRecord`/Y.Text field it lands in).
+	 */
 	creatable: readonly string[];
-	/** WorkspaceRecord fields this type accepts via `write_record` after creation. Overlaps `creatable` for a field settable both at creation and later (e.g. page_link's `referencedRecordId`); a field in `creatable` but not here is set-once-at-creation only. */
+	/**
+	 * MCP argument names `write_record` accepts for this type after creation.
+	 * Overlaps `creatable` for an argument settable both at creation and later
+	 * (e.g. page_link's `referencedRecordId`); an argument in `creatable` but
+	 * not here is set-once-at-creation only (e.g. child_pages' `childPagesDepth`).
+	 */
 	writable: readonly string[];
-	/** WorkspaceRecord fields `get_document` exposes for this type with no MCP write path at all — neither `create_record` nor `write_record` accepts them; UI-only. */
+	/**
+	 * `WorkspaceRecord` field names `get_document` exposes for this type with
+	 * no MCP write path at all — neither `create_record` nor `write_record`
+	 * accepts an argument for them; UI-only (e.g. `to_do`'s `checked`). Named
+	 * as record fields, not MCP arguments, since no MCP argument exists.
+	 */
 	readOnly: readonly string[];
 }
 
@@ -24,7 +40,7 @@ export interface BlockCapabilities {
 	 */
 	label: string;
 	description: string;
-	/** The WorkspaceRecord fields relevant to this type beyond the universal base, and which MCP tool(s) accept them — see `mcp-tools.md`. */
+	/** The `create_record`/`write_record` argument contract for this type — see `mcp-tools.md`. */
 	fields: BlockFieldContract;
 	/**
 	 * Present only for a type where `referencedRecordId` applies — what the id
@@ -34,9 +50,31 @@ export interface BlockCapabilities {
 	 */
 	referencedRecordSemantics?: string;
 	markdown: {
-		/** Whether this type's own text is part of `write_record`'s `markdown` read/write path — mirrors `holdsFreeformText`. */
+		/**
+		 * Whether `write_record`'s `markdown` argument can ever change what
+		 * `get_document` renders for this type. False only when a write is
+		 * rejected outright (`isContainer` — `columns`/`column`) or silently
+		 * has zero rendering effect in every state (`collection_view`,
+		 * `child_pages`, whose markdown is always computed from other fields
+		 * instead) — every other type's own `Y.Text` is created at `create_record`
+		 * time (`record-ops.ts`) and rendered verbatim by `get_document`'s
+		 * generic branch (`document-projection.ts`) regardless of
+		 * `holdsFreeformText`, which governs UI Enter/Backspace/conversion
+		 * behavior only, not the MCP write/render path. `page_link` is `true`
+		 * but conditional — see its own `representation`.
+		 */
 		writable: boolean;
-		/** One-line description of this type's Markdown read-direction representation at the `get_document`/`list_block_types` boundary — see `markdown-transcoding.md`. */
+		/**
+		 * One-line description of this type's Markdown read-direction
+		 * representation at the `get_document`/`list_block_types` boundary —
+		 * see `markdown-transcoding.md`. `richTextToMarkdown`
+		 * (`data/markdown-transcode.ts`) only ever emits *inline* marks
+		 * (bold/italic/strikethrough/code/links/\@mention/[[wiki-links]]); no
+		 * block type gets a block-level Markdown prefix (heading `#`, bullet
+		 * `-`, task `- [ ]`, blockquote `>`) except a preset-styled `callout`'s
+		 * GitHub-alert marker — a heading's/list item's/quote's structural
+		 * identity is conveyed only by the separate `blockType` field.
+		 */
 		representation: string;
 	};
 }
@@ -65,11 +103,11 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: true,
 		label: 'Text',
 		description: 'Just start writing with plain text.',
-		fields: { creatable: [], writable: ['content'], readOnly: [] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: [] },
 		markdown: {
 			writable: true,
 			representation:
-				'A CommonMark paragraph, with standard inline marks (bold/italic/strikethrough/code/links) plus @mention and [[Record Title]] wiki-links.'
+				'Its inline-formatted text (bold/italic/strikethrough/code/links, plus @mention and [[Record Title]] wiki-links) — get_document adds no block-level Markdown syntax of its own.'
 		}
 	},
 	heading_1: {
@@ -77,10 +115,11 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: true,
 		label: 'Heading 1',
 		description: 'Large section heading.',
-		fields: { creatable: [], writable: ['content'], readOnly: [] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: [] },
 		markdown: {
 			writable: true,
-			representation: 'A CommonMark ATX heading (`#`), same inline marks as paragraph.'
+			representation:
+				'Its inline-formatted text only, same as paragraph — get_document does not prefix it with a Markdown heading marker (`#`); the heading level is conveyed by the separate blockType field, not markdown syntax.'
 		}
 	},
 	heading_2: {
@@ -88,10 +127,11 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: true,
 		label: 'Heading 2',
 		description: 'Medium section heading.',
-		fields: { creatable: [], writable: ['content'], readOnly: [] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: [] },
 		markdown: {
 			writable: true,
-			representation: 'A CommonMark ATX heading (`##`), same inline marks as paragraph.'
+			representation:
+				'Its inline-formatted text only, same as paragraph — get_document does not prefix it with a Markdown heading marker (`##`); the heading level is conveyed by the separate blockType field, not markdown syntax.'
 		}
 	},
 	heading_3: {
@@ -99,10 +139,11 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: true,
 		label: 'Heading 3',
 		description: 'Small section heading.',
-		fields: { creatable: [], writable: ['content'], readOnly: [] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: [] },
 		markdown: {
 			writable: true,
-			representation: 'A CommonMark ATX heading (`###`), same inline marks as paragraph.'
+			representation:
+				'Its inline-formatted text only, same as paragraph — get_document does not prefix it with a Markdown heading marker (`###`); the heading level is conveyed by the separate blockType field, not markdown syntax.'
 		}
 	},
 	heading_4: {
@@ -110,10 +151,11 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: true,
 		label: 'Heading 4',
 		description: 'Sub-heading.',
-		fields: { creatable: [], writable: ['content'], readOnly: [] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: [] },
 		markdown: {
 			writable: true,
-			representation: 'A CommonMark ATX heading (`####`), same inline marks as paragraph.'
+			representation:
+				'Its inline-formatted text only, same as paragraph — get_document does not prefix it with a Markdown heading marker (`####`); the heading level is conveyed by the separate blockType field, not markdown syntax.'
 		}
 	},
 	bulleted_list_item: {
@@ -121,10 +163,11 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: true,
 		label: 'Bulleted list',
 		description: 'Create a simple bulleted list.',
-		fields: { creatable: [], writable: ['content'], readOnly: [] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: [] },
 		markdown: {
 			writable: true,
-			representation: 'A CommonMark bullet list item (`-`), same inline marks as paragraph.'
+			representation:
+				'Its inline-formatted text only — get_document does not prefix it with a Markdown bullet marker (`-`); list membership is conveyed by the separate blockType field, not markdown syntax.'
 		}
 	},
 	numbered_list_item: {
@@ -132,11 +175,11 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: true,
 		label: 'Numbered list',
 		description: 'Create an ordered numbered list.',
-		fields: { creatable: [], writable: ['content'], readOnly: [] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: [] },
 		markdown: {
 			writable: true,
 			representation:
-				'A CommonMark ordered list item; its rendered number reflects position among sibling numbered_list_items, not a stored value.'
+				'Its inline-formatted text only — get_document does not render a Markdown ordered-list marker; its position among sibling numbered_list_items (not a stored value) is what determines its displayed number in the UI.'
 		}
 	},
 	to_do: {
@@ -144,10 +187,11 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: true,
 		label: 'To-do list',
 		description: 'Track tasks with a to-do checkbox.',
-		fields: { creatable: [], writable: ['content'], readOnly: ['checked'] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: ['checked'] },
 		markdown: {
 			writable: true,
-			representation: 'A GFM task-list item (`- [ ]`/`- [x]`) reflecting `checked`.'
+			representation:
+				'Its inline-formatted text only — get_document does not render a GFM task-list checkbox (`- [ ]`/`- [x]`); checked state is exposed separately via the read-only `checked` field, not markdown syntax.'
 		}
 	},
 	quote: {
@@ -155,10 +199,11 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: true,
 		label: 'Quote',
 		description: 'Capture a quotation.',
-		fields: { creatable: [], writable: ['content'], readOnly: [] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: [] },
 		markdown: {
 			writable: true,
-			representation: 'A CommonMark blockquote (`>`), same inline marks as paragraph.'
+			representation:
+				'Its inline-formatted text only — get_document does not prefix it with a Markdown blockquote marker (`>`); this differs from a preset-styled callout, which does get a comparable prefix (see callout below).'
 		}
 	},
 	divider: {
@@ -166,11 +211,11 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: false,
 		label: 'Divider',
 		description: 'Visually divide sections with a line.',
-		fields: { creatable: [], writable: [], readOnly: [] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: [] },
 		markdown: {
-			writable: false,
+			writable: true,
 			representation:
-				'No text content — renders as an empty markdown string; the UI draws a horizontal rule.'
+				"No meaningful text by design — the block starts empty and the UI always draws a plain horizontal rule regardless of content — but write_record's markdown is technically accepted and rendered verbatim by get_document if ever called against one, the same as a paragraph."
 		}
 	},
 	callout: {
@@ -178,7 +223,7 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: true,
 		label: 'Callout',
 		description: 'Highlight key notes and warnings.',
-		fields: { creatable: [], writable: ['content'], readOnly: ['calloutStyle'] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: ['calloutStyle'] },
 		markdown: {
 			writable: true,
 			representation:
@@ -190,7 +235,7 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: true,
 		label: 'Toggle list',
 		description: 'Hide or show content inside.',
-		fields: { creatable: [], writable: ['content'], readOnly: ['collapsed'] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: ['collapsed'] },
 		markdown: {
 			writable: true,
 			representation:
@@ -202,11 +247,11 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: false,
 		label: 'Table',
 		description: 'Add a table for structured information.',
-		fields: { creatable: [], writable: [], readOnly: [] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: [] },
 		markdown: {
-			writable: false,
+			writable: true,
 			representation:
-				'Not yet backed by a structured row/cell field on WorkspaceRecord — insertable from the slash menu, but its data model and Markdown representation are unimplemented as of this writing.'
+				"Not yet backed by a structured row/cell field on WorkspaceRecord — write_record's markdown is technically accepted and rendered as plain inline text, identical to a paragraph, since no dedicated tabular data model or rendering exists yet."
 		}
 	},
 	code: {
@@ -214,7 +259,7 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: true,
 		label: 'Code',
 		description: 'Capture a code snippet with monospace font.',
-		fields: { creatable: [], writable: ['content'], readOnly: [] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: [] },
 		markdown: {
 			writable: true,
 			representation: 'Its inline text — no fenced code-block wrapper is applied at this boundary.'
@@ -225,11 +270,11 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: false,
 		label: 'Table of contents',
 		description: 'Live outline of headings in this document.',
-		fields: { creatable: [], writable: [], readOnly: [] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: [] },
 		markdown: {
-			writable: false,
+			writable: true,
 			representation:
-				"Computed at render time from the containing Document's headings, not stored (`data-model.md` §3) — this live computation is a UI-only concern; get_document does not currently emit it into markdown."
+				"Computed live from the containing Document's headings in the browser UI, not stored (`data-model.md` §3) — but get_document performs no such computation: write_record's markdown is accepted and rendered verbatim like any other block, with no relationship to the document's actual headings."
 		}
 	},
 	synced_block: {
@@ -237,13 +282,13 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: false,
 		label: 'Synced block',
 		description: 'Reference content from another block.',
-		fields: { creatable: [], writable: [], readOnly: ['referencedRecordId'] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: ['referencedRecordId'] },
 		referencedRecordSemantics:
 			"Identifies the source record this block mirrors in the browser UI. Settable only via the UI's own duplicate-as-synced-block action — create_record/write_record don't accept it for this type.",
 		markdown: {
-			writable: false,
+			writable: true,
 			representation:
-				"Mirrors the source record's Y.Text in the browser UI (`syncedBlockTargetId`), but get_document's markdown projection does not currently resolve through the source (`data-model.md` §3) — this type has no working MCP-facing content representation yet."
+				"get_document renders this block's own stored text — write_record's markdown is accepted and persisted to it — but the live browser UI ignores this field entirely and resolves the block's displayed content through referencedRecordId's source record instead (`data-model.md` §3); the two can diverge."
 		}
 	},
 	page_link: {
@@ -253,15 +298,15 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		description: 'Link to another document.',
 		fields: {
 			creatable: ['referencedRecordId'],
-			writable: ['referencedRecordId'],
+			writable: ['referencedRecordId', 'markdown'],
 			readOnly: []
 		},
 		referencedRecordSemantics:
 			"Identifies the target Document this link navigates to. Absent means an unconfigured link, rendering the block's own content instead. Settable at creation and retargetable later via write_record.",
 		markdown: {
-			writable: false,
+			writable: true,
 			representation:
-				"Renders as `[[Target Title]]` once configured, or `[[Deleted page]]` with `linkBroken: true` once the target is deleted; while unconfigured (no referencedRecordId), falls back to rendering the block's own inline content instead — write_record's markdown is only meaningful in that unconfigured state."
+				"Renders as `[[Target Title]]` once configured, or `[[Deleted page]]` with `linkBroken: true` once the target is deleted; while unconfigured (no referencedRecordId), get_document instead renders write_record's written markdown as the block's own inline text. write_record's markdown argument is always accepted, but only visible in get_document's output during that unconfigured state — once referencedRecordId is set, any stored text is never rendered."
 		}
 	},
 	embed: {
@@ -269,11 +314,11 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		holdsFreeformText: false,
 		label: 'Embed',
 		description: 'Embed content from another source.',
-		fields: { creatable: [], writable: [], readOnly: [] },
+		fields: { creatable: [], writable: ['markdown'], readOnly: [] },
 		markdown: {
-			writable: false,
+			writable: true,
 			representation:
-				'The generic external-content mechanism (`data-model.md` §3), but with no dedicated field or Markdown representation on WorkspaceRecord yet — renders as plain inline content, same as a paragraph.'
+				"The generic external-content mechanism (`data-model.md` §3), with no dedicated field yet — write_record's markdown is accepted and rendered as plain inline content, identical to a paragraph."
 		}
 	},
 	collection_view: {
@@ -291,7 +336,7 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		markdown: {
 			writable: false,
 			representation:
-				'Renders as `[collection view: Target Title]`, `[collection view: Deleted collection]` with `linkBroken: true`, or `[collection view: unconfigured]` — never its own content; `viewConfig` (its Table/Board/Calendar configuration) is exposed as a separate structured field, not folded into the markdown string.'
+				"Renders as `[collection view: Target Title]`, `[collection view: Deleted collection]` with `linkBroken: true`, or `[collection view: unconfigured]` — never its own content, in every state; write_record's markdown argument is technically accepted (no error) but has no rendering effect here. `viewConfig` (its Table/Board/Calendar configuration) is exposed as a separate structured field, not folded into the markdown string."
 		}
 	},
 	child_pages: {
@@ -309,7 +354,7 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		markdown: {
 			writable: false,
 			representation:
-				'Nested `- [[Title]]` Markdown bullets, one per resolved child, indented per nesting level up to `childPagesDepth`; `_No sub-pages yet._` when empty; `[child pages: unavailable]` when an explicit target does not resolve — never its own content.'
+				"Nested `- [[Title]]` Markdown bullets, one per resolved child, indented per nesting level up to `childPagesDepth`; `_No sub-pages yet._` when empty; `[child pages: unavailable]` when an explicit target does not resolve — never its own content, in every state; write_record's markdown argument is technically accepted (no error) but has no rendering effect here."
 		}
 	},
 	columns: {
@@ -322,7 +367,7 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		markdown: {
 			writable: false,
 			representation:
-				"A Pandoc-style fenced div: `::: columns` wrapping one `::: column ... :::` block per column, each column's body the blank-line-joined markdown of its own children."
+				"A Pandoc-style fenced div: `::: columns` wrapping one `::: column ... :::` block per column, each column's body the blank-line-joined markdown of its own children. write_record's markdown argument is rejected outright for this type (`services/records.ts`) — content must be written to one of its nested blocks instead."
 		}
 	},
 	column: {
@@ -336,7 +381,7 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		markdown: {
 			writable: false,
 			representation:
-				"Its own children's markdown, blank-line joined and wrapped in a `::: column ... :::` fence by its parent columns block's projection — a column has no markdown representation of its own outside that context."
+				"Its own children's markdown, blank-line joined and wrapped in a `::: column ... :::` fence by its parent columns block's projection — a column has no markdown representation of its own outside that context. write_record's markdown argument is rejected outright for this type (`services/records.ts`), same as columns."
 		}
 	}
 };

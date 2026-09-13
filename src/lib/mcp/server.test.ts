@@ -657,21 +657,31 @@ describe('mcp server: full tool surface', () => {
 					blockType: 'paragraph',
 					label: 'Text',
 					capabilities: { isContainer: false, holdsFreeformText: true },
-					fields: { creatable: [], writable: ['content'], readOnly: [] },
+					fields: { creatable: [], writable: ['markdown'], readOnly: [] },
 					markdown: expect.objectContaining({ writable: true })
 				}),
 				expect.objectContaining({
 					blockType: 'columns',
-					capabilities: { isContainer: true, childBlockTypes: ['column'], holdsFreeformText: false }
+					capabilities: {
+						isContainer: true,
+						childBlockTypes: ['column'],
+						holdsFreeformText: false
+					},
+					markdown: expect.objectContaining({ writable: false })
 				}),
 				expect.objectContaining({
 					blockType: 'page_link',
 					referencedRecordSemantics: expect.any(String),
 					fields: {
 						creatable: ['referencedRecordId'],
-						writable: ['referencedRecordId'],
+						writable: ['referencedRecordId', 'markdown'],
 						readOnly: []
-					}
+					},
+					markdown: expect.objectContaining({ writable: true })
+				}),
+				expect.objectContaining({
+					blockType: 'collection_view',
+					markdown: expect.objectContaining({ writable: false })
 				})
 			])
 		);
