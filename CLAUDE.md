@@ -18,6 +18,7 @@ Compendium is a shared, real-time knowledge workspace: one SvelteKit app where a
 - [`undo-redo.md`](docs/specifications/undo-redo.md) — local, per-actor undo/redo via Y.UndoManager
 - [`persistence.md`](docs/specifications/persistence.md) — SQLite via Drizzle (snapshots, audit, tokens, read model)
 - [`backup-recovery.md`](docs/specifications/backup-recovery.md) — external backup/restore path for the whole SQLite file (RPO/RTO/retention, failure visibility)
+- [`workspace-export.md`](docs/specifications/workspace-export.md) — workspace data export (Markdown + manifest) and periodic disposable Markdown mirror
 - [`service-layer.md`](docs/specifications/service-layer.md) / [`service-layer-manifest.md`](docs/specifications/service-layer-manifest.md) — where permission+audit logic must live
 - [`e2e-testing.md`](docs/specifications/e2e-testing.md) — why/how the Tier A + Tier B suites exist
 - [`crdt-capacity-baseline-2026-08-30.md`](docs/benchmarks/crdt-capacity-baseline-2026-08-30.md) — current measured global-workspace envelope and sharding decision gates

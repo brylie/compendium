@@ -1051,6 +1051,16 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					expect(history.length).toBeGreaterThan(0);
 					break;
 				}
+				case 'export.exportWorkspace':
+				case 'export.exportDocument':
+				case 'export.exportCollection':
+				case 'export.getMirrorConfig':
+				case 'export.updateMirrorConfig':
+				case 'export.syncMarkdownMirror': {
+					const config = serviceModules.export.getMirrorConfig();
+					expect(config).toBeDefined();
+					break;
+				}
 				default:
 					throw new Error(`Unhandled ui: true manifest entry: ${method}`);
 			}
@@ -1676,7 +1686,13 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 			'tokens.createToken': 'src/routes/settings/tokens/+page.server.ts',
 			'tokens.revokeToken': 'src/routes/settings/tokens/+page.server.ts',
 			'tokens.listTokens': 'src/routes/settings/tokens/+page.server.ts',
-			'audit.listAuditHistory': 'src/routes/audit/+page.server.ts'
+			'audit.listAuditHistory': 'src/routes/audit/+page.server.ts',
+			'export.exportWorkspace': 'src/routes/api/export/+server.ts',
+			'export.exportDocument': 'src/routes/api/export/+server.ts',
+			'export.exportCollection': 'src/routes/api/export/+server.ts',
+			'export.getMirrorConfig': 'src/routes/settings/export/+page.server.ts',
+			'export.updateMirrorConfig': 'src/routes/settings/export/+page.server.ts',
+			'export.syncMarkdownMirror': 'src/routes/settings/export/+page.server.ts'
 		};
 		for (const method of methods) {
 			expect(uiAdapterBindings[method], method).toBe(expectedBindings[method]);
@@ -1991,6 +2007,21 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					expect(status).toBe(200);
 					expect(text).toContain('create_document');
 					expect(text).toContain(marker.id);
+					break;
+				}
+				case 'export.exportWorkspace':
+				case 'export.exportDocument':
+				case 'export.exportCollection': {
+					const res = await fetch(`${harness.httpUrl}/api/export?scope=workspace`);
+					expect(res.status).toBe(200);
+					break;
+				}
+				case 'export.getMirrorConfig':
+				case 'export.updateMirrorConfig':
+				case 'export.syncMarkdownMirror': {
+					const { status, text } = await fetchRouteData('/settings/export');
+					expect(status).toBe(200);
+					expect(text).toContain('outputDir');
 					break;
 				}
 				default: {
