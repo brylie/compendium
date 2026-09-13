@@ -2,11 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/svelte';
 import Page from './+page.svelte';
 
+const baseData = {
+	spaces: [],
+	documents: [],
+	collections: [],
+	activeSpaceId: 'space-1'
+};
+
 describe('settings/export +page.svelte', () => {
 	it('renders export settings page with disabled mirror status', () => {
 		render(Page, {
-			params: {},
 			data: {
+				...baseData,
 				mirrorConfig: {
 					enabled: false,
 					outputDir: './markdown-export',
@@ -29,8 +36,8 @@ describe('settings/export +page.svelte', () => {
 			syncIntervalMs: 3600000
 		};
 		render(Page, {
-			params: {},
 			data: {
+				...baseData,
 				mirrorConfig
 			},
 			form: { success: true, mirrorConfig }
@@ -42,8 +49,8 @@ describe('settings/export +page.svelte', () => {
 
 	it('displays form error banner when present', () => {
 		render(Page, {
-			params: {},
 			data: {
+				...baseData,
 				mirrorConfig: {
 					enabled: false,
 					outputDir: './markdown-export',
