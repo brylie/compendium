@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { createDocument, deleteDocument } from '$lib/data/document-ops';
 import { createCollection } from '$lib/data/collection-ops';
-import { createDocument as serviceCreateDocument } from '$lib/services';
+import {
+	createCollection as serviceCreateCollection,
+	createDocument as serviceCreateDocument
+} from '$lib/services';
 import { CURRENT_USER } from '$lib/server/current-user';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { markdownToRichText, richTextToMarkdown } from './markdown-transcode';
@@ -71,6 +74,18 @@ describe('markdown transcoding', () => {
 		};
 
 		expect(richTextToMarkdown(doc, richText)).toBe('[[Sharded Render Target]]');
+	});
+
+	it('resolves [[Title]] to a Collection only findable via the catalog fan-out', () => {
+		const target = serviceCreateCollection(CURRENT_USER, {
+			title: 'Sharded Target Collection',
+			schema: []
+		});
+		const { doc } = resolveWorkspaceContext();
+
+		const richText = markdownToRichText(doc, 'see [[Sharded Target Collection]] for tasks');
+		const linkRun = richText.runs.find((run) => run.marks.link?.startsWith('record:'));
+		expect(linkRun?.marks.link).toBe(`record:${target.id}`);
 	});
 
 	it('resolves [[Title]] to a Collection when no Document matches', () => {

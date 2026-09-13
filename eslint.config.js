@@ -299,7 +299,7 @@ export default defineConfig(
 		// to catch it. No eslint-plugin-boundaries/import/no-restricted-paths
 		// dependency needed — built-in no-restricted-imports, scoped by `files`
 		// the same way the Yjs-typed-map override above is, is enough.
-		files: ['src/lib/data/**/*.ts', 'src/lib/server/**/*.ts', 'src/lib/services/**/*.ts'],
+		files: ['src/lib/server/**/*.ts', 'src/lib/services/**/*.ts'],
 		ignores: ['**/*.test.ts'],
 		rules: {
 			'no-restricted-imports': [
@@ -309,10 +309,10 @@ export default defineConfig(
 						{
 							group: ['$lib/mcp/*', '$lib/mcp'],
 							message:
-								'Data modules must stay protocol-neutral (#191) — do not import from the MCP layer. If both sides need this logic, it belongs in $lib/data or $lib/server instead.'
+								'Data/repository/service modules must stay protocol-neutral (#191) — do not import from the MCP layer. If both sides need this logic, it belongs in $lib/data or $lib/server instead.'
 						},
 						{
-							group: ['$lib/mcp/*', '$lib/mcp'],
+							regex: '^(?:\\.\\./)+mcp(?:/|$)',
 							message:
 								'Data/repository/service modules must stay protocol-neutral (#191) — do not import from the MCP layer. If both sides need this logic, it belongs in $lib/data or $lib/server instead.'
 						}
@@ -336,7 +336,22 @@ export default defineConfig(
 				{
 					patterns: [
 						{
+							group: ['$lib/mcp/*', '$lib/mcp'],
+							message:
+								'Data modules must stay protocol-neutral (#191) — do not import from the MCP layer. If both sides need this logic, it belongs in $lib/data or $lib/server instead.'
+						},
+						{
+							regex: '^(?:\\.\\./)+mcp(?:/|$)',
+							message:
+								'Data modules must stay protocol-neutral (#191) — do not import from the MCP layer. If both sides need this logic, it belongs in $lib/data or $lib/server instead.'
+						},
+						{
 							group: ['$lib/services/*', '$lib/services'],
+							message:
+								'Data modules must not import application services (#212). Move policy-free workspace lookup to $lib/server or pass it in from the caller.'
+						},
+						{
+							regex: '^(?:\\.\\./)+services(?:/|$)',
 							message:
 								'Data modules must not import application services (#212). Move policy-free workspace lookup to $lib/server or pass it in from the caller.'
 						}
