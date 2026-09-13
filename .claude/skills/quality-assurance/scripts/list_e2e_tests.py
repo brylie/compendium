@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read-only: lists docs/specifications/e2e-testing.md's required Tier A
-test-list table side by side with the actual test titles in
-tests/e2e/tier-a.test.ts and tests/e2e/tier-b.spec.ts.
+test-list table side by side with the actual test titles in Tier A's split
+files (see e2e-testing.md §3.1) and tests/e2e/tier-b.spec.ts.
 
 This is a mechanical proxy, not an automated match — matching a prose table
 row to a test title by string similarity is too fragile to trust blindly
@@ -20,7 +20,20 @@ import re
 from pathlib import Path
 
 SPEC_PATH = "docs/specifications/e2e-testing.md"
-TIER_A_PATH = "tests/e2e/tier-a.test.ts"
+# Tier A used to be one tests/e2e/tier-a.test.ts; #300 split it by concern
+# into these files (each its own describe(), sharing tests/e2e/harness.ts
+# and tests/e2e/mcp-parity-helpers.ts) — keep this list in sync with
+# e2e-testing.md §3.1's table when a file is added, split, or renamed.
+TIER_A_PATHS = [
+    "tests/e2e/sync-parity.test.ts",
+    "tests/e2e/shard-routing.test.ts",
+    "tests/e2e/permissions-grants.test.ts",
+    "tests/e2e/holds-attribution.test.ts",
+    "tests/e2e/service-layer-manifest.test.ts",
+    "tests/e2e/collection-views.test.ts",
+    "tests/e2e/markdown-fidelity.test.ts",
+    "tests/e2e/ui-adapter-bindings.test.ts",
+]
 TIER_B_PATH = "tests/e2e/tier-b.spec.ts"
 
 TEST_TITLE_RE = re.compile(r"""^\s*(?:it|test)\(\s*(['"`])(.*?)\1""")
@@ -76,7 +89,11 @@ def main() -> None:
 
     spec_file = root / SPEC_PATH
     required_rows = extract_required_test_rows(spec_file.read_text(encoding="utf-8")) if spec_file.exists() else []
-    tier_a_titles = extract_test_titles(root / TIER_A_PATH)
+    tier_a_titles = [
+        title
+        for path in TIER_A_PATHS
+        for title in extract_test_titles(root / path)
+    ]
     tier_b_titles = extract_test_titles(root / TIER_B_PATH)
 
     print(json.dumps({

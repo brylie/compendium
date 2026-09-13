@@ -86,7 +86,19 @@ export default defineConfig({
 					environment: 'node',
 					include: ['tests/e2e/**/*.test.{js,ts}', 'src/routes/mcp/server.test.ts'],
 					setupFiles: ['./tests/setup/isolate-persistence.ts'],
-					fileParallelism: false
+					// Each file's own beforeEach resets process-wide state (globalThis's
+					// workspace-store registry, process.env.DATABASE_URL — see
+					// workspace-store.ts and harness.ts), which only stays safe under
+					// concurrency because Vitest's default pool ('forks') plus
+					// isolate: true gives every test file its own OS process; two files
+					// never share that process-wide state at the same time. Pinned
+					// explicitly (matching the defaults) so this isolation guarantee is
+					// visible here rather than relying on defaults silently holding —
+					// see e2e-testing.md §3 "Test isolation model".
+					pool: 'forks',
+					isolate: true,
+					fileParallelism: true,
+					maxWorkers: '50%'
 				}
 			},
 			{
