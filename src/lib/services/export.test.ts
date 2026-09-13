@@ -110,8 +110,11 @@ describe('export service', () => {
 			{
 				id: 'rec-1',
 				parentId: 'col-1',
-				recordType: 'collection_item',
 				order: 'a0',
+				createdBy: { kind: 'human', userId: 'user-1' },
+				createdAt: 1000,
+				lastEditedBy: { kind: 'human', userId: 'user-1' },
+				lastEditedAt: 1000,
 				properties: {
 					name: { type: 'text', value: 'Widget, Special "Edition"\nLine 2' },
 					cost: { type: 'number', value: 19.99 },
@@ -124,8 +127,11 @@ describe('export service', () => {
 			{
 				id: 'rec-2',
 				parentId: 'col-1',
-				recordType: 'collection_item',
 				order: 'a1',
+				createdBy: { kind: 'human', userId: 'user-1' },
+				createdAt: 1000,
+				lastEditedBy: { kind: 'human', userId: 'user-1' },
+				lastEditedAt: 1000,
 				properties: {
 					name: { type: 'text', value: 'Simple Item' },
 					available: { type: 'checkbox', value: false }
