@@ -473,6 +473,16 @@ export function createMcpServer(): McpServer {
 		}
 	);
 
+	// 14. blockTypes.listBlockTypes
+	registerFromManifest(server, 'blockTypes.listBlockTypes', {}, async (_args, extra) => {
+		try {
+			requireToken(extra);
+			return textResult(serviceModules.blockTypes.listBlockTypes());
+		} catch (err) {
+			return handleToolError(err);
+		}
+	});
+
 	return server;
 }
 

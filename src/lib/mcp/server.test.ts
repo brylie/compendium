@@ -11,6 +11,7 @@ import {
 	setPrimaryField as rawSetPrimaryField
 } from '$lib/data/collection-ops';
 import { createRecord as rawCreateRecord } from '$lib/data/record-ops';
+import { blockTypes } from '$lib/data/types';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 
 function createDocument(...args: Parameters<typeof rawCreateDocument>) {
@@ -635,5 +636,58 @@ describe('mcp server: full tool surface', () => {
 		expect(getTextContent(writeResult)).toContain(
 			'markdown, properties, referencedRecordId, viewConfig, or viewConfigPatch'
 		);
+	});
+
+	it('list_block_types describes every BlockType from the shared BLOCK_CAPABILITIES contract (issue #29)', async () => {
+		const { token } = createToken({
+			clientLabel: 'Discovery Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+		const mcpServer = createMcpServer();
+
+		const result = await invokeTool(mcpServer, 'list_block_types', {}, token);
+		expect(result.isError).toBeFalsy();
+		const parsed = JSON.parse(getTextContent(result));
+
+		expect(parsed.schemaVersion).toBe(1);
+		expect(parsed.blockTypes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					blockType: 'paragraph',
+					label: 'Text',
+					capabilities: { isContainer: false, holdsFreeformText: true },
+					fields: { creatable: [], writable: ['content'], readOnly: [] },
+					markdown: expect.objectContaining({ writable: true })
+				}),
+				expect.objectContaining({
+					blockType: 'columns',
+					capabilities: { isContainer: true, childBlockTypes: ['column'], holdsFreeformText: false }
+				}),
+				expect.objectContaining({
+					blockType: 'page_link',
+					referencedRecordSemantics: expect.any(String),
+					fields: {
+						creatable: ['referencedRecordId'],
+						writable: ['referencedRecordId'],
+						readOnly: []
+					}
+				})
+			])
+		);
+		// Every BlockType, including `column` — never insertable from the slash
+		// menu directly, but still a discoverable type for an agent populating
+		// an existing columns block.
+		const alphabetically = (values: string[]) => [...values].sort((a, b) => a.localeCompare(b));
+		expect(
+			alphabetically(parsed.blockTypes.map((b: { blockType: string }) => b.blockType))
+		).toEqual(alphabetically([...blockTypes]));
+	});
+
+	it('list_block_types requires a valid token like every other tool', async () => {
+		const mcpServer = createMcpServer();
+		const result = await invokeTool(mcpServer, 'list_block_types', {}, 'not-a-real-token');
+		expect(result.isError).toBe(true);
+		expect(getTextContent(result)).toContain('Permission denied');
 	});
 });
