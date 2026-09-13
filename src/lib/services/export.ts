@@ -159,7 +159,7 @@ export function collectionRecordsToCsv(
 				case 'text':
 				case 'date':
 				case 'select':
-					row.push(csvEscape(propVal.value));
+					row.push(String(propVal.value));
 					break;
 				case 'number':
 					row.push(String(propVal.value));
@@ -168,7 +168,7 @@ export function collectionRecordsToCsv(
 					row.push(propVal.value ? 'true' : 'false');
 					break;
 				case 'relation':
-					row.push(csvEscape(propVal.value.join(', ')));
+					row.push(propVal.value.join(', '));
 					break;
 				default:
 					row.push('');

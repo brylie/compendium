@@ -143,7 +143,7 @@ describe('export service', () => {
 		expect(csv).toContain('id,Item Name,Price,In Stock,Date,Tags,Related Items,Other');
 		expect(csv).toContain('"Widget, Special ""Edition""\nLine 2"');
 		expect(csv).toContain('19.99,true,2026-09-13,Gadgets,"rec-2, rec-3"');
-		expect(csv).toContain('rec-2,Simple Item,,,false,,,');
+		expect(csv).toContain('rec-2,Simple Item,,false,,,,');
 
 		const mdTable = collectionToMarkdownTable('Inventory', schema, records);
 		expect(mdTable).toContain('# Inventory');
