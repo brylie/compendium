@@ -52,7 +52,13 @@ let ydoc: Y.Doc;
 vi.mock('$lib/client/yjs-client', () => ({
 	getClientDoc: () => ydoc,
 	getShardDoc: () => ydoc,
-	getShardAwareness: () => ({})
+	getShardAwareness: () => ({}),
+	// #242's cross-shard synced_block resolution: every referencedRecordId in
+	// this file's fixtures either resolves in the shared `ydoc` already, or is
+	// a deliberately broken/never-set reference — there's no genuinely
+	// cross-shard target for it to ever actually resolve, so this always
+	// rejects, the same as a real lookup failing to find a target anywhere.
+	resolveRecordDoc: () => Promise.reject(new Error('resolveRecordDoc is not mocked in this suite'))
 }));
 
 // +page.svelte resolves its real shard via a fetch before connecting — see

@@ -247,6 +247,60 @@ export const migrationTargets = sqliteTable(
 	(t) => [uniqueIndex('migration_targets_run_legacy_unique').on(t.runId, t.legacyId)]
 );
 
+// --- Synced-block reverse index (#242, docs/specifications/data-model.md §3.1) ---
+//
+// A durable, cross-shard "which synced_block records mirror this source"
+// index — the record_index/record_locator pattern applied to one more
+// projection. listIncomingLinks/listSyncedBlockInstances (src/lib/data/links.ts)
+// already answer this same question, but as an in-memory WeakMap<Y.Doc, ...>
+// index: structurally incapable of seeing another Y.Doc, let alone another
+// shard. Since #120 gave every Document its own shard, "used in N places" can
+// only ever see same-shard instances without a durable index that's actually
+// populated across every shard — this table is that index. Kept live by
+// synced-block-index-observer.ts's afterTransaction reaction (no write path
+// dual-writes this on its own, so — like record_index — it reacts to every
+// mutation source) and rebuilt wholesale per shard load by
+// rebuildSyncedBlockIndexForShard, mirroring record-index.ts's own contract.
+export const syncedBlockInstance = sqliteTable(
+	'synced_block_instance',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		workspaceId: text('workspace_id').notNull().default('default'),
+		// The synced_block's own referencedRecordId — the record every instance
+		// in this row's group mirrors. Not itself required to be catalog-
+		// navigable or even to still exist; a dangling sourceRecordId (source
+		// deleted, or never resolvable) just means the corresponding instance
+		// row is stale until its own transaction clears it.
+		sourceRecordId: text('source_record_id').notNull(),
+		// The synced_block record itself (the "instance" in "used in N
+		// places") and the shard it physically lives in — needed to resolve
+		// that shard's own Y.Doc for the instance's owning Document/context
+		// (see services/synced-blocks.ts) without the caller having to guess.
+		instanceRecordId: text('instance_record_id').notNull(),
+		instanceShardId: text('instance_shard_id').notNull(),
+		createdAt: integer('created_at').notNull()
+	},
+	(t) => [
+		// One synced_block instance mirrors at most one source at a time (its
+		// own referencedRecordId), so upserting is delete-by-instance then
+		// insert, the same shape record_index's FTS5 table uses for its own
+		// upsert-via-delete-then-insert (SQLite has no native upsert here
+		// either, though this table could use ON CONFLICT — kept symmetrical
+		// with record_index's approach for one less pattern to hold in mind).
+		uniqueIndex('synced_block_instance_workspace_instance_unique').on(
+			t.workspaceId,
+			t.instanceRecordId
+		),
+		// Backs listSyncedBlockInstancesAcrossShards' "every instance of this
+		// source, in this workspace" query — the reverse-index read this table
+		// exists for.
+		index('synced_block_instance_workspace_source').on(t.workspaceId, t.sourceRecordId),
+		// Backs rebuildSyncedBlockIndexForShard's per-shard wipe, mirroring
+		// record_locator_workspace_shard's identical justification.
+		index('synced_block_instance_workspace_shard').on(t.workspaceId, t.instanceShardId)
+	]
+);
+
 // --- Backup/disaster-recovery run log (#19, docs/specifications/backup-recovery.md) ---
 //
 // One row per attempted backup (scheduled or manual via `npm run db:backup`).

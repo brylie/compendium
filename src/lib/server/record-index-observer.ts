@@ -22,7 +22,7 @@ type AnyYType = Y.AbstractType<any>;
  * `recordsTop`, e.g. part of a record deleted earlier in the same
  * transaction.
  */
-function resolveRecordId(recordsTop: AnyYType, type: AnyYType): string | undefined {
+export function resolveRecordId(recordsTop: AnyYType, type: AnyYType): string | undefined {
 	let current: AnyYType | null = type;
 	while (current) {
 		const parent: AnyYType | null = current.parent;

@@ -1,16 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveRequestContext } from '$lib/server/request-context';
 import { createTestHarness, type TestHarness } from './harness';
-import { createRecord, getRecordYText, updateRecordContent } from '$lib/data/record-ops';
+import {
+	createRecord,
+	getRecordYText,
+	setRecordReferencedId,
+	updateRecordContent
+} from '$lib/data/record-ops';
 import {
 	createSpace,
 	recordCatalogDocumentCreated,
-	reserveDocumentLocator
+	reserveDocumentLocator,
+	resolveShardForRecord
 } from '$lib/server/catalog';
 import { grantDocumentAccess } from '$lib/mcp/tokens';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { plainText, yTextToRichText } from '$lib/data/richtext';
 import { serviceModules } from '$lib/services/manifest';
+import { resolveSyncGroups } from '$lib/services/synced-blocks';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { createDocument, human, parseMcpText } from './mcp-parity-helpers';
 
@@ -314,5 +321,178 @@ describe('Document/Shard/Space Routing', () => {
 		});
 		const unfiltered = parseMcpText<{ rows: { id: string }[] }>(unfilteredRes);
 		expect(unfiltered.rows).toHaveLength(2);
+	});
+
+	it('3d. A synced_block instance can mirror a source record living in a different Document’s shard — content converges both ways, and the durable reverse index finds the instance across shards (#242)', async () => {
+		const { token } = harness.createToken({
+			clientLabel: 'Synced Block Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+		const mcp = await harness.getMcpClient(token);
+
+		const sourceDoc = parseMcpText<{ id: string }>(
+			await mcp.callTool({ name: 'create_document', arguments: { title: 'Source Doc' } })
+		);
+		const instanceDoc = parseMcpText<{ id: string }>(
+			await mcp.callTool({ name: 'create_document', arguments: { title: 'Instance Doc' } })
+		);
+
+		const source = parseMcpText<{ recordId: string }>(
+			await mcp.callTool({
+				name: 'create_record',
+				arguments: { parentId: sourceDoc.id, blockType: 'paragraph' }
+			})
+		);
+		await mcp.callTool({ name: 'hold_records', arguments: { recordIds: [source.recordId] } });
+		await mcp.callTool({
+			name: 'write_record',
+			arguments: { recordId: source.recordId, markdown: 'Shared content' }
+		});
+
+		const instance = parseMcpText<{ recordId: string }>(
+			await mcp.callTool({
+				name: 'create_record',
+				arguments: { parentId: instanceDoc.id, blockType: 'synced_block' }
+			})
+		);
+		// write_record's referencedRecordId support is deliberately restricted
+		// to page_link/collection_view (services/records.ts's
+		// validateReferencedRecordIdWrite) — a synced_block is only ever linked
+		// via the UI's direct Yjs mutation (+page.svelte's "Set target ID"
+		// dialog, setRecordReferencedId), never through an MCP write path. This
+		// mirrors that exact call, against the instance's own already-created
+		// shard (a Document's shard is its own id, #120).
+		const context = resolveRequestContext();
+		const instanceContext = resolveWorkspaceContext({
+			workspaceId: context.workspaceId,
+			shardId: instanceDoc.id
+		});
+		transactWithOrigin(instanceContext.doc, TEST_ORIGIN, () =>
+			setRecordReferencedId(instanceContext.doc, instance.recordId, source.recordId, human)
+		);
+
+		// #242 sub-task 1: resolveShardForRecord resolves the bare source
+		// recordId to its real owning shard — a Document's own shard is its
+		// own id (#120), and sourceDoc/instanceDoc are two genuinely different
+		// Documents/shards here, not the same one twice.
+		expect(sourceDoc.id).not.toBe(instanceDoc.id);
+		expect(resolveShardForRecord(context.workspaceId, source.recordId)?.shardId).toBe(sourceDoc.id);
+
+		// A real Yjs client connects directly to the source's own shard room —
+		// the same connection $lib/client/yjs-client.ts's resolveRecordDoc
+		// makes once it resolves that shard id via GET /api/records/[id]/shard
+		// for a synced_block instance whose target isn't in the viewing
+		// Document's own ydoc.
+		const sourceShardClient = harness.getYjsClient({ room: `shard-${sourceDoc.id}` });
+		await harness.waitForCondition(() => {
+			const ytext = getRecordYText(sourceShardClient.doc, source.recordId);
+			return !!ytext && plainText(yTextToRichText(ytext)).includes('Shared content');
+		});
+
+		// Editing through that connection — standing in for a synced_block
+		// instance's own BlockEditor, once resolved cross-shard — mutates the
+		// exact same Y.Text the source Document's own clients see: content
+		// convergence needs no bespoke propagation (data-model.md §3.1).
+		transactWithOrigin(sourceShardClient.doc, TEST_ORIGIN, () =>
+			updateRecordContent(
+				sourceShardClient.doc,
+				source.recordId,
+				{ runs: [{ text: 'Shared content, edited via the instance’s resolved shard', marks: {} }] },
+				human
+			)
+		);
+		const independentSourceClient = harness.getYjsClient({ room: `shard-${sourceDoc.id}` });
+		await harness.waitForCondition(() => {
+			const ytext = getRecordYText(independentSourceClient.doc, source.recordId);
+			return !!ytext && plainText(yTextToRichText(ytext)).includes('edited via the instance');
+		});
+
+		// #242 sub-task 3: the durable synced_block_instance reverse index
+		// (server/synced-block-index.ts, kept live by
+		// synced-block-index-observer.ts) reports the instance under its
+		// source even though they live in two different shards —
+		// listSyncedBlockInstances' own same-Y.Doc index structurally cannot.
+		await harness.waitForCondition(() => {
+			const groups = resolveSyncGroups(context, [source.recordId]);
+			return (
+				groups[source.recordId]?.instances.some(
+					(location) => location.sourceRecordId === instance.recordId
+				) ?? false
+			);
+		});
+		const groups = resolveSyncGroups(context, [source.recordId]);
+		expect(groups[source.recordId]?.source).toMatchObject({
+			sourceDocumentId: sourceDoc.id,
+			sourceRecordId: source.recordId
+		});
+		expect(groups[source.recordId]?.instances).toEqual([
+			expect.objectContaining({
+				sourceDocumentId: instanceDoc.id,
+				sourceRecordId: instance.recordId
+			})
+		]);
+	});
+
+	it('3d-2. GET /api/records/[id]/shard and POST /api/sync-groups serve the same cross-shard resolution over real HTTP (#242)', async () => {
+		if (!harness.hasAppHandler) {
+			throw new Error(
+				'harness.hasAppHandler is false — run `npm run build` before this test so ' +
+					'tests/e2e/harness.ts can serve real routes through build/handler.js.'
+			);
+		}
+
+		const { token } = harness.createToken({
+			clientLabel: 'Synced Block HTTP Bot',
+			allowedDocumentIds: [],
+			allowedCollectionIds: []
+		});
+		const mcp = await harness.getMcpClient(token);
+
+		const sourceDoc = parseMcpText<{ id: string }>(
+			await mcp.callTool({ name: 'create_document', arguments: { title: 'HTTP Source Doc' } })
+		);
+		const instanceDoc = parseMcpText<{ id: string }>(
+			await mcp.callTool({ name: 'create_document', arguments: { title: 'HTTP Instance Doc' } })
+		);
+		const source = parseMcpText<{ recordId: string }>(
+			await mcp.callTool({
+				name: 'create_record',
+				arguments: { parentId: sourceDoc.id, blockType: 'paragraph' }
+			})
+		);
+		const instance = parseMcpText<{ recordId: string }>(
+			await mcp.callTool({
+				name: 'create_record',
+				arguments: { parentId: instanceDoc.id, blockType: 'synced_block' }
+			})
+		);
+		// Same as the previous test: synced_block linking is UI-only (direct
+		// Yjs mutation), not an MCP write path — see validateReferencedRecordIdWrite.
+		const { workspaceId } = resolveRequestContext();
+		const instanceContext = resolveWorkspaceContext({ workspaceId, shardId: instanceDoc.id });
+		transactWithOrigin(instanceContext.doc, TEST_ORIGIN, () =>
+			setRecordReferencedId(instanceContext.doc, instance.recordId, source.recordId, human)
+		);
+
+		const shardRes = await fetch(`${harness.httpUrl}/api/records/${source.recordId}/shard`);
+		expect(shardRes.status).toBe(200);
+		expect((await shardRes.json()).shardId).toBe(sourceDoc.id);
+
+		await harness.waitForCondition(async () => {
+			const syncGroupsRes = await fetch(`${harness.httpUrl}/api/sync-groups`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ recordIds: [source.recordId] })
+			});
+			const body = (await syncGroupsRes.json()) as Record<
+				string,
+				{ instances: { sourceRecordId: string }[] }
+			>;
+			return (
+				body[source.recordId]?.instances.some((i) => i.sourceRecordId === instance.recordId) ??
+				false
+			);
+		});
 	});
 });

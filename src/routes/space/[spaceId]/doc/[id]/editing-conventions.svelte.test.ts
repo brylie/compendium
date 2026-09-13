@@ -76,7 +76,11 @@ let ydoc: Y.Doc;
 vi.mock('$lib/client/yjs-client', () => ({
 	getClientDoc: () => ydoc,
 	getShardDoc: () => ydoc,
-	getShardAwareness: () => ({})
+	getShardAwareness: () => ({}),
+	// #242: no fixture here has a genuinely cross-shard synced_block target,
+	// so this always rejects the same way a real lookup fails to find a
+	// target anywhere — see page.svelte.test.ts's identical mock.
+	resolveRecordDoc: () => Promise.reject(new Error('resolveRecordDoc is not mocked in this suite'))
 }));
 
 function textOf(recordId: string): string {

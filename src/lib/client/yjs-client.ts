@@ -118,3 +118,47 @@ export async function resolveCollectionDoc(collectionId: string): Promise<Y.Doc>
 	const shardId = await shardIdPromise;
 	return getShardDoc(shardId);
 }
+
+// Memoizes each record's shard lookup for the tab's lifetime — a
+// synced_block's referencedRecordId (#242) is very often a record in a
+// Document other than the one currently being viewed, so resolving and
+// connecting to it is a fresh cross-Document lookup, exactly the same shape
+// as resolveCollectionDoc's cross-Collection one above.
+const recordShardIds = new Map<string, Promise<string>>();
+
+/**
+ * Resolves an arbitrary record's shard and connects to it (memoized per
+ * recordId), for UI that needs to read/edit a record that may not live in
+ * the Document currently being viewed — today, a synced_block's cross-Document
+ * target (#242). Returns both the resolved doc and that shard's own Awareness,
+ * since a synced_block instance needs to claim/observe holds against its
+ * target's real shard, not the viewing Document's. Same GET
+ * /api/records/[id]/shard + {@link getShardDoc}/{@link getShardAwareness}
+ * pairing, and the same "evict the cache entry on a failed lookup so a later
+ * call retries fresh" behavior, as {@link resolveCollectionDoc}.
+ */
+export async function resolveRecordDoc(
+	recordId: string
+): Promise<{ doc: Y.Doc; awareness: Awareness }> {
+	let shardIdPromise = recordShardIds.get(recordId);
+	if (!shardIdPromise) {
+		shardIdPromise = fetch(`/api/records/${recordId}/shard`)
+			.then((res) => {
+				if (!res.ok) throw new Error(`Shard lookup for record ${recordId} failed: ${res.status}`);
+				return res.json();
+			})
+			.then((body: { shardId: string }) => {
+				if (typeof body.shardId !== 'string' || !body.shardId) {
+					throw new Error(`Shard lookup for record ${recordId} returned no shardId`);
+				}
+				return body.shardId;
+			})
+			.catch((err: unknown) => {
+				recordShardIds.delete(recordId);
+				throw err;
+			});
+		recordShardIds.set(recordId, shardIdPromise);
+	}
+	const shardId = await shardIdPromise;
+	return { doc: getShardDoc(shardId), awareness: getShardAwareness(shardId) };
+}
