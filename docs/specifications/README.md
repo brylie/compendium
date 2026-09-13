@@ -13,6 +13,8 @@ Canonical specification for each implemented subsystem, translating [`prd.md`](.
 - [`block-capability-contract.md`](./block-capability-contract.md) — the checklist every `BlockType` (existing or new) must satisfy: conversion rules, keyboard behavior, Markdown/MCP representation, hold semantics, and accessible rendering.
 - [`undo-redo.md`](./undo-redo.md) — local, per-actor undo/redo via Y.UndoManager, and why it never reverts a collaborator's or agent's edit.
 - [`persistence.md`](./persistence.md) — SQLite via Drizzle: snapshots, audit log, access tokens, and the query read model.
+- [`backup-recovery.md`](./backup-recovery.md) — point-in-time SQLite backups and restore procedure.
+- [`workspace-export.md`](./workspace-export.md) — workspace data export scopes/formats (Markdown + manifest) and periodic disposable Markdown mirror.
 - [`audit-coverage.md`](./audit-coverage.md) — how direct UI mutations (which bypass the service layer entirely) and denied MCP attempts get an audit trail, and what's deliberately excluded.
 - [`service-layer.md`](./service-layer.md) / [`service-layer-manifest.md`](./service-layer-manifest.md) — how permission/audit logic is centralized once and shared by MCP and UI.
 - [`e2e-testing.md`](./e2e-testing.md) — MCP/UI parity and CRDT capacity benchmark strategy.
