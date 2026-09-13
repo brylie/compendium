@@ -12,7 +12,8 @@ import {
 	releaseContextIfIdle,
 	resetWorkspaceStoreForTests,
 	resolveWorkspaceContext,
-	sweepIdleContexts
+	sweepIdleContexts,
+	WorkspaceStore
 } from './workspace-store';
 
 describe('workspace-store: snapshot persistence survives a process restart', () => {
@@ -258,4 +259,66 @@ describe('workspace-store: isolation between independently-resolved contexts', (
 		expect(a2.defaultSpaceId).toBe(a1.defaultSpaceId);
 		expect(b.defaultSpaceId).not.toBe(a1.defaultSpaceId);
 	});
+});
+
+// Every other describe block above shares the one ambient default
+// WorkspaceStore (via the free resolveWorkspaceContext/resetWorkspaceStoreForTests
+// wrappers) and this file's own beforeEach/afterEach (tests/setup/isolate-persistence.ts)
+// reset that *entire* shared registry around every test — safe only because
+// those tests run serially. `test.concurrent` needs a different guarantee:
+// two tests genuinely interleaved on the event loop must never observe or
+// tear down each other's state. Each test below constructs its own
+// `WorkspaceStore` instance instead of touching the ambient default, and
+// resolves the *same* {workspaceId, shardId} selector against it — proving
+// isolation comes from the instance, not merely from picking different keys.
+// The `await` between the write and the read forces a real interleaving
+// opportunity: with the old bare-globalThis-Map registry (pre-#306), a
+// concurrently-running sibling test's own teardown would have raced this
+// one's read. None of these tests ever call flush() — resolve()'s own doc
+// comment covers what's still shared across independently-constructed
+// instances even after this fix: the on-disk snapshot for a given
+// {workspaceId, shardId} pair is one row regardless of which store touched
+// it, so this suite only asserts the in-memory Y.Doc/Awareness isolation the
+// registry itself is responsible for.
+describe('WorkspaceStore: independent instances stay isolated under real concurrency (#306)', () => {
+	it.concurrent(
+		"store A never observes store B's content resolved for the identical selector",
+		async () => {
+			const storeA = new WorkspaceStore();
+			const a = storeA.resolve({ workspaceId: 'concurrent-shared-key', shardId: 'main' });
+			transactWithOrigin(a.doc, TEST_ORIGIN, () => a.doc.getMap('workspace').set('owner', 'A'));
+
+			await new Promise((resolveDelay) => setTimeout(resolveDelay, 15));
+
+			expect(a.doc.getMap('workspace').get('owner')).toBe('A');
+			storeA.resetForTests();
+		}
+	);
+
+	it.concurrent(
+		"store B never observes store A's content resolved for the identical selector",
+		async () => {
+			const storeB = new WorkspaceStore();
+			const b = storeB.resolve({ workspaceId: 'concurrent-shared-key', shardId: 'main' });
+			transactWithOrigin(b.doc, TEST_ORIGIN, () => b.doc.getMap('workspace').set('owner', 'B'));
+
+			await new Promise((resolveDelay) => setTimeout(resolveDelay, 15));
+
+			expect(b.doc.getMap('workspace').get('owner')).toBe('B');
+			storeB.resetForTests();
+		}
+	);
+
+	it.concurrent(
+		"a third, independently-constructed store sees neither sibling's writes",
+		async () => {
+			const storeC = new WorkspaceStore();
+			const c = storeC.resolve({ workspaceId: 'concurrent-shared-key', shardId: 'main' });
+
+			await new Promise((resolveDelay) => setTimeout(resolveDelay, 15));
+
+			expect(c.doc.getMap('workspace').get('owner')).toBeUndefined();
+			storeC.resetForTests();
+		}
+	);
 });

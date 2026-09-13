@@ -6,6 +6,7 @@ import { resetWorkspaceStoreForTests, resolveWorkspaceContext } from './workspac
 import { resetHoldsForTests } from './holds';
 import { createDocument } from '../services/documents';
 import { CURRENT_USER } from './current-user';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 // Minimal stand-in for `ws`'s WebSocket, matching the one already used in
 // yjs-ws-server.test.ts — just enough surface for setupWSConnection to run
@@ -133,7 +134,9 @@ describe('attachYjsWebSocket: upgrade routing', () => {
 		// (see the rejection test below) rather than lazily creating an empty
 		// doc for it, so a fabricated id like the old 'abc123' no longer
 		// connects at all.
-		const document = createDocument(CURRENT_USER, { title: 'Shard Room Doc' });
+		const document = createDocument(resolveRequestContext(CURRENT_USER), {
+			title: 'Shard Room Doc'
+		});
 
 		const server = new EventEmitter();
 		const wss = attachYjsWebSocket(

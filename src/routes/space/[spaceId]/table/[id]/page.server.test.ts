@@ -5,6 +5,7 @@ import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { createCollection as createCollectionService } from '$lib/services';
 import { CURRENT_USER } from '$lib/server/current-user';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 function createCollection(...args: Parameters<typeof rawCreateCollection>) {
 	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCreateCollection(...args));
@@ -16,19 +17,23 @@ describe('routes/table/[id]/+page.server', () => {
 		const collection = createCollection(doc, { title: 'My Table', schema: [] });
 
 		const result = load({
-			params: { id: collection.id, spaceId: defaultSpaceId }
-		} as Parameters<typeof load>[0]);
+			params: { id: collection.id, spaceId: defaultSpaceId },
+			locals: { requestContext: resolveRequestContext() }
+		} as unknown as Parameters<typeof load>[0]);
 
 		expect(result).toEqual({ collectionId: collection.id, title: 'My Table' });
 	});
 
 	it('returns the collection title for a Collection living in its own shard (#120)', () => {
 		const { defaultSpaceId } = resolveWorkspaceContext();
-		const collection = createCollectionService(CURRENT_USER, { title: 'Sharded Table' });
+		const collection = createCollectionService(resolveRequestContext(CURRENT_USER), {
+			title: 'Sharded Table'
+		});
 
 		const result = load({
-			params: { id: collection.id, spaceId: defaultSpaceId }
-		} as Parameters<typeof load>[0]);
+			params: { id: collection.id, spaceId: defaultSpaceId },
+			locals: { requestContext: resolveRequestContext() }
+		} as unknown as Parameters<typeof load>[0]);
 
 		expect(result).toEqual({ collectionId: collection.id, title: 'Sharded Table' });
 	});
@@ -36,8 +41,9 @@ describe('routes/table/[id]/+page.server', () => {
 	it('falls back to "Untitled Collection" for a nonexistent collection', () => {
 		const { defaultSpaceId } = resolveWorkspaceContext();
 		const result = load({
-			params: { id: 'nonexistent', spaceId: defaultSpaceId }
-		} as Parameters<typeof load>[0]);
+			params: { id: 'nonexistent', spaceId: defaultSpaceId },
+			locals: { requestContext: resolveRequestContext() }
+		} as unknown as Parameters<typeof load>[0]);
 		expect(result).toEqual({ collectionId: 'nonexistent', title: 'Untitled Collection' });
 	});
 });

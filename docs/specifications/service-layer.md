@@ -43,8 +43,8 @@ src/lib/server/workspace-repository.ts — the one owner of the "catalog-first, 
                                   re-implement independently and had already drifted between.
         ↓
 src/lib/services/*.ts          — one module per aggregate (documents, records, collections,
-                                  holds, tokens). Each exported function takes an actor/
-                                  token and validated input, and is the ONLY place that:
+                                  holds, tokens). Each exported function takes a
+                                  RequestContext and validated input, and is the ONLY place that:
                                     1. checks permission (reuses tokenAllowsParent /
                                        requireAccessibleParent style helpers, moved here)
                                     2. calls into the appropriate data-operation module to mutate the Y.Doc
@@ -74,29 +74,29 @@ Markdown/MCP response rendering lives in the MCP/presentation adapter, not the s
 
 ```
 src/lib/services/
-  documents.ts    createDocument(actor, input) → DocumentMeta
-                  moveDocument(actor, documentId, { parentDocumentId?, afterDocumentId? }) → void
-                  deleteDocument(actor, documentId) → void
-  records.ts      createRecord(actor, input) → WorkspaceRecord
-                  writeRecord(actor, recordId, { markdown? | properties? }) → void
-                  deleteRecord(actor, recordId) → void
-  holds.ts        holdRecords(actor, recordIds) → { granted, denied }
-                  releaseRecords(actor, recordIds) → void
-  collections.ts  createCollection(actor, input) → CollectionMeta
-                  queryCollection(actor, collectionId, filter?) → WorkspaceRecord[]
-  search.ts       searchWorkspace(actor, query) → { recordId, snippet }[]
-  spaces.ts       createSpace(actor, name) → SpaceMeta
-  tokens.ts       createToken(actor, input) → { token, record }
-                  revokeToken(actor, tokenHash) → void
+  documents.ts    createDocument(context, input) → DocumentMeta
+                  moveDocument(context, documentId, { parentDocumentId?, afterDocumentId? }) → void
+                  deleteDocument(context, documentId) → void
+  records.ts      createRecord(context, input) → WorkspaceRecord
+                  writeRecord(context, recordId, { markdown? | properties? }) → void
+                  deleteRecord(context, recordId) → void
+  holds.ts        holdRecords(context, recordIds) → { granted, denied }
+                  releaseRecords(context, recordIds) → void
+  collections.ts  createCollection(context, input) → CollectionMeta
+                  queryCollection(context, collectionId, filter?) → WorkspaceRecord[]
+  search.ts       searchWorkspace(context, query) → { recordId, snippet }[]
+  spaces.ts       createSpace(context, name) → SpaceMeta
+  tokens.ts       createToken(context, input) → { token, record }
+                  revokeToken(context, tokenHash) → void
 ```
 
 `tokens.ts` and `spaces.ts` are UI-only (`settings/tokens`, `/api/spaces`) — no MCP tool exposes minting or revoking a token or creating a Space. They are nevertheless registered in `services/manifest.ts` with `mcp: false, ui: true`, alongside token listing and audit-history listing, so adapter ownership is enforced without accidentally exposing them over MCP. `tokens.ts#createToken` validates every grant list — `allowedSpaceIds` against the workspace's real Spaces (#188), and (since #62) `allowedDocumentIds`/`allowedCollectionIds` against `resolveInternalLinkTarget` (`data/links.ts`) — before persisting, all three through one shared `validateEvery(ids, existsFn, ErrorClass)` helper. A crafted request could otherwise grant a token access to an id that merely happens to exist somewhere else (or doesn't exist at all), since existence alone later authorizes access (`tokenAllowsParent`) — no permission check is needed for a grant itself, since Phase 0 has no membership model gating who a caller may grant a _future_ token access to.
 
-Each function's first parameter is whatever identifies the caller for permission purposes — an `AccessToken` for MCP-originated calls, the fixed `CURRENT_USER` `ActorId` for Phase 0/1 UI calls (see `data-model.md` §1's `ActorId` union; this doesn't need to change). Where MCP and UI calls to the "same" use case need different permission rules (e.g. UI writes are currently unscoped, single-tenant; MCP writes are token-scoped), the service function is the one place that branches on that — not duplicated per adapter.
+**Each function's first parameter is a `RequestContext`** (`src/lib/server/request-context.ts`), not a bare caller identity (issue #306 — this signature shape replaced an earlier `(actor, ...)` form each service function used to take individually). `RequestContext` bundles everything a boundary resolves once per call: `caller` (an `AccessToken` for MCP-originated calls, or the fixed `CURRENT_USER` `ActorId` for Phase 0/1 UI calls — see `data-model.md` §1's `ActorId` union), `workspaceId`/`allowedSpaceIds`, the already-resolved default-shard `workspace: WorkspaceContext` bundle, and a `workspaceStore: WorkspaceStore` reference. Where MCP and UI calls to the "same" use case need different permission rules (e.g. UI writes are currently unscoped, single-tenant; MCP writes are token-scoped), the service function branches on `context.caller` — not duplicated per adapter. Where a service function (or a `permissions.ts` helper it calls, e.g. `resolveParentWorkspaceContext`/`resolveRecordWorkspaceContext`) needs a _different_ shard's `WorkspaceContext` than the request's own default one — a Document/Collection's own shard, per `architecture.md` §1 — it resolves that through `context.workspaceStore.resolve({ workspaceId, shardId })`, never by importing `workspace-store.ts`'s ambient `resolveWorkspaceContext()` free function directly. This is what makes a service function's workspace resolution fully explicit rather than ambient: a caller with its own isolated `WorkspaceStore` (a test, most notably) is guaranteed every service function it calls resolves against that same store, never silently against the process-wide default.
 
 ## 4. What this fixes, concretely
 
-- **The `create_document` self-grant bug.** `services/documents.ts#createDocument` becomes the single place that creates the document _and_ persists the calling token's new grant (via a real `grantDocumentAccess(tokenHash, documentId)` function added to `tokens.ts`, doing an actual `UPDATE access_tokens SET allowed_document_ids = ...`) _and_ logs the audit entry, as one unit. The MCP tool handler shrinks to: verify token → call `createDocument(token, input)` → return result.
+- **The `create_document` self-grant bug.** `services/documents.ts#createDocument` becomes the single place that creates the document _and_ persists the calling token's new grant (via a real `grantDocumentAccess(tokenHash, documentId)` function added to `tokens.ts`, doing an actual `UPDATE access_tokens SET allowed_document_ids = ...`) _and_ logs the audit entry, as one unit. The MCP tool handler shrinks to: verify token → resolve a `RequestContext` for it → call `createDocument(context, input)` → return result.
 - **The Sidebar audit-log gap.** Now that the MCP/route handlers are the only sanctioned way to reach a mutating service function over the network, `Sidebar.svelte` no longer has a lower-level function to silently fall back to on a fetch failure — that fallback (finding #4) has been removed rather than left as an isolated patch.
 - **Future write operations** (starting with `move_document`, from the same review) get built against this layer from day one instead of accumulating the same inconsistency a fourth time.
 

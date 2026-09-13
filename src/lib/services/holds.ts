@@ -1,4 +1,4 @@
-import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import type { RequestContext } from '$lib/server/request-context';
 import { clientIdForToken, releaseAgentHold, requestAgentHold } from '$lib/server/holds';
 import { getRecord } from '$lib/data/record-ops';
 import { logAudit } from '$lib/server/audit';
@@ -9,14 +9,13 @@ import {
 	groupRecordIdsByShard,
 	isAccessToken,
 	requireAccessibleRecord,
-	resolveOwningParentId,
-	type CallerIdentity
+	resolveOwningParentId
 } from './permissions';
 
 /**
- * Grants a hold on each of `recordIds` for `caller` — permission-checking a token caller's
- * grant per record (or record existence/accessibility for a human caller) — and audits the
- * result. Never all-or-nothing: some ids may be granted while others are denied.
+ * Grants a hold on each of `recordIds` for `context.caller` — permission-checking a token
+ * caller's grant per record (or record existence/accessibility for a human caller) — and
+ * audits the result. Never all-or-nothing: some ids may be granted while others are denied.
  *
  * A single call can legitimately span more than one shard (a cross-document agent batch is
  * a stated acceptance criterion — see docs/specifications/collaboration.md), so recordIds
@@ -25,20 +24,21 @@ import {
  * today (#120 hasn't cut over shard assignment yet), so this is a no-op split until it does.
  */
 export function holdRecords(
-	caller: CallerIdentity,
+	context: RequestContext,
 	recordIds: string[]
 ): { granted: string[]; denied: string[] } {
+	const caller = context.caller;
 	const actor = actorForCaller(caller);
 
 	let result: { granted: string[]; denied: string[] };
 
 	if (isAccessToken(caller)) {
 		const clientId = clientIdForToken(caller.tokenHash);
-		const { workspaceId } = resolveWorkspaceContext();
+		const { workspaceId, workspaceStore } = context;
 		const granted: string[] = [];
 		const denied: string[] = [];
-		for (const [shardId, ids] of groupRecordIdsByShard(recordIds)) {
-			const { doc, awareness } = resolveWorkspaceContext({ workspaceId, shardId });
+		for (const [shardId, ids] of groupRecordIdsByShard(context, recordIds)) {
+			const { doc, awareness } = workspaceStore.resolve({ workspaceId, shardId });
 			const groupResult = requestAgentHold(awareness, clientId, actor, ids, (id) => {
 				const record = getRecord(doc, id);
 				if (!record) return false;
@@ -61,7 +61,7 @@ export function holdRecords(
 		const denied: string[] = [];
 		for (const id of recordIds) {
 			try {
-				requireAccessibleRecord(caller, id);
+				requireAccessibleRecord(context, id);
 				granted.push(id);
 			} catch {
 				denied.push(id);
@@ -79,14 +79,15 @@ export function holdRecords(
  * `releaseAgentHold` call per shard's Awareness) and audits the release. No-ops the actual
  * release for human callers, who never hold via this mechanism, but still audits the call.
  */
-export function releaseRecords(caller: CallerIdentity, recordIds: string[]): void {
+export function releaseRecords(context: RequestContext, recordIds: string[]): void {
+	const caller = context.caller;
 	const actor = actorForCaller(caller);
 
 	if (isAccessToken(caller)) {
 		const clientId = clientIdForToken(caller.tokenHash);
-		const { workspaceId } = resolveWorkspaceContext();
-		for (const [shardId, ids] of groupRecordIdsByShard(recordIds)) {
-			const { awareness } = resolveWorkspaceContext({ workspaceId, shardId });
+		const { workspaceId, workspaceStore } = context;
+		for (const [shardId, ids] of groupRecordIdsByShard(context, recordIds)) {
+			const { awareness } = workspaceStore.resolve({ workspaceId, shardId });
 			releaseAgentHold(awareness, clientId, ids);
 		}
 	}

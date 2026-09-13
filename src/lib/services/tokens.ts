@@ -1,4 +1,4 @@
-import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import type { RequestContext } from '$lib/server/request-context';
 import { listSpaces } from '$lib/server/catalog';
 import {
 	createToken as storeCreateToken,
@@ -8,7 +8,7 @@ import {
 } from '$lib/server/token-store';
 import { logAudit } from '$lib/server/audit';
 import { resolveInternalLinkTarget } from '$lib/data/links';
-import { actorForCaller, resolveParentWorkspaceContext, type CallerIdentity } from './permissions';
+import { actorForCaller, resolveParentWorkspaceContext } from './permissions';
 
 /** Thrown when a token-creation request names a Space id that isn't a real Space in this workspace. */
 export class UnknownSpaceError extends Error {
@@ -51,14 +51,14 @@ function validateEvery(
 }
 
 /** A Document id naming a real, existing Document — a token grant needs no permission check of its own here (Phase 0 has no membership model gating who a caller may grant a *future* token access to), just existence and kind. */
-function documentExists(id: string): boolean {
-	const { doc } = resolveParentWorkspaceContext(id);
+function documentExists(context: RequestContext, id: string): boolean {
+	const { doc } = resolveParentWorkspaceContext(context, id);
 	return resolveInternalLinkTarget(doc, id)?.kind === 'document';
 }
 
 /** A Collection id naming a real, existing Collection — see {@link documentExists}. */
-function collectionExists(id: string): boolean {
-	const { doc } = resolveParentWorkspaceContext(id);
+function collectionExists(context: RequestContext, id: string): boolean {
+	const { doc } = resolveParentWorkspaceContext(context, id);
 	return resolveInternalLinkTarget(doc, id)?.kind === 'collection';
 }
 
@@ -80,16 +80,23 @@ export interface CreateTokenInput {
  * apparent (never matching anything via `tokenAllowsParent`) rather than rejected up front.
  */
 export function createToken(
-	caller: CallerIdentity,
+	context: RequestContext,
 	input: CreateTokenInput
 ): { token: string; record: AccessToken } {
-	const { workspaceId } = resolveWorkspaceContext();
-	const actor = actorForCaller(caller);
+	const actor = actorForCaller(context.caller);
 
-	const knownSpaceIds = new Set(listSpaces(workspaceId).map((space) => space.id));
+	const knownSpaceIds = new Set(listSpaces(context.workspaceId).map((space) => space.id));
 	validateEvery(input.allowedSpaceIds, (id) => knownSpaceIds.has(id), UnknownSpaceError);
-	validateEvery(input.allowedDocumentIds, documentExists, UnknownDocumentError);
-	validateEvery(input.allowedCollectionIds, collectionExists, UnknownCollectionError);
+	validateEvery(
+		input.allowedDocumentIds,
+		(id) => documentExists(context, id),
+		UnknownDocumentError
+	);
+	validateEvery(
+		input.allowedCollectionIds,
+		(id) => collectionExists(context, id),
+		UnknownCollectionError
+	);
 
 	const result = storeCreateToken(input);
 	logAudit({ actor, action: 'create_token', targetRecordId: result.record.tokenHash });
@@ -97,8 +104,8 @@ export function createToken(
 }
 
 /** Revokes an existing access token — the service-layer wrapper around `mcp/tokens.ts`'s `revokeToken` (mutate → audit). */
-export function revokeToken(caller: CallerIdentity, tokenHash: string): void {
-	const actor = actorForCaller(caller);
+export function revokeToken(context: RequestContext, tokenHash: string): void {
+	const actor = actorForCaller(context.caller);
 	storeRevokeToken(tokenHash);
 	logAudit({ actor, action: 'revoke_token', targetRecordId: tokenHash });
 }

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { resolveRequestContext } from '$lib/server/request-context';
 import { createTestHarness, type TestHarness } from './harness';
 import { createRecord, getRecordYText, updateRecordContent } from '$lib/data/record-ops';
 import {
@@ -276,7 +277,7 @@ describe('Document/Shard/Space Routing', () => {
 		expect(scopedResults.map((r) => r.recordId)).not.toContain(recordB.id);
 	});
 	it("3c-2. MCP query_collection's filter argument round-trips through the real Zod schema and applies the same ViewFilter semantics the UI uses (issue #70)", async () => {
-		const col = serviceModules.collections.createCollection(human, {
+		const col = serviceModules.collections.createCollection(resolveRequestContext(human), {
 			title: 'Filter Wiring Collection',
 			schema: [{ key: 'status', label: 'Status', type: 'select' }]
 		});

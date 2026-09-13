@@ -12,12 +12,13 @@ import { createToken as createRawToken, listTokens } from '$lib/mcp/tokens';
 import { queryAuditLog } from '$lib/server/audit';
 import { createSpace } from '$lib/server/catalog';
 import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 describe('service layer: createToken (#188)', () => {
 	it('mints a token and logs exactly one create_token audit entry attributed to a human caller', () => {
 		const before = queryAuditLog().filter((a) => a.action === 'create_token').length;
 
-		const { token, record } = createToken(CURRENT_USER, {
+		const { token, record } = createToken(resolveRequestContext(CURRENT_USER), {
 			clientLabel: 'Test Client',
 			allowedDocumentIds: [],
 			allowedCollectionIds: [],
@@ -40,7 +41,7 @@ describe('service layer: createToken (#188)', () => {
 			allowedCollectionIds: []
 		});
 
-		const { record } = createToken(callerToken, {
+		const { record } = createToken(resolveRequestContext(callerToken), {
 			clientLabel: 'Agent-Minted Client',
 			allowedDocumentIds: [],
 			allowedCollectionIds: [],
@@ -58,7 +59,7 @@ describe('service layer: createToken (#188)', () => {
 		const { workspaceId } = resolveWorkspaceContext();
 		const space = createSpace(workspaceId, 'Real Space For Token Test');
 
-		const { record } = createToken(CURRENT_USER, {
+		const { record } = createToken(resolveRequestContext(CURRENT_USER), {
 			clientLabel: 'Space Grant Client',
 			allowedDocumentIds: [],
 			allowedCollectionIds: [],
@@ -72,7 +73,7 @@ describe('service layer: createToken (#188)', () => {
 		const before = listTokens().length;
 
 		expect(() =>
-			createToken(CURRENT_USER, {
+			createToken(resolveRequestContext(CURRENT_USER), {
 				clientLabel: 'Space Spoofer',
 				allowedDocumentIds: [],
 				allowedCollectionIds: [],
@@ -84,10 +85,14 @@ describe('service layer: createToken (#188)', () => {
 	});
 
 	it('grants access to a real Document and a real Collection (issue #62)', () => {
-		const document = createDocument(CURRENT_USER, { title: 'Real Doc For Token Test' });
-		const collection = createCollection(CURRENT_USER, { title: 'Real Collection For Token Test' });
+		const document = createDocument(resolveRequestContext(CURRENT_USER), {
+			title: 'Real Doc For Token Test'
+		});
+		const collection = createCollection(resolveRequestContext(CURRENT_USER), {
+			title: 'Real Collection For Token Test'
+		});
 
-		const { record } = createToken(CURRENT_USER, {
+		const { record } = createToken(resolveRequestContext(CURRENT_USER), {
 			clientLabel: 'Reference Grant Client',
 			allowedDocumentIds: [document.id],
 			allowedCollectionIds: [collection.id],
@@ -102,7 +107,7 @@ describe('service layer: createToken (#188)', () => {
 		const before = listTokens().length;
 
 		expect(() =>
-			createToken(CURRENT_USER, {
+			createToken(resolveRequestContext(CURRENT_USER), {
 				clientLabel: 'Document Spoofer',
 				allowedDocumentIds: ['not-a-real-document-id'],
 				allowedCollectionIds: [],
@@ -117,7 +122,7 @@ describe('service layer: createToken (#188)', () => {
 		const before = listTokens().length;
 
 		expect(() =>
-			createToken(CURRENT_USER, {
+			createToken(resolveRequestContext(CURRENT_USER), {
 				clientLabel: 'Collection Spoofer',
 				allowedDocumentIds: [],
 				allowedCollectionIds: ['not-a-real-collection-id'],
@@ -129,11 +134,15 @@ describe('service layer: createToken (#188)', () => {
 	});
 
 	it('rejects a Document id naming a real Collection, and vice versa (issue #62)', () => {
-		const document = createDocument(CURRENT_USER, { title: 'Doc Not A Collection' });
-		const collection = createCollection(CURRENT_USER, { title: 'Collection Not A Doc' });
+		const document = createDocument(resolveRequestContext(CURRENT_USER), {
+			title: 'Doc Not A Collection'
+		});
+		const collection = createCollection(resolveRequestContext(CURRENT_USER), {
+			title: 'Collection Not A Doc'
+		});
 
 		expect(() =>
-			createToken(CURRENT_USER, {
+			createToken(resolveRequestContext(CURRENT_USER), {
 				clientLabel: 'Kind Mismatch A',
 				allowedDocumentIds: [collection.id],
 				allowedCollectionIds: [],
@@ -142,7 +151,7 @@ describe('service layer: createToken (#188)', () => {
 		).toThrow(UnknownDocumentError);
 
 		expect(() =>
-			createToken(CURRENT_USER, {
+			createToken(resolveRequestContext(CURRENT_USER), {
 				clientLabel: 'Kind Mismatch B',
 				allowedDocumentIds: [],
 				allowedCollectionIds: [document.id],
@@ -154,7 +163,7 @@ describe('service layer: createToken (#188)', () => {
 
 describe('service layer: revokeToken (#188)', () => {
 	it('revokes a token and logs exactly one revoke_token audit entry attributed to a human caller', () => {
-		const { record } = createToken(CURRENT_USER, {
+		const { record } = createToken(resolveRequestContext(CURRENT_USER), {
 			clientLabel: 'To Revoke',
 			allowedDocumentIds: [],
 			allowedCollectionIds: [],
@@ -162,7 +171,7 @@ describe('service layer: revokeToken (#188)', () => {
 		});
 		const before = queryAuditLog().filter((a) => a.action === 'revoke_token').length;
 
-		revokeToken(CURRENT_USER, record.tokenHash);
+		revokeToken(resolveRequestContext(CURRENT_USER), record.tokenHash);
 
 		expect(listTokens().find((t) => t.tokenHash === record.tokenHash)?.revokedAt).toBeDefined();
 		const entries = queryAuditLog().filter((a) => a.action === 'revoke_token');
@@ -177,14 +186,14 @@ describe('service layer: revokeToken (#188)', () => {
 			allowedDocumentIds: [],
 			allowedCollectionIds: []
 		});
-		const { record } = createToken(CURRENT_USER, {
+		const { record } = createToken(resolveRequestContext(CURRENT_USER), {
 			clientLabel: 'Revoked By Agent',
 			allowedDocumentIds: [],
 			allowedCollectionIds: [],
 			allowedSpaceIds: []
 		});
 
-		revokeToken(callerToken, record.tokenHash);
+		revokeToken(resolveRequestContext(callerToken), record.tokenHash);
 
 		const entry = queryAuditLog().find(
 			(a) => a.action === 'revoke_token' && a.targetRecordId === record.tokenHash

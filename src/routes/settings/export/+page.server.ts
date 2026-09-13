@@ -22,7 +22,7 @@ export const actions: Actions = {
 
 		let updated: ReturnType<typeof updateMirrorConfig>;
 		try {
-			updated = updateMirrorConfig(locals.requestContext.caller, {
+			updated = updateMirrorConfig(locals.requestContext, {
 				enabled,
 				outputDir
 			});

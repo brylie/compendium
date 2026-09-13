@@ -21,7 +21,7 @@ function formEvent(fields: Record<string, string>): Parameters<typeof actions.cr
 
 describe('routes/+page.server: workspace home', () => {
 	it('load() lists documents and collections for the current user', () => {
-		createDocument(CURRENT_USER, { title: 'Existing Doc' });
+		createDocument(resolveRequestContext(CURRENT_USER), { title: 'Existing Doc' });
 		const result = load({
 			params: { spaceId: spaceId() },
 			locals: { requestContext: resolveRequestContext() }
@@ -46,7 +46,7 @@ describe('routes/+page.server: workspace home', () => {
 	});
 
 	it('createDocument action nests under a parent when parentDocumentId is given', async () => {
-		const parent = createDocument(CURRENT_USER, { title: 'Parent' });
+		const parent = createDocument(resolveRequestContext(CURRENT_USER), { title: 'Parent' });
 		await expect(
 			actions.createDocument(formEvent({ title: 'Child', parentDocumentId: parent.id }))
 		).rejects.toMatchObject({
@@ -67,7 +67,10 @@ describe('routes/+page.server: workspace home', () => {
 	});
 
 	it('createCollection action fails with a 400 when the title collides with an existing Collection in the same Space (issue #78)', async () => {
-		createCollection(CURRENT_USER, { title: 'Sprint Tasks', spaceId: spaceId() });
+		createCollection(resolveRequestContext(CURRENT_USER), {
+			title: 'Sprint Tasks',
+			spaceId: spaceId()
+		});
 		const result = await actions.createCollection(formEvent({ title: 'Sprint Tasks' }));
 		expect(result).toMatchObject({
 			status: 400,

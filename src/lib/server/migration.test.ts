@@ -20,6 +20,7 @@ import { getDb } from './store';
 import { catalogDocuments, migrationRuns, migrationTargets, snapshots } from './db/schema';
 import { resolveWorkspaceContext } from './workspace-store';
 import { migrateWorkspace } from './migration';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 const WS = 'migration-test-ws';
 const actor = CURRENT_USER;
@@ -172,12 +173,16 @@ describe('migration: post-migration reads resolve via the catalog, not the uncat
 		const { doc } = resolveWorkspaceContext();
 		const document = crdtCreateDocument(doc, { title: 'Fallback Then Catalog Doc' });
 
-		const beforeMigration = listDocuments(CURRENT_USER).find((d) => d.id === document.id);
+		const beforeMigration = listDocuments(resolveRequestContext(CURRENT_USER)).find(
+			(d) => d.id === document.id
+		);
 		expect(beforeMigration?.title).toBe('Fallback Then Catalog Doc');
 
 		migrateWorkspace();
 
-		const afterMigration = listDocuments(CURRENT_USER).find((d) => d.id === document.id);
+		const afterMigration = listDocuments(resolveRequestContext(CURRENT_USER)).find(
+			(d) => d.id === document.id
+		);
 		expect(afterMigration?.title).toBe('Fallback Then Catalog Doc');
 
 		const catalogRow = listCatalogDocuments('default').find((d) => d.id === document.id);

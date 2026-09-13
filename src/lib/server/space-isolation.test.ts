@@ -29,6 +29,7 @@ import { aggregateHolds, clientIdForToken, requestAgentHold } from './holds';
 import { resolveWorkspaceContext } from './workspace-store';
 import { PermissionDeniedError } from '../services/permissions';
 import type { AccessToken } from '$lib/mcp/tokens';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 const actor = CURRENT_USER;
 
@@ -60,8 +61,11 @@ function seedTwoSpaces() {
 	const { workspaceId, defaultSpaceId: spaceAId } = resolveWorkspaceContext();
 	const spaceB = createSpace(workspaceId, 'Space B');
 
-	const docA = createDocument(CURRENT_USER, { title: 'Space A Doc' });
-	const collectionA = createCollection(CURRENT_USER, { title: 'Space A Table', schema: [] });
+	const docA = createDocument(resolveRequestContext(CURRENT_USER), { title: 'Space A Doc' });
+	const collectionA = createCollection(resolveRequestContext(CURRENT_USER), {
+		title: 'Space A Table',
+		schema: []
+	});
 
 	const docBShard = resolveWorkspaceContext({ workspaceId, shardId: 'space-b-doc' });
 	const docB = crdtCreateDocument(docBShard.doc, { id: 'space-b-doc', title: 'Space B Doc' });
@@ -83,11 +87,11 @@ describe('space isolation: listDocuments/listCollections (#133, workspace-shardi
 	it("scopes to the requested Space and never returns the other Space's Documents", () => {
 		const { spaceAId, spaceBId, docA, docB } = seedTwoSpaces();
 
-		const inSpaceA = listDocuments(CURRENT_USER, spaceAId);
+		const inSpaceA = listDocuments(resolveRequestContext(CURRENT_USER), spaceAId);
 		expect(inSpaceA.map((d) => d.id)).toContain(docA.id);
 		expect(inSpaceA.map((d) => d.id)).not.toContain(docB.id);
 
-		const inSpaceB = listDocuments(CURRENT_USER, spaceBId);
+		const inSpaceB = listDocuments(resolveRequestContext(CURRENT_USER), spaceBId);
 		expect(inSpaceB.map((d) => d.id)).toContain(docB.id);
 		expect(inSpaceB.map((d) => d.id)).not.toContain(docA.id);
 	});
@@ -95,7 +99,7 @@ describe('space isolation: listDocuments/listCollections (#133, workspace-shardi
 	it('with no spaceId, keeps returning every Document in the workspace (back-compat)', () => {
 		const { docA, docB } = seedTwoSpaces();
 
-		const all = listDocuments(CURRENT_USER);
+		const all = listDocuments(resolveRequestContext(CURRENT_USER));
 		expect(all.map((d) => d.id)).toContain(docA.id);
 		expect(all.map((d) => d.id)).toContain(docB.id);
 	});
@@ -107,7 +111,7 @@ describe('space isolation: listDocuments/listCollections (#133, workspace-shardi
 		// workspace-wide results for a caller that *did* pass something.
 		const { docA, docB } = seedTwoSpaces();
 
-		const results = listDocuments(CURRENT_USER, '');
+		const results = listDocuments(resolveRequestContext(CURRENT_USER), '');
 		expect(results).toEqual([]);
 		expect(results.map((d) => d.id)).not.toContain(docA.id);
 		expect(results.map((d) => d.id)).not.toContain(docB.id);
@@ -116,10 +120,10 @@ describe('space isolation: listDocuments/listCollections (#133, workspace-shardi
 	it('scopes Collections to the requested Space the same way', () => {
 		const { spaceAId, spaceBId, collectionA } = seedTwoSpaces();
 
-		const inSpaceA = listCollections(CURRENT_USER, spaceAId);
+		const inSpaceA = listCollections(resolveRequestContext(CURRENT_USER), spaceAId);
 		expect(inSpaceA.map((c) => c.id)).toContain(collectionA.id);
 
-		const inSpaceB = listCollections(CURRENT_USER, spaceBId);
+		const inSpaceB = listCollections(resolveRequestContext(CURRENT_USER), spaceBId);
 		expect(inSpaceB.map((c) => c.id)).not.toContain(collectionA.id);
 	});
 
@@ -135,7 +139,7 @@ describe('space isolation: listDocuments/listCollections (#133, workspace-shardi
 			title: 'Legacy Direct-Written Doc'
 		});
 
-		const inDefaultSpace = listDocuments(CURRENT_USER, defaultSpaceId);
+		const inDefaultSpace = listDocuments(resolveRequestContext(CURRENT_USER), defaultSpaceId);
 		expect(inDefaultSpace.map((d) => d.id)).toContain(uncatalogedDoc.id);
 	});
 
@@ -144,12 +148,15 @@ describe('space isolation: listDocuments/listCollections (#133, workspace-shardi
 		const spaceB = createSpace(workspaceId, 'Space B');
 		crdtCreateDocument(resolveWorkspaceContext().doc, { title: 'Legacy Direct-Written Doc' });
 
-		const inSpaceB = listDocuments(CURRENT_USER, spaceB.id);
+		const inSpaceB = listDocuments(resolveRequestContext(CURRENT_USER), spaceB.id);
 		expect(inSpaceB).toEqual([]);
 	});
 
 	it('listCollections with no spaceId filter lists a cataloged collection exactly once, plus any uncataloged one', () => {
-		const cataloged = createCollection(CURRENT_USER, { title: 'Cataloged Table', schema: [] });
+		const cataloged = createCollection(resolveRequestContext(CURRENT_USER), {
+			title: 'Cataloged Table',
+			schema: []
+		});
 		const uncataloged = crdtCreateCollection(resolveWorkspaceContext().doc, {
 			title: 'Legacy Direct-Written Table',
 			schema: []
@@ -160,7 +167,7 @@ describe('space isolation: listDocuments/listCollections (#133, workspace-shardi
 		// would appear twice (once from the catalog loop, once again from the
 		// uncataloged-fallback loop, since every collection also lives in the
 		// underlying Y.Doc regardless of how it was created).
-		const results = listCollections(CURRENT_USER);
+		const results = listCollections(resolveRequestContext(CURRENT_USER));
 		expect(results.filter((c) => c.id === cataloged.id)).toHaveLength(1);
 		expect(results.some((c) => c.id === uncataloged.id)).toBe(true);
 	});
@@ -168,24 +175,33 @@ describe('space isolation: listDocuments/listCollections (#133, workspace-shardi
 
 describe('createDocument/createCollection: Space validation (#140 CodeRabbit)', () => {
 	it('createDocument rejects an unknown spaceId instead of letting the FK violation escape', () => {
-		expect(() => createDocument(CURRENT_USER, { title: 'X', spaceId: 'not-a-real-space' })).toThrow(
-			UnknownSpaceError
-		);
+		expect(() =>
+			createDocument(resolveRequestContext(CURRENT_USER), {
+				title: 'X',
+				spaceId: 'not-a-real-space'
+			})
+		).toThrow(UnknownSpaceError);
 	});
 
 	it('createCollection rejects an unknown spaceId the same way', () => {
 		expect(() =>
-			createCollection(CURRENT_USER, { title: 'X', schema: [], spaceId: 'not-a-real-space' })
+			createCollection(resolveRequestContext(CURRENT_USER), {
+				title: 'X',
+				schema: [],
+				spaceId: 'not-a-real-space'
+			})
 		).toThrow(UnknownSpaceError);
 	});
 
 	it('createDocument rejects nesting a child under a parent from a different Space', () => {
 		const { workspaceId } = resolveWorkspaceContext();
 		const spaceB = createSpace(workspaceId, 'Space B');
-		const parentInSpaceA = createDocument(CURRENT_USER, { title: 'Parent in A' });
+		const parentInSpaceA = createDocument(resolveRequestContext(CURRENT_USER), {
+			title: 'Parent in A'
+		});
 
 		expect(() =>
-			createDocument(CURRENT_USER, {
+			createDocument(resolveRequestContext(CURRENT_USER), {
 				title: 'Child in B',
 				parentDocumentId: parentInSpaceA.id,
 				spaceId: spaceB.id
@@ -195,10 +211,13 @@ describe('createDocument/createCollection: Space validation (#140 CodeRabbit)', 
 
 	it('createDocument allows nesting when the child and parent share the same explicit Space', () => {
 		const { defaultSpaceId } = resolveWorkspaceContext();
-		const parent = createDocument(CURRENT_USER, { title: 'Parent', spaceId: defaultSpaceId });
+		const parent = createDocument(resolveRequestContext(CURRENT_USER), {
+			title: 'Parent',
+			spaceId: defaultSpaceId
+		});
 
 		expect(() =>
-			createDocument(CURRENT_USER, {
+			createDocument(resolveRequestContext(CURRENT_USER), {
 				title: 'Child',
 				parentDocumentId: parent.id,
 				spaceId: defaultSpaceId
@@ -209,23 +228,25 @@ describe('createDocument/createCollection: Space validation (#140 CodeRabbit)', 
 	it('moveDocument rejects moving a Document under a parent from a different Space', () => {
 		const { workspaceId } = resolveWorkspaceContext();
 		const spaceB = createSpace(workspaceId, 'Space B');
-		const docInSpaceA = createDocument(CURRENT_USER, { title: 'Doc in A' });
-		const parentInSpaceB = createDocument(CURRENT_USER, {
+		const docInSpaceA = createDocument(resolveRequestContext(CURRENT_USER), { title: 'Doc in A' });
+		const parentInSpaceB = createDocument(resolveRequestContext(CURRENT_USER), {
 			title: 'Parent in B',
 			spaceId: spaceB.id
 		});
 
 		expect(() =>
-			moveDocument(CURRENT_USER, docInSpaceA.id, { parentDocumentId: parentInSpaceB.id })
+			moveDocument(resolveRequestContext(CURRENT_USER), docInSpaceA.id, {
+				parentDocumentId: parentInSpaceB.id
+			})
 		).toThrow(SpaceMismatchError);
 	});
 
 	it('moveDocument allows moving within the same Space', () => {
-		const newParent = createDocument(CURRENT_USER, { title: 'New Parent' });
-		const doc = createDocument(CURRENT_USER, { title: 'Doc' });
+		const newParent = createDocument(resolveRequestContext(CURRENT_USER), { title: 'New Parent' });
+		const doc = createDocument(resolveRequestContext(CURRENT_USER), { title: 'Doc' });
 
 		expect(() =>
-			moveDocument(CURRENT_USER, doc.id, { parentDocumentId: newParent.id })
+			moveDocument(resolveRequestContext(CURRENT_USER), doc.id, { parentDocumentId: newParent.id })
 		).not.toThrow();
 	});
 
@@ -241,7 +262,7 @@ describe('createDocument/createCollection: Space validation (#140 CodeRabbit)', 
 		});
 
 		expect(() =>
-			createDocument(CURRENT_USER, {
+			createDocument(resolveRequestContext(CURRENT_USER), {
 				title: 'Child in B',
 				parentDocumentId: legacyParent.id,
 				spaceId: spaceB.id
@@ -251,7 +272,7 @@ describe('createDocument/createCollection: Space validation (#140 CodeRabbit)', 
 		// The same nesting succeeds when explicitly targeting the default Space
 		// the legacy parent actually belongs to.
 		expect(() =>
-			createDocument(CURRENT_USER, {
+			createDocument(resolveRequestContext(CURRENT_USER), {
 				title: 'Child in Default',
 				parentDocumentId: legacyParent.id,
 				spaceId: defaultSpaceId
@@ -265,13 +286,15 @@ describe('createDocument/createCollection: Space validation (#140 CodeRabbit)', 
 		const legacyDoc = crdtCreateDocument(resolveWorkspaceContext().doc, {
 			title: 'Legacy Default-Space Doc'
 		});
-		const parentInSpaceB = createDocument(CURRENT_USER, {
+		const parentInSpaceB = createDocument(resolveRequestContext(CURRENT_USER), {
 			title: 'Parent in B',
 			spaceId: spaceB.id
 		});
 
 		expect(() =>
-			moveDocument(CURRENT_USER, legacyDoc.id, { parentDocumentId: parentInSpaceB.id })
+			moveDocument(resolveRequestContext(CURRENT_USER), legacyDoc.id, {
+				parentDocumentId: parentInSpaceB.id
+			})
 		).toThrow(SpaceMismatchError);
 	});
 
@@ -288,7 +311,7 @@ describe('createDocument/createCollection: Space validation (#140 CodeRabbit)', 
 		// Asserts successful creation directly (not just the absence of one
 		// specific error type) — `.not.toThrow(SpaceMismatchError)` alone would
 		// still pass if this threw some other, unexpected error instead.
-		const child = createDocument(CURRENT_USER, {
+		const child = createDocument(resolveRequestContext(CURRENT_USER), {
 			title: 'Child of nowhere',
 			parentDocumentId: 'not-a-real-parent-id',
 			spaceId: spaceB.id
@@ -325,11 +348,19 @@ describe('space isolation: searchWorkspace never crosses a Space boundary', () =
 			actor
 		);
 
-		const resultsInA = searchWorkspace(CURRENT_USER, 'unicornsparkle', spaceAId);
+		const resultsInA = searchWorkspace(
+			resolveRequestContext(CURRENT_USER),
+			'unicornsparkle',
+			spaceAId
+		);
 		expect(resultsInA.map((r) => r.recordId)).toContain(blockA.id);
 		expect(resultsInA.map((r) => r.recordId)).not.toContain(blockB.id);
 
-		const resultsInB = searchWorkspace(CURRENT_USER, 'unicornsparkle', spaceBId);
+		const resultsInB = searchWorkspace(
+			resolveRequestContext(CURRENT_USER),
+			'unicornsparkle',
+			spaceBId
+		);
 		expect(resultsInB.map((r) => r.recordId)).toContain(blockB.id);
 		expect(resultsInB.map((r) => r.recordId)).not.toContain(blockA.id);
 	});
@@ -348,7 +379,7 @@ describe('space isolation: searchWorkspace never crosses a Space boundary', () =
 		// The token is scoped to Space A's own document, but the query itself
 		// asks for Space B — the space filter and the per-ID token filter are
 		// two independent gates, and both must agree.
-		const results = searchWorkspace(token, 'Space', spaceBId);
+		const results = searchWorkspace(resolveRequestContext(token), 'Space', spaceBId);
 		expect(results).toEqual([]);
 	});
 });
@@ -384,7 +415,10 @@ describe('space isolation: audit history', () => {
 		// surface under Space A and be invisible under its real Space B.
 		const { workspaceId, spaceAId, spaceBId, docB, docBShard } = seedTwoSpaces();
 
-		const record = createRecord(CURRENT_USER, { parentId: docB.id, blockType: 'paragraph' });
+		const record = createRecord(resolveRequestContext(CURRENT_USER), {
+			parentId: docB.id,
+			blockType: 'paragraph'
+		});
 
 		// The CRDT mutation itself landed in docB's own shard, not just an
 		// audit row with nothing behind it — otherwise every assertion below
@@ -423,21 +457,21 @@ describe('space isolation: MCP token Space-level allowlists (#6)', () => {
 		const { spaceAId, docA } = seedTwoSpaces();
 		const token = tokenScopedToSpace(spaceAId);
 
-		expect(getDocument(token, docA.id)?.id).toBe(docA.id);
+		expect(getDocument(resolveRequestContext(token), docA.id)?.id).toBe(docA.id);
 	});
 
 	it("a token granted Space A cannot read Space B's Document, even by direct id", () => {
 		const { spaceAId, docB } = seedTwoSpaces();
 		const token = tokenScopedToSpace(spaceAId);
 
-		expect(() => getDocument(token, docB.id)).toThrow(PermissionDeniedError);
+		expect(() => getDocument(resolveRequestContext(token), docB.id)).toThrow(PermissionDeniedError);
 	});
 
 	it('listDocuments (unscoped call, no spaceId filter) still only returns the Space-granted Documents for a Space-scoped token', () => {
 		const { spaceAId, docA, docB } = seedTwoSpaces();
 		const token = tokenScopedToSpace(spaceAId);
 
-		const results = listDocuments(token);
+		const results = listDocuments(resolveRequestContext(token));
 		expect(results.map((d) => d.id)).toContain(docA.id);
 		expect(results.map((d) => d.id)).not.toContain(docB.id);
 	});
@@ -455,8 +489,8 @@ describe('space isolation: MCP token Space-level allowlists (#6)', () => {
 
 		// Both grants independently work: Space A via the Space grant, Doc B via
 		// its own direct grant — neither one implies unscoped access.
-		expect(getDocument(token, docA.id)?.id).toBe(docA.id);
-		expect(getDocument(token, docB.id)?.id).toBe(docB.id);
+		expect(getDocument(resolveRequestContext(token), docA.id)?.id).toBe(docA.id);
+		expect(getDocument(resolveRequestContext(token), docB.id)?.id).toBe(docB.id);
 	});
 
 	it('a token granted only the default Space can list legacy/uncataloged content via listDocuments (#141 merge-with-#140 CodeRabbit finding)', () => {
@@ -472,7 +506,7 @@ describe('space isolation: MCP token Space-level allowlists (#6)', () => {
 		});
 		const token = tokenScopedToSpace(defaultSpaceId);
 
-		const results = listDocuments(token);
+		const results = listDocuments(resolveRequestContext(token));
 		expect(results.map((d) => d.id)).toContain(legacyDoc.id);
 	});
 
@@ -484,7 +518,7 @@ describe('space isolation: MCP token Space-level allowlists (#6)', () => {
 		});
 		const token = tokenScopedToSpace(defaultSpaceId);
 
-		const results = listCollections(token);
+		const results = listCollections(resolveRequestContext(token));
 		expect(results.map((c) => c.id)).toContain(legacyCollection.id);
 	});
 });

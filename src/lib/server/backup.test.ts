@@ -16,6 +16,7 @@ import { CURRENT_USER } from './current-user';
 import { getDb } from './store';
 import { backupRuns } from './db/schema';
 import { getBackupDir, restoreFrom, runBackup } from './backup';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 // isolate-persistence.ts (tests/setup) already gives every test in this
 // project its own temp DATABASE_URL — BACKUP_DIR has no equivalent global
@@ -83,7 +84,7 @@ function readDocumentTitleFromCrdtShard(dbPath: string, documentId: string): str
 
 describe('backup: runBackup (#19)', () => {
 	it('writes a standalone, openable copy of the database containing already-committed content', () => {
-		createDocument(CURRENT_USER, { title: 'Backed Up Doc' });
+		createDocument(resolveRequestContext(CURRENT_USER), { title: 'Backed Up Doc' });
 
 		const result = runBackup();
 
@@ -179,7 +180,7 @@ describe('backup: runBackup (#19)', () => {
 
 describe('backup: restoreFrom (#19)', () => {
 	it('restores a backup file over a target path and the restored database contains the original CRDT document content', () => {
-		const document = createDocument(CURRENT_USER, { title: 'Restore Me' });
+		const document = createDocument(resolveRequestContext(CURRENT_USER), { title: 'Restore Me' });
 		const { filePath } = runBackup();
 
 		const restoreDir = mkdtempSync(join(tmpdir(), 'restore-target-'));
@@ -199,7 +200,7 @@ describe('backup: restoreFrom (#19)', () => {
 	});
 
 	it('preserves an existing WAL-mode target and its -wal/-shm sidecars aside instead of deleting them', () => {
-		createDocument(CURRENT_USER, { title: 'New Content' });
+		createDocument(resolveRequestContext(CURRENT_USER), { title: 'New Content' });
 		const { filePath } = runBackup();
 
 		const restoreDir = mkdtempSync(join(tmpdir(), 'restore-target-'));
@@ -257,7 +258,7 @@ describe('backup: restoreFrom (#19)', () => {
 	});
 
 	it('rolls back a target already moved aside if moving its sidecars fails partway through', () => {
-		createDocument(CURRENT_USER, { title: 'New Content' });
+		createDocument(resolveRequestContext(CURRENT_USER), { title: 'New Content' });
 		const { filePath } = runBackup();
 
 		const restoreDir = mkdtempSync(join(tmpdir(), 'restore-target-'));
@@ -323,7 +324,7 @@ describe('backup: restoreFrom (#19)', () => {
 	});
 
 	it('moves aside a stale -wal/-shm sidecar even when the main target file is absent', () => {
-		createDocument(CURRENT_USER, { title: 'Fresh Restore' });
+		createDocument(resolveRequestContext(CURRENT_USER), { title: 'Fresh Restore' });
 		const { filePath } = runBackup();
 
 		const restoreDir = mkdtempSync(join(tmpdir(), 'restore-target-'));

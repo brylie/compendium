@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import { SERVICE_ORIGIN, transactWithOrigin } from '../mutation-origin.js';
 import type * as Y from 'yjs';
 import type { Awareness } from 'y-protocols/awareness';
+import type { Caller, RequestContext } from '$lib/server/request-context';
 import { clientIdForToken, isHeldByClient, releaseAgentHold } from '$lib/server/holds';
 import { getDocument as crdtGetDocument } from '$lib/data/document-ops';
 import {
@@ -46,8 +47,7 @@ import {
 	requireAccessibleRecord,
 	resolveOwningParentId,
 	resolveParentWorkspaceContext,
-	resolveRecordWorkspaceContext,
-	type CallerIdentity
+	resolveRecordWorkspaceContext
 } from './permissions';
 
 /** Thrown when an agent caller tries to write a record's content without first holding it via `hold_records`. */
@@ -97,18 +97,21 @@ const REFERENCE_TARGET_ERROR_KIND = { document: 'Document', collection: 'Collect
  * kind (issue #62).
  */
 function validateReferenceTarget(
-	caller: CallerIdentity,
+	context: RequestContext,
 	targetId: string,
 	kind: 'document' | 'collection'
 ): void {
 	// The target has its own real shard (#120) — resolveParentWorkspaceContext
 	// finds it via the catalog locator, falling back to the default doc for an
 	// untracked/legacy target.
-	const { doc, parentSpaceId } = resolveParentWorkspaceContext(targetId);
+	const { doc, parentSpaceId } = resolveParentWorkspaceContext(context, targetId);
 	const target = resolveInternalLinkTarget(doc, targetId);
 	const errorKind = REFERENCE_TARGET_ERROR_KIND[kind];
 	if (target?.kind !== kind) throw new InvalidLinkTargetError(targetId, errorKind);
-	if (isAccessToken(caller) && !tokenAllowsParent(caller, targetId, parentSpaceId)) {
+	if (
+		isAccessToken(context.caller) &&
+		!tokenAllowsParent(context.caller, targetId, parentSpaceId)
+	) {
 		throw new InvalidLinkTargetError(targetId, errorKind);
 	}
 }
@@ -125,7 +128,7 @@ function validateReferenceTarget(
  * (issue #62).
  */
 function requireParentDocumentThenValidateTarget(
-	caller: CallerIdentity,
+	context: RequestContext,
 	doc: Y.Doc,
 	parentId: string,
 	targetId: string,
@@ -133,7 +136,7 @@ function requireParentDocumentThenValidateTarget(
 	parentErrorMessage: string
 ): void {
 	if (!crdtGetDocument(doc, parentId)) throw new Error(parentErrorMessage);
-	validateReferenceTarget(caller, targetId, kind);
+	validateReferenceTarget(context, targetId, kind);
 }
 
 const VIEW_TYPES: readonly ViewType[] = ['table', 'board', 'calendar'];
@@ -248,7 +251,7 @@ function validateChildPagesDepth(depth: ChildPagesDepth): void {
 // retarget path already knows its record's existing blockType, so it has
 // its own, differently-shaped validateReferencedRecordIdWrite below).
 function validateCreateReferencedRecordId(
-	caller: CallerIdentity,
+	context: RequestContext,
 	doc: Y.Doc,
 	parentId: string,
 	blockType: BlockType | undefined,
@@ -256,7 +259,7 @@ function validateCreateReferencedRecordId(
 ): void {
 	if (blockType && DOCUMENT_REFERENCE_BLOCK_TYPES.includes(blockType)) {
 		requireParentDocumentThenValidateTarget(
-			caller,
+			context,
 			doc,
 			parentId,
 			referencedRecordId,
@@ -267,7 +270,7 @@ function validateCreateReferencedRecordId(
 	}
 	if (blockType === 'collection_view') {
 		requireParentDocumentThenValidateTarget(
-			caller,
+			context,
 			doc,
 			parentId,
 			referencedRecordId,
@@ -297,7 +300,7 @@ interface CreateRecordServiceInput {
 // split out) — every up-front rejection createRecord needs before it
 // reserves a locator or writes anything, in one place.
 function validateCreateRecordInput(
-	caller: CallerIdentity,
+	context: RequestContext,
 	doc: Y.Doc,
 	input: CreateRecordServiceInput
 ): void {
@@ -315,7 +318,7 @@ function validateCreateRecordInput(
 
 	if (input.referencedRecordId !== undefined) {
 		validateCreateReferencedRecordId(
-			caller,
+			context,
 			doc,
 			input.parentId,
 			input.blockType,
@@ -432,10 +435,12 @@ function rollBackContainerCreate(doc: Y.Doc, id: string): void {
  * the reservation back if the write itself then fails.
  */
 export function createRecord(
-	caller: CallerIdentity,
+	context: RequestContext,
 	input: CreateRecordServiceInput
 ): WorkspaceRecord {
+	const caller = context.caller;
 	const { doc, workspaceId, shardId, defaultSpaceId } = resolveParentWorkspaceContext(
+		context,
 		input.parentId
 	);
 	// The Document/Collection that owns this shard usually has its own real
@@ -451,9 +456,9 @@ export function createRecord(
 	// access is checked against its owning Document's grant instead (issue
 	// #148). A no-op for every pre-#148 parentId, which was already
 	// top-level.
-	requireAccessibleParent(caller, resolveOwningParentId(doc, input.parentId), 'create_record');
+	requireAccessibleParent(context, resolveOwningParentId(doc, input.parentId), 'create_record');
 
-	validateCreateRecordInput(caller, doc, input);
+	validateCreateRecordInput(context, doc, input);
 
 	// Reserved before the CRDT write (not after) so a row can never exist in a
 	// non-default shard without a locator: if reservation itself fails (e.g. a
@@ -513,14 +518,14 @@ interface WriteRecordInput {
 // UI-only, via setRecordChildPagesConfig, the same "no MCP write path"
 // precedent calloutStyle already established (rich-text-toolbar.md §7).
 function validateReferencedRecordIdWrite(
-	caller: CallerIdentity,
+	context: RequestContext,
 	doc: Y.Doc,
 	record: WorkspaceRecord,
 	referencedRecordId: string
 ): void {
 	if (record.blockType === 'page_link') {
 		requireParentDocumentThenValidateTarget(
-			caller,
+			context,
 			doc,
 			record.parentId,
 			referencedRecordId,
@@ -531,7 +536,7 @@ function validateReferencedRecordIdWrite(
 	}
 	if (record.blockType === 'collection_view') {
 		requireParentDocumentThenValidateTarget(
-			caller,
+			context,
 			doc,
 			record.parentId,
 			referencedRecordId,
@@ -546,7 +551,7 @@ function validateReferencedRecordIdWrite(
 }
 
 function writeRecordMarkdown(
-	caller: CallerIdentity,
+	caller: Caller,
 	doc: Y.Doc,
 	awareness: Awareness,
 	recordId: string,
@@ -673,10 +678,11 @@ function applyViewConfigPatchWrite(
  * applyViewConfigWrite/applyViewConfigPatchWrite) rather than one silently overriding the other.
  */
 export function writeRecord(
-	caller: CallerIdentity,
+	context: RequestContext,
 	recordId: string,
 	input: WriteRecordInput
 ): void {
+	const caller = context.caller;
 	if (
 		input.markdown === undefined &&
 		!input.properties &&
@@ -693,9 +699,9 @@ export function writeRecord(
 		throw new Error('write_record accepts either viewConfig or viewConfigPatch, not both.');
 	}
 
-	const { doc, awareness } = resolveRecordWorkspaceContext(recordId);
+	const { doc, awareness } = resolveRecordWorkspaceContext(context, recordId);
 	const actor = actorForCaller(caller);
-	const record = requireAccessibleRecord(caller, recordId, 'write_record');
+	const record = requireAccessibleRecord(context, recordId, 'write_record');
 
 	// A columns/column block has no content of its own (data-model.md §3.1) —
 	// its markdown is entirely derived from its columns' children
@@ -714,7 +720,7 @@ export function writeRecord(
 	}
 
 	if (input.referencedRecordId !== undefined) {
-		validateReferencedRecordIdWrite(caller, doc, record, input.referencedRecordId);
+		validateReferencedRecordIdWrite(context, doc, record, input.referencedRecordId);
 	}
 
 	if (input.viewConfig !== undefined) {
@@ -756,11 +762,11 @@ export function writeRecord(
  * point, so failing the call back to the caller would misreport a completed deletion as an
  * error; a stale locator row for a since-deleted record fails safe either way.
  */
-export function deleteRecord(caller: CallerIdentity, recordId: string): void {
-	const { doc, workspaceId } = resolveRecordWorkspaceContext(recordId);
-	const actor = actorForCaller(caller);
+export function deleteRecord(context: RequestContext, recordId: string): void {
+	const { doc, workspaceId } = resolveRecordWorkspaceContext(context, recordId);
+	const actor = actorForCaller(context.caller);
 
-	requireAccessibleRecord(caller, recordId, 'delete_record');
+	requireAccessibleRecord(context, recordId, 'delete_record');
 	transactWithOrigin(doc, SERVICE_ORIGIN, () => crdtDeleteRecord(doc, recordId));
 	// The CRDT delete has already committed at this point — a release failure
 	// here must not throw back to the caller as if deletion itself failed. Log
@@ -776,6 +782,6 @@ export function deleteRecord(caller: CallerIdentity, recordId: string): void {
 }
 
 /** Returns a single record after checking the caller may access it. */
-export function getRecord(caller: CallerIdentity, recordId: string): WorkspaceRecord | undefined {
-	return requireAccessibleRecord(caller, recordId, 'get_record');
+export function getRecord(context: RequestContext, recordId: string): WorkspaceRecord | undefined {
+	return requireAccessibleRecord(context, recordId, 'get_record');
 }

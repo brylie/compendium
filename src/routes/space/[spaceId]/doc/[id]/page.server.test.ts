@@ -38,7 +38,9 @@ describe('routes/doc/[id]/+page.server', () => {
 	});
 
 	it('resolves the title from a Document living in its own real shard (#120)', () => {
-		const docMeta = createDocumentService(CURRENT_USER, { title: 'Sharded Doc' });
+		const docMeta = createDocumentService(resolveRequestContext(CURRENT_USER), {
+			title: 'Sharded Doc'
+		});
 
 		const result = load(loadEvent(docMeta.id));
 

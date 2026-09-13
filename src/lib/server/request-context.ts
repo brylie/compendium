@@ -1,6 +1,10 @@
 import { getInstanceWorkspaceId } from './instance.js';
 import { listSpaces } from './catalog.js';
-import { resolveWorkspaceContext } from './workspace-store.js';
+import {
+	getDefaultWorkspaceStore,
+	type WorkspaceContext,
+	type WorkspaceStore
+} from './workspace-store.js';
 import { CURRENT_USER } from './current-user.js';
 import type { AccessToken } from './token-store.js';
 import type { ActorId } from '../data/types.js';
@@ -23,27 +27,46 @@ export type Caller = AccessToken | ActorId;
  * yet) — the seam is here so a later, real per-principal restriction only
  * ever changes what `resolveRequestContext()` computes, not any of its
  * callers.
+ *
+ * `workspace` is this context's own default-shard `WorkspaceContext` bundle
+ * (`{doc, awareness, connections, defaultSpaceId}`), and `workspaceStore` is
+ * the `WorkspaceStore` it was resolved from — threaded through so
+ * `src/lib/services/*.ts` functions that need a *different* shard's context
+ * (a Document/Collection's own shard — see permissions.ts's
+ * resolveParentWorkspaceContext/resolveRecordWorkspaceContext) resolve it
+ * via `context.workspaceStore.resolve(...)` instead of importing
+ * workspace-store.ts's ambient `resolveWorkspaceContext()` themselves
+ * (issue #306). A test that wants its own isolated `WorkspaceContext`
+ * registry passes an explicit `store` here instead of relying on the
+ * process-wide default.
  */
 export interface RequestContext {
 	instanceId: string;
 	workspaceId: string;
 	caller: Caller;
 	allowedSpaceIds: ReadonlySet<string>;
+	workspace: WorkspaceContext;
+	workspaceStore: WorkspaceStore;
 }
 
-/** Resolves the trusted {@link RequestContext} for one boundary call, defaulting to Phase 0's single local user. */
-export function resolveRequestContext(caller: Caller = CURRENT_USER): RequestContext {
+/** Resolves the trusted {@link RequestContext} for one boundary call, defaulting to Phase 0's single local user and the process-wide default `WorkspaceStore`. */
+export function resolveRequestContext(
+	caller: Caller = CURRENT_USER,
+	store: WorkspaceStore = getDefaultWorkspaceStore()
+): RequestContext {
 	const workspaceId = getInstanceWorkspaceId();
 	// Guarantees the catalog/default-Space bootstrap has run for this
 	// workspace before listing its Spaces — resolveRequestContext() may be
 	// the very first thing a fresh boundary call does, before anything else
-	// has touched resolveWorkspaceContext() for this workspaceId.
-	resolveWorkspaceContext({ workspaceId });
+	// has touched this store for this workspaceId.
+	const workspace = store.resolve({ workspaceId });
 	const allowedSpaceIds = new Set(listSpaces(workspaceId).map((space) => space.id));
 	return {
 		instanceId: workspaceId,
 		workspaceId,
 		caller,
-		allowedSpaceIds
+		allowedSpaceIds,
+		workspace,
+		workspaceStore: store
 	};
 }

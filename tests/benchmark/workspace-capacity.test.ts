@@ -1,4 +1,5 @@
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
+import { resolveRequestContext } from '$lib/server/request-context';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { createTestHarness, type TestHarness } from '../e2e/harness';
@@ -128,17 +129,17 @@ describe('CRDT workspace capacity, real shard-aware transport (issue #123)', () 
 		const documentIds: string[] = [];
 		const blockIdsByDocument: string[][] = [];
 		for (let d = 0; d < profile.documents; d += 1) {
-			const document = serviceModules.documents.createDocument(human, {
+			const document = serviceModules.documents.createDocument(resolveRequestContext(human), {
 				title: `Benchmark document ${d + 1}`
 			});
 			documentIds.push(document.id);
 			const blocks: string[] = [];
 			for (let b = 0; b < profile.blocksPerDocument; b += 1) {
-				const record = serviceModules.records.createRecord(human, {
+				const record = serviceModules.records.createRecord(resolveRequestContext(human), {
 					parentId: document.id,
 					blockType: 'paragraph'
 				});
-				serviceModules.records.writeRecord(human, record.id, {
+				serviceModules.records.writeRecord(resolveRequestContext(human), record.id, {
 					markdown: `Seed ${d + 1}.${b + 1}: durable workspace context.`
 				});
 				blocks.push(record.id);
@@ -148,13 +149,13 @@ describe('CRDT workspace capacity, real shard-aware transport (issue #123)', () 
 
 		const collectionIds: string[] = [];
 		for (let c = 0; c < profile.collections; c += 1) {
-			const collection = serviceModules.collections.createCollection(human, {
+			const collection = serviceModules.collections.createCollection(resolveRequestContext(human), {
 				title: `Benchmark collection ${c + 1}`,
 				schema
 			});
 			collectionIds.push(collection.id);
 			for (let r = 0; r < profile.rowsPerCollection; r += 1) {
-				serviceModules.records.createRecord(human, {
+				serviceModules.records.createRecord(resolveRequestContext(human), {
 					parentId: collection.id,
 					properties: {
 						title: { type: 'text', value: `Row ${c + 1}.${r + 1}` },

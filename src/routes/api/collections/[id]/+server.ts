@@ -10,6 +10,6 @@ import type { RequestHandler } from './$types';
  * real shard and keeps the catalog in sync.
  */
 export const DELETE: RequestHandler = ({ params, locals }) => {
-	deleteCollection(locals.requestContext.caller, params.id);
+	deleteCollection(locals.requestContext, params.id);
 	return json({ success: true });
 };

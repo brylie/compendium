@@ -36,7 +36,7 @@ import { projectDocument } from '$lib/mcp/document-projection';
  */
 function getDocument(...args: Parameters<typeof servicesGetDocument>) {
 	const result = servicesGetDocument(...args);
-	return result ? projectDocument(args[1], result) : null;
+	return result ? projectDocument(args[0], args[1], result) : null;
 }
 import { createToken, verifyToken } from '$lib/mcp/tokens';
 import { queryAuditLog } from '$lib/server/audit';
@@ -66,6 +66,7 @@ import {
 	resolveShardForRecord
 } from '$lib/server/catalog';
 import { blockTypes, type ActorId, type EmbeddedViewConfig } from '$lib/data/types';
+import { resolveRequestContext } from '$lib/server/request-context';
 
 const human: ActorId = { kind: 'human', userId: 'brylie' };
 
@@ -88,7 +89,10 @@ function writeTestYText(doc: Parameters<typeof transactWithOrigin>[0], write: ()
 describe('service layer: centralized business rules & side effects', () => {
 	it('creates documents, logs audit, and persists token grants in SQLite', () => {
 		// 1. Create document as human
-		const docA = createDocument(human, { title: 'Parent Doc', createInitialBlock: true });
+		const docA = createDocument(resolveRequestContext(human), {
+			title: 'Parent Doc',
+			createInitialBlock: true
+		});
 		expect(docA.id).toBeDefined();
 		expect(docA.title).toBe('Parent Doc');
 
@@ -99,7 +103,7 @@ describe('service layer: centralized business rules & side effects', () => {
 		);
 
 		// Check initial block
-		const fullDoc = getDocument(human, docA.id);
+		const fullDoc = getDocument(resolveRequestContext(human), docA.id);
 		expect(fullDoc?.records).toHaveLength(1);
 		expect(fullDoc?.records[0].blockType).toBe('paragraph');
 
@@ -111,7 +115,7 @@ describe('service layer: centralized business rules & side effects', () => {
 		});
 
 		// 3. Agent creates nested document under docA
-		const childDoc = createDocument(tokenRecord, {
+		const childDoc = createDocument(resolveRequestContext(tokenRecord), {
 			title: 'Nested Child',
 			parentDocumentId: docA.id
 		});
@@ -122,13 +126,13 @@ describe('service layer: centralized business rules & side effects', () => {
 		expect(freshToken?.allowedDocumentIds).toContain(childDoc.id);
 
 		// 5. Read child document using the fresh token
-		const readChild = getDocument(freshToken!, childDoc.id);
+		const readChild = getDocument(resolveRequestContext(freshToken!), childDoc.id);
 		expect(readChild?.title).toBe('Nested Child');
 	});
 
 	it('enforces permission boundaries on nested document creation and moving', () => {
-		const docSecret = createDocument(human, { title: 'Secret Doc' });
-		const docAllowed = createDocument(human, { title: 'Allowed Doc' });
+		const docSecret = createDocument(resolveRequestContext(human), { title: 'Secret Doc' });
+		const docAllowed = createDocument(resolveRequestContext(human), { title: 'Allowed Doc' });
 
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Scoped Bot',
@@ -138,7 +142,7 @@ describe('service layer: centralized business rules & side effects', () => {
 
 		// Cannot create sub-page under docSecret
 		expect(() =>
-			createDocument(tokenRecord, {
+			createDocument(resolveRequestContext(tokenRecord), {
 				title: 'Exploit Child',
 				parentDocumentId: docSecret.id
 			})
@@ -146,20 +150,23 @@ describe('service layer: centralized business rules & side effects', () => {
 
 		// Cannot move docAllowed under docSecret
 		expect(() =>
-			moveDocument(tokenRecord, docAllowed.id, {
+			moveDocument(resolveRequestContext(tokenRecord), docAllowed.id, {
 				parentDocumentId: docSecret.id
 			})
 		).toThrow(PermissionDeniedError);
 
 		// Human can move it
-		moveDocument(human, docAllowed.id, { parentDocumentId: docSecret.id });
-		const updated = getDocument(human, docAllowed.id);
+		moveDocument(resolveRequestContext(human), docAllowed.id, { parentDocumentId: docSecret.id });
+		const updated = getDocument(resolveRequestContext(human), docAllowed.id);
 		expect(updated?.parentDocumentId).toBe(docSecret.id);
 	});
 
 	it('enforces hold requirements for agents before writing block content', () => {
-		const doc = createDocument(human, { title: 'Collaboration Doc' });
-		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Collaboration Doc' });
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'paragraph'
+		});
 
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Writer Bot',
@@ -168,28 +175,28 @@ describe('service layer: centralized business rules & side effects', () => {
 		});
 
 		// Agent tries to write without hold -> throws HoldRequiredError
-		expect(() => writeRecord(tokenRecord, block.id, { markdown: 'Unheld edit' })).toThrow(
-			HoldRequiredError
-		);
+		expect(() =>
+			writeRecord(resolveRequestContext(tokenRecord), block.id, { markdown: 'Unheld edit' })
+		).toThrow(HoldRequiredError);
 
 		// Agent requests hold
-		const holdRes = holdRecords(tokenRecord, [block.id]);
+		const holdRes = holdRecords(resolveRequestContext(tokenRecord), [block.id]);
 		expect(holdRes.granted).toContain(block.id);
 
 		// Agent writes with active hold -> succeeds and automatically releases hold
-		writeRecord(tokenRecord, block.id, { markdown: 'Held edit' });
+		writeRecord(resolveRequestContext(tokenRecord), block.id, { markdown: 'Held edit' });
 
-		const readDoc = getDocument(human, doc.id);
+		const readDoc = getDocument(resolveRequestContext(human), doc.id);
 		expect(readDoc?.records[0].markdown).toBe('Held edit');
 
 		// Second write without new hold -> fails again because hold was consumed
-		expect(() => writeRecord(tokenRecord, block.id, { markdown: 'Second edit' })).toThrow(
-			HoldRequiredError
-		);
+		expect(() =>
+			writeRecord(resolveRequestContext(tokenRecord), block.id, { markdown: 'Second edit' })
+		).toThrow(HoldRequiredError);
 	});
 
 	it('manages collections, persists collection grants, and queries rows', () => {
-		const col = createCollection(human, {
+		const col = createCollection(resolveRequestContext(human), {
 			title: 'Sprint Backlog',
 			schema: [{ key: 'status', label: 'Status', type: 'select' }]
 		});
@@ -200,12 +207,12 @@ describe('service layer: centralized business rules & side effects', () => {
 			allowedCollectionIds: [col.id]
 		});
 
-		createRecord(tokenRecord, {
+		createRecord(resolveRequestContext(tokenRecord), {
 			parentId: col.id,
 			properties: { status: { type: 'select', value: 'in_progress' } }
 		});
 
-		const queried = queryCollection(tokenRecord, col.id);
+		const queried = queryCollection(resolveRequestContext(tokenRecord), col.id);
 		expect(queried.collection?.title).toBe('Sprint Backlog');
 		expect(queried.records).toHaveLength(1);
 		expect(queried.records[0].properties?.status).toEqual({
@@ -215,37 +222,40 @@ describe('service layer: centralized business rules & side effects', () => {
 	});
 
 	it('queryCollection applies a filter with the same ViewFilter semantics the UI views use (issue #70)', () => {
-		const col = createCollection(human, {
+		const col = createCollection(resolveRequestContext(human), {
 			title: 'Filtered Backlog',
 			schema: [{ key: 'status', label: 'Status', type: 'select' }]
 		});
-		const inProgress = createRecord(human, {
+		const inProgress = createRecord(resolveRequestContext(human), {
 			parentId: col.id,
 			properties: { status: { type: 'select', value: 'in_progress' } }
 		});
-		createRecord(human, {
+		createRecord(resolveRequestContext(human), {
 			parentId: col.id,
 			properties: { status: { type: 'select', value: 'done' } }
 		});
 
-		const filtered = queryCollection(human, col.id, [
+		const filtered = queryCollection(resolveRequestContext(human), col.id, [
 			{ propertyKey: 'status', op: 'is', value: 'in_progress' }
 		]);
 		expect(filtered.records.map((r) => r.id)).toEqual([inProgress.id]);
 
-		const unfiltered = queryCollection(human, col.id);
+		const unfiltered = queryCollection(resolveRequestContext(human), col.id);
 		expect(unfiltered.records).toHaveLength(2);
 	});
 
 	it('filters workspace search results by caller permission scope', () => {
-		const docPublic = createDocument(human, { title: 'Public Handbook' });
-		createRecord(human, { parentId: docPublic.id, blockType: 'paragraph' });
-		const pBlock = getDocument(human, docPublic.id)!.records[0];
-		writeRecord(human, pBlock.id, { markdown: 'Alpha project guidelines' });
+		const docPublic = createDocument(resolveRequestContext(human), { title: 'Public Handbook' });
+		createRecord(resolveRequestContext(human), { parentId: docPublic.id, blockType: 'paragraph' });
+		const pBlock = getDocument(resolveRequestContext(human), docPublic.id)!.records[0];
+		writeRecord(resolveRequestContext(human), pBlock.id, { markdown: 'Alpha project guidelines' });
 
-		const docPrivate = createDocument(human, { title: 'Private Vault' });
-		const vBlock = createRecord(human, { parentId: docPrivate.id, blockType: 'paragraph' });
-		writeRecord(human, vBlock.id, { markdown: 'Alpha secret passwords' });
+		const docPrivate = createDocument(resolveRequestContext(human), { title: 'Private Vault' });
+		const vBlock = createRecord(resolveRequestContext(human), {
+			parentId: docPrivate.id,
+			blockType: 'paragraph'
+		});
+		writeRecord(resolveRequestContext(human), vBlock.id, { markdown: 'Alpha secret passwords' });
 
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Search Bot',
@@ -253,23 +263,23 @@ describe('service layer: centralized business rules & side effects', () => {
 			allowedCollectionIds: []
 		});
 
-		const results = searchWorkspace(tokenRecord, 'Alpha');
+		const results = searchWorkspace(resolveRequestContext(tokenRecord), 'Alpha');
 		expect(results).toHaveLength(1);
 		expect(results[0].recordId).toBe(pBlock.id);
 
-		const humanResults = searchWorkspace(human, 'Alpha');
+		const humanResults = searchWorkspace(resolveRequestContext(human), 'Alpha');
 		expect(humanResults.length).toBeGreaterThanOrEqual(2);
 	});
 
 	it('omits a page_link target outside the caller token scope instead of leaking its title', () => {
-		const docPublic = createDocument(human, { title: 'Public Handbook' });
-		const docSecret = createDocument(human, { title: 'Secret Doc' });
+		const docPublic = createDocument(resolveRequestContext(human), { title: 'Public Handbook' });
+		const docSecret = createDocument(resolveRequestContext(human), { title: 'Secret Doc' });
 
 		// The human caller is unscoped, so createRecord's referencedRecordId
 		// validation (accessible-Document check) trivially passes here — the
 		// scoping under test below is entirely about the later *read* by a
 		// token restricted to docPublic only.
-		const link = createRecord(human, {
+		const link = createRecord(resolveRequestContext(human), {
 			parentId: docPublic.id,
 			blockType: 'page_link',
 			referencedRecordId: docSecret.id
@@ -281,19 +291,19 @@ describe('service layer: centralized business rules & side effects', () => {
 			allowedCollectionIds: []
 		});
 
-		const scoped = getDocument(tokenRecord, docPublic.id);
+		const scoped = getDocument(resolveRequestContext(tokenRecord), docPublic.id);
 		const scopedLink = scoped?.records.find((r) => r.id === link.id);
 		expect(scopedLink?.referencedRecordId).toBeUndefined();
 		expect(scopedLink?.markdown).toBe('');
 
-		const full = getDocument(human, docPublic.id);
+		const full = getDocument(resolveRequestContext(human), docPublic.id);
 		const fullLink = full?.records.find((r) => r.id === link.id);
 		expect(fullLink?.referencedRecordId).toBe(docSecret.id);
 		expect(fullLink?.markdown).toBe('[[Secret Doc]]');
 	});
 
 	it('renders a page_link block with rich text but no referencedRecordId via its own content', () => {
-		const docPublic = createDocument(human, { title: 'Public Handbook' });
+		const docPublic = createDocument(resolveRequestContext(human), { title: 'Public Handbook' });
 		const link = crdtCreateRecord(
 			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
 			{ parentId: docPublic.id, blockType: 'page_link' },
@@ -303,25 +313,25 @@ describe('service layer: centralized business rules & side effects', () => {
 		// service layer's createRecord, and therefore its locator reservation)
 		// still gets one automatically, via record-locator-observer.ts (#253)
 		// — writeRecord below resolves it by bare recordId alone.
-		writeRecord(human, link.id, { markdown: 'unresolved link text' });
+		writeRecord(resolveRequestContext(human), link.id, { markdown: 'unresolved link text' });
 
-		const result = getDocument(human, docPublic.id);
+		const result = getDocument(resolveRequestContext(human), docPublic.id);
 		const linkRecord = result?.records.find((r) => r.id === link.id);
 		expect(linkRecord?.markdown).toBe('unresolved link text');
 	});
 
 	it('marks a page_link explicitly broken, not silently unset, once its target Document is deleted', () => {
-		const docPublic = createDocument(human, { title: 'Public Handbook' });
-		const docTarget = createDocument(human, { title: 'Will Be Deleted' });
+		const docPublic = createDocument(resolveRequestContext(human), { title: 'Public Handbook' });
+		const docTarget = createDocument(resolveRequestContext(human), { title: 'Will Be Deleted' });
 		const link = crdtCreateRecord(
 			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
 			{ parentId: docPublic.id, blockType: 'page_link', referencedRecordId: docTarget.id },
 			human
 		);
 
-		deleteDocument(human, docTarget.id);
+		deleteDocument(resolveRequestContext(human), docTarget.id);
 
-		const result = getDocument(human, docPublic.id);
+		const result = getDocument(resolveRequestContext(human), docPublic.id);
 		const linkRecord = result?.records.find((r) => r.id === link.id);
 		expect(linkRecord?.linkBroken).toBe(true);
 		expect(linkRecord?.markdown).toBe('[[Deleted page]]');
@@ -331,21 +341,21 @@ describe('service layer: centralized business rules & side effects', () => {
 	});
 
 	it('does not mark linkBroken for a page_link with no target set yet', () => {
-		const docPublic = createDocument(human, { title: 'Public Handbook' });
+		const docPublic = createDocument(resolveRequestContext(human), { title: 'Public Handbook' });
 		const link = crdtCreateRecord(
 			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
 			{ parentId: docPublic.id, blockType: 'page_link' },
 			human
 		);
 
-		const result = getDocument(human, docPublic.id);
+		const result = getDocument(resolveRequestContext(human), docPublic.id);
 		const linkRecord = result?.records.find((r) => r.id === link.id);
 		expect(linkRecord?.linkBroken).toBeUndefined();
 	});
 
 	it('omits a collection_view target outside the caller token scope instead of leaking its schema', () => {
-		const docPublic = createDocument(human, { title: 'Team Page' });
-		const collectionSecret = createCollection(human, {
+		const docPublic = createDocument(resolveRequestContext(human), { title: 'Team Page' });
+		const collectionSecret = createCollection(resolveRequestContext(human), {
 			title: 'Secret Tasks',
 			schema: [{ key: 'status', label: 'Status', type: 'select' }]
 		});
@@ -366,13 +376,13 @@ describe('service layer: centralized business rules & side effects', () => {
 			allowedCollectionIds: []
 		});
 
-		const scoped = getDocument(tokenRecord, docPublic.id);
+		const scoped = getDocument(resolveRequestContext(tokenRecord), docPublic.id);
 		const scopedEmbed = scoped?.records.find((r) => r.id === embed.id);
 		expect(scopedEmbed?.referencedRecordId).toBeUndefined();
 		expect(scopedEmbed?.viewConfig).toBeUndefined();
 		expect(scopedEmbed?.markdown).toBe('[collection view: unconfigured]');
 
-		const full = getDocument(human, docPublic.id);
+		const full = getDocument(resolveRequestContext(human), docPublic.id);
 		const fullEmbed = full?.records.find((r) => r.id === embed.id);
 		expect(fullEmbed?.referencedRecordId).toBe(collectionSecret.id);
 		expect(fullEmbed?.viewConfig).toEqual({ viewType: 'board', groupBy: 'status' });
@@ -380,8 +390,11 @@ describe('service layer: centralized business rules & side effects', () => {
 	});
 
 	it('marks a collection_view explicitly broken once its target Collection is deleted, preserving the id', () => {
-		const docPublic = createDocument(human, { title: 'Team Page' });
-		const collectionTarget = createCollection(human, { title: 'Will Be Deleted', schema: [] });
+		const docPublic = createDocument(resolveRequestContext(human), { title: 'Team Page' });
+		const collectionTarget = createCollection(resolveRequestContext(human), {
+			title: 'Will Be Deleted',
+			schema: []
+		});
 		const embed = crdtCreateRecord(
 			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
 			{
@@ -393,9 +406,9 @@ describe('service layer: centralized business rules & side effects', () => {
 			human
 		);
 
-		deleteCollection(human, collectionTarget.id);
+		deleteCollection(resolveRequestContext(human), collectionTarget.id);
 
-		const result = getDocument(human, docPublic.id);
+		const result = getDocument(resolveRequestContext(human), docPublic.id);
 		const embedRecord = result?.records.find((r) => r.id === embed.id);
 		expect(embedRecord?.linkBroken).toBe(true);
 		expect(embedRecord?.markdown).toBe('[collection view: Deleted collection]');
@@ -404,8 +417,8 @@ describe('service layer: centralized business rules & side effects', () => {
 	});
 
 	it('marks a collection_view broken when its referencedRecordId names a Document, not a Collection', () => {
-		const docPublic = createDocument(human, { title: 'Team Page' });
-		const docTarget = createDocument(human, { title: 'Not A Collection' });
+		const docPublic = createDocument(resolveRequestContext(human), { title: 'Team Page' });
+		const docTarget = createDocument(resolveRequestContext(human), { title: 'Not A Collection' });
 		const embed = crdtCreateRecord(
 			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
 			{
@@ -417,7 +430,7 @@ describe('service layer: centralized business rules & side effects', () => {
 			human
 		);
 
-		const result = getDocument(human, docPublic.id);
+		const result = getDocument(resolveRequestContext(human), docPublic.id);
 		const embedRecord = result?.records.find((r) => r.id === embed.id);
 		expect(embedRecord?.linkBroken).toBe(true);
 		expect(embedRecord?.markdown).toBe('[collection view: Deleted collection]');
@@ -432,15 +445,18 @@ describe('service layer: centralized business rules & side effects', () => {
 	// direct UI edit (setRecordReferencedId), which isn't routed through that
 	// validation. Mirrors the collection_view-wrong-kind test above.
 	it('marks a page_link broken when its referencedRecordId names a Collection, not a Document', () => {
-		const docPublic = createDocument(human, { title: 'Team Page' });
-		const collectionTarget = createCollection(human, { title: 'Not A Document', schema: [] });
+		const docPublic = createDocument(resolveRequestContext(human), { title: 'Team Page' });
+		const collectionTarget = createCollection(resolveRequestContext(human), {
+			title: 'Not A Document',
+			schema: []
+		});
 		const link = crdtCreateRecord(
 			resolveWorkspaceContext({ shardId: docPublic.id }).doc,
 			{ parentId: docPublic.id, blockType: 'page_link', referencedRecordId: collectionTarget.id },
 			human
 		);
 
-		const result = getDocument(human, docPublic.id);
+		const result = getDocument(resolveRequestContext(human), docPublic.id);
 		const linkRecord = result?.records.find((r) => r.id === link.id);
 		expect(linkRecord?.linkBroken).toBe(true);
 		expect(linkRecord?.markdown).toBe('[[Deleted page]]');
@@ -449,7 +465,7 @@ describe('service layer: centralized business rules & side effects', () => {
 
 	describe('callout style (issue #42)', () => {
 		it('emits a GitHub-alert-style prefix for a preset callout, and exposes calloutStyle read-only', () => {
-			const docPublic = createDocument(human, { title: 'Handbook' });
+			const docPublic = createDocument(resolveRequestContext(human), { title: 'Handbook' });
 			const doc = resolveWorkspaceContext({ shardId: docPublic.id }).doc;
 			const callout = crdtCreateRecord(
 				doc,
@@ -464,14 +480,14 @@ describe('service layer: centralized business rules & side effects', () => {
 				crdtGetRecordYText(doc, callout.id)!.insert(0, 'Handle with care.')
 			);
 
-			const result = getDocument(human, docPublic.id);
+			const result = getDocument(resolveRequestContext(human), docPublic.id);
 			const record = result?.records.find((r) => r.id === callout.id);
 			expect(record?.calloutStyle).toEqual({ kind: 'preset', preset: 'danger' });
 			expect(record?.markdown).toBe('> [!DANGER]\n> Handle with care\\.');
 		});
 
 		it('quotes every line of a multi-line preset callout, not just the first', () => {
-			const docPublic = createDocument(human, { title: 'Handbook' });
+			const docPublic = createDocument(resolveRequestContext(human), { title: 'Handbook' });
 			const doc = resolveWorkspaceContext({ shardId: docPublic.id }).doc;
 			const callout = crdtCreateRecord(
 				doc,
@@ -486,13 +502,13 @@ describe('service layer: centralized business rules & side effects', () => {
 				crdtGetRecordYText(doc, callout.id)!.insert(0, 'First line\nSecond line')
 			);
 
-			const result = getDocument(human, docPublic.id);
+			const result = getDocument(resolveRequestContext(human), docPublic.id);
 			const record = result?.records.find((r) => r.id === callout.id);
 			expect(record?.markdown).toBe('> [!NOTE]\n> First line\n> Second line');
 		});
 
 		it('emits just the alert marker for an empty preset callout', () => {
-			const docPublic = createDocument(human, { title: 'Handbook' });
+			const docPublic = createDocument(resolveRequestContext(human), { title: 'Handbook' });
 			crdtCreateRecord(
 				resolveWorkspaceContext({ shardId: docPublic.id }).doc,
 				{
@@ -503,13 +519,13 @@ describe('service layer: centralized business rules & side effects', () => {
 				human
 			);
 
-			const result = getDocument(human, docPublic.id);
+			const result = getDocument(resolveRequestContext(human), docPublic.id);
 			const record = result?.records.find((r) => r.blockType === 'callout');
 			expect(record?.markdown).toBe('> [!TIP]');
 		});
 
 		it('renders a custom-styled callout as plain content — no markdown alert equivalent for an arbitrary color', () => {
-			const docPublic = createDocument(human, { title: 'Handbook' });
+			const docPublic = createDocument(resolveRequestContext(human), { title: 'Handbook' });
 			const doc = resolveWorkspaceContext({ shardId: docPublic.id }).doc;
 			const callout = crdtCreateRecord(
 				doc,
@@ -524,14 +540,14 @@ describe('service layer: centralized business rules & side effects', () => {
 				crdtGetRecordYText(doc, callout.id)!.insert(0, 'Plain text, styled cell only.')
 			);
 
-			const result = getDocument(human, docPublic.id);
+			const result = getDocument(resolveRequestContext(human), docPublic.id);
 			const record = result?.records.find((r) => r.id === callout.id);
 			expect(record?.calloutStyle).toEqual({ kind: 'custom', icon: 'star', color: '#336699' });
 			expect(record?.markdown).toBe('Plain text, styled cell only\\.');
 		});
 
 		it('renders an unstyled callout as plain content, same as before issue #42', () => {
-			const docPublic = createDocument(human, { title: 'Handbook' });
+			const docPublic = createDocument(resolveRequestContext(human), { title: 'Handbook' });
 			const doc = resolveWorkspaceContext({ shardId: docPublic.id }).doc;
 			const callout = crdtCreateRecord(
 				doc,
@@ -540,7 +556,7 @@ describe('service layer: centralized business rules & side effects', () => {
 			);
 			writeTestYText(doc, () => crdtGetRecordYText(doc, callout.id)!.insert(0, 'Careful!'));
 
-			const result = getDocument(human, docPublic.id);
+			const result = getDocument(resolveRequestContext(human), docPublic.id);
 			const record = result?.records.find((r) => r.id === callout.id);
 			expect(record?.calloutStyle).toBeUndefined();
 			expect(record?.markdown).toBe('Careful\\!');
@@ -549,17 +565,23 @@ describe('service layer: centralized business rules & side effects', () => {
 
 	describe('child_pages block (issue #43)', () => {
 		it("defaults to listing the containing Document's own immediate children when no target/depth is set", () => {
-			const root = createDocument(human, { title: 'Root' });
-			const childA = createDocument(human, { title: 'Child A', parentDocumentId: root.id });
-			createDocument(human, {
+			const root = createDocument(resolveRequestContext(human), { title: 'Root' });
+			const childA = createDocument(resolveRequestContext(human), {
+				title: 'Child A',
+				parentDocumentId: root.id
+			});
+			createDocument(resolveRequestContext(human), {
 				title: 'Child B',
 				parentDocumentId: root.id,
 				afterDocumentId: childA.id
 			});
-			createDocument(human, { title: 'Grandchild', parentDocumentId: childA.id });
-			createRecord(human, { parentId: root.id, blockType: 'child_pages' });
+			createDocument(resolveRequestContext(human), {
+				title: 'Grandchild',
+				parentDocumentId: childA.id
+			});
+			createRecord(resolveRequestContext(human), { parentId: root.id, blockType: 'child_pages' });
 
-			const result = getDocument(human, root.id);
+			const result = getDocument(resolveRequestContext(human), root.id);
 			const record = result?.records.find((r) => r.blockType === 'child_pages');
 			expect(record?.referencedRecordId).toBeUndefined();
 			expect(record?.childPagesDepth).toBeUndefined();
@@ -567,18 +589,24 @@ describe('service layer: centralized business rules & side effects', () => {
 		});
 
 		it("lists an explicit target Document's children, nested per its configured depth", () => {
-			const other = createDocument(human, { title: 'Other Root' });
-			const child = createDocument(human, { title: 'Other Child', parentDocumentId: other.id });
-			createDocument(human, { title: 'Other Grandchild', parentDocumentId: child.id });
-			const host = createDocument(human, { title: 'Host' });
-			const block = createRecord(human, {
+			const other = createDocument(resolveRequestContext(human), { title: 'Other Root' });
+			const child = createDocument(resolveRequestContext(human), {
+				title: 'Other Child',
+				parentDocumentId: other.id
+			});
+			createDocument(resolveRequestContext(human), {
+				title: 'Other Grandchild',
+				parentDocumentId: child.id
+			});
+			const host = createDocument(resolveRequestContext(human), { title: 'Host' });
+			const block = createRecord(resolveRequestContext(human), {
 				parentId: host.id,
 				blockType: 'child_pages',
 				referencedRecordId: other.id,
 				childPagesDepth: 2
 			});
 
-			const result = getDocument(human, host.id);
+			const result = getDocument(resolveRequestContext(human), host.id);
 			const record = result?.records.find((r) => r.id === block.id);
 			expect(record?.referencedRecordId).toBe(other.id);
 			expect(record?.childPagesDepth).toBe(2);
@@ -586,36 +614,48 @@ describe('service layer: centralized business rules & side effects', () => {
 		});
 
 		it('emits a placeholder for a target with no sub-pages', () => {
-			const host = createDocument(human, { title: 'Host' });
-			createRecord(human, { parentId: host.id, blockType: 'child_pages' });
+			const host = createDocument(resolveRequestContext(human), { title: 'Host' });
+			createRecord(resolveRequestContext(human), { parentId: host.id, blockType: 'child_pages' });
 
-			const result = getDocument(human, host.id);
+			const result = getDocument(resolveRequestContext(human), host.id);
 			const record = result?.records.find((r) => r.blockType === 'child_pages');
 			expect(record?.markdown).toBe('_No sub-pages yet._');
 		});
 
 		it('rejects create_record with childPagesDepth on any other block type', () => {
-			const host = createDocument(human, { title: 'Host' });
+			const host = createDocument(resolveRequestContext(human), { title: 'Host' });
 			expect(() =>
-				createRecord(human, { parentId: host.id, blockType: 'paragraph', childPagesDepth: 2 })
+				createRecord(resolveRequestContext(human), {
+					parentId: host.id,
+					blockType: 'paragraph',
+					childPagesDepth: 2
+				})
 			).toThrow(/childPagesDepth/);
 		});
 
 		it('rejects create_record with a childPagesDepth that is neither a positive integer nor "unlimited"', () => {
-			const host = createDocument(human, { title: 'Host' });
+			const host = createDocument(resolveRequestContext(human), { title: 'Host' });
 			expect(() =>
-				createRecord(human, { parentId: host.id, blockType: 'child_pages', childPagesDepth: 0 })
+				createRecord(resolveRequestContext(human), {
+					parentId: host.id,
+					blockType: 'child_pages',
+					childPagesDepth: 0
+				})
 			).toThrow(/childPagesDepth/);
 			expect(() =>
-				createRecord(human, { parentId: host.id, blockType: 'child_pages', childPagesDepth: 1.5 })
+				createRecord(resolveRequestContext(human), {
+					parentId: host.id,
+					blockType: 'child_pages',
+					childPagesDepth: 1.5
+				})
 			).toThrow(/childPagesDepth/);
 		});
 
 		it('rejects create_record with a referencedRecordId pointing at a Collection instead of a Document', () => {
-			const col = createCollection(human, { title: 'Rows' });
-			const host = createDocument(human, { title: 'Host' });
+			const col = createCollection(resolveRequestContext(human), { title: 'Rows' });
+			const host = createDocument(resolveRequestContext(human), { title: 'Host' });
 			expect(() =>
-				createRecord(human, {
+				createRecord(resolveRequestContext(human), {
 					parentId: host.id,
 					blockType: 'child_pages',
 					referencedRecordId: col.id
@@ -624,23 +664,23 @@ describe('service layer: centralized business rules & side effects', () => {
 		});
 
 		it('rejects a targetless, default-depth child_pages block under a Collection parent', () => {
-			const col = createCollection(human, { title: 'Rows' });
-			expect(() => createRecord(human, { parentId: col.id, blockType: 'child_pages' })).toThrow(
-				/Document/
-			);
+			const col = createCollection(resolveRequestContext(human), { title: 'Rows' });
+			expect(() =>
+				createRecord(resolveRequestContext(human), { parentId: col.id, blockType: 'child_pages' })
+			).toThrow(/Document/);
 		});
 
 		it('renders "[child pages: unavailable]" for a deleted target, without distinguishing it from an out-of-scope one', () => {
-			const target = createDocument(human, { title: 'Target' });
-			const host = createDocument(human, { title: 'Host' });
-			const block = createRecord(human, {
+			const target = createDocument(resolveRequestContext(human), { title: 'Target' });
+			const host = createDocument(resolveRequestContext(human), { title: 'Host' });
+			const block = createRecord(resolveRequestContext(human), {
 				parentId: host.id,
 				blockType: 'child_pages',
 				referencedRecordId: target.id
 			});
-			deleteDocument(human, target.id);
+			deleteDocument(resolveRequestContext(human), target.id);
 
-			const result = getDocument(human, host.id);
+			const result = getDocument(resolveRequestContext(human), host.id);
 			const record = result?.records.find((r) => r.id === block.id);
 			expect(record?.markdown).toBe('[child pages: unavailable]');
 			expect(record?.linkBroken).toBe(true);
@@ -651,9 +691,9 @@ describe('service layer: centralized business rules & side effects', () => {
 		});
 
 		it('renders "[child pages: unavailable]" and omits referencedRecordId when the target is outside the caller token scope', () => {
-			const secret = createDocument(human, { title: 'Secret' });
-			const host = createDocument(human, { title: 'Host' });
-			const block = createRecord(human, {
+			const secret = createDocument(resolveRequestContext(human), { title: 'Secret' });
+			const host = createDocument(resolveRequestContext(human), { title: 'Host' });
+			const block = createRecord(resolveRequestContext(human), {
 				parentId: host.id,
 				blockType: 'child_pages',
 				referencedRecordId: secret.id
@@ -665,20 +705,23 @@ describe('service layer: centralized business rules & side effects', () => {
 				allowedCollectionIds: []
 			});
 
-			const result = getDocument(tokenRecord, host.id);
+			const result = getDocument(resolveRequestContext(tokenRecord), host.id);
 			const record = result?.records.find((r) => r.id === block.id);
 			expect(record?.markdown).toBe('[child pages: unavailable]');
 			expect(record?.referencedRecordId).toBeUndefined();
 		});
 
 		it("silently excludes a child the caller's token was never granted access to, rather than erroring", () => {
-			const root = createDocument(human, { title: 'Root' });
-			const visibleChild = createDocument(human, {
+			const root = createDocument(resolveRequestContext(human), { title: 'Root' });
+			const visibleChild = createDocument(resolveRequestContext(human), {
 				title: 'Visible Child',
 				parentDocumentId: root.id
 			});
-			createDocument(human, { title: 'Hidden Child', parentDocumentId: root.id });
-			createRecord(human, { parentId: root.id, blockType: 'child_pages' });
+			createDocument(resolveRequestContext(human), {
+				title: 'Hidden Child',
+				parentDocumentId: root.id
+			});
+			createRecord(resolveRequestContext(human), { parentId: root.id, blockType: 'child_pages' });
 
 			const { record: tokenRecord } = createToken({
 				clientLabel: 'Scoped Sibling Bot',
@@ -686,7 +729,7 @@ describe('service layer: centralized business rules & side effects', () => {
 				allowedCollectionIds: []
 			});
 
-			const result = getDocument(tokenRecord, root.id);
+			const result = getDocument(resolveRequestContext(tokenRecord), root.id);
 			const record = result?.records.find((r) => r.blockType === 'child_pages');
 			expect(record?.markdown).toBe('- [[Visible Child]]');
 		});
@@ -698,7 +741,7 @@ describe('service layer: centralized business rules & side effects', () => {
 	// denied access to it — hiding an otherwise-accessible page_link instead
 	// of rendering it.
 	it('resolves a page_link to an uncataloged Document via a default-Space-only grant', () => {
-		const docPublic = createDocument(human, { title: 'Team Page' });
+		const docPublic = createDocument(resolveRequestContext(human), { title: 'Team Page' });
 		const { doc, defaultSpaceId } = resolveWorkspaceContext();
 		const uncatalogedTarget = crdtCreateDocument(doc, { title: 'Uncataloged Target' });
 		const link = crdtCreateRecord(
@@ -717,7 +760,7 @@ describe('service layer: centralized business rules & side effects', () => {
 			allowedSpaceIds: [defaultSpaceId]
 		});
 
-		const result = getDocument(tokenRecord, docPublic.id);
+		const result = getDocument(resolveRequestContext(tokenRecord), docPublic.id);
 		const linkRecord = result?.records.find((r) => r.id === link.id);
 		expect(linkRecord?.linkBroken).toBeUndefined();
 		expect(linkRecord?.referencedRecordId).toBe(uncatalogedTarget.id);
@@ -727,8 +770,8 @@ describe('service layer: centralized business rules & side effects', () => {
 
 describe('service layer: MCP authoring and repair of page_link targets (issue #46)', () => {
 	it('creates a page_link block with a valid, accessible target in one call', () => {
-		const target = createDocument(human, { title: 'Target Doc' });
-		const source = createDocument(human, { title: 'Source Doc' });
+		const target = createDocument(resolveRequestContext(human), { title: 'Target Doc' });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
 
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Linker Bot',
@@ -736,24 +779,24 @@ describe('service layer: MCP authoring and repair of page_link targets (issue #4
 			allowedCollectionIds: []
 		});
 
-		const link = createRecord(tokenRecord, {
+		const link = createRecord(resolveRequestContext(tokenRecord), {
 			parentId: source.id,
 			blockType: 'page_link',
 			referencedRecordId: target.id
 		});
 
-		const result = getDocument(tokenRecord, source.id);
+		const result = getDocument(resolveRequestContext(tokenRecord), source.id);
 		const linkRecord = result?.records.find((r) => r.id === link.id);
 		expect(linkRecord?.referencedRecordId).toBe(target.id);
 		expect(linkRecord?.markdown).toBe('[[Target Doc]]');
 	});
 
 	it('rejects referencedRecordId on create_record when blockType is not page_link', () => {
-		const target = createDocument(human, { title: 'Target Doc' });
-		const source = createDocument(human, { title: 'Source Doc' });
+		const target = createDocument(resolveRequestContext(human), { title: 'Target Doc' });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
 
 		expect(() =>
-			createRecord(human, {
+			createRecord(resolveRequestContext(human), {
 				parentId: source.id,
 				blockType: 'paragraph',
 				referencedRecordId: target.id
@@ -762,11 +805,11 @@ describe('service layer: MCP authoring and repair of page_link targets (issue #4
 	});
 
 	it('rejects referencedRecordId on create_record when the parent is a Collection, not a Document', () => {
-		const target = createDocument(human, { title: 'Target Doc' });
-		const col = createCollection(human, { title: 'Tasks', schema: [] });
+		const target = createDocument(resolveRequestContext(human), { title: 'Target Doc' });
+		const col = createCollection(resolveRequestContext(human), { title: 'Tasks', schema: [] });
 
 		expect(() =>
-			createRecord(human, {
+			createRecord(resolveRequestContext(human), {
 				parentId: col.id,
 				blockType: 'page_link',
 				referencedRecordId: target.id
@@ -775,26 +818,28 @@ describe('service layer: MCP authoring and repair of page_link targets (issue #4
 	});
 
 	it('rejects a targetless page_link under a Collection parent without creating a row', () => {
-		const col = createCollection(human, { title: 'Tasks', schema: [] });
+		const col = createCollection(resolveRequestContext(human), { title: 'Tasks', schema: [] });
 
-		expect(() => createRecord(human, { parentId: col.id, blockType: 'page_link' })).toThrow(
-			/Document/
-		);
-		expect(queryCollection(human, col.id).records).toEqual([]);
+		expect(() =>
+			createRecord(resolveRequestContext(human), { parentId: col.id, blockType: 'page_link' })
+		).toThrow(/Document/);
+		expect(queryCollection(resolveRequestContext(human), col.id).records).toEqual([]);
 	});
 
 	it('rejects every explicit Document block type under a Collection parent', () => {
-		const col = createCollection(human, { title: 'Tasks', schema: [] });
+		const col = createCollection(resolveRequestContext(human), { title: 'Tasks', schema: [] });
 
 		for (const blockType of blockTypes) {
-			expect(() => createRecord(human, { parentId: col.id, blockType })).toThrow(/Document/);
+			expect(() =>
+				createRecord(resolveRequestContext(human), { parentId: col.id, blockType })
+			).toThrow(/Document/);
 		}
-		expect(queryCollection(human, col.id).records).toEqual([]);
+		expect(queryCollection(resolveRequestContext(human), col.id).records).toEqual([]);
 	});
 
 	it('rejects create_record with a referencedRecordId the token was never granted access to, without distinguishing "forbidden" from "nonexistent"', () => {
-		const secret = createDocument(human, { title: 'Secret Doc' });
-		const source = createDocument(human, { title: 'Source Doc' });
+		const secret = createDocument(resolveRequestContext(human), { title: 'Secret Doc' });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
 
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Scoped Bot',
@@ -804,7 +849,7 @@ describe('service layer: MCP authoring and repair of page_link targets (issue #4
 
 		let forbiddenErr: Error | undefined;
 		try {
-			createRecord(tokenRecord, {
+			createRecord(resolveRequestContext(tokenRecord), {
 				parentId: source.id,
 				blockType: 'page_link',
 				referencedRecordId: secret.id
@@ -817,7 +862,7 @@ describe('service layer: MCP authoring and repair of page_link targets (issue #4
 
 		let missingErr: Error | undefined;
 		try {
-			createRecord(tokenRecord, {
+			createRecord(resolveRequestContext(tokenRecord), {
 				parentId: source.id,
 				blockType: 'page_link',
 				referencedRecordId: 'does-not-exist'
@@ -835,14 +880,14 @@ describe('service layer: MCP authoring and repair of page_link targets (issue #4
 			missingErr!.message.replace('does-not-exist', 'X')
 		);
 
-		const result = getDocument(human, source.id);
+		const result = getDocument(resolveRequestContext(human), source.id);
 		expect(result?.records).toHaveLength(0);
 	});
 
 	it('retargets an existing page_link via write_record, without needing a hold, and is idempotent', () => {
-		const targetA = createDocument(human, { title: 'Target A' });
-		const targetB = createDocument(human, { title: 'Target B' });
-		const source = createDocument(human, { title: 'Source Doc' });
+		const targetA = createDocument(resolveRequestContext(human), { title: 'Target A' });
+		const targetB = createDocument(resolveRequestContext(human), { title: 'Target B' });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
 
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Retarget Bot',
@@ -850,20 +895,20 @@ describe('service layer: MCP authoring and repair of page_link targets (issue #4
 			allowedCollectionIds: []
 		});
 
-		const link = createRecord(tokenRecord, {
+		const link = createRecord(resolveRequestContext(tokenRecord), {
 			parentId: source.id,
 			blockType: 'page_link',
 			referencedRecordId: targetA.id
 		});
 
 		// No hold_records call first — a metadata-only write is exempt.
-		writeRecord(tokenRecord, link.id, { referencedRecordId: targetB.id });
-		let result = getDocument(tokenRecord, source.id);
+		writeRecord(resolveRequestContext(tokenRecord), link.id, { referencedRecordId: targetB.id });
+		let result = getDocument(resolveRequestContext(tokenRecord), source.id);
 		expect(result?.records.find((r) => r.id === link.id)?.referencedRecordId).toBe(targetB.id);
 
 		// Idempotent: writing the same target again is a no-op state transition.
-		writeRecord(tokenRecord, link.id, { referencedRecordId: targetB.id });
-		result = getDocument(tokenRecord, source.id);
+		writeRecord(resolveRequestContext(tokenRecord), link.id, { referencedRecordId: targetB.id });
+		result = getDocument(resolveRequestContext(tokenRecord), source.id);
 		expect(result?.records.find((r) => r.id === link.id)?.referencedRecordId).toBe(targetB.id);
 
 		const audits = queryAuditLog();
@@ -874,20 +919,23 @@ describe('service layer: MCP authoring and repair of page_link targets (issue #4
 	});
 
 	it('rejects retargeting a block that is not a page_link', () => {
-		const target = createDocument(human, { title: 'Target Doc' });
-		const doc = createDocument(human, { title: 'Doc' });
-		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+		const target = createDocument(resolveRequestContext(human), { title: 'Target Doc' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'paragraph'
+		});
 
-		expect(() => writeRecord(human, block.id, { referencedRecordId: target.id })).toThrow(
-			/page_link/
-		);
+		expect(() =>
+			writeRecord(resolveRequestContext(human), block.id, { referencedRecordId: target.id })
+		).toThrow(/page_link/);
 	});
 
 	it('rejects retargeting a page_link to a Document outside the caller token scope', () => {
-		const secret = createDocument(human, { title: 'Secret Doc' });
-		const target = createDocument(human, { title: 'Target Doc' });
-		const source = createDocument(human, { title: 'Source Doc' });
-		const link = createRecord(human, {
+		const secret = createDocument(resolveRequestContext(human), { title: 'Secret Doc' });
+		const target = createDocument(resolveRequestContext(human), { title: 'Target Doc' });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
+		const link = createRecord(resolveRequestContext(human), {
 			parentId: source.id,
 			blockType: 'page_link',
 			referencedRecordId: target.id
@@ -899,29 +947,32 @@ describe('service layer: MCP authoring and repair of page_link targets (issue #4
 			allowedCollectionIds: []
 		});
 
-		expect(() => writeRecord(tokenRecord, link.id, { referencedRecordId: secret.id })).toThrow(
-			InvalidLinkTargetError
-		);
+		expect(() =>
+			writeRecord(resolveRequestContext(tokenRecord), link.id, { referencedRecordId: secret.id })
+		).toThrow(InvalidLinkTargetError);
 
 		// Rejected retarget leaves the original target untouched.
-		const result = getDocument(tokenRecord, source.id);
+		const result = getDocument(resolveRequestContext(tokenRecord), source.id);
 		expect(result?.records.find((r) => r.id === link.id)?.referencedRecordId).toBe(target.id);
 	});
 
 	it('rejects a combined write_record call with an invalid referencedRecordId before applying its markdown', () => {
-		const secret = createDocument(human, { title: 'Secret Doc' });
-		const source = createDocument(human, { title: 'Source Doc' });
-		const link = createRecord(human, { parentId: source.id, blockType: 'page_link' });
+		const secret = createDocument(resolveRequestContext(human), { title: 'Secret Doc' });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
+		const link = createRecord(resolveRequestContext(human), {
+			parentId: source.id,
+			blockType: 'page_link'
+		});
 
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Combined Write Bot',
 			allowedDocumentIds: [source.id],
 			allowedCollectionIds: []
 		});
-		holdRecords(tokenRecord, [link.id]);
+		holdRecords(resolveRequestContext(tokenRecord), [link.id]);
 
 		expect(() =>
-			writeRecord(tokenRecord, link.id, {
+			writeRecord(resolveRequestContext(tokenRecord), link.id, {
 				markdown: 'unresolved link text',
 				referencedRecordId: secret.id
 			})
@@ -929,18 +980,18 @@ describe('service layer: MCP authoring and repair of page_link targets (issue #4
 
 		// The markdown write never committed, and the hold was never consumed —
 		// validation ran before any mutation (docs/specifications/mcp-tools.md).
-		const result = getDocument(human, source.id);
+		const result = getDocument(resolveRequestContext(human), source.id);
 		const linkRecord = result?.records.find((r) => r.id === link.id);
 		expect(linkRecord?.markdown).toBe('');
 		expect(linkRecord?.referencedRecordId).toBeUndefined();
-		expect(holdRecords(tokenRecord, [link.id]).granted).toContain(link.id);
+		expect(holdRecords(resolveRequestContext(tokenRecord), [link.id]).granted).toContain(link.id);
 	});
 });
 
 describe('service layer: MCP authoring and validation of collection_view targets (issue #37)', () => {
 	it('creates a collection_view block with a valid, accessible Collection target and viewConfig in one call', () => {
-		const target = createCollection(human, { title: 'Tasks', schema: [] });
-		const source = createDocument(human, { title: 'Source Doc' });
+		const target = createCollection(resolveRequestContext(human), { title: 'Tasks', schema: [] });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
 
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Embed Bot',
@@ -948,14 +999,14 @@ describe('service layer: MCP authoring and validation of collection_view targets
 			allowedCollectionIds: [target.id]
 		});
 
-		const embed = createRecord(tokenRecord, {
+		const embed = createRecord(resolveRequestContext(tokenRecord), {
 			parentId: source.id,
 			blockType: 'collection_view',
 			referencedRecordId: target.id,
 			viewConfig: { viewType: 'table' }
 		});
 
-		const result = getDocument(tokenRecord, source.id);
+		const result = getDocument(resolveRequestContext(tokenRecord), source.id);
 		const embedRecord = result?.records.find((r) => r.id === embed.id);
 		expect(embedRecord?.referencedRecordId).toBe(target.id);
 		expect(embedRecord?.viewConfig).toEqual({ viewType: 'table' });
@@ -963,11 +1014,11 @@ describe('service layer: MCP authoring and validation of collection_view targets
 	});
 
 	it('rejects referencedRecordId on create_record for a collection_view whose target is a Document, not a Collection', () => {
-		const target = createDocument(human, { title: 'Not A Collection' });
-		const source = createDocument(human, { title: 'Source Doc' });
+		const target = createDocument(resolveRequestContext(human), { title: 'Not A Collection' });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
 
 		expect(() =>
-			createRecord(human, {
+			createRecord(resolveRequestContext(human), {
 				parentId: source.id,
 				blockType: 'collection_view',
 				referencedRecordId: target.id
@@ -976,8 +1027,11 @@ describe('service layer: MCP authoring and validation of collection_view targets
 	});
 
 	it('rejects create_record with a collection_view referencedRecordId the token was never granted access to, without distinguishing "forbidden" from "nonexistent"', () => {
-		const secret = createCollection(human, { title: 'Secret Tasks', schema: [] });
-		const source = createDocument(human, { title: 'Source Doc' });
+		const secret = createCollection(resolveRequestContext(human), {
+			title: 'Secret Tasks',
+			schema: []
+		});
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
 
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Scoped Embed Bot',
@@ -987,7 +1041,7 @@ describe('service layer: MCP authoring and validation of collection_view targets
 
 		let forbiddenErr: Error | undefined;
 		try {
-			createRecord(tokenRecord, {
+			createRecord(resolveRequestContext(tokenRecord), {
 				parentId: source.id,
 				blockType: 'collection_view',
 				referencedRecordId: secret.id
@@ -1000,7 +1054,7 @@ describe('service layer: MCP authoring and validation of collection_view targets
 
 		let missingErr: Error | undefined;
 		try {
-			createRecord(tokenRecord, {
+			createRecord(resolveRequestContext(tokenRecord), {
 				parentId: source.id,
 				blockType: 'collection_view',
 				referencedRecordId: 'does-not-exist'
@@ -1014,15 +1068,15 @@ describe('service layer: MCP authoring and validation of collection_view targets
 			missingErr!.message.replace('does-not-exist', 'X')
 		);
 
-		const result = getDocument(human, source.id);
+		const result = getDocument(resolveRequestContext(human), source.id);
 		expect(result?.records).toHaveLength(0);
 	});
 
 	it('rejects viewConfig on create_record when blockType is not collection_view', () => {
-		const source = createDocument(human, { title: 'Source Doc' });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
 
 		expect(() =>
-			createRecord(human, {
+			createRecord(resolveRequestContext(human), {
 				parentId: source.id,
 				blockType: 'paragraph',
 				viewConfig: { viewType: 'table' }
@@ -1031,11 +1085,11 @@ describe('service layer: MCP authoring and validation of collection_view targets
 	});
 
 	it('rejects viewConfig on create_record with an unrecognized viewType', () => {
-		const target = createCollection(human, { title: 'Tasks', schema: [] });
-		const source = createDocument(human, { title: 'Source Doc' });
+		const target = createCollection(resolveRequestContext(human), { title: 'Tasks', schema: [] });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
 
 		expect(() =>
-			createRecord(human, {
+			createRecord(resolveRequestContext(human), {
 				parentId: source.id,
 				blockType: 'collection_view',
 				referencedRecordId: target.id,
@@ -1045,11 +1099,20 @@ describe('service layer: MCP authoring and validation of collection_view targets
 	});
 
 	it('retargets an existing collection_view via write_record, and rejects a Document-kind or out-of-scope target', () => {
-		const targetA = createCollection(human, { title: 'Tasks A', schema: [] });
-		const targetB = createCollection(human, { title: 'Tasks B', schema: [] });
-		const docTarget = createDocument(human, { title: 'Not A Collection' });
-		const secret = createCollection(human, { title: 'Secret Tasks', schema: [] });
-		const source = createDocument(human, { title: 'Source Doc' });
+		const targetA = createCollection(resolveRequestContext(human), {
+			title: 'Tasks A',
+			schema: []
+		});
+		const targetB = createCollection(resolveRequestContext(human), {
+			title: 'Tasks B',
+			schema: []
+		});
+		const docTarget = createDocument(resolveRequestContext(human), { title: 'Not A Collection' });
+		const secret = createCollection(resolveRequestContext(human), {
+			title: 'Secret Tasks',
+			schema: []
+		});
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
 
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Retarget Embed Bot',
@@ -1057,51 +1120,56 @@ describe('service layer: MCP authoring and validation of collection_view targets
 			allowedCollectionIds: [targetA.id, targetB.id]
 		});
 
-		const embed = createRecord(tokenRecord, {
+		const embed = createRecord(resolveRequestContext(tokenRecord), {
 			parentId: source.id,
 			blockType: 'collection_view',
 			referencedRecordId: targetA.id
 		});
 
-		writeRecord(tokenRecord, embed.id, { referencedRecordId: targetB.id });
-		let result = getDocument(tokenRecord, source.id);
+		writeRecord(resolveRequestContext(tokenRecord), embed.id, { referencedRecordId: targetB.id });
+		let result = getDocument(resolveRequestContext(tokenRecord), source.id);
 		expect(result?.records.find((r) => r.id === embed.id)?.referencedRecordId).toBe(targetB.id);
 
-		expect(() => writeRecord(tokenRecord, embed.id, { referencedRecordId: docTarget.id })).toThrow(
-			InvalidLinkTargetError
-		);
-		expect(() => writeRecord(tokenRecord, embed.id, { referencedRecordId: secret.id })).toThrow(
-			InvalidLinkTargetError
-		);
+		expect(() =>
+			writeRecord(resolveRequestContext(tokenRecord), embed.id, {
+				referencedRecordId: docTarget.id
+			})
+		).toThrow(InvalidLinkTargetError);
+		expect(() =>
+			writeRecord(resolveRequestContext(tokenRecord), embed.id, { referencedRecordId: secret.id })
+		).toThrow(InvalidLinkTargetError);
 
 		// Neither rejected retarget mutated the block.
-		result = getDocument(tokenRecord, source.id);
+		result = getDocument(resolveRequestContext(tokenRecord), source.id);
 		expect(result?.records.find((r) => r.id === embed.id)?.referencedRecordId).toBe(targetB.id);
 	});
 
 	it('rejects retargeting a block that is not a collection_view via referencedRecordId', () => {
-		const target = createCollection(human, { title: 'Tasks', schema: [] });
-		const doc = createDocument(human, { title: 'Doc' });
-		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+		const target = createCollection(resolveRequestContext(human), { title: 'Tasks', schema: [] });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'paragraph'
+		});
 
-		expect(() => writeRecord(human, block.id, { referencedRecordId: target.id })).toThrow(
-			/page_link|collection_view/
-		);
+		expect(() =>
+			writeRecord(resolveRequestContext(human), block.id, { referencedRecordId: target.id })
+		).toThrow(/page_link|collection_view/);
 	});
 
 	it('sets viewConfig on an existing collection_view block via write_record, replacing it wholesale', () => {
-		const target = createCollection(human, { title: 'Tasks', schema: [] });
-		const doc = createDocument(human, { title: 'Doc' });
-		const embed = createRecord(human, {
+		const target = createCollection(resolveRequestContext(human), { title: 'Tasks', schema: [] });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const embed = createRecord(resolveRequestContext(human), {
 			parentId: doc.id,
 			blockType: 'collection_view',
 			referencedRecordId: target.id,
 			viewConfig: { viewType: 'table', groupBy: 'status' }
 		});
 
-		writeRecord(human, embed.id, { viewConfig: { viewType: 'board' } });
+		writeRecord(resolveRequestContext(human), embed.id, { viewConfig: { viewType: 'board' } });
 
-		const result = getDocument(human, doc.id);
+		const result = getDocument(resolveRequestContext(human), doc.id);
 		// A full replace clears members absent from the new config (groupBy).
 		expect(result?.records.find((r) => r.id === embed.id)?.viewConfig).toEqual({
 			viewType: 'board'
@@ -1109,20 +1177,23 @@ describe('service layer: MCP authoring and validation of collection_view targets
 	});
 
 	it('rejects viewConfig on write_record for a block that is not collection_view', () => {
-		const doc = createDocument(human, { title: 'Doc' });
-		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'paragraph'
+		});
 
-		expect(() => writeRecord(human, block.id, { viewConfig: { viewType: 'table' } })).toThrow(
-			/collection_view/
-		);
+		expect(() =>
+			writeRecord(resolveRequestContext(human), block.id, { viewConfig: { viewType: 'table' } })
+		).toThrow(/collection_view/);
 	});
 });
 
 describe('service layer: write_record viewConfigPatch — per-member merge without clobbering untouched members (issue #195)', () => {
 	it('merges only the named members, leaving a concurrently-set member untouched', () => {
-		const target = createCollection(human, { title: 'Tasks', schema: [] });
-		const doc = createDocument(human, { title: 'Doc' });
-		const embed = createRecord(human, {
+		const target = createCollection(resolveRequestContext(human), { title: 'Tasks', schema: [] });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const embed = createRecord(resolveRequestContext(human), {
 			parentId: doc.id,
 			blockType: 'collection_view',
 			referencedRecordId: target.id,
@@ -1137,9 +1208,11 @@ describe('service layer: write_record viewConfigPatch — per-member merge witho
 			crdtPatchRecordViewConfig(shardDoc, embed.id, { sort: { mode: 'manual' } }, human)
 		);
 
-		writeRecord(human, embed.id, { viewConfigPatch: { groupBy: 'priority' } });
+		writeRecord(resolveRequestContext(human), embed.id, {
+			viewConfigPatch: { groupBy: 'priority' }
+		});
 
-		const result = getDocument(human, doc.id);
+		const result = getDocument(resolveRequestContext(human), doc.id);
 		expect(result?.records.find((r) => r.id === embed.id)?.viewConfig).toEqual({
 			viewType: 'board',
 			groupBy: 'priority',
@@ -1149,18 +1222,20 @@ describe('service layer: write_record viewConfigPatch — per-member merge witho
 	});
 
 	it('clears a member explicitly set to undefined in the patch, leaving the rest untouched', () => {
-		const target = createCollection(human, { title: 'Tasks', schema: [] });
-		const doc = createDocument(human, { title: 'Doc' });
-		const embed = createRecord(human, {
+		const target = createCollection(resolveRequestContext(human), { title: 'Tasks', schema: [] });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const embed = createRecord(resolveRequestContext(human), {
 			parentId: doc.id,
 			blockType: 'collection_view',
 			referencedRecordId: target.id,
 			viewConfig: { viewType: 'board', groupBy: 'status', visibleProperties: ['status'] }
 		});
 
-		writeRecord(human, embed.id, { viewConfigPatch: { groupBy: undefined } });
+		writeRecord(resolveRequestContext(human), embed.id, {
+			viewConfigPatch: { groupBy: undefined }
+		});
 
-		const result = getDocument(human, doc.id);
+		const result = getDocument(resolveRequestContext(human), doc.id);
 		expect(result?.records.find((r) => r.id === embed.id)?.viewConfig).toEqual({
 			viewType: 'board',
 			visibleProperties: ['status']
@@ -1177,32 +1252,39 @@ describe('service layer: write_record viewConfigPatch — per-member merge witho
 	});
 
 	it('rejects viewConfigPatch on a block that is not collection_view', () => {
-		const doc = createDocument(human, { title: 'Doc' });
-		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'paragraph'
+		});
 
-		expect(() => writeRecord(human, block.id, { viewConfigPatch: { groupBy: 'status' } })).toThrow(
-			/collection_view/
-		);
+		expect(() =>
+			writeRecord(resolveRequestContext(human), block.id, {
+				viewConfigPatch: { groupBy: 'status' }
+			})
+		).toThrow(/collection_view/);
 	});
 
 	it('rejects viewConfigPatch on a collection_view block that has no viewConfig yet', () => {
-		const target = createCollection(human, { title: 'Tasks', schema: [] });
-		const doc = createDocument(human, { title: 'Doc' });
-		const embed = createRecord(human, {
+		const target = createCollection(resolveRequestContext(human), { title: 'Tasks', schema: [] });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const embed = createRecord(resolveRequestContext(human), {
 			parentId: doc.id,
 			blockType: 'collection_view',
 			referencedRecordId: target.id
 		});
 
-		expect(() => writeRecord(human, embed.id, { viewConfigPatch: { groupBy: 'status' } })).toThrow(
-			/already be configured/
-		);
+		expect(() =>
+			writeRecord(resolveRequestContext(human), embed.id, {
+				viewConfigPatch: { groupBy: 'status' }
+			})
+		).toThrow(/already be configured/);
 	});
 
 	it('rejects a write_record call that supplies both viewConfig and viewConfigPatch', () => {
-		const target = createCollection(human, { title: 'Tasks', schema: [] });
-		const doc = createDocument(human, { title: 'Doc' });
-		const embed = createRecord(human, {
+		const target = createCollection(resolveRequestContext(human), { title: 'Tasks', schema: [] });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const embed = createRecord(resolveRequestContext(human), {
 			parentId: doc.id,
 			blockType: 'collection_view',
 			referencedRecordId: target.id,
@@ -1210,7 +1292,7 @@ describe('service layer: write_record viewConfigPatch — per-member merge witho
 		});
 
 		expect(() =>
-			writeRecord(human, embed.id, {
+			writeRecord(resolveRequestContext(human), embed.id, {
 				viewConfig: { viewType: 'board' },
 				viewConfigPatch: { groupBy: 'status' }
 			})
@@ -1220,21 +1302,21 @@ describe('service layer: write_record viewConfigPatch — per-member merge witho
 
 describe('service layer: documents — unfiltered listing, delete, and rename', () => {
 	it('listDocuments returns every document, unfiltered, for a human caller', () => {
-		createDocument(human, { title: 'Doc One' });
-		createDocument(human, { title: 'Doc Two' });
-		const docs = listDocuments(human);
+		createDocument(resolveRequestContext(human), { title: 'Doc One' });
+		createDocument(resolveRequestContext(human), { title: 'Doc Two' });
+		const docs = listDocuments(resolveRequestContext(human));
 		expect(docs.length).toBeGreaterThanOrEqual(2);
 	});
 
 	it('listDocuments filters to only what a token was granted', () => {
-		const docAllowed = createDocument(human, { title: 'Allowed' });
-		createDocument(human, { title: 'Not Allowed' });
+		const docAllowed = createDocument(resolveRequestContext(human), { title: 'Allowed' });
+		createDocument(resolveRequestContext(human), { title: 'Not Allowed' });
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Scoped Lister',
 			allowedDocumentIds: [docAllowed.id],
 			allowedCollectionIds: []
 		});
-		const docs = listDocuments(tokenRecord);
+		const docs = listDocuments(resolveRequestContext(tokenRecord));
 		expect(docs).toHaveLength(1);
 		expect(docs[0].id).toBe(docAllowed.id);
 	});
@@ -1249,15 +1331,17 @@ describe('service layer: documents — unfiltered listing, delete, and rename', 
 			allowedCollectionIds: []
 		});
 
-		const docs = listDocuments(tokenRecord);
+		const docs = listDocuments(resolveRequestContext(tokenRecord));
 		expect(docs.some((d) => d.id === uncataloged.id)).toBe(false);
 	});
 
 	it('moveDocument reorders among top-level siblings without a parentDocumentId', () => {
-		const docA = createDocument(human, { title: 'Top A' });
-		const docB = createDocument(human, { title: 'Top B' });
+		const docA = createDocument(resolveRequestContext(human), { title: 'Top A' });
+		const docB = createDocument(resolveRequestContext(human), { title: 'Top B' });
 
-		expect(() => moveDocument(human, docB.id, { afterDocumentId: docA.id })).not.toThrow();
+		expect(() =>
+			moveDocument(resolveRequestContext(human), docB.id, { afterDocumentId: docA.id })
+		).not.toThrow();
 	});
 
 	it('createDocument does not double-push an id a token was already pre-authorized for', () => {
@@ -1268,45 +1352,47 @@ describe('service layer: documents — unfiltered listing, delete, and rename', 
 			allowedCollectionIds: []
 		});
 
-		createDocument(tokenRecord, { id: preassignedId, title: 'Preassigned' });
+		createDocument(resolveRequestContext(tokenRecord), { id: preassignedId, title: 'Preassigned' });
 
 		expect(tokenRecord.allowedDocumentIds.filter((id) => id === preassignedId)).toHaveLength(1);
 	});
 
 	it('updateDocumentTitle renames a document and logs the change', () => {
-		const doc = createDocument(human, { title: 'Before' });
-		updateDocumentTitle(human, doc.id, 'After');
-		expect(getDocument(human, doc.id)?.title).toBe('After');
+		const doc = createDocument(resolveRequestContext(human), { title: 'Before' });
+		updateDocumentTitle(resolveRequestContext(human), doc.id, 'After');
+		expect(getDocument(resolveRequestContext(human), doc.id)?.title).toBe('After');
 	});
 
 	it('deleteDocument removes a document a caller can access', () => {
-		const doc = createDocument(human, { title: 'To Delete' });
-		deleteDocument(human, doc.id);
-		expect(getDocument(human, doc.id)).toBeNull();
+		const doc = createDocument(resolveRequestContext(human), { title: 'To Delete' });
+		deleteDocument(resolveRequestContext(human), doc.id);
+		expect(getDocument(resolveRequestContext(human), doc.id)).toBeNull();
 	});
 
 	it('deleteDocument is denied for a token without access to the parent', () => {
-		const doc = createDocument(human, { title: 'Protected' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Protected' });
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'No Access Bot',
 			allowedDocumentIds: [],
 			allowedCollectionIds: []
 		});
-		expect(() => deleteDocument(tokenRecord, doc.id)).toThrow(PermissionDeniedError);
+		expect(() => deleteDocument(resolveRequestContext(tokenRecord), doc.id)).toThrow(
+			PermissionDeniedError
+		);
 	});
 });
 
 describe('service layer: listBacklinks — cross-shard reverse-link fan-out (issue #83)', () => {
 	it('finds a page_link block in a different Document pointing at the target', () => {
-		const target = createDocument(human, { title: 'Target Doc' });
-		const source = createDocument(human, { title: 'Source Doc' });
-		const block = createRecord(human, {
+		const target = createDocument(resolveRequestContext(human), { title: 'Target Doc' });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
+		const block = createRecord(resolveRequestContext(human), {
 			parentId: source.id,
 			blockType: 'page_link',
 			referencedRecordId: target.id
 		});
 
-		const backlinks = listBacklinks(human, target.id);
+		const backlinks = listBacklinks(resolveRequestContext(human), target.id);
 
 		expect(backlinks).toHaveLength(1);
 		expect(backlinks[0]).toEqual({
@@ -1318,12 +1404,17 @@ describe('service layer: listBacklinks — cross-shard reverse-link fan-out (iss
 	});
 
 	it('finds an inline [[wiki link]] mark pointing at the target, using the block text as context', () => {
-		const target = createDocument(human, { title: 'Target Doc' });
-		const source = createDocument(human, { title: 'Source Doc' });
-		const block = createRecord(human, { parentId: source.id, blockType: 'paragraph' });
-		writeRecord(human, block.id, { markdown: 'See [[Target Doc]] for more.' });
+		const target = createDocument(resolveRequestContext(human), { title: 'Target Doc' });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: source.id,
+			blockType: 'paragraph'
+		});
+		writeRecord(resolveRequestContext(human), block.id, {
+			markdown: 'See [[Target Doc]] for more.'
+		});
 
-		const backlinks = listBacklinks(human, target.id);
+		const backlinks = listBacklinks(resolveRequestContext(human), target.id);
 
 		expect(backlinks).toHaveLength(1);
 		expect(backlinks[0].sourceDocumentId).toBe(source.id);
@@ -1332,36 +1423,36 @@ describe('service layer: listBacklinks — cross-shard reverse-link fan-out (iss
 	});
 
 	it('excludes links pointing at a different Document', () => {
-		const target = createDocument(human, { title: 'Target Doc' });
-		const other = createDocument(human, { title: 'Other Doc' });
-		const source = createDocument(human, { title: 'Source Doc' });
-		createRecord(human, {
+		const target = createDocument(resolveRequestContext(human), { title: 'Target Doc' });
+		const other = createDocument(resolveRequestContext(human), { title: 'Other Doc' });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
+		createRecord(resolveRequestContext(human), {
 			parentId: source.id,
 			blockType: 'page_link',
 			referencedRecordId: other.id
 		});
 
-		expect(listBacklinks(human, target.id)).toEqual([]);
+		expect(listBacklinks(resolveRequestContext(human), target.id)).toEqual([]);
 	});
 
 	it('reflects a source edit live — not a cached title/context', () => {
-		const target = createDocument(human, { title: 'Target Doc' });
-		const source = createDocument(human, { title: 'Source Doc' });
-		createRecord(human, {
+		const target = createDocument(resolveRequestContext(human), { title: 'Target Doc' });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
+		createRecord(resolveRequestContext(human), {
 			parentId: source.id,
 			blockType: 'page_link',
 			referencedRecordId: target.id
 		});
-		updateDocumentTitle(human, source.id, 'Renamed Source');
+		updateDocumentTitle(resolveRequestContext(human), source.id, 'Renamed Source');
 
-		const backlinks = listBacklinks(human, target.id);
+		const backlinks = listBacklinks(resolveRequestContext(human), target.id);
 		expect(backlinks[0].sourceDocumentTitle).toBe('Renamed Source');
 	});
 
 	it('omits a backlink whose source Document a token was not granted', () => {
-		const target = createDocument(human, { title: 'Target Doc' });
-		const source = createDocument(human, { title: 'Source Doc' });
-		createRecord(human, {
+		const target = createDocument(resolveRequestContext(human), { title: 'Target Doc' });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
+		createRecord(resolveRequestContext(human), {
 			parentId: source.id,
 			blockType: 'page_link',
 			referencedRecordId: target.id
@@ -1372,13 +1463,13 @@ describe('service layer: listBacklinks — cross-shard reverse-link fan-out (iss
 			allowedCollectionIds: []
 		});
 
-		expect(listBacklinks(tokenRecord, target.id)).toEqual([]);
+		expect(listBacklinks(resolveRequestContext(tokenRecord), target.id)).toEqual([]);
 	});
 
 	it('includes the backlink once the token is also granted the source Document', () => {
-		const target = createDocument(human, { title: 'Target Doc' });
-		const source = createDocument(human, { title: 'Source Doc' });
-		createRecord(human, {
+		const target = createDocument(resolveRequestContext(human), { title: 'Target Doc' });
+		const source = createDocument(resolveRequestContext(human), { title: 'Source Doc' });
+		createRecord(resolveRequestContext(human), {
 			parentId: source.id,
 			blockType: 'page_link',
 			referencedRecordId: target.id
@@ -1389,24 +1480,26 @@ describe('service layer: listBacklinks — cross-shard reverse-link fan-out (iss
 			allowedCollectionIds: []
 		});
 
-		const backlinks = listBacklinks(tokenRecord, target.id);
+		const backlinks = listBacklinks(resolveRequestContext(tokenRecord), target.id);
 		expect(backlinks.some((b) => b.sourceDocumentId === source.id)).toBe(true);
 	});
 
 	it('is denied for a token without access to the target Document itself', () => {
-		const target = createDocument(human, { title: 'Target Doc' });
+		const target = createDocument(resolveRequestContext(human), { title: 'Target Doc' });
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'No Access Bot',
 			allowedDocumentIds: [],
 			allowedCollectionIds: []
 		});
 
-		expect(() => listBacklinks(tokenRecord, target.id)).toThrow(PermissionDeniedError);
+		expect(() => listBacklinks(resolveRequestContext(tokenRecord), target.id)).toThrow(
+			PermissionDeniedError
+		);
 	});
 
 	it('logs an audit entry attributed to the target Document', () => {
-		const target = createDocument(human, { title: 'Target Doc' });
-		listBacklinks(human, target.id);
+		const target = createDocument(resolveRequestContext(human), { title: 'Target Doc' });
+		listBacklinks(resolveRequestContext(human), target.id);
 
 		const entries = queryAuditLog().filter((e) => e.targetRecordId === target.id);
 		expect(entries.some((e) => e.action === 'list_backlinks')).toBe(true);
@@ -1420,20 +1513,25 @@ describe('service layer: collections — grants, listing, query, delete, rename'
 			allowedDocumentIds: [],
 			allowedCollectionIds: []
 		});
-		const collection = createCollection(tokenRecord, { title: 'Bot-created Table' });
-		const { collection: queried } = queryCollection(tokenRecord, collection.id);
+		const collection = createCollection(resolveRequestContext(tokenRecord), {
+			title: 'Bot-created Table'
+		});
+		const { collection: queried } = queryCollection(
+			resolveRequestContext(tokenRecord),
+			collection.id
+		);
 		expect(queried?.id).toBe(collection.id);
 	});
 
 	it('listCollections filters to only what a token was granted', () => {
-		const colAllowed = createCollection(human, { title: 'Allowed Table' });
-		createCollection(human, { title: 'Not Allowed Table' });
+		const colAllowed = createCollection(resolveRequestContext(human), { title: 'Allowed Table' });
+		createCollection(resolveRequestContext(human), { title: 'Not Allowed Table' });
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Scoped Collection Lister',
 			allowedDocumentIds: [],
 			allowedCollectionIds: [colAllowed.id]
 		});
-		const collections = listCollections(tokenRecord);
+		const collections = listCollections(resolveRequestContext(tokenRecord));
 		expect(collections).toHaveLength(1);
 		expect(collections[0].id).toBe(colAllowed.id);
 	});
@@ -1444,39 +1542,42 @@ describe('service layer: collections — grants, listing, query, delete, rename'
 			allowedDocumentIds: [],
 			allowedCollectionIds: ['never-created']
 		});
-		const { collection, records } = queryCollection(tokenRecord, 'never-created');
+		const { collection, records } = queryCollection(
+			resolveRequestContext(tokenRecord),
+			'never-created'
+		);
 		expect(collection).toBeUndefined();
 		expect(records).toEqual([]);
 	});
 
 	it('updateCollectionTitle renames a collection', () => {
-		const collection = createCollection(human, { title: 'Before' });
-		updateCollectionTitle(human, collection.id, 'After');
-		const { collection: updated } = queryCollection(human, collection.id);
+		const collection = createCollection(resolveRequestContext(human), { title: 'Before' });
+		updateCollectionTitle(resolveRequestContext(human), collection.id, 'After');
+		const { collection: updated } = queryCollection(resolveRequestContext(human), collection.id);
 		expect(updated?.title).toBe('After');
 	});
 
 	describe('Collection titles are unique per-Space (issue #78)', () => {
 		it('createCollection rejects a title already used by another Collection in the same Space', () => {
-			createCollection(human, { title: 'Sprint Tasks' });
-			expect(() => createCollection(human, { title: 'Sprint Tasks' })).toThrow(
-				DuplicateCollectionTitleError
-			);
+			createCollection(resolveRequestContext(human), { title: 'Sprint Tasks' });
+			expect(() =>
+				createCollection(resolveRequestContext(human), { title: 'Sprint Tasks' })
+			).toThrow(DuplicateCollectionTitleError);
 		});
 
 		it('createCollection treats a colliding title as case-insensitive and trims whitespace', () => {
-			createCollection(human, { title: 'Sprint Tasks' });
-			expect(() => createCollection(human, { title: '  sprint tasks  ' })).toThrow(
-				DuplicateCollectionTitleError
-			);
+			createCollection(resolveRequestContext(human), { title: 'Sprint Tasks' });
+			expect(() =>
+				createCollection(resolveRequestContext(human), { title: '  sprint tasks  ' })
+			).toThrow(DuplicateCollectionTitleError);
 		});
 
 		it('createCollection allows the same title in a different Space', () => {
 			const { workspaceId } = resolveWorkspaceContext();
 			const otherSpace = catalogCreateSpace(workspaceId, 'Other Space');
 
-			createCollection(human, { title: 'Sprint Tasks' });
-			const inOtherSpace = createCollection(human, {
+			createCollection(resolveRequestContext(human), { title: 'Sprint Tasks' });
+			const inOtherSpace = createCollection(resolveRequestContext(human), {
 				title: 'Sprint Tasks',
 				spaceId: otherSpace.id
 			});
@@ -1484,28 +1585,30 @@ describe('service layer: collections — grants, listing, query, delete, rename'
 		});
 
 		it('updateCollectionTitle rejects renaming to a title already used by another Collection in the same Space', () => {
-			createCollection(human, { title: 'Sprint Tasks' });
-			const other = createCollection(human, { title: 'Launch Tracker' });
-			expect(() => updateCollectionTitle(human, other.id, 'Sprint Tasks')).toThrow(
-				DuplicateCollectionTitleError
-			);
+			createCollection(resolveRequestContext(human), { title: 'Sprint Tasks' });
+			const other = createCollection(resolveRequestContext(human), { title: 'Launch Tracker' });
+			expect(() =>
+				updateCollectionTitle(resolveRequestContext(human), other.id, 'Sprint Tasks')
+			).toThrow(DuplicateCollectionTitleError);
 		});
 
 		it('updateCollectionTitle allows renaming a Collection to its own current title unchanged', () => {
-			const collection = createCollection(human, { title: 'Sprint Tasks' });
-			expect(() => updateCollectionTitle(human, collection.id, 'Sprint Tasks')).not.toThrow();
+			const collection = createCollection(resolveRequestContext(human), { title: 'Sprint Tasks' });
+			expect(() =>
+				updateCollectionTitle(resolveRequestContext(human), collection.id, 'Sprint Tasks')
+			).not.toThrow();
 		});
 	});
 
 	it('deleteCollection removes a collection a caller can access', () => {
-		const collection = createCollection(human, { title: 'To Delete' });
-		deleteCollection(human, collection.id);
-		const { collection: after } = queryCollection(human, collection.id);
+		const collection = createCollection(resolveRequestContext(human), { title: 'To Delete' });
+		deleteCollection(resolveRequestContext(human), collection.id);
+		const { collection: after } = queryCollection(resolveRequestContext(human), collection.id);
 		expect(after).toBeUndefined();
 	});
 
 	it('createCollection assigns a real, distinct shard — its own id — not the default doc (#120)', () => {
-		const collection = createCollection(human, { title: 'Sharded' });
+		const collection = createCollection(resolveRequestContext(human), { title: 'Sharded' });
 
 		const { workspaceId } = resolveWorkspaceContext();
 		const shardDoc = resolveWorkspaceContext({ workspaceId, shardId: collection.id }).doc;
@@ -1516,7 +1619,9 @@ describe('service layer: collections — grants, listing, query, delete, rename'
 
 		// listCollections finds it via the catalog fan-out, reading full
 		// CollectionMeta (schema) from its real shard.
-		const listed = listCollections(human).find((c) => c.id === collection.id);
+		const listed = listCollections(resolveRequestContext(human)).find(
+			(c) => c.id === collection.id
+		);
 		expect(listed?.title).toBe('Sharded');
 	});
 
@@ -1528,7 +1633,11 @@ describe('service layer: collections — grants, listing, query, delete, rename'
 			allowedCollectionIds: [preassignedId]
 		});
 
-		createCollection(tokenRecord, { id: preassignedId, title: 'Preassigned', schema: [] });
+		createCollection(resolveRequestContext(tokenRecord), {
+			id: preassignedId,
+			title: 'Preassigned',
+			schema: []
+		});
 
 		expect(tokenRecord.allowedCollectionIds.filter((id) => id === preassignedId)).toHaveLength(1);
 	});
@@ -1544,124 +1653,171 @@ describe('service layer: collections — grants, listing, query, delete, rename'
 			allowedCollectionIds: []
 		});
 
-		const results = listCollections(tokenRecord);
+		const results = listCollections(resolveRequestContext(tokenRecord));
 		expect(results.some((c) => c.id === uncataloged.id)).toBe(false);
 	});
 });
 
 describe('service layer: records — write validation, delete, and direct read', () => {
 	it('writeRecord throws when given neither markdown nor properties', () => {
-		const doc = createDocument(human, { title: 'Doc' });
-		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
-		expect(() => writeRecord(human, block.id, {})).toThrow(
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'paragraph'
+		});
+		expect(() => writeRecord(resolveRequestContext(human), block.id, {})).toThrow(
 			/markdown, properties, referencedRecordId, viewConfig, or viewConfigPatch/
 		);
 	});
 
 	it('writeRecord as a human caller applies markdown without needing a hold', () => {
-		const doc = createDocument(human, { title: 'Doc' });
-		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
-		writeRecord(human, block.id, { markdown: 'human authored text' });
-		expect(getDocument(human, doc.id)?.records[0].markdown).toBe('human authored text');
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'paragraph'
+		});
+		writeRecord(resolveRequestContext(human), block.id, { markdown: 'human authored text' });
+		expect(getDocument(resolveRequestContext(human), doc.id)?.records[0].markdown).toBe(
+			'human authored text'
+		);
 	});
 
 	it('writeRecord applies properties to a collection row', () => {
-		const collection = createCollection(human, {
+		const collection = createCollection(resolveRequestContext(human), {
 			title: 'Tasks',
 			schema: [{ key: 'status', label: 'Status', type: 'select' }]
 		});
-		const row = createRecord(human, {
+		const row = createRecord(resolveRequestContext(human), {
 			parentId: collection.id,
 			properties: { status: { type: 'select', value: 'todo' } }
 		});
-		writeRecord(human, row.id, { properties: { status: { type: 'select', value: 'done' } } });
-		expect(getRecord(human, row.id)?.properties?.status).toEqual({
+		writeRecord(resolveRequestContext(human), row.id, {
+			properties: { status: { type: 'select', value: 'done' } }
+		});
+		expect(getRecord(resolveRequestContext(human), row.id)?.properties?.status).toEqual({
 			type: 'select',
 			value: 'done'
 		});
 	});
 
 	it('deleteRecord removes a record a caller can access', () => {
-		const doc = createDocument(human, { title: 'Doc' });
-		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
-		deleteRecord(human, block.id);
-		expect(() => getRecord(human, block.id)).toThrow(PermissionDeniedError);
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'paragraph'
+		});
+		deleteRecord(resolveRequestContext(human), block.id);
+		expect(() => getRecord(resolveRequestContext(human), block.id)).toThrow(PermissionDeniedError);
 	});
 
 	it('getRecord returns the record for a caller who can access its parent', () => {
-		const doc = createDocument(human, { title: 'Doc' });
-		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
-		expect(getRecord(human, block.id)?.id).toBe(block.id);
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'paragraph'
+		});
+		expect(getRecord(resolveRequestContext(human), block.id)?.id).toBe(block.id);
 	});
 });
 
 describe('service layer: columns block nesting and its container-parent permission scoping (issue #148)', () => {
 	it('createRecord with blockType "columns" seeds 2 columns by default, each with one paragraph', () => {
-		const doc = createDocument(human, { title: 'Layout' });
-		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Layout' });
+		const columns = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'columns'
+		});
 		expect(columns.childRecordIds).toHaveLength(2);
 		for (const columnId of columns.childRecordIds!) {
-			expect(getRecord(human, columnId)?.blockType).toBe('column');
-			expect(getRecord(human, columnId)?.childRecordIds).toHaveLength(1);
+			expect(getRecord(resolveRequestContext(human), columnId)?.blockType).toBe('column');
+			expect(getRecord(resolveRequestContext(human), columnId)?.childRecordIds).toHaveLength(1);
 		}
 	});
 
 	it('honors a custom columnCount', () => {
-		const doc = createDocument(human, { title: 'Layout' });
-		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns', columnCount: 3 });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Layout' });
+		const columns = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'columns',
+			columnCount: 3
+		});
 		expect(columns.childRecordIds).toHaveLength(3);
 	});
 
 	it('rejects columnCount outside the 2-6 range', () => {
-		const doc = createDocument(human, { title: 'Layout' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Layout' });
 		expect(() =>
-			createRecord(human, { parentId: doc.id, blockType: 'columns', columnCount: 1 })
+			createRecord(resolveRequestContext(human), {
+				parentId: doc.id,
+				blockType: 'columns',
+				columnCount: 1
+			})
 		).toThrow(/columnCount/);
 		expect(() =>
-			createRecord(human, { parentId: doc.id, blockType: 'columns', columnCount: 7 })
+			createRecord(resolveRequestContext(human), {
+				parentId: doc.id,
+				blockType: 'columns',
+				columnCount: 7
+			})
 		).toThrow(/columnCount/);
 	});
 
 	it('rejects columnCount on a non-columns block', () => {
-		const doc = createDocument(human, { title: 'Layout' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Layout' });
 		expect(() =>
-			createRecord(human, { parentId: doc.id, blockType: 'paragraph', columnCount: 2 })
+			createRecord(resolveRequestContext(human), {
+				parentId: doc.id,
+				blockType: 'paragraph',
+				columnCount: 2
+			})
 		).toThrow(/columnCount/);
 	});
 
 	it('rejects a column block created directly inside a Document', () => {
-		const doc = createDocument(human, { title: 'Layout' });
-		expect(() => createRecord(human, { parentId: doc.id, blockType: 'column' })).toThrow(
-			/column blocks can only be created directly inside a columns block/
-		);
+		const doc = createDocument(resolveRequestContext(human), { title: 'Layout' });
+		expect(() =>
+			createRecord(resolveRequestContext(human), { parentId: doc.id, blockType: 'column' })
+		).toThrow(/column blocks can only be created directly inside a columns block/);
 	});
 
 	it('rejects a nested columns block inside a column', () => {
-		const doc = createDocument(human, { title: 'Layout' });
-		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Layout' });
+		const columns = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'columns'
+		});
 		const [columnId] = columns.childRecordIds!;
-		expect(() => createRecord(human, { parentId: columnId, blockType: 'columns' })).toThrow(
-			/columns blocks can only be created directly inside a Document/
-		);
+		expect(() =>
+			createRecord(resolveRequestContext(human), { parentId: columnId, blockType: 'columns' })
+		).toThrow(/columns blocks can only be created directly inside a Document/);
 	});
 
 	it('rejects an unsupported block type inside a column', () => {
-		const doc = createDocument(human, { title: 'Layout' });
-		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Layout' });
+		const columns = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'columns'
+		});
 		const [columnId] = columns.childRecordIds!;
-		expect(() => createRecord(human, { parentId: columnId, blockType: 'callout' })).toThrow(
-			/cannot be created inside a column/
-		);
+		expect(() =>
+			createRecord(resolveRequestContext(human), { parentId: columnId, blockType: 'callout' })
+		).toThrow(/cannot be created inside a column/);
 	});
 
 	it('allows a curated block type to be created inside a column, nested under the columns block in getDocument', () => {
-		const doc = createDocument(human, { title: 'Layout' });
-		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Layout' });
+		const columns = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'columns'
+		});
 		const [columnId] = columns.childRecordIds!;
-		const heading = createRecord(human, { parentId: columnId, blockType: 'heading_2' });
-		writeRecord(human, heading.id, { markdown: '## Column heading' });
+		const heading = createRecord(resolveRequestContext(human), {
+			parentId: columnId,
+			blockType: 'heading_2'
+		});
+		writeRecord(resolveRequestContext(human), heading.id, { markdown: '## Column heading' });
 
-		const projected = getDocument(human, doc.id)!;
+		const projected = getDocument(resolveRequestContext(human), doc.id)!;
 		expect(projected.records).toHaveLength(1); // only the columns block is top-level
 		const columnsView = projected.records[0];
 		expect(columnsView.blockType).toBe('columns');
@@ -1670,8 +1826,11 @@ describe('service layer: columns block nesting and its container-parent permissi
 	});
 
 	it('a token granted only the owning Document can create, write, and delete a block nested inside one of its columns', () => {
-		const doc = createDocument(human, { title: 'Scoped Layout' });
-		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Scoped Layout' });
+		const columns = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'columns'
+		});
 		const [columnId] = columns.childRecordIds!;
 
 		const { record: tokenRecord } = createToken({
@@ -1683,17 +1842,25 @@ describe('service layer: columns block nesting and its container-parent permissi
 		// The column's own id is never in the token's allowlist — access must
 		// resolve up to the owning Document (doc.id) instead (see
 		// resolveOwningParentId in services/permissions.ts).
-		const block = createRecord(tokenRecord, { parentId: columnId, blockType: 'paragraph' });
-		holdRecords(tokenRecord, [block.id]);
-		writeRecord(tokenRecord, block.id, { markdown: 'written by an agent' });
-		expect(getRecord(tokenRecord, block.id)?.id).toBe(block.id);
-		deleteRecord(tokenRecord, block.id);
-		expect(() => getRecord(tokenRecord, block.id)).toThrow(PermissionDeniedError);
+		const block = createRecord(resolveRequestContext(tokenRecord), {
+			parentId: columnId,
+			blockType: 'paragraph'
+		});
+		holdRecords(resolveRequestContext(tokenRecord), [block.id]);
+		writeRecord(resolveRequestContext(tokenRecord), block.id, { markdown: 'written by an agent' });
+		expect(getRecord(resolveRequestContext(tokenRecord), block.id)?.id).toBe(block.id);
+		deleteRecord(resolveRequestContext(tokenRecord), block.id);
+		expect(() => getRecord(resolveRequestContext(tokenRecord), block.id)).toThrow(
+			PermissionDeniedError
+		);
 	});
 
 	it('a token not granted the owning Document is denied creating a block inside one of its columns', () => {
-		const doc = createDocument(human, { title: 'Unscoped Layout' });
-		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Unscoped Layout' });
+		const columns = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'columns'
+		});
 		const [columnId] = columns.childRecordIds!;
 
 		const { record: tokenRecord } = createToken({
@@ -1702,50 +1869,75 @@ describe('service layer: columns block nesting and its container-parent permissi
 			allowedCollectionIds: []
 		});
 
-		expect(() => createRecord(tokenRecord, { parentId: columnId, blockType: 'paragraph' })).toThrow(
+		expect(() =>
+			createRecord(resolveRequestContext(tokenRecord), {
+				parentId: columnId,
+				blockType: 'paragraph'
+			})
+		).toThrow(PermissionDeniedError);
+	});
+
+	it('deleteRecord on the columns block removes every column and their content', () => {
+		const doc = createDocument(resolveRequestContext(human), { title: 'Layout' });
+		const columns = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'columns'
+		});
+		const [columnId] = columns.childRecordIds!;
+		const heading = createRecord(resolveRequestContext(human), {
+			parentId: columnId,
+			blockType: 'heading_2'
+		});
+
+		deleteRecord(resolveRequestContext(human), columns.id);
+
+		expect(() => getRecord(resolveRequestContext(human), columns.id)).toThrow(
+			PermissionDeniedError
+		);
+		expect(() => getRecord(resolveRequestContext(human), columnId)).toThrow(PermissionDeniedError);
+		expect(() => getRecord(resolveRequestContext(human), heading.id)).toThrow(
 			PermissionDeniedError
 		);
 	});
 
-	it('deleteRecord on the columns block removes every column and their content', () => {
-		const doc = createDocument(human, { title: 'Layout' });
-		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
-		const [columnId] = columns.childRecordIds!;
-		const heading = createRecord(human, { parentId: columnId, blockType: 'heading_2' });
-
-		deleteRecord(human, columns.id);
-
-		expect(() => getRecord(human, columns.id)).toThrow(PermissionDeniedError);
-		expect(() => getRecord(human, columnId)).toThrow(PermissionDeniedError);
-		expect(() => getRecord(human, heading.id)).toThrow(PermissionDeniedError);
-	});
-
 	it('write_record rejects a markdown write directly on a columns or column block (its content has nowhere to render)', () => {
-		const doc = createDocument(human, { title: 'Layout' });
-		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Layout' });
+		const columns = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'columns'
+		});
 		const [columnId] = columns.childRecordIds!;
 
-		expect(() => writeRecord(human, columns.id, { markdown: 'lost' })).toThrow(
-			/cannot be written to a columns or column block/
-		);
-		expect(() => writeRecord(human, columnId, { markdown: 'also lost' })).toThrow(
-			/cannot be written to a columns or column block/
-		);
+		expect(() =>
+			writeRecord(resolveRequestContext(human), columns.id, { markdown: 'lost' })
+		).toThrow(/cannot be written to a columns or column block/);
+		expect(() =>
+			writeRecord(resolveRequestContext(human), columnId, { markdown: 'also lost' })
+		).toThrow(/cannot be written to a columns or column block/);
 	});
 
 	it('rejects growing a columns block past the maximum of 6 columns via create_record', () => {
-		const doc = createDocument(human, { title: 'Layout' });
-		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns', columnCount: 6 });
-		expect(() => createRecord(human, { parentId: columns.id, blockType: 'column' })).toThrow(
-			/at most 6 columns/
-		);
+		const doc = createDocument(resolveRequestContext(human), { title: 'Layout' });
+		const columns = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'columns',
+			columnCount: 6
+		});
+		expect(() =>
+			createRecord(resolveRequestContext(human), { parentId: columns.id, blockType: 'column' })
+		).toThrow(/at most 6 columns/);
 	});
 
 	it('rejects deleting a column that would leave a columns block below the minimum of 2', () => {
-		const doc = createDocument(human, { title: 'Layout' });
-		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' }); // default 2
+		const doc = createDocument(resolveRequestContext(human), { title: 'Layout' });
+		const columns = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'columns'
+		}); // default 2
 		const [columnId] = columns.childRecordIds!;
-		expect(() => deleteRecord(human, columnId)).toThrow(/at least 2 columns/);
+		expect(() => deleteRecord(resolveRequestContext(human), columnId)).toThrow(
+			/at least 2 columns/
+		);
 	});
 
 	it("reserves a locator for the paragraph auto-seeded by a bare column create, so writes to it resolve to the Document's real shard rather than silently missing it", () => {
@@ -1757,18 +1949,26 @@ describe('service layer: columns block nesting and its container-parent permissi
 		// createRecord only reserved a locator for the column itself, not for
 		// the paragraph it auto-seeds inside its own recordIds array.
 		const { workspaceId } = resolveWorkspaceContext();
-		const doc = createDocument(human, { title: 'Layout' });
-		const columns = createRecord(human, { parentId: doc.id, blockType: 'columns' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Layout' });
+		const columns = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'columns'
+		});
 
-		const newColumn = createRecord(human, { parentId: columns.id, blockType: 'column' });
+		const newColumn = createRecord(resolveRequestContext(human), {
+			parentId: columns.id,
+			blockType: 'column'
+		});
 		expect(newColumn.childRecordIds).toHaveLength(1);
 		const [seededParagraphId] = newColumn.childRecordIds!;
 
 		expect(resolveShardForRecord(workspaceId, seededParagraphId)).toEqual({ shardId: doc.id });
 
-		writeRecord(human, seededParagraphId, { markdown: 'written from a bare column' });
+		writeRecord(resolveRequestContext(human), seededParagraphId, {
+			markdown: 'written from a bare column'
+		});
 		expect(
-			getRecord(human, seededParagraphId)
+			getRecord(resolveRequestContext(human), seededParagraphId)
 				?.content?.runs.map((r) => r.text)
 				.join('')
 		).toBe('written from a bare column');
@@ -1777,38 +1977,46 @@ describe('service layer: columns block nesting and its container-parent permissi
 
 describe('service layer: holds — human caller path and permission-denied records', () => {
 	it('a human caller holding an inaccessible/nonexistent record is denied that one record only', () => {
-		const doc = createDocument(human, { title: 'Doc' });
-		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
-		const result = holdRecords(human, [block.id, 'nonexistent']);
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'paragraph'
+		});
+		const result = holdRecords(resolveRequestContext(human), [block.id, 'nonexistent']);
 		expect(result.granted).toContain(block.id);
 		expect(result.denied).toContain('nonexistent');
 	});
 
 	it('releaseRecords for a human caller is a logged no-op (holds are agent-only)', () => {
-		const doc = createDocument(human, { title: 'Doc' });
-		const block = createRecord(human, { parentId: doc.id, blockType: 'paragraph' });
-		expect(() => releaseRecords(human, [block.id])).not.toThrow();
+		const doc = createDocument(resolveRequestContext(human), { title: 'Doc' });
+		const block = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'paragraph'
+		});
+		expect(() => releaseRecords(resolveRequestContext(human), [block.id])).not.toThrow();
 	});
 });
 
 describe('service layer: permissions — record-not-found path', () => {
 	it('throws PermissionDeniedError for a nonexistent record before any parent check', () => {
-		expect(() => getRecord(human, 'nonexistent')).toThrow(PermissionDeniedError);
+		expect(() => getRecord(resolveRequestContext(human), 'nonexistent')).toThrow(
+			PermissionDeniedError
+		);
 	});
 });
 
 describe('service layer: denied access attempts are themselves audited (docs/specifications/audit-coverage.md §3)', () => {
 	it('logs a create_record_denied event, attributed to the token, when a token lacks access to the parent', () => {
-		const doc = createDocument(human, { title: 'Denial Audit Doc' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Denial Audit Doc' });
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Denied Bot',
 			allowedDocumentIds: [],
 			allowedCollectionIds: []
 		});
 
-		expect(() => createRecord(tokenRecord, { parentId: doc.id, blockType: 'paragraph' })).toThrow(
-			PermissionDeniedError
-		);
+		expect(() =>
+			createRecord(resolveRequestContext(tokenRecord), { parentId: doc.id, blockType: 'paragraph' })
+		).toThrow(PermissionDeniedError);
 
 		const entry = queryAuditLog().find(
 			(a) => a.action === 'create_record_denied' && a.targetRecordId === doc.id
@@ -1818,22 +2026,24 @@ describe('service layer: denied access attempts are themselves audited (docs/spe
 	});
 
 	it('logs a get_document_denied event when a token requests a document outside its grant', () => {
-		const doc = createDocument(human, { title: 'Denial Audit Get Doc' });
+		const doc = createDocument(resolveRequestContext(human), { title: 'Denial Audit Get Doc' });
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Denied Bot 2',
 			allowedDocumentIds: [],
 			allowedCollectionIds: []
 		});
 
-		expect(() => getDocument(tokenRecord, doc.id)).toThrow(PermissionDeniedError);
+		expect(() => getDocument(resolveRequestContext(tokenRecord), doc.id)).toThrow(
+			PermissionDeniedError
+		);
 		expect(
 			queryAuditLog().some((a) => a.action === 'get_document_denied' && a.targetRecordId === doc.id)
 		).toBe(true);
 	});
 
 	it('does not log a denial for a human caller (requireAccessibleParent never denies CURRENT_USER)', () => {
-		const doc = createDocument(human, { title: 'Human Never Denied Doc' });
-		getDocument(human, doc.id); // succeeds — not a denial
+		const doc = createDocument(resolveRequestContext(human), { title: 'Human Never Denied Doc' });
+		getDocument(resolveRequestContext(human), doc.id); // succeeds — not a denial
 		expect(
 			queryAuditLog().some((a) => a.action === 'get_document_denied' && a.targetRecordId === doc.id)
 		).toBe(false);
@@ -1845,9 +2055,9 @@ describe('service layer: denied access attempts are themselves audited (docs/spe
 			allowedDocumentIds: [],
 			allowedCollectionIds: []
 		});
-		expect(() => writeRecord(tokenRecord, 'nonexistent-record-id', { markdown: 'x' })).toThrow(
-			PermissionDeniedError
-		);
+		expect(() =>
+			writeRecord(resolveRequestContext(tokenRecord), 'nonexistent-record-id', { markdown: 'x' })
+		).toThrow(PermissionDeniedError);
 		const entry = queryAuditLog().find(
 			(a) => a.action === 'write_record_denied' && a.targetRecordId === 'nonexistent-record-id'
 		);
@@ -1862,53 +2072,60 @@ describe('service layer: catalog stays in sync with Y.Doc document/collection mu
 	}
 
 	it('mirrors document create, rename, move, and delete into the catalog', () => {
-		const parent = createDocument(human, { title: 'Catalog Parent' });
-		const child = createDocument(human, { title: 'Catalog Child' });
+		const parent = createDocument(resolveRequestContext(human), { title: 'Catalog Parent' });
+		const child = createDocument(resolveRequestContext(human), { title: 'Catalog Child' });
 
 		let catalog = listCatalogDocuments(catalogWorkspaceId());
 		expect(catalog.find((d) => d.id === parent.id)?.title).toBe('Catalog Parent');
 		expect(catalog.find((d) => d.id === child.id)?.parentDocumentId).toBeUndefined();
 
-		updateDocumentTitle(human, child.id, 'Renamed Child');
+		updateDocumentTitle(resolveRequestContext(human), child.id, 'Renamed Child');
 		catalog = listCatalogDocuments(catalogWorkspaceId());
 		expect(catalog.find((d) => d.id === child.id)?.title).toBe('Renamed Child');
 
-		moveDocument(human, child.id, { parentDocumentId: parent.id });
+		moveDocument(resolveRequestContext(human), child.id, { parentDocumentId: parent.id });
 		catalog = listCatalogDocuments(catalogWorkspaceId());
 		expect(catalog.find((d) => d.id === child.id)?.parentDocumentId).toBe(parent.id);
 
-		deleteDocument(human, parent.id);
+		deleteDocument(resolveRequestContext(human), parent.id);
 		catalog = listCatalogDocuments(catalogWorkspaceId());
 		expect(catalog.find((d) => d.id === parent.id)).toBeUndefined();
 		expect(catalog.find((d) => d.id === child.id)).toBeUndefined(); // recursive descendant delete
 	});
 
 	it('mirrors collection create, rename, and delete into the catalog', () => {
-		const col = createCollection(human, { title: 'Catalog Table', schema: [] });
+		const col = createCollection(resolveRequestContext(human), {
+			title: 'Catalog Table',
+			schema: []
+		});
 
 		let catalog = listCatalogCollections(catalogWorkspaceId());
 		expect(catalog.find((c) => c.id === col.id)?.title).toBe('Catalog Table');
 
-		updateCollectionTitle(human, col.id, 'Renamed Table');
+		updateCollectionTitle(resolveRequestContext(human), col.id, 'Renamed Table');
 		catalog = listCatalogCollections(catalogWorkspaceId());
 		expect(catalog.find((c) => c.id === col.id)?.title).toBe('Renamed Table');
 
-		deleteCollection(human, col.id);
+		deleteCollection(resolveRequestContext(human), col.id);
 		catalog = listCatalogCollections(catalogWorkspaceId());
 		expect(catalog.find((c) => c.id === col.id)).toBeUndefined();
 	});
 
 	it('rejects a caller-supplied document id that collides with an existing record', () => {
-		const existing = createDocument(human, { title: 'Existing' });
-		expect(() => createDocument(human, { id: existing.id, title: 'Colliding' })).toThrow(
-			RecordIdConflictError
-		);
+		const existing = createDocument(resolveRequestContext(human), { title: 'Existing' });
+		expect(() =>
+			createDocument(resolveRequestContext(human), { id: existing.id, title: 'Colliding' })
+		).toThrow(RecordIdConflictError);
 	});
 
 	it('rejects a caller-supplied collection id that collides with an existing document', () => {
-		const existingDoc = createDocument(human, { title: 'Existing Doc' });
+		const existingDoc = createDocument(resolveRequestContext(human), { title: 'Existing Doc' });
 		expect(() =>
-			createCollection(human, { id: existingDoc.id, title: 'Colliding Collection', schema: [] })
+			createCollection(resolveRequestContext(human), {
+				id: existingDoc.id,
+				title: 'Colliding Collection',
+				schema: []
+			})
 		).toThrow(RecordIdConflictError);
 	});
 
@@ -1919,9 +2136,9 @@ describe('service layer: catalog stays in sync with Y.Doc document/collection mu
 		// through reserveDocumentLocator/recordCatalogDocumentCreated.
 		const direct = crdtCreateDocument(doc, { title: 'Written Directly To The Y.Doc' });
 
-		expect(() => createDocument(human, { id: direct.id, title: 'Overwrite Attempt' })).toThrow(
-			RecordIdConflictError
-		);
+		expect(() =>
+			createDocument(resolveRequestContext(human), { id: direct.id, title: 'Overwrite Attempt' })
+		).toThrow(RecordIdConflictError);
 		// The original content must survive untouched.
 		expect(crdtGetDocument(doc, direct.id)?.title).toBe('Written Directly To The Y.Doc');
 	});
@@ -1934,7 +2151,11 @@ describe('service layer: catalog stays in sync with Y.Doc document/collection mu
 		});
 
 		expect(() =>
-			createCollection(human, { id: direct.id, title: 'Overwrite Attempt', schema: [] })
+			createCollection(resolveRequestContext(human), {
+				id: direct.id,
+				title: 'Overwrite Attempt',
+				schema: []
+			})
 		).toThrow(RecordIdConflictError);
 		expect(crdtGetCollection(doc, direct.id)?.title).toBe('Written Directly To The Y.Doc');
 	});
@@ -1947,7 +2168,10 @@ describe('service layer: catalog stays in sync with Y.Doc document/collection mu
 		});
 
 		expect(() =>
-			createDocument(human, { id: directCollection.id, title: 'Cross-Type Attempt' })
+			createDocument(resolveRequestContext(human), {
+				id: directCollection.id,
+				title: 'Cross-Type Attempt'
+			})
 		).toThrow(RecordIdConflictError);
 		// The Collection must remain intact and still reachable — not silently
 		// shadowed by a same-id Document entry (documentsMap/collectionsMap are
@@ -1965,7 +2189,11 @@ describe('service layer: catalog stays in sync with Y.Doc document/collection mu
 		const directDocument = crdtCreateDocument(doc, { title: 'A Document, Written Directly' });
 
 		expect(() =>
-			createCollection(human, { id: directDocument.id, title: 'Cross-Type Attempt', schema: [] })
+			createCollection(resolveRequestContext(human), {
+				id: directDocument.id,
+				title: 'Cross-Type Attempt',
+				schema: []
+			})
 		).toThrow(RecordIdConflictError);
 		expect(crdtGetDocument(doc, directDocument.id)?.title).toBe('A Document, Written Directly');
 		expect(crdtGetCollection(doc, directDocument.id)).toBeUndefined();
@@ -2013,7 +2241,7 @@ describe('service layer: resolves a genuinely separate Collection shard (#120)',
 			human
 		);
 
-		const result = queryCollection(human, collectionId);
+		const result = queryCollection(resolveRequestContext(human), collectionId);
 		expect(result.collection?.title).toBe('Synthetic Sharded Table');
 		expect(result.records).toHaveLength(1);
 	});
@@ -2021,7 +2249,7 @@ describe('service layer: resolves a genuinely separate Collection shard (#120)',
 	it('createRecord targeting a sharded Collection writes into that shard and reserves a row locator', () => {
 		const { collectionId, workspaceId } = createSyntheticShardedCollection();
 
-		const record = createRecord(human, {
+		const record = createRecord(resolveRequestContext(human), {
 			parentId: collectionId,
 			properties: { name: { type: 'text', value: 'New Row' } }
 		});
@@ -2036,9 +2264,14 @@ describe('service layer: resolves a genuinely separate Collection shard (#120)',
 
 	it('writeRecord updates content in the resolved shard', () => {
 		const { collectionId, workspaceId } = createSyntheticShardedCollection();
-		const record = createRecord(human, { parentId: collectionId, properties: {} });
+		const record = createRecord(resolveRequestContext(human), {
+			parentId: collectionId,
+			properties: {}
+		});
 
-		writeRecord(human, record.id, { properties: { status: { type: 'text', value: 'Done' } } });
+		writeRecord(resolveRequestContext(human), record.id, {
+			properties: { status: { type: 'text', value: 'Done' } }
+		});
 
 		const { doc: otherDoc } = resolveWorkspaceContext({ workspaceId, shardId: OTHER_SHARD });
 		expect(crdtGetRecord(otherDoc, record.id)?.properties?.status).toEqual({
@@ -2049,19 +2282,25 @@ describe('service layer: resolves a genuinely separate Collection shard (#120)',
 
 	it('getRecord reads from the resolved shard', () => {
 		const { collectionId } = createSyntheticShardedCollection();
-		const record = createRecord(human, {
+		const record = createRecord(resolveRequestContext(human), {
 			parentId: collectionId,
 			properties: { a: { type: 'text', value: '1' } }
 		});
 
-		expect(getRecord(human, record.id)?.properties?.a).toEqual({ type: 'text', value: '1' });
+		expect(getRecord(resolveRequestContext(human), record.id)?.properties?.a).toEqual({
+			type: 'text',
+			value: '1'
+		});
 	});
 
 	it('deleteRecord removes it from the resolved shard and releases its row locator', () => {
 		const { collectionId, workspaceId } = createSyntheticShardedCollection();
-		const record = createRecord(human, { parentId: collectionId, properties: {} });
+		const record = createRecord(resolveRequestContext(human), {
+			parentId: collectionId,
+			properties: {}
+		});
 
-		deleteRecord(human, record.id);
+		deleteRecord(resolveRequestContext(human), record.id);
 
 		expect(resolveShardForRecord(workspaceId, record.id)).toBeUndefined();
 		const { doc: otherDoc } = resolveWorkspaceContext({ workspaceId, shardId: OTHER_SHARD });
@@ -2070,7 +2309,10 @@ describe('service layer: resolves a genuinely separate Collection shard (#120)',
 
 	it('holdRecords/releaseRecords (token caller) operate against the resolved shard Awareness, never the default one', () => {
 		const { collectionId, workspaceId } = createSyntheticShardedCollection();
-		const record = createRecord(human, { parentId: collectionId, properties: {} });
+		const record = createRecord(resolveRequestContext(human), {
+			parentId: collectionId,
+			properties: {}
+		});
 
 		const { record: tokenRecord } = createToken({
 			clientLabel: 'Shard Test Bot',
@@ -2078,7 +2320,7 @@ describe('service layer: resolves a genuinely separate Collection shard (#120)',
 			allowedCollectionIds: [collectionId]
 		});
 
-		const holdResult = holdRecords(tokenRecord, [record.id]);
+		const holdResult = holdRecords(resolveRequestContext(tokenRecord), [record.id]);
 		expect(holdResult).toEqual({ granted: [record.id], denied: [] });
 
 		function isHeldSomewhere(workspaceIdArg: string, shardId: string | undefined): boolean {
@@ -2095,18 +2337,18 @@ describe('service layer: resolves a genuinely separate Collection shard (#120)',
 		expect(isHeldSomewhere(workspaceId, OTHER_SHARD)).toBe(true);
 		expect(isHeldSomewhere(workspaceId, undefined)).toBe(false);
 
-		releaseRecords(tokenRecord, [record.id]);
+		releaseRecords(resolveRequestContext(tokenRecord), [record.id]);
 		expect(isHeldSomewhere(workspaceId, OTHER_SHARD)).toBe(false);
 	});
 
 	it('searchWorkspace finds content living in the resolved shard, not just the default doc', () => {
 		const { collectionId } = createSyntheticShardedCollection();
-		createRecord(human, {
+		createRecord(resolveRequestContext(human), {
 			parentId: collectionId,
 			properties: { name: { type: 'text', value: 'Findable Needle Value' } }
 		});
 
-		const results = searchWorkspace(human, 'needle');
+		const results = searchWorkspace(resolveRequestContext(human), 'needle');
 		expect(results.some((r) => r.snippet.includes('Needle'))).toBe(true);
 	});
 });

@@ -10,7 +10,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const spaceId = body.spaceId ? String(body.spaceId) : undefined;
 
 	try {
-		const collection = createCollection(locals.requestContext.caller, {
+		const collection = createCollection(locals.requestContext, {
 			title,
 			schema: [],
 			spaceId

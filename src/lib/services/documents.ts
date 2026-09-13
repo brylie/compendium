@@ -1,4 +1,4 @@
-import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import type { RequestContext } from '$lib/server/request-context';
 import {
 	computeSiblingOrder,
 	createDocument as crdtCreateDocument,
@@ -56,8 +56,7 @@ import {
 	actorForCaller,
 	isAccessToken,
 	requireAccessibleParent,
-	resolveParentWorkspaceContext,
-	type CallerIdentity
+	resolveParentWorkspaceContext
 } from './permissions';
 
 /** Thrown when creating or moving a Document would place it under a parent belonging to a different Space. */
@@ -83,7 +82,7 @@ export class SpaceMismatchError extends Error {
 function resolveEffectiveDocumentSpaceId(
 	workspaceId: string,
 	documentId: string,
-	defaultDoc: ReturnType<typeof resolveWorkspaceContext>['doc'],
+	defaultDoc: Y.Doc,
 	defaultSpaceId: string
 ): string | undefined {
 	const cataloged = resolveShardForParent(workspaceId, documentId)?.spaceId;
@@ -109,13 +108,15 @@ export interface CreateDocumentInput {
  * directly to the default Y.Doc bypassing the service layer (and therefore the catalog
  * locator) entirely.
  */
-export function createDocument(caller: CallerIdentity, input: CreateDocumentInput): DocumentMeta {
+export function createDocument(context: RequestContext, input: CreateDocumentInput): DocumentMeta {
+	const caller = context.caller;
 	const id = input.id ?? nanoid();
+	const { workspaceId, defaultSpaceId } = context.workspace;
 	// A Document's shard is its own id — same pattern as createCollection
-	// (#120). resolveWorkspaceContext lazily creates the shard on first
+	// (#120). workspaceStore.resolve lazily creates the shard on first
 	// resolution, so this is safe to call before anything exists there yet.
-	const { doc, workspaceId, shardId, defaultSpaceId } = resolveWorkspaceContext({ shardId: id });
-	const { doc: defaultDoc } = resolveWorkspaceContext();
+	const { doc, shardId } = context.workspaceStore.resolve({ workspaceId, shardId: id });
+	const { doc: defaultDoc } = context.workspace;
 	const actor = actorForCaller(caller);
 	const targetSpaceId = input.spaceId ?? defaultSpaceId;
 	// A caller-supplied spaceId must actually exist — otherwise
@@ -129,7 +130,7 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
 	// Decision: In single-tenant Phase 0/1, any authenticated caller is permitted
 	// to create top-level documents; when nested, access to parentDocumentId is verified.
 	if (input.parentDocumentId) {
-		requireAccessibleParent(caller, input.parentDocumentId, 'create_document');
+		requireAccessibleParent(context, input.parentDocumentId, 'create_document');
 		// The parent's effective Space must agree with the target Space —
 		// otherwise a child could be created in one Space while nested under a
 		// parent that belongs to another (#140 CodeRabbit finding). A legacy
@@ -214,17 +215,17 @@ export function createDocument(caller: CallerIdentity, input: CreateDocumentInpu
  * this doc's own record list, since true siblings can each live in a different shard.
  */
 export function moveDocument(
-	caller: CallerIdentity,
+	context: RequestContext,
 	documentId: string,
 	options: { parentDocumentId?: string; afterDocumentId?: string }
 ): void {
-	const { doc, workspaceId } = resolveParentWorkspaceContext(documentId);
-	const { doc: defaultDoc, defaultSpaceId } = resolveWorkspaceContext();
-	const actor = actorForCaller(caller);
+	const { doc, workspaceId } = resolveParentWorkspaceContext(context, documentId);
+	const { doc: defaultDoc, defaultSpaceId } = context.workspace;
+	const actor = actorForCaller(context.caller);
 
-	requireAccessibleParent(caller, documentId, 'move_document');
+	requireAccessibleParent(context, documentId, 'move_document');
 	if (options.parentDocumentId) {
-		requireAccessibleParent(caller, options.parentDocumentId, 'move_document');
+		requireAccessibleParent(context, options.parentDocumentId, 'move_document');
 		// Same Space-consistency rule as createDocument: moving a Document
 		// under a parent in a different Space would silently break the
 		// isolation guarantee this feature exists for. Legacy/uncataloged
@@ -298,11 +299,11 @@ function collectDescendantIds(allDocs: DocumentMeta[], rootId: string): string[]
  * walking the catalog's parent chain, the only place the full cross-shard tree is visible —
  * then cascades the deletion in the catalog and audits it once for the root.
  */
-export function deleteDocument(caller: CallerIdentity, documentId: string): void {
-	const { workspaceId } = resolveParentWorkspaceContext(documentId);
-	const actor = actorForCaller(caller);
+export function deleteDocument(context: RequestContext, documentId: string): void {
+	const { workspaceId } = resolveParentWorkspaceContext(context, documentId);
+	const actor = actorForCaller(context.caller);
 
-	requireAccessibleParent(caller, documentId, 'delete_document');
+	requireAccessibleParent(context, documentId, 'delete_document');
 
 	// Each descendant's own shard contains only that Document, so calling the
 	// existing recursive crdtDeleteDocument against it is automatically
@@ -311,7 +312,7 @@ export function deleteDocument(caller: CallerIdentity, documentId: string): void
 	// which is the only place the full cross-shard tree is visible.
 	const descendantIds = collectDescendantIds(listCatalogDocuments(workspaceId), documentId);
 	for (const id of descendantIds) {
-		const { doc } = resolveParentWorkspaceContext(id);
+		const { doc } = resolveParentWorkspaceContext(context, id);
 		transactWithOrigin(doc, SERVICE_ORIGIN, () => crdtDeleteDocument(doc, id));
 	}
 
@@ -323,14 +324,14 @@ export function deleteDocument(caller: CallerIdentity, documentId: string): void
 
 /** Renames a Document (after a permission check), updating both the Y.Doc and the catalog, and audits the change. */
 export function updateDocumentTitle(
-	caller: CallerIdentity,
+	context: RequestContext,
 	documentId: string,
 	title: string
 ): void {
-	const { doc, workspaceId } = resolveParentWorkspaceContext(documentId);
-	const actor = actorForCaller(caller);
+	const { doc, workspaceId } = resolveParentWorkspaceContext(context, documentId);
+	const actor = actorForCaller(context.caller);
 
-	requireAccessibleParent(caller, documentId, 'update_document_title');
+	requireAccessibleParent(context, documentId, 'update_document_title');
 	transactWithOrigin(doc, SERVICE_ORIGIN, () => crdtUpdateDocumentTitle(doc, documentId, title));
 	recordCatalogDocumentTitleChanged(workspaceId, documentId, title);
 	logAudit({
@@ -426,15 +427,16 @@ interface ResolvedLink {
 // Document", not "unconfigured"), but when it *is* set, it must resolve the
 // same way a page_link's target does: an existing, in-scope Document.
 function resolveRecordLink(
+	context: RequestContext,
 	r: WorkspaceRecord,
 	doc: Y.Doc,
 	workspaceId: string,
 	defaultSpaceId: string,
-	caller: CallerIdentity,
 	isPageLink: boolean,
 	isCollectionView: boolean,
 	isChildPages: boolean
 ): ResolvedLink {
+	const caller = context.caller;
 	const targetInScope =
 		!r.referencedRecordId ||
 		!isAccessToken(caller) ||
@@ -458,7 +460,7 @@ function resolveRecordLink(
 		(isPageLink || isCollectionView || isChildPages) && r.referencedRecordId && targetInScope
 			? (resolveInternalLinkTarget(doc, r.referencedRecordId) ??
 				resolveInternalLinkTarget(
-					resolveParentWorkspaceContext(r.referencedRecordId).doc,
+					resolveParentWorkspaceContext(context, r.referencedRecordId).doc,
 					r.referencedRecordId
 				))
 			: undefined;
@@ -496,22 +498,22 @@ function resolveRecordLink(
 // blocks costs this function nothing extra — the one catalog read it wraps
 // only actually runs the first time a child_pages block needs it.
 function resolveDocumentRecordData(
+	context: RequestContext,
 	r: WorkspaceRecord,
 	doc: Y.Doc,
 	documentId: string,
 	workspaceId: string,
 	defaultSpaceId: string,
-	caller: CallerIdentity,
 	getDocuments: () => DocumentMeta[]
 ): DocumentRecordData {
 	const isCollectionView = r.blockType === 'collection_view';
 	const isChildPages = r.blockType === 'child_pages';
 	const link = resolveRecordLink(
+		context,
 		r,
 		doc,
 		workspaceId,
 		defaultSpaceId,
-		caller,
 		r.blockType === 'page_link',
 		isCollectionView,
 		isChildPages
@@ -544,12 +546,12 @@ function resolveDocumentRecordData(
 		children: r.childRecordIds
 			? crdtListRecordsForParent(doc, r.id).map((child) =>
 					resolveDocumentRecordData(
+						context,
 						child,
 						doc,
 						documentId,
 						workspaceId,
 						defaultSpaceId,
-						caller,
 						getDocuments
 					)
 				)
@@ -570,7 +572,7 @@ function resolveDocumentRecordData(
  * resolvable, since the caller already passed the accessibility check above to reach it.
  */
 export function getDocument(
-	caller: CallerIdentity,
+	context: RequestContext,
 	documentId: string
 ): {
 	id: string;
@@ -578,10 +580,10 @@ export function getDocument(
 	parentDocumentId?: string;
 	records: DocumentRecordData[];
 } | null {
-	const { doc, workspaceId, defaultSpaceId } = resolveParentWorkspaceContext(documentId);
-	const actor = actorForCaller(caller);
+	const { doc, workspaceId, defaultSpaceId } = resolveParentWorkspaceContext(context, documentId);
+	const actor = actorForCaller(context.caller);
 
-	requireAccessibleParent(caller, documentId, 'get_document');
+	requireAccessibleParent(context, documentId, 'get_document');
 	const document = crdtGetDocument(doc, documentId);
 	if (!document) return null;
 
@@ -589,10 +591,18 @@ export function getDocument(
 	// catalog read at all, and a Document with several pays for it once, not
 	// once per block.
 	let cachedDocuments: DocumentMeta[] | undefined;
-	const getDocuments = (): DocumentMeta[] => (cachedDocuments ??= listDocuments(caller));
+	const getDocuments = (): DocumentMeta[] => (cachedDocuments ??= listDocuments(context));
 
 	const records = crdtListRecordsForParent(doc, documentId).map((r) =>
-		resolveDocumentRecordData(r, doc, documentId, workspaceId, defaultSpaceId, caller, getDocuments)
+		resolveDocumentRecordData(
+			context,
+			r,
+			doc,
+			documentId,
+			workspaceId,
+			defaultSpaceId,
+			getDocuments
+		)
 	);
 
 	logAudit({ actor, action: 'get_document', targetRecordId: documentId });
@@ -624,10 +634,11 @@ export function getDocument(
  * Phase 0's unscoped human caller (`isAccessToken` is false), load-bearing
  * once this is ever reachable by a scoped MCP token.
  */
-export function listBacklinks(caller: CallerIdentity, documentId: string): Backlink[] {
-	requireAccessibleParent(caller, documentId, 'list_backlinks');
+export function listBacklinks(context: RequestContext, documentId: string): Backlink[] {
+	requireAccessibleParent(context, documentId, 'list_backlinks');
+	const caller = context.caller;
 	const actor = actorForCaller(caller);
-	const { workspaceId, defaultSpaceId, doc: defaultDoc } = resolveWorkspaceContext();
+	const { workspaceId, defaultSpaceId, doc: defaultDoc } = context.workspace;
 	const allowed = (id: string, docSpaceId?: string) =>
 		!isAccessToken(caller) || tokenAllowsParent(caller, id, docSpaceId);
 
@@ -641,6 +652,7 @@ export function listBacklinks(caller: CallerIdentity, documentId: string): Backl
 		getId: (m) => m.id,
 		getSpaceId: (m) => m.spaceId,
 		allowed,
+		workspaceStore: context.workspaceStore,
 		resolveShardDoc: true
 	})) {
 		for (const link of listOutgoingLinks(doc, meta.id)) {
@@ -688,10 +700,18 @@ export function listBacklinks(caller: CallerIdentity, documentId: string): Backl
  * `collections.ts#listCollections` and `search.ts#searchWorkspace` rather
  * than each re-implementing it.
  */
-export function listDocuments(caller: CallerIdentity, spaceId?: string): DocumentMeta[] {
-	const { workspaceId, defaultSpaceId, doc: defaultDoc } = resolveWorkspaceContext();
+export function listDocuments(context: RequestContext, spaceId?: string): DocumentMeta[] {
+	const caller = context.caller;
+	const { workspaceId, defaultSpaceId, doc: defaultDoc } = context.workspace;
 	const allowed = (id: string, docSpaceId?: string) =>
 		!isAccessToken(caller) || tokenAllowsParent(caller, id, docSpaceId);
 
-	return listWorkspaceDocuments({ workspaceId, spaceId, defaultSpaceId, defaultDoc, allowed });
+	return listWorkspaceDocuments({
+		workspaceId,
+		spaceId,
+		defaultSpaceId,
+		defaultDoc,
+		allowed,
+		workspaceStore: context.workspaceStore
+	});
 }

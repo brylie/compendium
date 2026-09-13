@@ -1,4 +1,4 @@
-import { resolveWorkspaceContext } from '$lib/server/workspace-store';
+import type { RequestContext } from '$lib/server/request-context';
 import { listDocuments as crdtListDocuments } from '$lib/data/document-ops';
 import { listCollections as crdtListCollections } from '$lib/data/collection-ops';
 import { logAudit } from '$lib/server/audit';
@@ -6,7 +6,7 @@ import { listCatalogCollections, listCatalogDocuments } from '$lib/server/catalo
 import { tokenAllowsParent } from '$lib/server/token-store';
 import { fanOutCatalogedAndUncataloged } from '$lib/server/workspace-repository';
 import { searchRecordIndex } from '$lib/server/record-index';
-import { actorForCaller, isAccessToken, type CallerIdentity } from './permissions';
+import { actorForCaller, isAccessToken } from './permissions';
 
 interface SearchHit {
 	recordId: string;
@@ -42,11 +42,12 @@ function snippetAround(text: string, needle: string): string {
  * scan.
  */
 export function searchWorkspace(
-	caller: CallerIdentity,
+	context: RequestContext,
 	query: string,
 	spaceId?: string
 ): SearchHit[] {
-	const { doc: defaultDoc, workspaceId, defaultSpaceId } = resolveWorkspaceContext();
+	const caller = context.caller;
+	const { doc: defaultDoc, workspaceId, defaultSpaceId } = context.workspace;
 	const actor = actorForCaller(caller);
 	const allowed = (id: string, itemSpaceId?: string) =>
 		!isAccessToken(caller) || tokenAllowsParent(caller, id, itemSpaceId);
@@ -62,6 +63,7 @@ export function searchWorkspace(
 		getId: (m) => m.id,
 		getSpaceId: (m) => m.spaceId,
 		allowed,
+		workspaceStore: context.workspaceStore,
 		resolveShardDoc: true
 	})) {
 		allowedParentIds.add(meta.id);
@@ -77,6 +79,7 @@ export function searchWorkspace(
 		getId: (m) => m.id,
 		getSpaceId: (m) => m.spaceId,
 		allowed,
+		workspaceStore: context.workspaceStore,
 		resolveShardDoc: true
 	})) {
 		allowedParentIds.add(meta.id);

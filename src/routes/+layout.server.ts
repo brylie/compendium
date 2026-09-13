@@ -25,7 +25,7 @@ export const load: LayoutServerLoad = ({ params, locals }) => {
 	return {
 		spaces: listSpaces(),
 		activeSpaceId,
-		documents: listDocuments(locals.requestContext.caller, activeSpaceId),
-		collections: listCollections(locals.requestContext.caller, activeSpaceId)
+		documents: listDocuments(locals.requestContext, activeSpaceId),
+		collections: listCollections(locals.requestContext, activeSpaceId)
 	};
 };

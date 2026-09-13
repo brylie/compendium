@@ -7,7 +7,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 	const scope = url.searchParams.get('scope') ?? 'workspace';
 	const id = url.searchParams.get('id') ?? undefined;
 	const spaceId = url.searchParams.get('spaceId') ?? undefined;
-	const caller = locals.requestContext.caller;
+	const context = locals.requestContext;
 
 	if (!['workspace', 'document', 'collection'].includes(scope)) {
 		error(400, `Invalid export scope: ${scope}`);
@@ -19,7 +19,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 
 	try {
 		if (scope === 'document' && id) {
-			const docResult = exportDocument(caller, id);
+			const docResult = exportDocument(context, id);
 			return new Response(docResult.markdown, {
 				headers: {
 					'Content-Type': 'text/markdown; charset=utf-8',
@@ -29,7 +29,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		}
 
 		if (scope === 'collection' && id) {
-			const colResult = exportCollection(caller, id);
+			const colResult = exportCollection(context, id);
 			const format = url.searchParams.get('format') ?? 'csv';
 			if (format === 'json') {
 				return new Response(colResult.recordsJson, {
@@ -48,7 +48,7 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 		}
 
 		// Default: Full workspace export ZIP
-		const workspaceResult = exportWorkspace(caller, spaceId);
+		const workspaceResult = exportWorkspace(context, spaceId);
 		const filename = `workspace-export-${new Date().toISOString().slice(0, 10)}.zip`;
 
 		return new Response(Buffer.from(workspaceResult.zipBuffer), {

@@ -8,10 +8,10 @@ import type { PageServerLoad } from './$types';
  * Loads a Collection for the table view, self-healing the URL's [spaceId] when
  * it disagrees with the Collection's actual owning Space rather than 404ing.
  */
-export const load: PageServerLoad = ({ params }) => {
+export const load: PageServerLoad = ({ params, locals }) => {
 	// Resolves the Collection's real shard, not the default doc — a
 	// Collection's own meta entry lives in its own shard (see #120).
-	const { doc, parentSpaceId } = resolveParentWorkspaceContext(params.id);
+	const { doc, parentSpaceId } = resolveParentWorkspaceContext(locals.requestContext, params.id);
 	// A Collection can be linked to from a different Space than the URL's own
 	// [spaceId] segment (page_link/collection_view targets aren't restricted
 	// to the current Space — #6 Phase A). Self-heal to the real one rather

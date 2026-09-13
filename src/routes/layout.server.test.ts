@@ -6,8 +6,8 @@ import { resolveRequestContext } from '$lib/server/request-context';
 
 describe('routes/+layout.server: sidebar navigation data', () => {
 	it('lists documents and collections for the current user', () => {
-		createDocument(CURRENT_USER, { title: 'Sidebar Doc' });
-		createCollection(CURRENT_USER, { title: 'Sidebar Table' });
+		createDocument(resolveRequestContext(CURRENT_USER), { title: 'Sidebar Doc' });
+		createCollection(resolveRequestContext(CURRENT_USER), { title: 'Sidebar Table' });
 
 		const result = load({
 			params: {},
