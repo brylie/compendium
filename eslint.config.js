@@ -312,7 +312,7 @@ export default defineConfig(
 								'Data/repository/service modules must stay protocol-neutral (#191) — do not import from the MCP layer. If both sides need this logic, it belongs in $lib/data or $lib/server instead.'
 						},
 						{
-							regex: '^(?:\\.\\./)+mcp(?:/|$)',
+							regex: '^(?:\\./)*(?:\\.\\./)+mcp(?:/|$)',
 							message:
 								'Data/repository/service modules must stay protocol-neutral (#191) — do not import from the MCP layer. If both sides need this logic, it belongs in $lib/data or $lib/server instead.'
 						}
@@ -341,7 +341,7 @@ export default defineConfig(
 								'Data modules must stay protocol-neutral (#191) — do not import from the MCP layer. If both sides need this logic, it belongs in $lib/data or $lib/server instead.'
 						},
 						{
-							regex: '^(?:\\.\\./)+mcp(?:/|$)',
+							regex: '^(?:\\./)*(?:\\.\\./)+mcp(?:/|$)',
 							message:
 								'Data modules must stay protocol-neutral (#191) — do not import from the MCP layer. If both sides need this logic, it belongs in $lib/data or $lib/server instead.'
 						},
@@ -351,7 +351,7 @@ export default defineConfig(
 								'Data modules must not import application services (#212). Move policy-free workspace lookup to $lib/server or pass it in from the caller.'
 						},
 						{
-							regex: '^(?:\\.\\./)+services(?:/|$)',
+							regex: '^(?:\\./)*(?:\\.\\./)+services(?:/|$)',
 							message:
 								'Data modules must not import application services (#212). Move policy-free workspace lookup to $lib/server or pass it in from the caller.'
 						}
