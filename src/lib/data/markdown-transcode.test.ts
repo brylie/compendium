@@ -63,6 +63,16 @@ describe('markdown transcoding', () => {
 		expect(linkRun?.marks.link).toBe(`record:${target.id}`);
 	});
 
+	it('renders a wiki-link target only findable in its own shard', () => {
+		const target = serviceCreateDocument(CURRENT_USER, { title: 'Sharded Render Target' });
+		const { doc } = resolveWorkspaceContext();
+		const richText: Parameters<typeof richTextToMarkdown>[1] = {
+			runs: [{ text: 'Sharded Render Target', marks: { link: `record:${target.id}` } }]
+		};
+
+		expect(richTextToMarkdown(doc, richText)).toBe('[[Sharded Render Target]]');
+	});
+
 	it('resolves [[Title]] to a Collection when no Document matches', () => {
 		const doc = new Y.Doc();
 		const collection = createCollection(doc, { title: 'Sprint Backlog', schema: [] });

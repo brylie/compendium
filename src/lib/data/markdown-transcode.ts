@@ -4,9 +4,10 @@ import type * as Y from 'yjs';
 import { listDocuments } from '$lib/data/document-ops';
 import { listCollections } from '$lib/data/collection-ops';
 import { RECORD_LINK_SCHEME, resolveInternalLinkTarget } from '$lib/data/links';
-import { resolveParentWorkspaceContext } from '$lib/services/permissions';
-import { resolveWorkspaceContext } from '$lib/server/workspace-store';
-import { listCatalogCollections, listCatalogDocuments } from '$lib/server/catalog';
+import {
+	resolveWorkspaceLinkId,
+	resolveWorkspaceLinkTarget
+} from '$lib/server/workspace-link-resolution';
 import type { RichText, TextMarks } from '$lib/data/types';
 
 // Per docs/technical-design.md §6: CommonMark + GFM as the baseline, plus two
@@ -64,9 +65,7 @@ function runToMarkdown(doc: Y.Doc, text: string, marks: TextMarks): string {
 		// have one) may or may not be `doc` itself. Try `doc` first — cheap,
 		// and correct whenever the target really is local to it — then fall
 		// back to resolving its real shard.
-		const target =
-			resolveInternalLinkTarget(doc, id) ??
-			resolveInternalLinkTarget(resolveParentWorkspaceContext(id).doc, id);
+		const target = resolveInternalLinkTarget(doc, id) ?? resolveWorkspaceLinkTarget(id);
 		return `[[${target?.title ?? DELETED_LINK_LABEL}]]`;
 	}
 
@@ -166,8 +165,5 @@ function resolveTitleToId(doc: Y.Doc, title: string): string | undefined {
 	if (localDocumentMatch) return localDocumentMatch;
 	const localCollectionMatch = listCollections(doc).find((c) => c.title === title)?.id;
 	if (localCollectionMatch) return localCollectionMatch;
-	const { workspaceId } = resolveWorkspaceContext();
-	const catalogDocumentMatch = listCatalogDocuments(workspaceId).find((d) => d.title === title)?.id;
-	if (catalogDocumentMatch) return catalogDocumentMatch;
-	return listCatalogCollections(workspaceId).find((c) => c.title === title)?.id;
+	return resolveWorkspaceLinkId(title);
 }

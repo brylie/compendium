@@ -288,7 +288,7 @@ export default defineConfig(
 		}
 	},
 	{
-		// Dependency-boundary enforcement (#191): the data/repository and
+		// Dependency-boundary enforcement (#191, #212): the data/repository and
 		// service layers must stay protocol-neutral — service-layer.md already
 		// said MCP tool handlers must not call records.ts directly, but nothing
 		// stopped the reverse: services/documents.ts and services/records.ts
@@ -309,7 +309,36 @@ export default defineConfig(
 						{
 							group: ['$lib/mcp/*', '$lib/mcp'],
 							message:
+								'Data modules must stay protocol-neutral (#191) — do not import from the MCP layer. If both sides need this logic, it belongs in $lib/data or $lib/server instead.'
+						},
+						{
+							group: ['$lib/mcp/*', '$lib/mcp'],
+							message:
 								'Data/repository/service modules must stay protocol-neutral (#191) — do not import from the MCP layer. If both sides need this logic, it belongs in $lib/data or $lib/server instead.'
+						}
+					]
+				}
+			]
+		}
+	},
+	{
+		// The CRDT/data layer must not reach upward into application services:
+		// services own policy (permissions, audit, and use-case orchestration),
+		// while data modules stay reusable codecs/primitives. Server imports are
+		// deliberately allowed: markdown-transcode's narrowly-scoped
+		// workspace-link-resolution adapter is a repository lookup, not policy;
+		// see service-layer.md and #212.
+		files: ['src/lib/data/**/*.ts'],
+		ignores: ['**/*.test.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						{
+							group: ['$lib/services/*', '$lib/services'],
+							message:
+								'Data modules must not import application services (#212). Move policy-free workspace lookup to $lib/server or pass it in from the caller.'
 						}
 					]
 				}
