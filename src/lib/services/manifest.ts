@@ -6,6 +6,7 @@ import * as search from './search';
 import * as spaces from './spaces';
 import * as tokens from './tokens';
 import * as audit from './audit';
+import * as exportModule from './export';
 
 export const serviceModules = {
 	documents,
@@ -15,7 +16,8 @@ export const serviceModules = {
 	search,
 	spaces,
 	tokens,
-	audit
+	audit,
+	export: exportModule
 } as const;
 
 export type ServiceModuleName = keyof typeof serviceModules;
@@ -178,7 +180,18 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 	'tokens.createToken': { mcp: false, ui: true },
 	'tokens.revokeToken': { mcp: false, ui: true },
 	'tokens.listTokens': { mcp: false, ui: true },
-	'audit.listAuditHistory': { mcp: false, ui: true }
+	'audit.listAuditHistory': { mcp: false, ui: true },
+	'export.exportWorkspace': { mcp: false, ui: true },
+	'export.exportDocument': { mcp: false, ui: true },
+	'export.exportCollection': { mcp: false, ui: true },
+	'export.getMirrorConfig': { mcp: false, ui: true },
+	'export.updateMirrorConfig': { mcp: false, ui: true },
+	'export.syncMarkdownMirror': { mcp: false, ui: true },
+	'export.sanitizeFilename': { mcp: false, ui: false },
+	'export.renderBlockMarkdown': { mcp: false, ui: false },
+	'export.renderDocumentFileMarkdown': { mcp: false, ui: false },
+	'export.collectionRecordsToCsv': { mcp: false, ui: false },
+	'export.collectionToMarkdownTable': { mcp: false, ui: false }
 };
 
 /**
@@ -228,5 +241,11 @@ export const uiAdapterBindings = {
 	'tokens.createToken': 'src/routes/settings/tokens/+page.server.ts',
 	'tokens.revokeToken': 'src/routes/settings/tokens/+page.server.ts',
 	'tokens.listTokens': 'src/routes/settings/tokens/+page.server.ts',
-	'audit.listAuditHistory': 'src/routes/audit/+page.server.ts'
+	'audit.listAuditHistory': 'src/routes/audit/+page.server.ts',
+	'export.exportWorkspace': 'src/routes/api/export/+server.ts',
+	'export.exportDocument': 'src/routes/api/export/+server.ts',
+	'export.exportCollection': 'src/routes/api/export/+server.ts',
+	'export.getMirrorConfig': 'src/routes/settings/export/+page.server.ts',
+	'export.updateMirrorConfig': 'src/routes/settings/export/+page.server.ts',
+	'export.syncMarkdownMirror': 'src/routes/settings/export/+page.server.ts'
 } as const satisfies Partial<Record<ServiceMethod, string>>;
