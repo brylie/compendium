@@ -17,9 +17,7 @@
 		getRecord,
 		getRecordYText,
 		listRecordsForParent,
-		moveRecordToParent,
 		parentKindOf,
-		reorderRecord,
 		setBlockType,
 		setRecordCollapsed,
 		setRecordReferencedId,
@@ -27,7 +25,6 @@
 	} from '$lib/data/record-ops';
 	import {
 		listSyncedBlockInstances,
-		RECORD_LINK_SCHEME,
 		type Backlink,
 		type InternalLinkTarget
 	} from '$lib/data/links';
@@ -45,6 +42,9 @@
 		subscribeHeldByOthers
 	} from '$lib/client/presence';
 	import { redo, subscribeUndoRedoState, undo } from '$lib/client/undo';
+	import { createLinkComposer } from '$lib/client/link-composer.svelte';
+	import { createBlockSelection } from '$lib/client/block-selection.svelte';
+	import { createBlockDrag } from '$lib/client/block-drag.svelte';
 	import { BLOCK_CAPABILITIES, blockCapabilitiesFor } from '$lib/data/block-capabilities';
 	import {
 		blockTypes,
@@ -57,6 +57,7 @@
 	import BlockRow, { type BlockEditorHandle } from '$lib/components/BlockRow.svelte';
 	import SlashMenu from './SlashMenu.svelte';
 	import Toolbar from './Toolbar.svelte';
+	import LinkComposerDialog from './LinkComposerDialog.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import CollectionViewBlock from '$lib/components/CollectionViewBlock.svelte';
 	import CalloutBlock from '$lib/components/CalloutBlock.svelte';
@@ -105,32 +106,22 @@
 	let canUndo = $state(false);
 	let canRedo = $state(false);
 	let syncedBlockDialogId: string | null = $state(null);
-	let linkDialogBlockId: string | null = $state(null);
-	let linkMode: 'url' | 'record' = $state('url');
-	let linkUrl = $state('');
-	let linkRecordId = $state('');
-	let linkSelection: { start: number; end: number } | null = $state(null);
-	let linkUrlInput: HTMLInputElement | undefined = $state();
-	let linkDialog: HTMLDivElement | undefined = $state();
+	const linkComposer = createLinkComposer((blockId) => blockRefs[blockId]);
 	let provenanceAnnouncement = $state('');
 	let provenanceAnnouncementTimer: ReturnType<typeof setTimeout> | undefined;
-	let draggingBlockId: string | null = $state(null);
-	let dropIndicatorIndex: number | null = $state(null);
-	// Which container (the Document, or a column, issue #148) the drop
-	// indicator above currently belongs to — a plain index alone is
-	// ambiguous once more than one block list is on screen at once.
-	let dropIndicatorParentId: string | null = $state(null);
 	let reorderAnnouncement = $state('');
-
-	// Multi-select (issue #152) — a set of block ids, always siblings of one
-	// another within the same parent container (the Document's own top level,
-	// or one column). selectionAnchorId is the fixed end of a Shift-click/
-	// Shift-Arrow range; the other end is whatever block was just interacted
-	// with. Selecting in a different container replaces the set outright
-	// rather than mixing containers — group move/delete below assume a single
-	// shared parent.
-	const selectedBlockIds = new SvelteSet<string>();
-	let selectionAnchorId: string | null = $state(null);
+	const blockSelection = createBlockSelection({
+		getYdoc: () => ydoc,
+		announceMoved: (message) => (reorderAnnouncement = message),
+		focusDragHandle
+	});
+	const blockDrag = createBlockDrag({
+		getYdoc: () => ydoc,
+		getDefaultParentId: () => data.documentId,
+		announceMoved: (message) => (reorderAnnouncement = message),
+		focusDragHandle,
+		selection: blockSelection
+	});
 	let outlineOpen = $state(false);
 	// Briefly highlighted after a List View selection or a #block-<id> deep
 	// link lands focus on it — a purely presentational pulse, not stored state.
@@ -235,64 +226,20 @@
 		const editor = activeBlockId ? blockRefs[activeBlockId] : undefined;
 		if (!editor) return;
 		if (mark === 'link') {
-			openLinkComposer(activeBlockId!);
+			linkComposer.open(activeBlockId!);
 		} else {
 			editor.applyFormat(mark);
 		}
 		activeMarks = editor.getFormatState();
 	}
 
-	function openLinkComposer(blockId: string): void {
-		const selection = blockRefs[blockId]?.getSelectionRange();
-		if (!selection || selection.start === selection.end) return;
-		linkDialogBlockId = blockId;
-		linkSelection = selection;
-		linkMode = 'url';
-		linkUrl = '';
-		linkRecordId = '';
-	}
-
+	// The composer nulls its own blockId once applied, so activeMarks (which
+	// drives the toolbar's link-active highlight) must be captured against the
+	// block it targeted before calling apply(), not after.
 	function applyLink(): void {
-		const editor = linkDialogBlockId ? blockRefs[linkDialogBlockId] : undefined;
-		const value = linkMode === 'record' ? linkRecordId : linkUrl.trim();
-		if (!editor || !value || !linkSelection) return;
-		editor.applyFormatAtRange(
-			'link',
-			linkSelection,
-			linkMode === 'record' ? `${RECORD_LINK_SCHEME}${value}` : value
-		);
-		activeMarks = editor.getFormatState();
-		closeLinkComposer();
-	}
-
-	function closeLinkComposer(): void {
-		const blockId = linkDialogBlockId;
-		linkDialogBlockId = null;
-		linkSelection = null;
-		if (blockId) void tick().then(() => blockRefs[blockId]?.focusEditor(false));
-	}
-
-	function handleLinkDialogKeydown(event: KeyboardEvent): void {
-		if (event.key === 'Escape') {
-			closeLinkComposer();
-			return;
-		}
-		if (event.key !== 'Tab' || !linkDialog) return;
-		const focusable = Array.from(
-			linkDialog.querySelectorAll<HTMLElement>(
-				'button:not([disabled]), input:not([disabled]), select:not([disabled]), [href]'
-			)
-		);
-		const first = focusable[0];
-		const last = focusable.at(-1);
-		if (!first || !last) return;
-		if (event.shiftKey && document.activeElement === first) {
-			event.preventDefault();
-			last.focus();
-		} else if (!event.shiftKey && document.activeElement === last) {
-			event.preventDefault();
-			first.focus();
-		}
+		const editor = linkComposer.blockId ? blockRefs[linkComposer.blockId] : undefined;
+		linkComposer.apply();
+		if (editor) activeMarks = editor.getFormatState();
 	}
 
 	function documentLocation(documentId: string): string {
@@ -382,7 +329,7 @@
 		// Move fully operable against the old Document's real blocks) for the
 		// whole network round-trip, not just eliminate the stale state after
 		// the fact.
-		clearSelection();
+		blockSelection.clear();
 
 		(async () => {
 			const res = await fetch(`/api/documents/${id}/shard`);
@@ -502,20 +449,15 @@
 		// this document-level listener would see them, so this only ever fires
 		// for a plain, otherwise-unhandled Escape — safe to use as "clear the
 		// current multi-selection" (issue #152).
-		if (event.key === 'Escape' && selectedBlockIds.size > 0) {
-			clearSelection();
+		if (event.key === 'Escape' && blockSelection.ids.size > 0) {
+			blockSelection.clear();
 		}
 	}
-
-	$effect(() => {
-		if (!linkDialogBlockId || linkMode !== 'url') return;
-		void tick().then(() => linkUrlInput?.focus());
-	});
 
 	// Guards against a leaked window listener if this page unmounts mid-drag
 	// (e.g. client-side navigation away while a pointer is still down).
 	$effect(() => {
-		return () => cleanupDragListeners();
+		return () => blockDrag.dispose();
 	});
 
 	// Deep-link support for "Copy link to block" (issue #152) — once this
@@ -756,514 +698,13 @@
 		return false;
 	}
 
-	// ---------------------------------------------------------------------
-	// Block reordering (#40) — a visible move handle in each block's gutter,
-	// draggable with the pointer or operable with the keyboard once focused.
-	// Both paths end up calling reorderRecord (same container) or
-	// moveRecordToParent (a different container — issue #148's move a block
-	// into/out of a column), which only ever reposition/reparent a block —
-	// content, blockType, and provenance are never touched by either.
-	//
-	// Every block list on the page (the Document's own top-level flow, and
-	// each column inside a columns block) tags its rows with data-block-row
-	// + data-block-parent, and its own wrapper with data-block-container, so
-	// the pointer-drag geometry below can resolve a drop target across all
-	// of them uniformly rather than assuming a single flat list.
-	// ---------------------------------------------------------------------
-
-	function announceBlockMoved(newIndex: number, parentId: string, location?: string): void {
-		if (!ydoc) return;
-		const total = listRecordsForParent(ydoc, parentId).length;
-		const suffix = location ? ` in ${location}` : '';
-		reorderAnnouncement = `Moved block to position ${newIndex + 1} of ${total}${suffix}.`;
-	}
-
+	// Block reordering (#40, extracted to blockDrag for #241) — a visible move
+	// handle in each block's gutter, draggable with the pointer or operable
+	// with the keyboard once focused. focusDragHandle stays here rather than
+	// inside blockDrag/blockSelection since both controllers need it.
 	async function focusDragHandle(blockId: string): Promise<void> {
 		await tick();
 		document.querySelector<HTMLElement>(`[data-drag-handle="${CSS.escape(blockId)}"]`)?.focus();
-	}
-
-	// Resolves what "up"/"down"/"start"/"end" means in terms of
-	// reorderRecord's own afterRecordId semantics — split out from moveBlock
-	// below purely to keep each function's branching within the cognitive
-	// complexity budget; sequential early-return `if`s (not else-if) here
-	// avoid the nesting penalty an else-if chain would add.
-	function computeMoveTarget(
-		siblings: WorkspaceRecord[],
-		target: 'up' | 'down' | 'start' | 'end',
-		currentIndex: number,
-		lastIndex: number
-	): { afterRecordId: string | undefined; newIndex: number } | null {
-		if (target === 'start') {
-			if (currentIndex === 0) return null;
-			return { afterRecordId: undefined, newIndex: 0 };
-		}
-		if (target === 'end') {
-			if (currentIndex === lastIndex) return null;
-			return { afterRecordId: siblings[lastIndex].id, newIndex: lastIndex };
-		}
-		if (target === 'up') {
-			if (currentIndex === 0) return null;
-			const afterRecordId = currentIndex >= 2 ? siblings[currentIndex - 2].id : undefined;
-			return { afterRecordId, newIndex: currentIndex - 1 };
-		}
-		if (currentIndex === lastIndex) return null;
-		return { afterRecordId: siblings[currentIndex + 1].id, newIndex: currentIndex + 1 };
-	}
-
-	// Keyboard equivalent of dragging: an adjacent swap with the previous/next
-	// sibling within the block's own current container, or a direct move to
-	// the very start/end of that same container — reusing reorderRecord's
-	// own afterRecordId semantics rather than the pointer-drag path's
-	// index-into-the-original-list math below, since "swap with my neighbor"
-	// is simpler to express directly. Not container-crossing — see
-	// moveBlockToAdjacentColumn for that (bound to ArrowLeft/ArrowRight).
-	function moveBlock(blockId: string, target: 'up' | 'down' | 'start' | 'end'): void {
-		if (!ydoc) return;
-		const record = getRecord(ydoc, blockId);
-		if (!record) return;
-		const siblings = listRecordsForParent(ydoc, record.parentId);
-		const currentIndex = siblings.findIndex((b) => b.id === blockId);
-		if (currentIndex === -1) return;
-		const move = computeMoveTarget(siblings, target, currentIndex, siblings.length - 1);
-		if (!move) return;
-
-		reorderRecord(ydoc, blockId, move.afterRecordId);
-		announceBlockMoved(move.newIndex, record.parentId);
-		void focusDragHandle(blockId);
-	}
-
-	// Moves a block sideways into the previous/next column of the same
-	// columns block (issue #148) — the keyboard counterpart to dragging a
-	// block across columns. A no-op when the block isn't currently inside a
-	// column, or there's no column in that direction. Lands at the same
-	// index (clamped) in the destination column, rather than always at its
-	// start/end, so repeated presses read as "shift sideways," not "jump to
-	// an end."
-	function moveBlockToAdjacentColumn(blockId: string, direction: 'previous' | 'next'): void {
-		if (!ydoc) return;
-		const record = getRecord(ydoc, blockId);
-		if (!record) return;
-		const column = getRecord(ydoc, record.parentId);
-		if (column?.blockType !== 'column') return;
-		const columnsBlock = getRecord(ydoc, column.parentId);
-		if (columnsBlock?.blockType !== 'columns') return;
-
-		const siblingColumns = listRecordsForParent(ydoc, columnsBlock.id);
-		const columnIndex = siblingColumns.findIndex((c) => c.id === column.id);
-		const targetColumn =
-			siblingColumns[direction === 'previous' ? columnIndex - 1 : columnIndex + 1];
-		if (!targetColumn) return;
-
-		const positionInColumn = listRecordsForParent(ydoc, column.id).findIndex(
-			(b) => b.id === blockId
-		);
-		const targetSiblings = listRecordsForParent(ydoc, targetColumn.id);
-		const insertIndex = Math.min(positionInColumn, targetSiblings.length);
-		const afterRecordId = insertIndex > 0 ? targetSiblings[insertIndex - 1]?.id : undefined;
-
-		moveRecordToParent(ydoc, blockId, targetColumn.id, afterRecordId);
-		const targetColumnIndex = siblingColumns.findIndex((c) => c.id === targetColumn.id);
-		announceBlockMoved(
-			insertIndex,
-			targetColumn.id,
-			`column ${targetColumnIndex + 1} of ${siblingColumns.length}`
-		);
-		void focusDragHandle(blockId);
-	}
-
-	// The plain-move-key branch of handleDragHandleKeydown, split out purely to
-	// keep that function's own cognitive complexity within budget — this
-	// function assumes no modifier keys are held (its caller already checked).
-	function handleDragHandleMoveKey(event: KeyboardEvent, blockId: string): void {
-		if (event.key === 'ArrowUp') {
-			event.preventDefault();
-			moveBlock(blockId, 'up');
-		} else if (event.key === 'ArrowDown') {
-			event.preventDefault();
-			moveBlock(blockId, 'down');
-		} else if (event.key === 'Home') {
-			event.preventDefault();
-			moveBlock(blockId, 'start');
-		} else if (event.key === 'End') {
-			event.preventDefault();
-			moveBlock(blockId, 'end');
-		} else if (event.key === 'ArrowLeft') {
-			event.preventDefault();
-			moveBlockToAdjacentColumn(blockId, 'previous');
-		} else if (event.key === 'ArrowRight') {
-			event.preventDefault();
-			moveBlockToAdjacentColumn(blockId, 'next');
-		} else if (event.key === 'Escape' && selectedBlockIds.size > 0) {
-			event.preventDefault();
-			clearSelection();
-		}
-	}
-
-	function handleDragHandleKeydown(event: KeyboardEvent, blockId: string): void {
-		// Shift+ArrowUp/Down extends the multi-select range from the current
-		// anchor (issue #152) — the keyboard equivalent of Shift-clicking the
-		// handle, checked before the plain-move branch below so a held Shift
-		// never also triggers a reorder.
-		if (event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
-			if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-				event.preventDefault();
-				extendBlockSelectionByKeyboard(blockId, event.key === 'ArrowUp' ? 'up' : 'down');
-			}
-			return;
-		}
-		if (event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
-		handleDragHandleMoveKey(event, blockId);
-	}
-
-	// ---------------------------------------------------------------------
-	// Multi-select and group actions (issue #152) — Shift/Ctrl-click (or
-	// Shift+Arrow) on a block's move handle builds a set of block ids, always
-	// scoped to one parent container (the Document's own top level, or a
-	// single column); selecting in a different container replaces the set
-	// rather than mixing containers, since group move below assumes one
-	// shared, orderable sibling list. The bulk action bar (rendered near the
-	// bottom of the template) is the primary UI for acting on the set; it's a
-	// plain, Tab-reachable toolbar, so no separate keyboard path is needed for
-	// duplicate/delete/move-as-group beyond what already reaches those
-	// buttons.
-	// ---------------------------------------------------------------------
-
-	function clearSelection(): void {
-		selectedBlockIds.clear();
-		selectionAnchorId = null;
-	}
-
-	function toggleBlockSelection(blockId: string, parentId: string): void {
-		// Starting a fresh toggle-select in a different container than the
-		// current selection replaces it outright — see the comment above.
-		if (!sameContainerSelection(parentId)) selectedBlockIds.clear();
-		if (selectedBlockIds.has(blockId)) selectedBlockIds.delete(blockId);
-		else selectedBlockIds.add(blockId);
-		selectionAnchorId = blockId;
-	}
-
-	function extendBlockSelectionRange(blockId: string, parentId: string, index: number): void {
-		if (!ydoc) return;
-		const anchorId =
-			selectionAnchorId && sameContainerSelection(parentId) ? selectionAnchorId : blockId;
-		const siblings = listRecordsForParent(ydoc, parentId);
-		const anchorIndex = siblings.findIndex((s) => s.id === anchorId);
-		if (anchorIndex === -1) {
-			selectedBlockIds.clear();
-			selectedBlockIds.add(blockId);
-			selectionAnchorId = blockId;
-			return;
-		}
-		const [lo, hi] = anchorIndex <= index ? [anchorIndex, index] : [index, anchorIndex];
-		selectedBlockIds.clear();
-		for (const sibling of siblings.slice(lo, hi + 1)) selectedBlockIds.add(sibling.id);
-		selectionAnchorId = anchorId;
-	}
-
-	// True when the current selection (if any) already belongs to `parentId` —
-	// an empty selection trivially agrees with any container.
-	function sameContainerSelection(parentId: string): boolean {
-		if (!ydoc || selectedBlockIds.size === 0) return true;
-		const [firstId] = selectedBlockIds;
-		return getRecord(ydoc, firstId)?.parentId === parentId;
-	}
-
-	function extendBlockSelectionByKeyboard(blockId: string, direction: 'up' | 'down'): void {
-		if (!ydoc) return;
-		const record = getRecord(ydoc, blockId);
-		if (!record) return;
-		// Establish the anchor at the block the handle was focused on *before*
-		// this keypress — without this, a first Shift+Arrow (no prior
-		// selection) would fall through to extendBlockSelectionRange's own
-		// "no anchor yet" fallback, which anchors on its `blockId` argument.
-		// That argument is the *target* row (siblings[nextIndex] below), so the
-		// selection would collapse to that single row instead of spanning from
-		// where the user started.
-		if (!selectionAnchorId || !sameContainerSelection(record.parentId)) {
-			selectionAnchorId = blockId;
-		}
-		const siblings = listRecordsForParent(ydoc, record.parentId);
-		const currentIndex = siblings.findIndex((s) => s.id === blockId);
-		if (currentIndex === -1) return;
-		const nextIndex =
-			direction === 'up'
-				? Math.max(0, currentIndex - 1)
-				: Math.min(siblings.length - 1, currentIndex + 1);
-		extendBlockSelectionRange(siblings[nextIndex].id, record.parentId, nextIndex);
-		void focusDragHandle(siblings[nextIndex].id);
-	}
-
-	// The selected ids in their actual sibling order — needed so
-	// duplicate/delete-as-group act in a stable, predictable order rather than
-	// Set insertion order (which toggleBlockSelection's add/remove can scramble
-	// relative to document order).
-	function orderedSelection(): WorkspaceRecord[] {
-		if (!ydoc || selectedBlockIds.size === 0) return [];
-		const [firstId] = selectedBlockIds;
-		const parentId = getRecord(ydoc, firstId)?.parentId;
-		if (!parentId) return [];
-		return listRecordsForParent(ydoc, parentId).filter((r) => selectedBlockIds.has(r.id));
-	}
-
-	function deleteSelection(): void {
-		if (!ydoc) return;
-		const ids = orderedSelection().map((r) => r.id);
-		if (ids.length === 0) return;
-		transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () => {
-			for (const id of ids) deleteRecord(ydoc!, id);
-		});
-		clearSelection();
-	}
-
-	function duplicateSelection(): void {
-		if (!ydoc) return;
-		const ids = orderedSelection().map((r) => r.id);
-		if (ids.length === 0) return;
-		const copies = ydoc.transact(() => ids.map((id) => duplicateRecord(ydoc!, id, CURRENT_USER)));
-		selectedBlockIds.clear();
-		for (const copy of copies) selectedBlockIds.add(copy.id);
-		selectionAnchorId = copies[0]?.id ?? null;
-	}
-
-	interface SelectionGroupBounds {
-		siblings: WorkspaceRecord[];
-		groupStart: number;
-		groupEnd: number;
-	}
-
-	// Resolves the current selection's start/end position within its shared
-	// parent's sibling list, or null when the selection is empty, spans an id
-	// no longer found there, or isn't contiguous — "move a scattered set up"
-	// has no single well-defined result. The one shared definition of "is this
-	// selection movable as a unit," used by isSelectionContiguous, the bulk
-	// bar's Move up/down disabled state, and moveSelectionAsGroup itself, so
-	// the three can't drift out of agreement with each other.
-	function resolveSelectionGroupBounds(): SelectionGroupBounds | null {
-		if (!ydoc) return null;
-		const selected = orderedSelection();
-		if (selected.length === 0) return null;
-		const siblings = listRecordsForParent(ydoc, selected[0].parentId);
-		const indices = selected
-			.map((r) => siblings.findIndex((s) => s.id === r.id))
-			.filter((i) => i !== -1)
-			.sort((a, b) => a - b);
-		if (indices.length !== selected.length) return null;
-		const groupStart = indices[0];
-		const groupEnd = indices[indices.length - 1];
-		if (groupEnd - groupStart + 1 !== indices.length) return null; // not contiguous
-		return { siblings, groupStart, groupEnd };
-	}
-
-	function isSelectionContiguous(): boolean {
-		return resolveSelectionGroupBounds() !== null;
-	}
-
-	// Whether the bulk bar's Move up/down button should be enabled — false for
-	// a non-contiguous selection (see resolveSelectionGroupBounds) and also
-	// false right at the container boundary in that direction, so the button
-	// can't be clicked to silently do nothing.
-	function canMoveSelectionAsGroup(direction: 'up' | 'down'): boolean {
-		const bounds = resolveSelectionGroupBounds();
-		if (!bounds) return false;
-		return direction === 'up'
-			? bounds.groupStart > 0
-			: bounds.groupEnd < bounds.siblings.length - 1;
-	}
-
-	// Moves the whole selected group up/down by one position as a unit,
-	// swapping it with its one adjacent unselected neighbor — the natural
-	// generalization of moveBlock's own single-block adjacent swap.
-	function moveSelectionAsGroup(direction: 'up' | 'down'): void {
-		if (!ydoc || !canMoveSelectionAsGroup(direction)) return;
-		const { siblings, groupStart, groupEnd } = resolveSelectionGroupBounds()!;
-
-		ydoc.transact(() => {
-			if (direction === 'up') {
-				reorderRecord(ydoc!, siblings[groupStart - 1].id, siblings[groupEnd].id);
-			} else {
-				const beforeFirst = groupStart > 0 ? siblings[groupStart - 1].id : undefined;
-				reorderRecord(ydoc!, siblings[groupEnd + 1].id, beforeFirst);
-			}
-		});
-		const count = groupEnd - groupStart + 1;
-		const newStart = direction === 'up' ? groupStart - 1 : groupStart + 1;
-		reorderAnnouncement =
-			count === 1
-				? `Moved block to position ${newStart + 1} of ${siblings.length}.`
-				: `Moved ${count} blocks to positions ${newStart + 1}-${newStart + count} of ${siblings.length}.`;
-	}
-
-	// Every drop container currently on screen (the Document's own top-level
-	// flow, plus one per column) and its bounding rect.
-	function containerRectsOnScreen(): { parentId: string; rect: DOMRect }[] {
-		return Array.from(document.querySelectorAll<HTMLElement>('[data-block-container]')).map(
-			(el) => ({
-				parentId: el.dataset.blockContainer!,
-				rect: el.getBoundingClientRect()
-			})
-		);
-	}
-
-	// Resolves which container a drag point is currently over. A column's
-	// own container rect is nested inside the Document's top-level one, so
-	// when a point falls inside more than one, the smallest (most specific)
-	// container wins — otherwise a drag over a column would always resolve
-	// to the whole page instead.
-	function resolveDropContainer(
-		clientX: number,
-		clientY: number,
-		fallbackParentId: string
-	): string {
-		const hits = containerRectsOnScreen().filter(
-			(c) =>
-				clientX >= c.rect.left &&
-				clientX <= c.rect.right &&
-				clientY >= c.rect.top &&
-				clientY <= c.rect.bottom
-		);
-		if (hits.length === 0) return fallbackParentId;
-		hits.sort((a, b) => a.rect.width * a.rect.height - b.rect.width * b.rect.height);
-		return hits[0].parentId;
-	}
-
-	// Finds the boundary between rendered block rows (within one container)
-	// closest to clientY, as an index into that container's *current*
-	// (pre-move) sibling array — 0..siblings.length, where siblings.length
-	// means "after the last block."
-	function dropIndexInContainer(parentId: string, clientY: number): number {
-		const rows = Array.from(
-			document.querySelectorAll<HTMLElement>(
-				`[data-block-row][data-block-parent="${CSS.escape(parentId)}"]`
-			)
-		);
-		for (let i = 0; i < rows.length; i++) {
-			const rect = rows[i].getBoundingClientRect();
-			if (clientY < rect.top + rect.height / 2) return i;
-		}
-		return rows.length;
-	}
-
-	// targetIndex is a drop-indicator position computed against targetParentId's
-	// *current* siblings (still including blockId at its old slot, if it was
-	// already there) — translated here into reorderRecord/moveRecordToParent's
-	// afterRecordId (resolved among blockId's prospective siblings, i.e. that
-	// same array *without* blockId).
-	function moveBlockToContainerIndex(
-		blockId: string,
-		targetParentId: string,
-		targetIndex: number
-	): void {
-		if (!ydoc) return;
-		const record = getRecord(ydoc, blockId);
-		if (!record) return;
-
-		if (record.parentId === targetParentId) {
-			const siblings = listRecordsForParent(ydoc, targetParentId);
-			const currentIndex = siblings.findIndex((b) => b.id === blockId);
-			if (currentIndex === -1) return;
-			const adjusted = targetIndex > currentIndex ? targetIndex - 1 : targetIndex;
-			if (adjusted === currentIndex) return; // dropped back at its own position
-			const withoutSelf = siblings.filter((b) => b.id !== blockId);
-			const afterRecordId = adjusted > 0 ? withoutSelf[adjusted - 1]?.id : undefined;
-			reorderRecord(ydoc, blockId, afterRecordId);
-			announceBlockMoved(adjusted, targetParentId);
-			return;
-		}
-
-		// Cross-container move (issue #148) — into/out of a column. Dropping
-		// into a column is restricted to the same curated
-		// BLOCK_CAPABILITIES.column.childBlockTypes set create_record enforces
-		// at creation time (services/records.ts) — the drag path bypasses that
-		// service-layer check entirely (a direct data-layer call, like every
-		// other UI mutation), so it needs its own guard here or an unsupported
-		// type (e.g. a table or another columns block) could be dropped into a
-		// column with nothing to render it.
-		const targetContainer = getRecord(ydoc, targetParentId);
-		if (targetContainer?.blockType === 'column') {
-			const allowed = BLOCK_CAPABILITIES.column.childBlockTypes;
-			if (!allowed?.includes(record.blockType ?? 'paragraph')) return;
-		}
-		const destSiblings = listRecordsForParent(ydoc, targetParentId);
-		const afterRecordId = targetIndex > 0 ? destSiblings[targetIndex - 1]?.id : undefined;
-		moveRecordToParent(ydoc, blockId, targetParentId, afterRecordId);
-		announceBlockMoved(targetIndex, targetParentId);
-	}
-
-	function cleanupDragListeners(): void {
-		window.removeEventListener('pointermove', handleDragPointerMove);
-		window.removeEventListener('pointerup', handleDragPointerUp);
-		window.removeEventListener('pointercancel', cancelDrag);
-		window.removeEventListener('keydown', handleDragEscapeKeydown);
-	}
-
-	function cancelDrag(): void {
-		cleanupDragListeners();
-		draggingBlockId = null;
-		dropIndicatorIndex = null;
-		dropIndicatorParentId = null;
-	}
-
-	function handleDragPointerMove(event: PointerEvent): void {
-		if (!draggingBlockId || !ydoc) return;
-		const sourceParentId = getRecord(ydoc, draggingBlockId)?.parentId ?? data.documentId;
-		const containerId = resolveDropContainer(event.clientX, event.clientY, sourceParentId);
-		dropIndicatorParentId = containerId;
-		dropIndicatorIndex = dropIndexInContainer(containerId, event.clientY);
-	}
-
-	function handleDragPointerUp(): void {
-		const blockId = draggingBlockId;
-		const targetParentId = dropIndicatorParentId;
-		const targetIndex = dropIndicatorIndex;
-		cleanupDragListeners();
-		draggingBlockId = null;
-		dropIndicatorIndex = null;
-		dropIndicatorParentId = null;
-		if (blockId !== null && targetParentId !== null && targetIndex !== null) {
-			moveBlockToContainerIndex(blockId, targetParentId, targetIndex);
-		}
-	}
-
-	function handleDragEscapeKeydown(event: KeyboardEvent): void {
-		if (event.key === 'Escape') cancelDrag();
-	}
-
-	function startBlockDrag(
-		event: PointerEvent,
-		blockId: string,
-		parentId: string,
-		index: number
-	): void {
-		// Only the primary button/touch starts a drag — a right-click or an
-		// auxiliary button on the handle shouldn't hijack a context menu.
-		if (event.button !== 0) return;
-		// Shift/Ctrl/Cmd-clicking the move handle selects a range/toggles a
-		// block instead of dragging it (issue #152 multi-select) — the same
-		// modifier-click convention a file manager or spreadsheet uses, chosen
-		// specifically so it can't collide with a plain drag-to-reorder click.
-		if (event.shiftKey || event.ctrlKey || event.metaKey) {
-			event.preventDefault();
-			if (event.shiftKey) {
-				extendBlockSelectionRange(blockId, parentId, index);
-			} else {
-				toggleBlockSelection(blockId, parentId);
-			}
-			return;
-		}
-		event.preventDefault();
-		draggingBlockId = blockId;
-		dropIndicatorParentId = parentId;
-		dropIndicatorIndex = index;
-		window.addEventListener('pointermove', handleDragPointerMove);
-		window.addEventListener('pointerup', handleDragPointerUp);
-		// The browser can cancel the pointer stream without ever firing
-		// pointerup — e.g. a touch drag that turns into a page scroll — which
-		// would otherwise leave the drag state (and these listeners) stuck
-		// active until an unrelated future pointerup silently commits a
-		// reorder the user never asked for.
-		window.addEventListener('pointercancel', cancelDrag);
-		window.addEventListener('keydown', handleDragEscapeKeydown);
 	}
 
 	/** Updates live provenance for the record whose editable text just changed. */
@@ -1433,7 +874,7 @@
 		const index = siblings.findIndex((s) => s.id === blockId);
 		const fallback = siblings[index - 1] ?? siblings[index + 1];
 		transactWithOrigin(currentDoc, LOCAL_UI_ORIGIN, () => deleteRecord(currentDoc, blockId));
-		selectedBlockIds.delete(blockId);
+		blockSelection.ids.delete(blockId);
 		if (fallback) void tick().then(() => blockRefs[fallback.id]?.focusEditor(false));
 	}
 
@@ -1667,7 +1108,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="mt-6 flex min-h-[350px] cursor-text flex-col gap-1 pb-16"
-	class:select-none={draggingBlockId !== null}
+	class:select-none={blockDrag.draggingBlockId !== null}
 	data-block-container={data.documentId}
 	onclick={(e) => {
 		if (e.target === e.currentTarget) {
@@ -1712,7 +1153,7 @@
 								onBackspaceAtStart={() => handleBackspace(block, index)}
 								onFocusBlock={() => handleFocusBlock(block.id)}
 								onSlashKey={() => openSlashMenu(block.id)}
-								onLinkShortcut={() => openLinkComposer(block.id)}
+								onLinkShortcut={() => linkComposer.open(block.id)}
 								isFirstBlock={index === 0}
 								isLastBlock={index === blocks.length - 1}
 								onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
@@ -1736,7 +1177,7 @@
 							onBackspaceAtStart={() => handleBackspace(block, index)}
 							onFocusBlock={() => handleFocusBlock(block.id)}
 							onSlashKey={() => openSlashMenu(block.id)}
-							onLinkShortcut={() => openLinkComposer(block.id)}
+							onLinkShortcut={() => linkComposer.open(block.id)}
 							isFirstBlock={index === 0}
 							isLastBlock={index === blocks.length - 1}
 							onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
@@ -1819,7 +1260,7 @@
 							onBackspaceAtStart={() => handleBackspace(block, index)}
 							onFocusBlock={() => handleFocusBlock(block.id, provenanceRecordId)}
 							onSlashKey={() => {}}
-							onLinkShortcut={() => openLinkComposer(block.id)}
+							onLinkShortcut={() => linkComposer.open(block.id)}
 							isFirstBlock={index === 0}
 							isLastBlock={index === blocks.length - 1}
 							onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
@@ -1935,23 +1376,23 @@
 						{ydoc}
 						{linkTargets}
 						{blockRefs}
-						{draggingBlockId}
-						{dropIndicatorParentId}
-						{dropIndicatorIndex}
-						{selectedBlockIds}
+						draggingBlockId={blockDrag.draggingBlockId}
+						dropIndicatorParentId={blockDrag.dropIndicatorParentId}
+						dropIndicatorIndex={blockDrag.dropIndicatorIndex}
+						selectedBlockIds={blockSelection.ids}
 						{justNavigatedBlockId}
 						convertOptions={COLUMN_CONVERTIBLE_BLOCK_TYPES}
 						onFocusBlock={(blockId) => handleFocusBlock(blockId)}
 						onInputText={(blockId) => handleBlockInput(blockId)}
 						onDragHandlePointerDown={(e, blockId, parentId, blockIndex) =>
-							startBlockDrag(e, blockId, parentId, blockIndex)}
-						onDragHandleKeydown={handleDragHandleKeydown}
+							blockDrag.startBlockDrag(e, blockId, parentId, blockIndex)}
+						onDragHandleKeydown={blockDrag.handleDragHandleKeydown}
 						onDuplicateBlock={duplicateBlock}
 						onDeleteBlock={deleteBlockViaMenu}
 						onConvertBlock={convertBlockViaMenu}
 						onCopyBlockLink={copyBlockLink}
-						onMoveBlockUp={(blockId) => moveBlock(blockId, 'up')}
-						onMoveBlockDown={(blockId) => moveBlock(blockId, 'down')}
+						onMoveBlockUp={(blockId) => blockDrag.moveBlock(blockId, 'up')}
+						onMoveBlockDown={(blockId) => blockDrag.moveBlock(blockId, 'down')}
 					/>
 				{/if}
 			{/if}
@@ -1999,7 +1440,7 @@
 			{/if}
 		{/snippet}
 
-		{#if draggingBlockId && dropIndicatorParentId === data.documentId && dropIndicatorIndex === index}
+		{#if blockDrag.draggingBlockId && blockDrag.dropIndicatorParentId === data.documentId && blockDrag.dropIndicatorIndex === index}
 			<div class="mx-auto w-full max-w-3xl px-6">
 				<div class="drop-indicator" aria-hidden="true"></div>
 			</div>
@@ -2013,8 +1454,8 @@
 			{ytext}
 			{linkTargets}
 			{blockRefs}
-			{draggingBlockId}
-			{selectedBlockIds}
+			draggingBlockId={blockDrag.draggingBlockId}
+			selectedBlockIds={blockSelection.ids}
 			{justNavigatedBlockId}
 			convertOptions={CONVERTIBLE_BLOCK_TYPES}
 			rowClass="mx-auto flex w-full items-start px-6 py-0.5{isBlockFullWidth(block)
@@ -2027,26 +1468,26 @@
 			{customContent}
 			{trailingContent}
 			{insideContent}
-			onDragHandlePointerDown={startBlockDrag}
-			onDragHandleKeydown={handleDragHandleKeydown}
+			onDragHandlePointerDown={blockDrag.startBlockDrag}
+			onDragHandleKeydown={blockDrag.handleDragHandleKeydown}
 			onDuplicateBlock={duplicateBlock}
 			onDeleteBlock={deleteBlockViaMenu}
 			onConvertBlock={convertBlockViaMenu}
 			onCopyBlockLink={copyBlockLink}
-			onMoveBlockUp={(blockId) => moveBlock(blockId, 'up')}
-			onMoveBlockDown={(blockId) => moveBlock(blockId, 'down')}
+			onMoveBlockUp={(blockId) => blockDrag.moveBlock(blockId, 'up')}
+			onMoveBlockDown={(blockId) => blockDrag.moveBlock(blockId, 'down')}
 			onFocusBlock={() => handleFocusBlock(block.id)}
 			onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
 			onEnter={(caretOffset) => handleEnter(block, caretOffset)}
 			onBackspaceAtStart={() => handleBackspace(block, index)}
 			onSlashKey={() => openSlashMenu(block.id)}
-			onLinkShortcut={() => openLinkComposer(block.id)}
+			onLinkShortcut={() => linkComposer.open(block.id)}
 			onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
 			onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
 			onToggleCollapse={toggleCollapseState}
 		/>
 	{/each}
-	{#if draggingBlockId && dropIndicatorParentId === data.documentId && dropIndicatorIndex === blocks.length}
+	{#if blockDrag.draggingBlockId && blockDrag.dropIndicatorParentId === data.documentId && blockDrag.dropIndicatorIndex === blocks.length}
 		<div class="mx-auto w-full max-w-3xl px-6">
 			<div class="drop-indicator" aria-hidden="true"></div>
 		</div>
@@ -2088,16 +1529,16 @@
 	onClose={() => (outlineOpen = false)}
 />
 
-{#if selectedBlockIds.size > 0}
+{#if blockSelection.ids.size > 0}
 	<div
 		class="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-border bg-bg px-2 py-1.5 shadow-lg ring-1 ring-black/5"
 		role="toolbar"
 		aria-label="Selected blocks actions"
 	>
-		<span class="px-2 text-xs font-medium text-muted">{selectedBlockIds.size} selected</span>
+		<span class="px-2 text-xs font-medium text-muted">{blockSelection.ids.size} selected</span>
 		<button
 			type="button"
-			onclick={duplicateSelection}
+			onclick={blockSelection.duplicateSelection}
 			class="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-fg hover:bg-surface"
 		>
 			<Icon name="duplicate" size={14} />
@@ -2105,10 +1546,10 @@
 		</button>
 		<button
 			type="button"
-			onclick={() => moveSelectionAsGroup('up')}
-			disabled={!canMoveSelectionAsGroup('up')}
+			onclick={() => blockSelection.moveAsGroup('up')}
+			disabled={!blockSelection.canMoveAsGroup('up')}
 			class="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-fg hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-			title={!isSelectionContiguous()
+			title={!blockSelection.isContiguous()
 				? 'Only a contiguous selection can move as a unit'
 				: 'Move up'}
 		>
@@ -2117,10 +1558,10 @@
 		</button>
 		<button
 			type="button"
-			onclick={() => moveSelectionAsGroup('down')}
-			disabled={!canMoveSelectionAsGroup('down')}
+			onclick={() => blockSelection.moveAsGroup('down')}
+			disabled={!blockSelection.canMoveAsGroup('down')}
 			class="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-fg hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-			title={!isSelectionContiguous()
+			title={!blockSelection.isContiguous()
 				? 'Only a contiguous selection can move as a unit'
 				: 'Move down'}
 		>
@@ -2129,7 +1570,7 @@
 		</button>
 		<button
 			type="button"
-			onclick={deleteSelection}
+			onclick={blockSelection.deleteSelection}
 			class="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40"
 		>
 			<Icon name="trash" size={14} />
@@ -2137,7 +1578,7 @@
 		</button>
 		<button
 			type="button"
-			onclick={clearSelection}
+			onclick={blockSelection.clear}
 			class="ml-1 rounded-md p-1 text-muted hover:bg-surface hover:text-fg"
 			aria-label="Clear selection"
 		>
@@ -2161,89 +1602,14 @@
 	onCancel={() => (syncedBlockDialogId = null)}
 />
 
-{#if linkDialogBlockId !== null}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-		role="presentation"
-	>
-		<div
-			bind:this={linkDialog}
-			role="dialog"
-			aria-modal="true"
-			aria-labelledby="link-composer-title"
-			tabindex="-1"
-			class="w-full max-w-md rounded-lg border border-border bg-bg p-5 shadow-xl"
-			onkeydown={handleLinkDialogKeydown}
-		>
-			<h2 id="link-composer-title" class="text-lg font-semibold text-fg">Add link</h2>
-			<div class="mt-4 flex gap-2" role="group" aria-label="Link type">
-				<button
-					type="button"
-					onclick={() => (linkMode = 'url')}
-					class="rounded px-3 py-1.5 text-sm"
-					class:bg-accent={linkMode === 'url'}
-					class:text-accent-fg={linkMode === 'url'}
-					class:bg-surface={linkMode !== 'url'}>Web address</button
-				>
-				<button
-					type="button"
-					onclick={() => (linkMode = 'record')}
-					class="rounded px-3 py-1.5 text-sm"
-					class:bg-accent={linkMode === 'record'}
-					class:text-accent-fg={linkMode === 'record'}
-					class:bg-surface={linkMode !== 'record'}>Workspace item</button
-				>
-			</div>
-			{#if linkMode === 'url'}
-				<label class="mt-4 block text-sm font-medium text-fg">
-					Web address
-					<input
-						bind:this={linkUrlInput}
-						bind:value={linkUrl}
-						placeholder="https://example.com"
-						class="mt-1.5 w-full rounded border border-border bg-surface px-3 py-2 text-sm text-fg outline-none focus:border-accent"
-					/>
-				</label>
-			{:else}
-				<label class="mt-4 block text-sm font-medium text-fg">
-					Link to
-					<select
-						bind:value={linkRecordId}
-						class="mt-1.5 w-full rounded border border-border bg-surface px-3 py-2 text-sm text-fg outline-none focus:border-accent"
-					>
-						<option value="">Choose a page or collection…</option>
-						<optgroup label="Pages">
-							{#each data.documents as document (document.id)}
-								{#if document.id !== data.documentId}
-									<option value={document.id}>{documentLocation(document.id)}</option>
-								{/if}
-							{/each}
-						</optgroup>
-						<optgroup label="Collections">
-							{#each data.collections as collection (collection.id)}
-								<option value={collection.id}>{collection.title || 'Untitled collection'}</option>
-							{/each}
-						</optgroup>
-					</select>
-				</label>
-			{/if}
-			<div class="mt-5 flex justify-end gap-2">
-				<button
-					type="button"
-					onclick={closeLinkComposer}
-					class="rounded px-3 py-2 text-sm text-muted hover:text-fg">Cancel</button
-				>
-				<button
-					type="button"
-					disabled={linkMode === 'url' ? !linkUrl.trim() : !linkRecordId}
-					onclick={applyLink}
-					class="rounded bg-accent px-3 py-2 text-sm font-medium text-accent-fg disabled:opacity-40"
-					>Add link</button
-				>
-			</div>
-		</div>
-	</div>
-{/if}
+<LinkComposerDialog
+	composer={linkComposer}
+	documents={data.documents}
+	collections={data.collections}
+	currentDocumentId={data.documentId}
+	{documentLocation}
+	onApply={applyLink}
+/>
 
 <style>
 	.drop-indicator {
