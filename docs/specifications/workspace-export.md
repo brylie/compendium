@@ -12,7 +12,7 @@ The Compendium README frames "nothing to export, import, or paste between them" 
 This specification addresses Issue #17 by defining:
 
 1. **On-demand export formats & scopes**: Structured Markdown files + `manifest.json` for Documents, Collections, and full Workspaces or Spaces.
-2. **Restore/import compatibility story**: A documented, lossless manifest schema that powers future import/restore tools (#26).
+2. **Restore/import compatibility story**: A documented manifest schema that powers future import/restore tools (#26). Note that Markdown export restores high-level document tree hierarchy and content, but is lossy for internal block record IDs and detailed block-level UI state (`checked`, `collapsed`, `viewConfig`, `calloutStyle`).
 3. **Periodic, disposable Markdown mirror**: An automatic, non-authoritative, user-toggleable disk mirror regenerated from live `Y.Doc` state for instant local searchability (e.g. `ripgrep`, external note readers).
 
 ---

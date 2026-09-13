@@ -20,19 +20,31 @@ import {
 } from './export';
 import type { CallerIdentity } from './permissions';
 import type { DocumentRecordView } from './document-projection';
-import type { PropertyDefinition, WorkspaceRecord } from '$lib/data/types';
+import type { ActorId, PropertyDefinition, WorkspaceRecord } from '$lib/data/types';
 
 describe('export service', () => {
 	const caller: CallerIdentity = { kind: 'human', userId: 'test-user' };
+	const configPath = '.data/markdown-mirror-config.json';
 	let tempDir: string;
+	let originalConfigData: string | null = null;
 
 	beforeEach(() => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compendium-export-test-'));
+		if (fs.existsSync(configPath)) {
+			originalConfigData = fs.readFileSync(configPath, 'utf-8');
+		} else {
+			originalConfigData = null;
+		}
 	});
 
 	afterEach(() => {
 		if (fs.existsSync(tempDir)) {
 			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+		if (originalConfigData !== null) {
+			fs.writeFileSync(configPath, originalConfigData, 'utf-8');
+		} else if (fs.existsSync(configPath)) {
+			fs.unlinkSync(configPath);
 		}
 	});
 
@@ -304,5 +316,52 @@ describe('export service', () => {
 
 		// Cleanup relative folder
 		fs.rmSync(absDir, { recursive: true, force: true });
+	});
+
+	it('neutralizes CSV formula injection characters', () => {
+		const schema: PropertyDefinition[] = [{ key: 'val', label: 'Value', type: 'text' }];
+		const records: WorkspaceRecord[] = [
+			{
+				id: 'rec-1',
+				parentId: 'col-1',
+				order: 'a',
+				createdBy: 'user_test' as ActorId,
+				createdAt: 1000,
+				lastEditedBy: 'user_test' as ActorId,
+				lastEditedAt: 1000,
+				properties: { val: { type: 'text', value: '=CMD("calc")' } }
+			},
+			{
+				id: 'rec-2',
+				parentId: 'col-1',
+				order: 'b',
+				createdBy: 'user_test' as ActorId,
+				createdAt: 1001,
+				lastEditedBy: 'user_test' as ActorId,
+				lastEditedAt: 1001,
+				properties: { val: { type: 'text', value: '+100' } }
+			}
+		];
+
+		const csv = collectionRecordsToCsv(schema, records);
+		expect(csv).toContain('rec-1,\'=CMD("calc")');
+		expect(csv).toContain("rec-2,'+100");
+	});
+
+	it('sanitizes dot and dot-dot filenames to Untitled', () => {
+		expect(sanitizeFilename('.')).toBe('Untitled');
+		expect(sanitizeFilename('..')).toBe('Untitled');
+		expect(sanitizeFilename('  .  ')).toBe('Untitled');
+	});
+
+	it('disambiguates duplicate document titles in workspace export', () => {
+		createDocument(caller, { title: 'Collision Doc' });
+		const doc2 = createDocument(caller, { title: 'Collision Doc' });
+
+		const result = exportWorkspace(caller);
+		const paths = result.files.map((f) => f.path);
+
+		expect(paths).toContain('documents/Collision Doc.md');
+		expect(paths.some((p) => p.includes(`Collision Doc (${doc2.id}).md`))).toBe(true);
 	});
 });

@@ -9,6 +9,14 @@ export const GET: RequestHandler = async ({ url, locals }) => {
 	const spaceId = url.searchParams.get('spaceId') ?? undefined;
 	const caller = locals.requestContext.caller;
 
+	if (!['workspace', 'document', 'collection'].includes(scope)) {
+		error(400, `Invalid export scope: ${scope}`);
+	}
+
+	if ((scope === 'document' || scope === 'collection') && !id?.trim()) {
+		error(400, `Export scope "${scope}" requires a valid non-empty id parameter`);
+	}
+
 	try {
 		if (scope === 'document' && id) {
 			const docResult = exportDocument(caller, id);

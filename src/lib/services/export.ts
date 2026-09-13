@@ -5,9 +5,15 @@ import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { logAudit } from '$lib/server/audit';
 import { getDocument, listDocuments } from './documents';
 import { listCollections, queryCollection } from './collections';
-import { projectDocument, type DocumentRecordView } from './document-projection';
+import {
+	projectDocument,
+	renderBlockMarkdown,
+	type DocumentRecordView
+} from './document-projection';
 import { actorForCaller, type CallerIdentity } from './permissions';
 import type { CollectionMeta, PropertyDefinition, WorkspaceRecord } from '$lib/data/types';
+
+export { renderBlockMarkdown };
 
 export interface MirrorConfig {
 	enabled: boolean;
@@ -70,6 +76,10 @@ export function updateMirrorConfig(
 		fs.writeFileSync(DEFAULT_MIRROR_CONFIG_PATH, JSON.stringify(updated, null, 2), 'utf-8');
 	} catch (err) {
 		console.error('Failed to save markdown mirror config:', err);
+		throw new Error(
+			`Failed to save mirror configuration: ${err instanceof Error ? err.message : String(err)}`,
+			{ cause: err }
+		);
 	}
 
 	const actor = actorForCaller(caller);
@@ -83,35 +93,20 @@ export function sanitizeFilename(name: string): string {
 		.trim()
 		.replace(/[/\\?%*:|"<>]/g, '_')
 		.replace(/\s+/g, ' ');
-	return sanitized || 'Untitled';
+	if (!sanitized || sanitized === '.' || sanitized === '..') {
+		return 'Untitled';
+	}
+	return sanitized;
 }
 
-/** Renders a DocumentRecordView block's markdown with its block-type prefix. */
-export function renderBlockMarkdown(r: DocumentRecordView): string {
-	switch (r.blockType) {
-		case 'heading_1':
-			return `# ${r.markdown}`;
-		case 'heading_2':
-			return `## ${r.markdown}`;
-		case 'heading_3':
-			return `### ${r.markdown}`;
-		case 'heading_4':
-			return `#### ${r.markdown}`;
-		case 'bulleted_list_item':
-			return `- ${r.markdown}`;
-		case 'numbered_list_item':
-			return `1. ${r.markdown}`;
-		case 'to_do':
-			return `- [${r.checked ? 'x' : ' '}] ${r.markdown}`;
-		case 'quote':
-			return `> ${r.markdown}`;
-		case 'code':
-			return `\`\`\`\n${r.markdown}\n\`\`\``;
-		case 'divider':
-			return `---`;
-		default:
-			return r.markdown;
+/** Verifies that targetPath is contained within rootDir to prevent path traversal. */
+function ensurePathInRoot(targetPath: string, rootDir: string): string {
+	const resolvedTarget = path.resolve(targetPath);
+	const resolvedRoot = path.resolve(rootDir);
+	if (!resolvedTarget.startsWith(resolvedRoot + path.sep) && resolvedTarget !== resolvedRoot) {
+		throw new Error(`Path traversal detected: ${targetPath} is outside ${rootDir}`);
 	}
+	return resolvedTarget;
 }
 
 /** Serializes a Document title and projected block views into full CommonMark/GFM markdown. */
@@ -132,8 +127,12 @@ function csvEscape(val: unknown): string {
 		const str = JSON.stringify(val);
 		return `"${str.replace(/"/g, '""')}"`;
 	}
-	const str = typeof val === 'string' ? val : String(val as string | number | boolean);
-	if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+	let str = typeof val === 'string' ? val : String(val as string | number | boolean);
+	// Formula injection protection: prefix values starting with =, +, -, @, \t, or \r with single quote
+	if (/^[=+\-@\t\r]/.test(str)) {
+		str = `'${str}`;
+	}
+	if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
 		return `"${str.replace(/"/g, '""')}"`;
 	}
 	return str;
@@ -381,23 +380,27 @@ export function exportWorkspace(caller: CallerIdentity, spaceId?: string): Expor
 	}
 
 	const docPathMap = new Map<string, string>();
+	const usedDocPaths = new Set<string>();
+
 	const buildDocPath = (id: string): string => {
 		if (docPathMap.has(id)) return docPathMap.get(id)!;
 		const meta = docMap.get(id);
 		if (!meta) return '';
 		const name = sanitizeFilename(meta.title);
-		if (meta.parentDocumentId && docMap.has(meta.parentDocumentId)) {
-			const parentPath = buildDocPath(meta.parentDocumentId);
-			const fullPath = parentPath
-				? `${parentPath.replace(/\.md$/, '')}/${name}.md`
+		const basePath =
+			meta.parentDocumentId && docMap.has(meta.parentDocumentId)
+				? `${buildDocPath(meta.parentDocumentId).replace(/\.md$/, '')}/${name}.md`
 				: `documents/${name}.md`;
-			docPathMap.set(id, fullPath);
-			return fullPath;
-		} else {
-			const fullPath = `documents/${name}.md`;
-			docPathMap.set(id, fullPath);
-			return fullPath;
+
+		let fullPath = basePath;
+		if (usedDocPaths.has(fullPath)) {
+			const ext = path.extname(fullPath);
+			const base = fullPath.slice(0, -ext.length);
+			fullPath = `${base} (${id})${ext}`;
 		}
+		usedDocPaths.add(fullPath);
+		docPathMap.set(id, fullPath);
+		return fullPath;
 	};
 
 	for (const meta of docMetas) {
@@ -417,8 +420,14 @@ export function exportWorkspace(caller: CallerIdentity, spaceId?: string): Expor
 		});
 	}
 
+	const usedColFolders = new Set<string>();
 	for (const colMeta of colMetas) {
-		const colFolder = `collections/${sanitizeFilename(colMeta.title)}`;
+		let colFolder = `collections/${sanitizeFilename(colMeta.title)}`;
+		if (usedColFolders.has(colFolder)) {
+			colFolder = `${colFolder} (${colMeta.id})`;
+		}
+		usedColFolders.add(colFolder);
+
 		const schemaPath = `${colFolder}/schema.json`;
 		const recordsPath = `${colFolder}/records.json`;
 		const csvPath = `${colFolder}/records.csv`;
@@ -465,6 +474,44 @@ export function exportWorkspace(caller: CallerIdentity, spaceId?: string): Expor
 	return { manifest, files, zipBuffer };
 }
 
+function removeEmptySubdirs(dir: string): void {
+	// eslint-disable-next-line security/detect-non-literal-fs-filename
+	if (!fs.existsSync(dir)) return;
+	// eslint-disable-next-line security/detect-non-literal-fs-filename
+	const entries = fs.readdirSync(dir, { withFileTypes: true });
+	for (const entry of entries) {
+		if (entry.isDirectory()) {
+			const fullSub = path.join(dir, entry.name);
+			removeEmptySubdirs(fullSub);
+			// eslint-disable-next-line security/detect-non-literal-fs-filename
+			if (fs.existsSync(fullSub) && fs.readdirSync(fullSub).length === 0) {
+				// eslint-disable-next-line security/detect-non-literal-fs-filename
+				fs.rmdirSync(fullSub);
+			}
+		}
+	}
+}
+
+function cleanupStaleMirrorFiles(
+	resolvedDir: string,
+	writtenPaths: Set<string>,
+	previousWrittenPaths: Set<string>
+): void {
+	for (const prevPath of previousWrittenPaths) {
+		// eslint-disable-next-line security/detect-non-literal-fs-filename
+		if (!writtenPaths.has(prevPath) && fs.existsSync(prevPath)) {
+			try {
+				// eslint-disable-next-line security/detect-non-literal-fs-filename
+				fs.unlinkSync(prevPath);
+			} catch {
+				// ignore deletion error
+			}
+		}
+	}
+
+	removeEmptySubdirs(resolvedDir);
+}
+
 /** Performs a one-directional synchronization of workspace content to the Markdown mirror directory. */
 export function syncMarkdownMirror(): {
 	synced: boolean;
@@ -490,9 +537,25 @@ export function syncMarkdownMirror(): {
 	}
 
 	const writtenPaths = new Set<string>();
+	const manifestMarkerPath = path.join(resolvedDir, '.compendium-mirror-manifest.json');
+	let previousWrittenPaths = new Set<string>();
+
+	// eslint-disable-next-line security/detect-non-literal-fs-filename
+	if (fs.existsSync(manifestMarkerPath)) {
+		try {
+			// eslint-disable-next-line security/detect-non-literal-fs-filename
+			const markerContent = fs.readFileSync(manifestMarkerPath, 'utf-8');
+			const parsedMarker = JSON.parse(markerContent);
+			if (Array.isArray(parsedMarker.files)) {
+				previousWrittenPaths = new Set(parsedMarker.files);
+			}
+		} catch {
+			// ignore read/parse errors for mirror marker
+		}
+	}
 
 	for (const file of exportResult.files) {
-		const filePath = path.join(resolvedDir, file.path);
+		const filePath = ensurePathInRoot(path.join(resolvedDir, file.path), resolvedDir);
 		const fileDir = path.dirname(filePath);
 		// eslint-disable-next-line security/detect-non-literal-fs-filename
 		if (!fs.existsSync(fileDir)) {
@@ -509,31 +572,17 @@ export function syncMarkdownMirror(): {
 		writtenPaths.add(filePath);
 	}
 
-	// Clean up stale files in mirror directory
-	const removeStaleFiles = (dir: string) => {
-		// eslint-disable-next-line security/detect-non-literal-fs-filename
-		if (!fs.existsSync(dir)) return;
-		// eslint-disable-next-line security/detect-non-literal-fs-filename
-		const entries = fs.readdirSync(dir, { withFileTypes: true });
-		for (const entry of entries) {
-			const fullPath = path.join(dir, entry.name);
-			if (entry.isDirectory()) {
-				removeStaleFiles(fullPath);
-				// eslint-disable-next-line security/detect-non-literal-fs-filename
-				if (fs.readdirSync(fullPath).length === 0) {
-					// eslint-disable-next-line security/detect-non-literal-fs-filename
-					fs.rmdirSync(fullPath);
-				}
-			} else {
-				if (!writtenPaths.has(fullPath)) {
-					// eslint-disable-next-line security/detect-non-literal-fs-filename
-					fs.unlinkSync(fullPath);
-				}
-			}
-		}
-	};
+	// Clean up only files previously written by the Markdown mirror
+	cleanupStaleMirrorFiles(resolvedDir, writtenPaths, previousWrittenPaths);
 
-	removeStaleFiles(resolvedDir);
+	// Write new mirror manifest marker
+	const mirrorMarkerData = {
+		version: '1.0',
+		lastSyncedAt: Date.now(),
+		files: Array.from(writtenPaths)
+	};
+	// eslint-disable-next-line security/detect-non-literal-fs-filename
+	fs.writeFileSync(manifestMarkerPath, JSON.stringify(mirrorMarkerData, null, 2), 'utf-8');
 
 	return {
 		synced: true,

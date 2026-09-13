@@ -1051,14 +1051,43 @@ describe('Tier A: Protocol-Level MCP & Yjs E2E Parity', () => {
 					expect(history.length).toBeGreaterThan(0);
 					break;
 				}
-				case 'export.exportWorkspace':
-				case 'export.exportDocument':
-				case 'export.exportCollection':
-				case 'export.getMirrorConfig':
-				case 'export.updateMirrorConfig':
-				case 'export.syncMarkdownMirror': {
+				case 'export.exportWorkspace': {
+					const res = serviceModules.export.exportWorkspace(human);
+					expect(res.manifest).toBeDefined();
+					expect(res.zipBuffer).toBeDefined();
+					break;
+				}
+				case 'export.exportDocument': {
+					const docs = serviceModules.documents.listDocuments(human);
+					if (docs.length > 0) {
+						const res = serviceModules.export.exportDocument(human, docs[0].id);
+						expect(res.markdown).toBeDefined();
+					}
+					break;
+				}
+				case 'export.exportCollection': {
+					const cols = serviceModules.collections.listCollections(human);
+					if (cols.length > 0) {
+						const res = serviceModules.export.exportCollection(human, cols[0].id);
+						expect(res.recordsCsv).toBeDefined();
+					}
+					break;
+				}
+				case 'export.getMirrorConfig': {
 					const config = serviceModules.export.getMirrorConfig();
 					expect(config).toBeDefined();
+					break;
+				}
+				case 'export.updateMirrorConfig': {
+					const updated = serviceModules.export.updateMirrorConfig(human, {
+						enabled: false
+					});
+					expect(updated.enabled).toBe(false);
+					break;
+				}
+				case 'export.syncMarkdownMirror': {
+					const res = serviceModules.export.syncMarkdownMirror();
+					expect(res).toHaveProperty('synced');
 					break;
 				}
 				default:

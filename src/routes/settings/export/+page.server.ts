@@ -20,10 +20,16 @@ export const actions: Actions = {
 			return fail(400, { error: 'Output directory path cannot be empty' });
 		}
 
-		const updated = updateMirrorConfig(locals.requestContext.caller, {
-			enabled,
-			outputDir
-		});
+		let updated: ReturnType<typeof updateMirrorConfig>;
+		try {
+			updated = updateMirrorConfig(locals.requestContext.caller, {
+				enabled,
+				outputDir
+			});
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Failed to update mirror configuration';
+			return fail(500, { error: message });
+		}
 
 		if (updated.enabled) {
 			try {

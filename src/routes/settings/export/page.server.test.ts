@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
 import { load, actions } from './+page.server';
 import { resolveRequestContext } from '$lib/server/request-context';
 
@@ -20,6 +21,29 @@ function formEvent(fields: Record<string, string>): Parameters<typeof actions.up
 }
 
 describe('routes/settings/export/+page.server', () => {
+	const configPath = '.data/markdown-mirror-config.json';
+	const testOutputDir = './.data/test-export-mirror';
+	let originalConfigData: string | null = null;
+
+	beforeEach(() => {
+		if (fs.existsSync(configPath)) {
+			originalConfigData = fs.readFileSync(configPath, 'utf-8');
+		} else {
+			originalConfigData = null;
+		}
+	});
+
+	afterEach(() => {
+		if (originalConfigData !== null) {
+			fs.writeFileSync(configPath, originalConfigData, 'utf-8');
+		} else if (fs.existsSync(configPath)) {
+			fs.unlinkSync(configPath);
+		}
+		if (fs.existsSync(testOutputDir)) {
+			fs.rmSync(testOutputDir, { recursive: true, force: true });
+		}
+	});
+
 	it('load() returns current mirror configuration', () => {
 		const result = load(loadEvent()) as unknown as { mirrorConfig: { enabled: boolean } };
 		expect(result).toHaveProperty('mirrorConfig');
@@ -36,12 +60,12 @@ describe('routes/settings/export/+page.server', () => {
 
 	it('updateMirror updates configuration and returns success', async () => {
 		const result = (await actions.updateMirror(
-			formEvent({ enabled: 'on', outputDir: './.data/test-export-mirror' })
+			formEvent({ enabled: 'on', outputDir: testOutputDir })
 		)) as unknown as { success: boolean; mirrorConfig: { enabled: boolean; outputDir: string } };
 
 		expect(result.success).toBe(true);
 		expect(result.mirrorConfig.enabled).toBe(true);
-		expect(result.mirrorConfig.outputDir).toBe('./.data/test-export-mirror');
+		expect(result.mirrorConfig.outputDir).toBe(testOutputDir);
 	});
 
 	it('syncNow triggers mirror sync and returns success', async () => {

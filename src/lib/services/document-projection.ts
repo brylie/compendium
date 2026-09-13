@@ -84,9 +84,37 @@ function renderRecordMarkdown(
 	return content;
 }
 
+/** Renders a DocumentRecordView block's markdown with its block-type prefix. */
+export function renderBlockMarkdown(r: DocumentRecordView): string {
+	switch (r.blockType) {
+		case 'heading_1':
+			return `# ${r.markdown}`;
+		case 'heading_2':
+			return `## ${r.markdown}`;
+		case 'heading_3':
+			return `### ${r.markdown}`;
+		case 'heading_4':
+			return `#### ${r.markdown}`;
+		case 'bulleted_list_item':
+			return `- ${r.markdown}`;
+		case 'numbered_list_item':
+			return `1. ${r.markdown}`;
+		case 'to_do':
+			return `- [${r.checked ? 'x' : ' '}] ${r.markdown}`;
+		case 'quote':
+			return `> ${r.markdown}`;
+		case 'code':
+			return `\`\`\`\n${r.markdown}\n\`\`\``;
+		case 'divider':
+			return `---`;
+		default:
+			return r.markdown;
+	}
+}
+
 function renderColumnMarkdown(column: DocumentRecordView): string {
 	const body = (column.children ?? [])
-		.map((block) => block.markdown)
+		.map((block) => renderBlockMarkdown(block))
 		.filter((markdown) => markdown.length > 0)
 		.join('\n\n');
 	return body ? `::: column\n${body}\n:::` : '::: column\n:::';

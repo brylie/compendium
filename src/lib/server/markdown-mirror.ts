@@ -14,7 +14,8 @@ export function wireMarkdownMirrorOnce(): void {
 
 		mirrorTimer = setTimeout(() => {
 			try {
-				if (config.enabled) {
+				const currentConfig = getMirrorConfig();
+				if (currentConfig.enabled) {
 					syncMarkdownMirror();
 				}
 			} catch (err) {
