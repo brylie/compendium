@@ -67,7 +67,11 @@ describe('Collection View Config', () => {
 
 		await harness.waitForCondition(() => {
 			const record = getRecord(yjs.doc, blockId);
-			return record?.referencedRecordId === targetB.id && record?.viewConfig?.viewType === 'board';
+			return (
+				record?.referencedRecordId === targetB.id &&
+				record?.viewConfig?.viewType === 'board' &&
+				record?.viewConfig?.groupBy === 'status'
+			);
 		});
 
 		// Rejected: target resolves to a Document, not a Collection.

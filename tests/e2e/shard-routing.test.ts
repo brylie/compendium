@@ -117,7 +117,11 @@ describe('Document/Shard/Space Routing', () => {
 		// receives this shard's content — proving shard isolation, not just
 		// that connecting to the right room happens to work.
 		const workspaceClient = harness.getYjsClient();
-		await harness.waitForCondition(() => true, { timeoutMs: 200 }); // let sync settle
+		// Wait for a real sync signal on the workspace room before asserting
+		// absence, so the negative assertions below can't pass merely because
+		// nothing has arrived yet.
+		await harness.waitForCondition(() => workspaceClient.provider.synced);
+		await new Promise((resolve) => setTimeout(resolve, 200));
 		expect(getRecordYText(workspaceClient.doc, block.recordId)).toBeUndefined();
 		expect(workspaceClient.doc.getMap('documents').has(newDoc.id)).toBe(false);
 	});

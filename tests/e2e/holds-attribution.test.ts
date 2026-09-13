@@ -234,9 +234,9 @@ describe('Holds & Audit Attribution', () => {
 		// Content edits are debounced (docs/specifications/audit-coverage.md §4) —
 		// force the pending event to write immediately rather than waiting out
 		// the real debounce window in this test.
-		const ytext = getRecordYText(yjs.doc, block.id);
-		await harness.waitForCondition(() => ytext !== undefined);
-		yjs.doc.transact(() => ytext!.insert(0, 'edited directly by the UI'));
+		await harness.waitForCondition(() => getRecordYText(yjs.doc, block.id) !== undefined);
+		const ytext = getRecordYText(yjs.doc, block.id)!;
+		yjs.doc.transact(() => ytext.insert(0, 'edited directly by the UI'));
 		// The editor updates the record's provenance projection alongside its
 		// direct Y.Text write, so every client observes the same attribution.
 		touchRecordEditor(yjs.doc, block.id, human);
