@@ -207,8 +207,9 @@ function validateColumnCount(blockType: BlockType | undefined, columnCount: numb
  * for v1. `parentKindOf` only resolves 'record' for a record that already
  * has its own `recordIds` array — i.e. an actual container — so the generic
  * branch below never needs to special-case which container type it is;
- * adding a new container type's `childBlockTypes` entry is enough on its own
- * for this function to accept the right children under it.
+ * adding a new container type's `childBlockTypes` entry (`column`, and now
+ * `toggle` — issue #227) is enough on its own for this function to accept
+ * the right children under it.
  */
 function validateBlockTypeForParent(doc: Y.Doc, parentId: string, blockType: BlockType): void {
 	const kind = parentKindOf(doc, parentId);
@@ -232,7 +233,7 @@ function validateBlockTypeForParent(doc: Y.Doc, parentId: string, blockType: Blo
 		: undefined;
 	if (!allowed?.includes(blockType)) {
 		throw new Error(
-			`${blockType} blocks cannot be created inside a column — supported column content is ${allowed?.join(', ') ?? ''}.`
+			`${blockType} blocks cannot be created inside a ${parent?.blockType ?? 'container'} — supported content is ${allowed?.join(', ') ?? ''}.`
 		);
 	}
 }
@@ -708,11 +709,16 @@ export function writeRecord(
 	// (document-projection.ts's renderColumnsMarkdown), so a markdown write
 	// here would have nowhere to go: no UI ever renders it, and it wouldn't
 	// even round-trip through get_document, unlike every other structural
-	// block type's content.
+	// block type's content. A `toggle` (issue #227) is also a container but
+	// *does* keep its own content (its summary line, `holdsFreeformText:
+	// true`) — this must stay generic on "container with no content of its
+	// own" (isContainer && !holdsFreeformText), not `isContainer` alone, or a
+	// toggle's own markdown writes would start being rejected too.
 	if (
 		input.markdown !== undefined &&
 		record.blockType !== undefined &&
-		blockCapabilitiesFor(record.blockType).isContainer
+		blockCapabilitiesFor(record.blockType).isContainer &&
+		!blockCapabilitiesFor(record.blockType).holdsFreeformText
 	) {
 		throw new Error(
 			'markdown cannot be written to a columns or column block directly — write to one of its nested blocks instead.'
@@ -756,17 +762,39 @@ export function writeRecord(
 	});
 }
 
+// Mirrors reserveDescendantLocators's own recursion, in the opposite
+// direction — walked *before* the CRDT delete below, since nothing can be
+// read back off a container's childRecordIds once deleteRecordAndChildren
+// has removed it from the Y.Doc. Every descendant a container-creating
+// blockType (columns/column, issue #148; toggle, issue #227) can have was
+// reserved its own locator at creation time (reserveDescendantLocators) —
+// deleting the container without releasing them here would leave one
+// orphaned locator row per descendant, each still routing future requests
+// for that id to the now-deleted shard.
+function collectDescendantRecordIds(doc: Y.Doc, record: WorkspaceRecord, ids: string[]): void {
+	for (const childId of record.childRecordIds ?? []) {
+		ids.push(childId);
+		const child = crdtGetRecord(doc, childId);
+		if (child) collectDescendantRecordIds(doc, child, ids);
+	}
+}
+
 /**
- * Deletes a record (after a permission check) and releases its catalog locator. A locator
- * release failure is logged, not thrown — the CRDT delete has already committed by that
- * point, so failing the call back to the caller would misreport a completed deletion as an
- * error; a stale locator row for a since-deleted record fails safe either way.
+ * Deletes a record (after a permission check) and releases its catalog locator, plus every
+ * descendant locator if it's a container (columns/column/toggle). A locator release failure
+ * is logged, not thrown — the CRDT delete has already committed by that point, so failing the
+ * call back to the caller would misreport a completed deletion as an error; a stale locator
+ * row for a since-deleted record fails safe either way.
  */
 export function deleteRecord(context: RequestContext, recordId: string): void {
 	const { doc, workspaceId } = resolveRecordWorkspaceContext(context, recordId);
 	const actor = actorForCaller(context.caller);
 
 	requireAccessibleRecord(context, recordId, 'delete_record');
+	const record = crdtGetRecord(doc, recordId);
+	const descendantIds: string[] = [];
+	if (record) collectDescendantRecordIds(doc, record, descendantIds);
+
 	transactWithOrigin(doc, SERVICE_ORIGIN, () => crdtDeleteRecord(doc, recordId));
 	// The CRDT delete has already committed at this point — a release failure
 	// here must not throw back to the caller as if deletion itself failed. Log
@@ -775,6 +803,7 @@ export function deleteRecord(context: RequestContext, recordId: string): void {
 	// would misreport a completed deletion as an error.
 	try {
 		releaseRecordLocator(workspaceId, recordId);
+		for (const childId of descendantIds) releaseRecordLocator(workspaceId, childId);
 	} catch (err) {
 		console.error(`[records] failed to release locator for deleted record ${recordId}`, err);
 	}

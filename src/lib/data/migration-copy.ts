@@ -95,12 +95,19 @@ function applyCopiedRecordFields(
 	if (kind === 'document' || kind === 'record') {
 		const blockType = record.blockType ?? 'paragraph';
 		yrecord.set('blockType', blockType);
-		// A container (BLOCK_CAPABILITIES[...].isContainer, issue #229) has no
-		// content Y.Text at all, matching how createRecord builds one fresh —
-		// not a present-but-empty one, which would round-trip differently
-		// through readRecord (an empty Y.Text is still truthy, so it wouldn't
-		// read back as `undefined`).
-		if (!blockCapabilitiesFor(blockType).isContainer) {
+		const capabilities = blockCapabilitiesFor(blockType);
+		// A content-less container (`BLOCK_CAPABILITIES[...].isContainer &&
+		// !holdsFreeformText`, issue #229) has no content Y.Text at all,
+		// matching how createRecord builds one fresh — not a present-but-empty
+		// one, which would round-trip differently through readRecord (an
+		// empty Y.Text is still truthy, so it wouldn't read back as
+		// `undefined`). A `toggle` (issue #227) is a container that *does*
+		// keep its own content — mirroring record-ops.ts's own
+		// applyDocumentKindFields, this must stay generic on
+		// `holdsFreeformText` rather than `isContainer` alone, or migrating a
+		// Document containing a toggle to a different shard would silently
+		// drop its summary text.
+		if (!capabilities.isContainer || capabilities.holdsFreeformText) {
 			const ytext = new Y.Text();
 			if (record.content) applyRichTextToYText(ytext, record.content);
 			yrecord.set('content', ytext);

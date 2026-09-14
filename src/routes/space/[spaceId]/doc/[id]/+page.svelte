@@ -68,6 +68,7 @@
 	import CalloutBlock from '$lib/components/CalloutBlock.svelte';
 	import ChildPagesBlock from '$lib/components/ChildPagesBlock.svelte';
 	import ColumnsBlock from '$lib/components/ColumnsBlock.svelte';
+	import ToggleChildren from '$lib/components/ToggleChildren.svelte';
 	import PromptDialog from '$lib/components/PromptDialog.svelte';
 	import SyncedBlockUsage from '$lib/components/SyncedBlockUsage.svelte';
 	import BacklinksPanel from '$lib/components/BacklinksPanel.svelte';
@@ -718,6 +719,15 @@
 		const currentDoc = ydoc;
 		const previous = blocks[index - 1];
 		if (!previous) return;
+		// A container with real children (a toggle, issue #227 — columns/
+		// column are never reachable here at all, since neither ever mounts a
+		// BlockEditor against its own row) must never be silently deleted by
+		// an empty-summary Backspace-join: deleteRecord recurses into
+		// children, so this would otherwise destroy real nested content the
+		// person never asked to remove, just because its summary line was
+		// blank. Leave it alone rather than guessing what should happen to
+		// its children instead.
+		if ((block.childRecordIds?.length ?? 0) > 0) return;
 
 		const currentYtext = getRecordYText(currentDoc, block.id);
 		const currentIsEmpty = !currentYtext || currentYtext.length === 0;
@@ -912,12 +922,26 @@
 		BLOCK_CAPABILITIES.column.childBlockTypes?.includes(c.type)
 	);
 
+	// Same idea, one level down: a toggle's own curated child-type subset
+	// (BLOCK_CAPABILITIES.toggle.childBlockTypes, issue #227) is the same
+	// list as a column's today (types.ts's toggleChildBlockTypes), so this
+	// happens to equal COLUMN_CONVERTIBLE_BLOCK_TYPES — kept as its own
+	// derivation, not an alias, since the two curated lists are free to
+	// diverge later.
+	const TOGGLE_CONVERTIBLE_BLOCK_TYPES = CONVERTIBLE_BLOCK_TYPES.filter((c) =>
+		BLOCK_CAPABILITIES.toggle.childBlockTypes?.includes(c.type)
+	);
+
 	// The block types BlockRow.svelte's own generic content dispatch doesn't
 	// know how to render (issue #239) — never produced inside a column, since
 	// they all fall outside BLOCK_CAPABILITIES.column.childBlockTypes (the
 	// same curated subset COLUMN_CONVERTIBLE_BLOCK_TYPES above excludes them
 	// from), so only the Document's own top-level flow ever supplies the
-	// `customContent` snippet that handles them.
+	// `customContent` snippet that handles them. `toggle` itself is
+	// deliberately not in this list (issue #227): unlike columns, a toggle's
+	// own summary line still renders through BlockRow's ordinary generic
+	// freeform-text branch — only its *children*, rendered separately via
+	// `insideContent` below, are new.
 	const BLOCK_ROW_CUSTOM_CONTENT_TYPES: readonly BlockType[] = [
 		'callout',
 		'code',
@@ -1609,6 +1633,32 @@
 					query={slashQuery}
 					onSelect={(newType) => selectSlashCommand(block.id, newType)}
 					onClose={() => (slashMenuBlockId = null)}
+				/>
+			{/if}
+			{#if bt === 'toggle' && !block.collapsed && ydoc}
+				<ToggleChildren
+					{block}
+					{ydoc}
+					{linkTargets}
+					{blockRefs}
+					draggingBlockId={blockDrag.draggingBlockId}
+					dropIndicatorParentId={blockDrag.dropIndicatorParentId}
+					dropIndicatorIndex={blockDrag.dropIndicatorIndex}
+					selectedBlockIds={blockSelection.ids}
+					{justNavigatedBlockId}
+					convertOptions={TOGGLE_CONVERTIBLE_BLOCK_TYPES}
+					{heldByOthers}
+					onFocusBlock={(blockId) => handleFocusBlock(blockId)}
+					onInputText={(blockId) => handleBlockInput(blockId)}
+					onDragHandlePointerDown={(e, blockId, parentId, blockIndex) =>
+						blockDrag.startBlockDrag(e, blockId, parentId, blockIndex)}
+					onDragHandleKeydown={blockDrag.handleDragHandleKeydown}
+					onDuplicateBlock={duplicateBlock}
+					onDeleteBlock={deleteBlockViaMenu}
+					onConvertBlock={convertBlockViaMenu}
+					onCopyBlockLink={copyBlockLink}
+					onMoveBlockUp={(blockId) => blockDrag.moveBlock(blockId, 'up')}
+					onMoveBlockDown={(blockId) => blockDrag.moveBlock(blockId, 'down')}
 				/>
 			{/if}
 		{/snippet}

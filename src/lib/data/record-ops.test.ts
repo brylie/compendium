@@ -1152,6 +1152,147 @@ describe('columns: container block nesting (#148)', () => {
 	});
 });
 
+describe('toggle: container block nesting (#227)', () => {
+	it('creates a toggle with a live recordIds array but starts with zero children, unlike a columns block', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const toggle = createRecord(doc, { parentId: document.id, blockType: 'toggle' }, human);
+		expect(toggle.childRecordIds).toEqual([]);
+		expect(parentKindOf(doc, toggle.id)).toBe('record');
+	});
+
+	it('a toggle keeps its own content Y.Text, unlike a columns/column container', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const toggle = createRecord(doc, { parentId: document.id, blockType: 'toggle' }, human);
+		expect(getRecordYText(doc, toggle.id)).toBeDefined();
+		updateRecordContent(doc, toggle.id, { runs: [{ text: 'Click to expand', marks: {} }] }, human);
+		expect(
+			getRecord(doc, toggle.id)
+				?.content?.runs.map((r) => r.text)
+				.join('')
+		).toBe('Click to expand');
+	});
+
+	it('createRecord under a toggle adds it to that toggle, not the Document', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const toggle = createRecord(doc, { parentId: document.id, blockType: 'toggle' }, human);
+		const child = createRecord(doc, { parentId: toggle.id, blockType: 'paragraph' }, human);
+
+		expect(listRecordsForParent(doc, toggle.id).map((r) => r.id)).toEqual([child.id]);
+		expect(listRecordsForParent(doc, document.id).map((r) => r.id)).not.toContain(child.id);
+	});
+
+	it('deleteRecord on a toggle recursively deletes its children', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const toggle = createRecord(doc, { parentId: document.id, blockType: 'toggle' }, human);
+		const child = createRecord(doc, { parentId: toggle.id, blockType: 'paragraph' }, human);
+
+		deleteRecord(doc, toggle.id);
+
+		expect(getRecord(doc, toggle.id)).toBeUndefined();
+		expect(getRecord(doc, child.id)).toBeUndefined();
+		expect(listRecordsForParent(doc, document.id).map((r) => r.id)).toEqual([]);
+	});
+
+	it('moveRecordToParent can move a block into and out of a toggle', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const toggle = createRecord(doc, { parentId: document.id, blockType: 'toggle' }, human);
+		const other = createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+
+		moveRecordToParent(doc, other.id, toggle.id);
+		expect(listRecordsForParent(doc, toggle.id).map((r) => r.id)).toEqual([other.id]);
+		expect(listRecordsForParent(doc, document.id).map((r) => r.id)).toEqual([toggle.id]);
+
+		moveRecordToParent(doc, other.id, document.id, toggle.id);
+		expect(listRecordsForParent(doc, toggle.id).map((r) => r.id)).toEqual([]);
+		expect(listRecordsForParent(doc, document.id).map((r) => r.id)).toEqual([toggle.id, other.id]);
+	});
+
+	it('recursively duplicates a toggle’s children with new ids', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const toggle = createRecord(doc, { parentId: document.id, blockType: 'toggle' }, human);
+		updateRecordContent(doc, toggle.id, { runs: [{ text: 'Summary', marks: {} }] }, human);
+		const child = createRecord(doc, { parentId: toggle.id, blockType: 'paragraph' }, human);
+		updateRecordContent(doc, child.id, { runs: [{ text: 'Detail', marks: {} }] }, human);
+
+		const copy = duplicateRecord(doc, toggle.id, human);
+
+		expect(copy.id).not.toBe(toggle.id);
+		expect(copy.content?.runs.map((r) => r.text).join('')).toBe('Summary');
+		expect(copy.childRecordIds).toHaveLength(1);
+		const [copiedChildId] = copy.childRecordIds!;
+		expect(copiedChildId).not.toBe(child.id);
+		expect(
+			getRecord(doc, copiedChildId)
+				?.content?.runs.map((r) => r.text)
+				.join('')
+		).toBe('Detail');
+	});
+
+	it('detaches to an empty paragraph rather than copying a toggle container source', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const toggle = createRecord(doc, { parentId: document.id, blockType: 'toggle' }, human);
+		createRecord(doc, { parentId: toggle.id, blockType: 'paragraph' }, human);
+		const synced = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'synced_block', referencedRecordId: toggle.id },
+			human
+		);
+
+		const detached = detachSyncedBlock(doc, synced.id, human);
+
+		expect(detached.blockType).toBe('paragraph');
+		expect(detached.childRecordIds).toBeUndefined();
+	});
+
+	it('setBlockType converting a paragraph to a toggle adds an empty recordIds array', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const paragraph = createRecord(doc, { parentId: document.id, blockType: 'paragraph' }, human);
+		updateRecordContent(doc, paragraph.id, { runs: [{ text: 'Now a toggle', marks: {} }] }, human);
+
+		setBlockType(doc, paragraph.id, 'toggle', human);
+
+		const record = getRecord(doc, paragraph.id)!;
+		expect(record.blockType).toBe('toggle');
+		expect(record.childRecordIds).toEqual([]);
+		expect(record.content?.runs.map((r) => r.text).join('')).toBe('Now a toggle');
+	});
+
+	it('setBlockType converting a toggle away from a container type promotes its children to siblings right after it, rather than deleting them', () => {
+		const doc = new Y.Doc();
+		const document = createDocument(doc, { title: 'Notes' });
+		const toggle = createRecord(doc, { parentId: document.id, blockType: 'toggle' }, human);
+		const trailingSibling = createRecord(
+			doc,
+			{ parentId: document.id, blockType: 'paragraph' },
+			human
+		);
+		const child1 = createRecord(doc, { parentId: toggle.id, blockType: 'paragraph' }, human);
+		const child2 = createRecord(doc, { parentId: toggle.id, blockType: 'paragraph' }, human);
+
+		setBlockType(doc, toggle.id, 'paragraph', human);
+
+		const record = getRecord(doc, toggle.id)!;
+		expect(record.blockType).toBe('paragraph');
+		expect(record.childRecordIds).toBeUndefined();
+		expect(listRecordsForParent(doc, document.id).map((r) => r.id)).toEqual([
+			toggle.id,
+			child1.id,
+			child2.id,
+			trailingSibling.id
+		]);
+		expect(getRecord(doc, child1.id)?.parentId).toBe(document.id);
+		expect(getRecord(doc, child2.id)?.parentId).toBe(document.id);
+	});
+});
+
 describe('duplicateRecord: block action menu duplicate (#152)', () => {
 	it('inserts the copy immediately after the source with a fresh id', () => {
 		const doc = new Y.Doc();

@@ -1,4 +1,4 @@
-import { columnChildBlockTypes, type BlockType } from './types';
+import { columnChildBlockTypes, toggleChildBlockTypes, type BlockType } from './types';
 
 export interface BlockFieldContract {
 	/**
@@ -13,9 +13,12 @@ export interface BlockFieldContract {
 	 * MCP argument names `write_record` accepts for this type after creation —
 	 * i.e. calling it does not error. This is acceptance, not effect: `markdown`
 	 * is listed here for `collection_view`/`child_pages` because `write_record`
-	 * only rejects a `markdown` write for a container type (`isContainer`), even
-	 * though it never changes what `get_document` renders for those two types —
-	 * see `markdown.writable` below for that separate, effect-based question.
+	 * only rejects a `markdown` write for a container type with no content of
+	 * its own (`isContainer && !holdsFreeformText` — `columns`/`column`; a
+	 * `toggle`, issue #227, is a container but keeps its own content, so its
+	 * markdown write is accepted), even though it never changes what
+	 * `get_document` renders for `collection_view`/`child_pages` — see
+	 * `markdown.writable` below for that separate, effect-based question.
 	 * Overlaps `creatable` for an argument settable both at creation and later
 	 * (e.g. page_link's `referencedRecordId`); an argument in `creatable` but
 	 * not here is set-once-at-creation only (e.g. child_pages' `childPagesDepth`).
@@ -31,11 +34,29 @@ export interface BlockFieldContract {
 }
 
 export interface BlockCapabilities {
-	/** True for a block whose children are other WorkspaceRecords (`columns`/`column`, issue #148) rather than an ordinary Document-kind record's own `content` Y.Text. */
+	/**
+	 * True for a block whose children are other WorkspaceRecords (`columns`/
+	 * `column`, issue #148; `toggle`, issue #227) rather than — or, for
+	 * `toggle`, in addition to — an ordinary Document-kind record's own
+	 * `content` Y.Text. Whether a container *also* keeps its own `content` is
+	 * `holdsFreeformText` below, not a second flag here: `columns`/`column`
+	 * have none (their content is entirely their children's), while `toggle`
+	 * does (its own summary line) — `record-ops.ts`'s `applyDocumentKindFields`
+	 * and `services/records.ts`'s markdown-write guard both key off
+	 * `isContainer && !holdsFreeformText` wherever "has no content of its own"
+	 * is what actually matters, rather than `isContainer` alone.
+	 */
 	isContainer: boolean;
 	/** Only set for a container type — the BlockTypes it may directly hold (enforced at creation by `services/records.ts`'s `validateBlockTypeForParent`). */
 	childBlockTypes?: readonly BlockType[];
-	/** True when the block holds free-form inline text that Enter/Backspace-join and in-place conversion can act on (`rich-text-toolbar.md` §5) — false for structural/reference/container/computed types. */
+	/**
+	 * True when the block holds free-form inline text that Enter/Backspace-join
+	 * and in-place conversion can act on (`rich-text-toolbar.md` §5) — false
+	 * for structural/reference/container/computed types. For a container type
+	 * (`isContainer: true`), this doubles as "also has its own `content`
+	 * Y.Text" (`toggle`'s summary line) rather than none at all (`columns`/
+	 * `column`) — see `isContainer`'s own doc comment above.
+	 */
 	holdsFreeformText: boolean;
 	/**
 	 * Human label and one-line description — the single source of truth for both
@@ -59,7 +80,8 @@ export interface BlockCapabilities {
 		 * Whether `write_record`'s `markdown` argument can ever change what
 		 * `get_document` renders for this type — a rendering-*effect* question,
 		 * distinct from `fields.writable`'s acceptance question above. False for
-		 * a write rejected outright (`isContainer` — `columns`/`column`) or one
+		 * a write rejected outright (a container with no content of its own,
+		 * `isContainer && !holdsFreeformText` — `columns`/`column`) or one
 		 * that's accepted but has zero rendering effect in every state
 		 * (`collection_view`, `child_pages`, whose markdown is always computed
 		 * from other fields instead, even though `write_record` doesn't error on
@@ -239,7 +261,8 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		}
 	},
 	toggle: {
-		isContainer: false,
+		isContainer: true,
+		childBlockTypes: toggleChildBlockTypes,
 		holdsFreeformText: true,
 		label: 'Toggle list',
 		description: 'Hide or show content inside.',
@@ -247,7 +270,7 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		markdown: {
 			writable: true,
 			representation:
-				'Its summary text only — toggle does not yet nest/hide real child blocks (issue #227) despite the container-with-children design it is ultimately intended to have (`block-capability-contract.md` §3).'
+				"Its own summary text (write_record's markdown writes here, same as any text-bearing type) wrapped in `<details><summary>...</summary>...</details>` together with its children's block-prefixed markdown — get_document always renders the full children, matching native <details> semantics where the content exists in the markup regardless of open/closed state; `open` reflects `!collapsed`."
 		}
 	},
 	table: {
