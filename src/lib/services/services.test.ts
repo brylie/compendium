@@ -53,7 +53,8 @@ import {
 	createRecord as rawCrdtCreateRecord,
 	getRecord as crdtGetRecord,
 	getRecordYText as crdtGetRecordYText,
-	patchRecordViewConfig as crdtPatchRecordViewConfig
+	patchRecordViewConfig as crdtPatchRecordViewConfig,
+	setRecordCollapsed as crdtSetRecordCollapsed
 } from '$lib/data/record-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import {
@@ -1972,6 +1973,125 @@ describe('service layer: columns block nesting and its container-parent permissi
 				?.content?.runs.map((r) => r.text)
 				.join('')
 		).toBe('written from a bare column');
+	});
+});
+
+describe('service layer: toggle block real child-block nesting (issue #227)', () => {
+	it('createRecord with blockType "toggle" starts with zero children, not auto-seeded like columns', () => {
+		const doc = createDocument(resolveRequestContext(human), { title: 'Notes' });
+		const toggle = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'toggle'
+		});
+		expect(toggle.childRecordIds).toEqual([]);
+	});
+
+	it('accepts a curated child block type inside a toggle, and rejects an unsupported one', () => {
+		const doc = createDocument(resolveRequestContext(human), { title: 'Notes' });
+		const toggle = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'toggle'
+		});
+		const child = createRecord(resolveRequestContext(human), {
+			parentId: toggle.id,
+			blockType: 'paragraph'
+		});
+		expect(getRecord(resolveRequestContext(human), toggle.id)?.childRecordIds).toEqual([child.id]);
+
+		expect(() =>
+			createRecord(resolveRequestContext(human), { parentId: toggle.id, blockType: 'callout' })
+		).toThrow(/cannot be created inside a toggle/);
+	});
+
+	it("write_record accepts markdown for a toggle's own summary text, unlike a content-less columns/column container", () => {
+		const doc = createDocument(resolveRequestContext(human), { title: 'Notes' });
+		const toggle = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'toggle'
+		});
+		writeRecord(resolveRequestContext(human), toggle.id, { markdown: 'Click to expand' });
+		expect(
+			getRecord(resolveRequestContext(human), toggle.id)
+				?.content?.runs.map((r) => r.text)
+				.join('')
+		).toBe('Click to expand');
+	});
+
+	it('getDocument renders a toggle as <details><summary> wrapping its full children, open reflecting !collapsed', () => {
+		const doc = createDocument(resolveRequestContext(human), { title: 'Notes' });
+		const toggle = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'toggle'
+		});
+		writeRecord(resolveRequestContext(human), toggle.id, { markdown: 'More info' });
+		const child = createRecord(resolveRequestContext(human), {
+			parentId: toggle.id,
+			blockType: 'paragraph'
+		});
+		writeRecord(resolveRequestContext(human), child.id, { markdown: 'hidden detail' });
+
+		const expanded = getDocument(resolveRequestContext(human), doc.id)!;
+		expect(expanded.records).toHaveLength(1); // only the toggle is top-level
+		const toggleView = expanded.records[0];
+		expect(toggleView.blockType).toBe('toggle');
+		expect(toggleView.children).toHaveLength(1);
+		expect(toggleView.markdown).toContain('<details open>');
+		expect(toggleView.markdown).toContain('<summary>More info</summary>');
+		expect(toggleView.markdown).toContain('hidden detail');
+
+		// get_document always exposes the full children regardless of
+		// collapsed state (matching native <details> semantics) — only the
+		// `open` attribute reflects it.
+		const shardDoc = resolveWorkspaceContext({ shardId: doc.id }).doc;
+		writeTestYText(shardDoc, () => crdtSetRecordCollapsed(shardDoc, toggle.id, true, human));
+		const collapsed = getDocument(resolveRequestContext(human), doc.id)!;
+		const collapsedView = collapsed.records[0];
+		expect(collapsedView.markdown).toContain('<details>');
+		expect(collapsedView.markdown).not.toContain('<details open>');
+		expect(collapsedView.markdown).toContain('hidden detail');
+	});
+
+	it('deleteRecord on a toggle recursively deletes its children', () => {
+		const doc = createDocument(resolveRequestContext(human), { title: 'Notes' });
+		const toggle = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'toggle'
+		});
+		const child = createRecord(resolveRequestContext(human), {
+			parentId: toggle.id,
+			blockType: 'paragraph'
+		});
+
+		deleteRecord(resolveRequestContext(human), toggle.id);
+
+		expect(() => getRecord(resolveRequestContext(human), toggle.id)).toThrow(PermissionDeniedError);
+		expect(() => getRecord(resolveRequestContext(human), child.id)).toThrow(PermissionDeniedError);
+	});
+
+	it('a token granted only the owning Document can create, write, and delete a block nested inside a toggle', () => {
+		const doc = createDocument(resolveRequestContext(human), { title: 'Scoped Notes' });
+		const toggle = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'toggle'
+		});
+
+		const { record: tokenRecord } = createToken({
+			clientLabel: 'Notes Bot',
+			allowedDocumentIds: [doc.id],
+			allowedCollectionIds: []
+		});
+
+		const block = createRecord(resolveRequestContext(tokenRecord), {
+			parentId: toggle.id,
+			blockType: 'paragraph'
+		});
+		holdRecords(resolveRequestContext(tokenRecord), [block.id]);
+		writeRecord(resolveRequestContext(tokenRecord), block.id, { markdown: 'written by an agent' });
+		expect(getRecord(resolveRequestContext(tokenRecord), block.id)?.id).toBe(block.id);
+		deleteRecord(resolveRequestContext(tokenRecord), block.id);
+		expect(() => getRecord(resolveRequestContext(tokenRecord), block.id)).toThrow(
+			PermissionDeniedError
+		);
 	});
 });
 

@@ -1,4 +1,4 @@
-import { columnChildBlockTypes, type BlockType } from './types';
+import { columnChildBlockTypes, toggleChildBlockTypes, type BlockType } from './types';
 
 export interface BlockFieldContract {
 	/**
@@ -31,11 +31,29 @@ export interface BlockFieldContract {
 }
 
 export interface BlockCapabilities {
-	/** True for a block whose children are other WorkspaceRecords (`columns`/`column`, issue #148) rather than an ordinary Document-kind record's own `content` Y.Text. */
+	/**
+	 * True for a block whose children are other WorkspaceRecords (`columns`/
+	 * `column`, issue #148; `toggle`, issue #227) rather than — or, for
+	 * `toggle`, in addition to — an ordinary Document-kind record's own
+	 * `content` Y.Text. Whether a container *also* keeps its own `content` is
+	 * `holdsFreeformText` below, not a second flag here: `columns`/`column`
+	 * have none (their content is entirely their children's), while `toggle`
+	 * does (its own summary line) — `record-ops.ts`'s `applyDocumentKindFields`
+	 * and `services/records.ts`'s markdown-write guard both key off
+	 * `isContainer && !holdsFreeformText` wherever "has no content of its own"
+	 * is what actually matters, rather than `isContainer` alone.
+	 */
 	isContainer: boolean;
 	/** Only set for a container type — the BlockTypes it may directly hold (enforced at creation by `services/records.ts`'s `validateBlockTypeForParent`). */
 	childBlockTypes?: readonly BlockType[];
-	/** True when the block holds free-form inline text that Enter/Backspace-join and in-place conversion can act on (`rich-text-toolbar.md` §5) — false for structural/reference/container/computed types. */
+	/**
+	 * True when the block holds free-form inline text that Enter/Backspace-join
+	 * and in-place conversion can act on (`rich-text-toolbar.md` §5) — false
+	 * for structural/reference/container/computed types. For a container type
+	 * (`isContainer: true`), this doubles as "also has its own `content`
+	 * Y.Text" (`toggle`'s summary line) rather than none at all (`columns`/
+	 * `column`) — see `isContainer`'s own doc comment above.
+	 */
 	holdsFreeformText: boolean;
 	/**
 	 * Human label and one-line description — the single source of truth for both
@@ -239,7 +257,8 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		}
 	},
 	toggle: {
-		isContainer: false,
+		isContainer: true,
+		childBlockTypes: toggleChildBlockTypes,
 		holdsFreeformText: true,
 		label: 'Toggle list',
 		description: 'Hide or show content inside.',
@@ -247,7 +266,7 @@ export const BLOCK_CAPABILITIES: Record<BlockType, BlockCapabilities> = {
 		markdown: {
 			writable: true,
 			representation:
-				'Its summary text only — toggle does not yet nest/hide real child blocks (issue #227) despite the container-with-children design it is ultimately intended to have (`block-capability-contract.md` §3).'
+				"Its own summary text (write_record's markdown writes here, same as any text-bearing type) wrapped in `<details><summary>...</summary>...</details>` together with its children's block-prefixed markdown — get_document always renders the full children, matching native <details> semantics where the content exists in the markup regardless of open/closed state; `open` reflects `!collapsed`."
 		}
 	},
 	table: {

@@ -207,8 +207,9 @@ function validateColumnCount(blockType: BlockType | undefined, columnCount: numb
  * for v1. `parentKindOf` only resolves 'record' for a record that already
  * has its own `recordIds` array — i.e. an actual container — so the generic
  * branch below never needs to special-case which container type it is;
- * adding a new container type's `childBlockTypes` entry is enough on its own
- * for this function to accept the right children under it.
+ * adding a new container type's `childBlockTypes` entry (`column`, and now
+ * `toggle` — issue #227) is enough on its own for this function to accept
+ * the right children under it.
  */
 function validateBlockTypeForParent(doc: Y.Doc, parentId: string, blockType: BlockType): void {
 	const kind = parentKindOf(doc, parentId);
@@ -232,7 +233,7 @@ function validateBlockTypeForParent(doc: Y.Doc, parentId: string, blockType: Blo
 		: undefined;
 	if (!allowed?.includes(blockType)) {
 		throw new Error(
-			`${blockType} blocks cannot be created inside a column — supported column content is ${allowed?.join(', ') ?? ''}.`
+			`${blockType} blocks cannot be created inside a ${parent?.blockType ?? 'container'} — supported content is ${allowed?.join(', ') ?? ''}.`
 		);
 	}
 }
@@ -708,11 +709,16 @@ export function writeRecord(
 	// (document-projection.ts's renderColumnsMarkdown), so a markdown write
 	// here would have nowhere to go: no UI ever renders it, and it wouldn't
 	// even round-trip through get_document, unlike every other structural
-	// block type's content.
+	// block type's content. A `toggle` (issue #227) is also a container but
+	// *does* keep its own content (its summary line, `holdsFreeformText:
+	// true`) — this must stay generic on "container with no content of its
+	// own" (isContainer && !holdsFreeformText), not `isContainer` alone, or a
+	// toggle's own markdown writes would start being rejected too.
 	if (
 		input.markdown !== undefined &&
 		record.blockType !== undefined &&
-		blockCapabilitiesFor(record.blockType).isContainer
+		blockCapabilitiesFor(record.blockType).isContainer &&
+		!blockCapabilitiesFor(record.blockType).holdsFreeformText
 	) {
 		throw new Error(
 			'markdown cannot be written to a columns or column block directly — write to one of its nested blocks instead.'

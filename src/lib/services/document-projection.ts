@@ -125,6 +125,29 @@ function renderColumnsMarkdown(columns: DocumentRecordView[]): string {
 	return ['::: columns', ...columns.map(renderColumnMarkdown), ':::'].join('\n');
 }
 
+// get_document always renders a toggle's full children regardless of
+// `collapsed` (issue #227) — matching native <details> semantics, where the
+// content exists in the markup whether or not the `open` attribute is set;
+// an agent reading the document should never have content silently withheld
+// just because a viewer last left it collapsed. `open` itself reflects
+// `!collapsed` so a client that renders the raw HTML still shows the same
+// expand/collapse state the CRDT has.
+function renderToggleMarkdown(
+	summary: string,
+	collapsed: boolean,
+	children: DocumentRecordView[]
+): string {
+	const body = children
+		.map((block) => renderBlockMarkdown(block))
+		.filter((markdown) => markdown.length > 0)
+		.join('\n\n');
+	const openAttr = collapsed ? '' : ' open';
+	const summaryLine = `<summary>${summary}</summary>`;
+	return body
+		? `<details${openAttr}>\n${summaryLine}\n\n${body}\n</details>`
+		: `<details${openAttr}>\n${summaryLine}\n</details>`;
+}
+
 function renderPresetCalloutMarkdown(preset: CalloutPreset, content: string): string {
 	const keyword = CALLOUT_PRESET_ALERT_KEYWORD[preset];
 	if (!content) return `> [!${keyword}]`;
@@ -147,10 +170,13 @@ export function projectDocumentRecordView(
 	const isCollectionView = data.blockType === 'collection_view';
 	const isChildPages = data.blockType === 'child_pages';
 	const children = data.children?.map((child) => projectDocumentRecordView(child, doc));
-	const markdown =
-		data.blockType === 'columns' && children
-			? renderColumnsMarkdown(children)
-			: renderRecordMarkdown(data, doc, isPageLink, isCollectionView, isChildPages);
+	const ownMarkdown = renderRecordMarkdown(data, doc, isPageLink, isCollectionView, isChildPages);
+	let markdown = ownMarkdown;
+	if (data.blockType === 'columns' && children) {
+		markdown = renderColumnsMarkdown(children);
+	} else if (data.blockType === 'toggle' && children) {
+		markdown = renderToggleMarkdown(ownMarkdown, !!data.collapsed, children);
+	}
 	return {
 		id: data.id,
 		blockType: data.blockType,

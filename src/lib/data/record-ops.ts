@@ -188,18 +188,22 @@ function applyDocumentKindFields(
 	input: CreateRecordInput,
 	siblingIds: Y.Array<string>
 ): void {
-	const isContainer = blockCapabilitiesFor(blockType).isContainer;
+	const capabilities = blockCapabilitiesFor(blockType);
+	const isContainer = capabilities.isContainer;
 	yrecord.set('blockType', blockType);
-	// A container never holds its own free-form text — its content lives
-	// entirely in its children (data-model.md §3.1) — so unlike every other
-	// Document-kind record it gets no content Y.Text at all: nothing in the
-	// UI ever mounts a BlockEditor against a columns/column record directly,
-	// and get_document's markdown for a columns block already comes
-	// entirely from its columns' children, not from any value here. Without
-	// this, a write_record markdown write to a columns/column id would
-	// silently vanish from both — writeRecord (services/records.ts) rejects
-	// that case outright.
-	if (!isContainer) yrecord.set('content', new Y.Text());
+	// A columns/column container never holds its own free-form text — its
+	// content lives entirely in its children (data-model.md §3.1) — so unlike
+	// every other Document-kind record it gets no content Y.Text at all:
+	// nothing in the UI ever mounts a BlockEditor against a columns/column
+	// record directly, and get_document's markdown for a columns block
+	// already comes entirely from its columns' children, not from any value
+	// here. A `toggle` container is the one exception (issue #227): it keeps
+	// its own summary-line content Y.Text *in addition to* its recordIds
+	// array below (`holdsFreeformText: true` is what distinguishes it from
+	// columns/column here). Without this, a write_record markdown write to a
+	// content-less container id would silently vanish from both —
+	// writeRecord (services/records.ts) rejects that case outright.
+	if (!isContainer || capabilities.holdsFreeformText) yrecord.set('content', new Y.Text());
 	applyOptionalBlockFields(yrecord, input);
 	if (isContainer) {
 		// A columns/column block always carries its own child-ordering array
@@ -401,11 +405,50 @@ export function updateRecordProperties(
 	return readRecord(yrecord);
 }
 
-/** Changes a Document block's type (e.g. paragraph to heading) in place, without touching its content. */
+/**
+ * Promotes a container's own children to siblings in its former position,
+ * immediately after the container itself — used by setBlockType below when
+ * converting a container (currently only reachable for `toggle`; columns/
+ * column are never offered in the convert-menu) to a non-container type,
+ * per block-capability-contract.md §3's toggle conversion row ("converting
+ * away from toggle does not delete its children — they're re-parented").
+ * Skips a stale child-array entry the same way deleteRecordAndChildren does.
+ */
+function reparentChildrenOutOfContainer(doc: Y.Doc, containerId: string): void {
+	const yrecord = recordsMap(doc).get(containerId)!;
+	const parentId = yrecord.get('parentId')!;
+	const childIds = yrecord.get('recordIds')?.toArray() ?? [];
+	let afterId = containerId;
+	for (const childId of childIds) {
+		if (!isAuthoritativeChild(doc, containerId, childId)) continue;
+		moveRecordToParent(doc, childId, parentId, afterId);
+		afterId = childId;
+	}
+}
+
+/**
+ * Changes a Document block's type (e.g. paragraph to heading) in place,
+ * without touching its content. Converting into a container type (`toggle`)
+ * from a non-container one adds an (initially empty) `recordIds` array;
+ * converting a container away from its container type re-parents its
+ * children to its own former position rather than deleting them along with
+ * the array that housed them (see reparentChildrenOutOfContainer above) —
+ * generic on `isContainer` rather than hardcoding `toggle`, even though
+ * `toggle` is currently the only reachable case (columns/column are never
+ * offered in the convert-menu, see rich-text-toolbar.md §5).
+ */
 export function setBlockType(doc: Y.Doc, id: string, blockType: BlockType, actor: ActorId): void {
 	const yrecord = recordsMap(doc).get(id);
 	if (!yrecord) throw new NotFoundError(`Record ${id} not found`);
 	doc.transact(() => {
+		const wasContainer = yrecord.get('recordIds') !== undefined;
+		const willBeContainer = blockCapabilitiesFor(blockType).isContainer;
+		if (wasContainer && !willBeContainer) {
+			reparentChildrenOutOfContainer(doc, id);
+			yrecord.raw.delete('recordIds');
+		} else if (!wasContainer && willBeContainer) {
+			yrecord.set('recordIds', new Y.Array<string>());
+		}
 		yrecord.set('blockType', blockType);
 		yrecord.set('lastEditedBy', actor);
 		yrecord.set('lastEditedAt', Date.now());
@@ -538,13 +581,17 @@ export function setRecordReferencedId(
 }
 
 // Neither of detachSyncedBlock's blockType/content copy steps below is safe
-// for a container (blockCapabilitiesFor(...).isContainer): it has no content
-// Y.Text at all (createRecord never allocates one — see
-// applyDocumentKindFields) and, more importantly, needs its own
-// childRecordIds array to be a valid columns/column block at all — blindly
-// copying just the blockType would produce a broken container with no
-// children. The "Set target ID" dialog accepts any pasted record id with no
-// kind check, so this has to be guarded here rather than assumed away.
+// for a container (blockCapabilitiesFor(...).isContainer) — a columns/column
+// source has no content Y.Text at all to copy (createRecord never allocates
+// one for it — see applyDocumentKindFields), and every container (including
+// `toggle`, which does have its own content) needs its own childRecordIds
+// array copied too to be a valid, functioning container — blindly copying
+// just the blockType (and, for toggle, its summary content) would produce a
+// broken container with no children. Detaching a synced_block that mirrors a
+// container source therefore still falls back to a plain paragraph, same as
+// any other unresolvable source, rather than partially reproducing it. The
+// "Set target ID" dialog accepts any pasted record id with no kind check, so
+// this has to be guarded here rather than assumed away.
 function isUndetachableSourceBlockType(blockType: BlockType): boolean {
 	return blockCapabilitiesFor(blockType).isContainer;
 }

@@ -77,6 +77,17 @@ export const columnChildBlockTypes = [
 ] as const satisfies readonly BlockType[];
 export type ColumnChildBlockType = (typeof columnChildBlockTypes)[number];
 
+// The block types a `toggle` may directly hold (issue #227) — the same
+// curated subset columnChildBlockTypes uses, for the same reason: each type
+// needs its own rendering already proven inside a container (ToggleChildren
+// mirrors ColumnsBlock's per-column renderer), and reference/structural/
+// container types (including toggle itself — no nested toggles-in-toggles
+// for v1, matching data-model.md §3.1's two-levels-deep cap) are deferred.
+// Kept as its own named export, not an alias, so the two lists can diverge
+// later without a rename.
+export const toggleChildBlockTypes = columnChildBlockTypes;
+export type ToggleChildBlockType = (typeof toggleChildBlockTypes)[number];
+
 // "View" here means a Collection/database view (Table/Board/Calendar — a
 // rendering + configuration over a Collection's records), never an MVC-style
 // page/route view. A collection_view block is the only place a view exists
