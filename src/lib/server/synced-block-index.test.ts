@@ -141,4 +141,32 @@ describe('synced-block-index: rebuilding from Y.Doc state (#242)', () => {
 	it('returns no rows for an empty source id list, without querying the database', () => {
 		expect(listSyncedBlockInstancesAcrossShards(WS, [])).toEqual([]);
 	});
+
+	it('rebuilds a shard whose row count spans more than one insert batch (issue #310 review)', () => {
+		const document = seedDocument(doc);
+		const source = transactWithOrigin(doc, SERVICE_ORIGIN, () =>
+			crdtCreateRecord(doc, { parentId: document.id, blockType: 'paragraph' }, actor)
+		);
+		// One more than 2× the 100-row insert batch size, so the rebuild's
+		// chunked insert loop runs three times (100 + 100 + 1), not once.
+		const instanceCount = 201;
+		const instanceIds: string[] = [];
+		transactWithOrigin(doc, SERVICE_ORIGIN, () => {
+			for (let i = 0; i < instanceCount; i++) {
+				const instance = crdtCreateRecord(
+					doc,
+					{ parentId: document.id, blockType: 'synced_block' },
+					actor
+				);
+				setRecordReferencedId(doc, instance.id, source.id, actor);
+				instanceIds.push(instance.id);
+			}
+		});
+
+		rebuildSyncedBlockIndexForShard(WS, 'shard-batch', doc);
+
+		const rows = listSyncedBlockInstancesAcrossShards(WS, [source.id]);
+		expect(rows).toHaveLength(instanceCount);
+		expect(new Set(rows.map((row) => row.instanceRecordId))).toEqual(new Set(instanceIds));
+	});
 });

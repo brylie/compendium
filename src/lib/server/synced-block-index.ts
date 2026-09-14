@@ -12,6 +12,12 @@ import { getRecord, listAllRecordIds } from '../data/record-ops.js';
 // differing mainly in storage (an exact-match Drizzle table, not FTS5 — this
 // index is never full-text matched).
 
+// Rows per INSERT during a shard rebuild (rebuildSyncedBlockIndexForShard) —
+// each row binds 5 parameters, so this stays comfortably under SQLite's own
+// bound-variable ceiling (999 on older builds, 32766 by default since
+// 3.32.0) regardless of which one the running SQLite build enforces.
+const REBUILD_INSERT_BATCH_SIZE = 100;
+
 /** Removes any existing row for `instanceRecordId` — the synced_block no longer exists, or no longer references anything. */
 export function deleteSyncedBlockInstanceEntry(
 	workspaceId: string,
@@ -117,7 +123,17 @@ export function rebuildSyncedBlockIndexForShard(
 				)
 			)
 			.run();
-		if (rows.length > 0) tx.insert(syncedBlockInstance).values(rows).run();
+		// Chunked, not one `values(rows)` call for the whole shard: each row
+		// binds 5 parameters, and a single INSERT is bound by SQLite's own
+		// variable-count limit — a shard with enough synced_block instances
+		// would otherwise fail this rebuild outright and leave the reverse
+		// index stale. Still one transaction, so a rebuild is all-or-nothing
+		// either way.
+		for (let offset = 0; offset < rows.length; offset += REBUILD_INSERT_BATCH_SIZE) {
+			tx.insert(syncedBlockInstance)
+				.values(rows.slice(offset, offset + REBUILD_INSERT_BATCH_SIZE))
+				.run();
+		}
 	});
 }
 
