@@ -17,6 +17,11 @@ import {
 } from './record-index-observer.js';
 import { rebuildRecordIndexForShard } from './record-index.js';
 import { attachRecordLocatorObserver } from './record-locator-observer.js';
+import {
+	attachSyncedBlockIndexObserver,
+	resetSyncedBlockIndexObserverForTests
+} from './synced-block-index-observer.js';
+import { rebuildSyncedBlockIndexForShard } from './synced-block-index.js';
 import { aggregateHolds, initHoldEviction, resetHoldEvictionForTests } from './holds.js';
 import {
 	backfillRecordLocators,
@@ -164,6 +169,10 @@ export class WorkspaceStore {
 		// that existed before this process/context resolved it.
 		rebuildRecordIndexForShard(workspaceId, shardId, doc);
 		attachRecordIndexObserver(workspaceId, shardId, doc);
+		// Same rebuild-then-observe ordering as record_index above, for #242's
+		// synced_block_instance reverse index.
+		rebuildSyncedBlockIndexForShard(workspaceId, shardId, doc);
+		attachSyncedBlockIndexObserver(workspaceId, shardId, doc);
 
 		const awareness = new Awareness(doc);
 		initHoldEviction(awareness);
@@ -315,6 +324,7 @@ export class WorkspaceStore {
 		resetAuditObserverForTests();
 		resetCatalogMirrorObserverForTests();
 		resetRecordIndexObserverForTests();
+		resetSyncedBlockIndexObserverForTests();
 		resetHoldEvictionForTests();
 	}
 }

@@ -203,6 +203,88 @@ describe('yjs-client: browser', () => {
 			expect(fetchMock).toHaveBeenCalledTimes(2);
 		});
 	});
+
+	describe('resolveRecordDoc (#242)', () => {
+		afterEach(() => {
+			vi.unstubAllGlobals();
+		});
+
+		it("fetches the record's shard and connects via getShardDoc/getShardAwareness", async () => {
+			const fetchMock = vi.fn(async () => ({
+				ok: true,
+				json: async () => ({ shardId: 'shard-y' })
+			}));
+			vi.stubGlobal('fetch', fetchMock);
+			const mod = await import('./yjs-client');
+
+			const resolved = await mod.resolveRecordDoc('rec-1');
+
+			expect(fetchMock).toHaveBeenCalledWith('/api/records/rec-1/shard');
+			expect(resolved.doc).toBe(mod.getShardDoc('shard-y'));
+			expect(resolved.awareness).toBe(mod.getShardAwareness('shard-y'));
+			expect(providerInstances).toHaveLength(1);
+		});
+
+		it('memoizes the shard lookup per recordId — one fetch no matter how many calls', async () => {
+			const fetchMock = vi.fn(async () => ({
+				ok: true,
+				json: async () => ({ shardId: 'shard-y' })
+			}));
+			vi.stubGlobal('fetch', fetchMock);
+			const mod = await import('./yjs-client');
+
+			await mod.resolveRecordDoc('rec-1');
+			await mod.resolveRecordDoc('rec-1');
+			await mod.resolveRecordDoc('rec-1');
+
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+		});
+
+		it('evicts a failed lookup from the cache, so a later call retries instead of reusing the rejection', async () => {
+			const fetchMock = vi
+				.fn()
+				.mockRejectedValueOnce(new Error('network error'))
+				.mockImplementation(async () => ({ ok: true, json: async () => ({ shardId: 'shard-y' }) }));
+			vi.stubGlobal('fetch', fetchMock);
+			const mod = await import('./yjs-client');
+
+			await expect(mod.resolveRecordDoc('rec-1')).rejects.toThrow('network error');
+			const resolved = await mod.resolveRecordDoc('rec-1');
+
+			expect(resolved.doc).toBe(mod.getShardDoc('shard-y'));
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+		});
+
+		it('rejects and evicts on a non-ok shard-lookup response', async () => {
+			const fetchMock = vi
+				.fn()
+				.mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({}) })
+				.mockImplementation(async () => ({ ok: true, json: async () => ({ shardId: 'shard-y' }) }));
+			vi.stubGlobal('fetch', fetchMock);
+			const mod = await import('./yjs-client');
+
+			await expect(mod.resolveRecordDoc('rec-1')).rejects.toThrow(/failed: 404/);
+			const resolved = await mod.resolveRecordDoc('rec-1');
+
+			expect(resolved.doc).toBe(mod.getShardDoc('shard-y'));
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+		});
+
+		it('rejects and evicts on a malformed shard-lookup response with no shardId', async () => {
+			const fetchMock = vi
+				.fn()
+				.mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+				.mockImplementation(async () => ({ ok: true, json: async () => ({ shardId: 'shard-y' }) }));
+			vi.stubGlobal('fetch', fetchMock);
+			const mod = await import('./yjs-client');
+
+			await expect(mod.resolveRecordDoc('rec-1')).rejects.toThrow(/returned no shardId/);
+			const resolved = await mod.resolveRecordDoc('rec-1');
+
+			expect(resolved.doc).toBe(mod.getShardDoc('shard-y'));
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+		});
+	});
 });
 
 describe('yjs-client: outside the browser', () => {

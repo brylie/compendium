@@ -4,6 +4,11 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { getShardAwareness, getShardDoc } from '$lib/client/yjs-client';
+	import {
+		createSyncGroupResolver,
+		createSyncedBlockResolver,
+		type ResolvedRecordTarget
+	} from '$lib/client/synced-block-resolution.svelte';
 	import { CURRENT_USER } from '$lib/client/actor';
 	import { LOCAL_UI_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 	import { getDocument, updateDocumentTitle } from '$lib/data/document-ops';
@@ -99,6 +104,13 @@
 	let slashMenuBlockId: string | null = $state(null);
 	let slashQuery = $state('');
 	let heldByOthers: Map<string, ActorId> = $state(new Map());
+	// #242: a synced_block whose target isn't found in this Document's own
+	// ydoc may still live in a different Document's shard — these resolve
+	// that cross-shard content/holder and "used in N places" data
+	// asynchronously, recreated whenever the viewed Document changes (see the
+	// shard-resolution $effect below).
+	let syncedBlockResolver = $state(createSyncedBlockResolver());
+	let syncGroupResolver = $state(createSyncGroupResolver());
 	let holdAnnouncement = $state('');
 	let parentDocTitle: string | null = $state(null);
 	let activeBlockId: string | null = $state(null);
@@ -216,9 +228,32 @@
 		activeMarks = blockRefs[blockId]?.getFormatState() ?? {};
 	}
 
-	function handleFocusBlock(blockId: string, presenceBlockId = blockId): void {
+	/**
+	 * `presenceAwareness` defaults to this Document's own shard Awareness —
+	 * overridden for a synced_block instance whose target resolved cross-shard
+	 * (#242), so the hold is claimed against the target's real shard, not the
+	 * viewing Document's. `claimBlockPresence` replaces its *own* Awareness
+	 * connection's local state wholesale, which is what makes moving focus
+	 * between two blocks on the *same* Awareness a plain overwrite — but
+	 * switching to a *different* Awareness (a cross-shard target, or back to
+	 * this Document's own) leaves the previous one still advertising the old
+	 * hold, since nothing else ever touches it. `lastPresenceAwareness`
+	 * (module state, set below) tracks whichever Awareness the last claim
+	 * actually landed on, so a change of Awareness releases it first.
+	 */
+	function handleFocusBlock(
+		blockId: string,
+		presenceBlockId = blockId,
+		presenceAwareness = awareness
+	): void {
 		activeBlockId = blockId;
-		if (awareness) claimBlockPresence(awareness, presenceBlockId);
+		if (presenceAwareness) {
+			if (lastPresenceAwareness && lastPresenceAwareness !== presenceAwareness) {
+				releaseBlockPresence(lastPresenceAwareness);
+			}
+			claimBlockPresence(presenceAwareness, presenceBlockId);
+			lastPresenceAwareness = presenceAwareness;
+		}
 		syncToolbarSelection();
 	}
 
@@ -307,7 +342,20 @@
 		void addBlockAfter(target.afterId, blockType, target.parentId);
 	}
 
-	let awareness: ReturnType<typeof getShardAwareness> | undefined = $state();
+	// $state.raw, not $state: this component only ever reassigns `awareness`
+	// wholesale (never mutates its own fields through Svelte reactivity), and
+	// handleFocusBlock/cleanup below compare it by identity against a plain
+	// (non-proxied) Awareness reference — $state's usual deep-reactivity
+	// proxy would make that comparison false even for "the same" instance
+	// (Svelte's own state_proxy_equality_mismatch warning).
+	let awareness: ReturnType<typeof getShardAwareness> | undefined = $state.raw();
+	// Whichever Awareness connection currently holds this tab's implicit
+	// presence claim — this Document's own `awareness` in the common case, or
+	// a cross-shard synced_block target's resolved Awareness (#242). Not
+	// reactive state: nothing renders from it, it just lets handleFocusBlock
+	// release the *previous* claim before moving to a different Awareness
+	// instance, and lets cleanup release whichever one is still held.
+	let lastPresenceAwareness: ReturnType<typeof getShardAwareness> | undefined;
 
 	// Resolves this Document's real shard (#120) and (re)connects whenever
 	// data.documentId changes — SvelteKit reuses this component instance
@@ -330,6 +378,13 @@
 		// whole network round-trip, not just eliminate the stale state after
 		// the fact.
 		blockSelection.clear();
+		// untrack: reading syncedBlockResolver here only to tear it down, not to
+		// react to it — without this, reading it and then reassigning it a line
+		// later makes this same effect both a reader and a writer of its own
+		// dependency, which Svelte reruns forever (effect_update_depth_exceeded).
+		untrack(() => syncedBlockResolver.destroy());
+		syncedBlockResolver = createSyncedBlockResolver();
+		syncGroupResolver = createSyncGroupResolver();
 
 		(async () => {
 			const res = await fetch(`/api/documents/${id}/shard`);
@@ -407,6 +462,15 @@
 				unsubscribePresence();
 				unsubscribeUndoRedo();
 				releaseBlockPresence(docAwareness);
+				// The last presence claim may have landed on a cross-shard
+				// target's Awareness instead of this Document's own (#242) —
+				// release that one too, or it keeps advertising this tab as an
+				// editor there until that separate connection is torn down.
+				if (lastPresenceAwareness && lastPresenceAwareness !== docAwareness) {
+					releaseBlockPresence(lastPresenceAwareness);
+				}
+				lastPresenceAwareness = undefined;
+				syncedBlockResolver.destroy();
 			};
 			// A rejection here (network failure, bad response) previously
 			// vanished as a silent unhandled rejection — this at least
@@ -708,18 +772,28 @@
 	}
 
 	/** Updates live provenance for the record whose editable text just changed. */
-	function handleBlockInput(blockId: string, editedRecordId = blockId): void {
-		if (!ydoc) return;
-		touchRecordEditor(ydoc, editedRecordId, CURRENT_USER);
+	/**
+	 * `targetDoc` defaults to this Document's own `ydoc` — the right doc for
+	 * every block except a synced_block instance whose target resolved
+	 * cross-shard (#242), where the actual edited record (and its Y.Text)
+	 * lives in a different, already-resolved doc instead.
+	 */
+	function handleBlockInput(
+		blockId: string,
+		editedRecordId = blockId,
+		targetDoc: typeof ydoc = ydoc
+	): void {
+		if (!targetDoc) return;
+		touchRecordEditor(targetDoc, editedRecordId, CURRENT_USER);
 		clearTimeout(provenanceAnnouncementTimer);
 		provenanceAnnouncementTimer = setTimeout(() => {
-			const record = getRecord(ydoc!, editedRecordId);
+			const record = getRecord(targetDoc, editedRecordId);
 			if (record && hasProvenance(record)) {
 				provenanceAnnouncement = `Last edited by ${formatActor(record.lastEditedBy)} at ${formatTimestamp(record.lastEditedAt)}.`;
 			}
 		}, 800);
 		if (slashMenuBlockId !== blockId) return;
-		const ytext = getRecordYText(ydoc, editedRecordId);
+		const ytext = getRecordYText(targetDoc, editedRecordId);
 		const text = ytext ? plainText(yTextToRichText(ytext)) : '';
 		if (!text.startsWith('/')) {
 			slashMenuBlockId = null;
@@ -956,6 +1030,24 @@
 	}
 
 	/**
+	 * The target record's Y.Text, whichever doc it actually resolved from —
+	 * this Document's own `ydoc` when found locally, or a cross-shard
+	 * `remoteTarget` (#242) once resolved. `localTargetRecord`/
+	 * `remoteTargetRecord` are whichever of the two already found the record
+	 * itself; passed in rather than re-derived so this stays a plain lookup.
+	 */
+	function targetYText(
+		provenanceRecordId: string,
+		localTargetRecord: WorkspaceRecord | undefined,
+		remoteTargetRecord: WorkspaceRecord | undefined,
+		remoteTarget: ResolvedRecordTarget | undefined
+	): ReturnType<typeof getRecordYText> {
+		if (localTargetRecord) return getRecordYText(ydoc!, provenanceRecordId);
+		if (remoteTargetRecord) return getRecordYText(remoteTarget!.doc, provenanceRecordId);
+		return undefined;
+	}
+
+	/**
 	 * Every *other* location in `sourceId`'s sync group, from the perspective
 	 * of whichever block (`excludeRecordId`) is currently rendering — the
 	 * source itself when called for a plain block, or one particular
@@ -965,27 +1057,88 @@
 	 * ahead of `listSyncedBlockInstances`' sibling instances (also excluding
 	 * self). Same-document only today — see listSyncedBlockInstances' own
 	 * comment on why a genuinely cross-Document instance can't appear here
-	 * (or exist at all) until synced blocks are shard-aware.
+	 * (or exist at all) — until now: #242's syncGroupResolver augments this
+	 * same-document view with the server-resolved, workspace-wide sync group
+	 * (services/synced-blocks.ts#resolveSyncGroups), for whatever this
+	 * Document's own live index structurally can't see. The local
+	 * computation below stays live (still updates instantly for a sibling
+	 * instance added/removed in *this* Document during the session); the
+	 * remote result only ever adds instances/a source this doc's own ydoc
+	 * has no way to know about, deduped by instance id so a same-shard
+	 * instance is never listed twice.
 	 */
 	function syncGroupLocations(sourceId: string, excludeRecordId: string): Backlink[] {
-		if (!ydoc) return [];
-		const others = listSyncedBlockInstances(ydoc, sourceId).filter(
-			(instance) => instance.sourceRecordId !== excludeRecordId
+		const localOthers = ydoc
+			? listSyncedBlockInstances(ydoc, sourceId).filter(
+					(instance) => instance.sourceRecordId !== excludeRecordId
+				)
+			: [];
+		const localInstanceIds = new Set(localOthers.map((instance) => instance.sourceRecordId));
+		const remoteGroup = syncGroupResolver.get(sourceId);
+		const remoteOthers = (remoteGroup?.instances ?? []).filter(
+			(instance) =>
+				instance.sourceRecordId !== excludeRecordId &&
+				!localInstanceIds.has(instance.sourceRecordId)
 		);
-		const source = getRecord(ydoc, sourceId);
-		if (!source || source.id === excludeRecordId) return others;
-		const sourceText = getRecordYText(ydoc, source.id);
-		const context = sourceText ? plainText(yTextToRichText(sourceText)).trim() : '';
-		return [
-			{
-				sourceDocumentId: data.documentId,
-				sourceDocumentTitle: title || 'Untitled Document',
-				sourceRecordId: source.id,
-				context: context || 'Synced source'
-			},
-			...others
-		];
+		const others = [...localOthers, ...remoteOthers];
+
+		const localSource = ydoc ? getRecord(ydoc, sourceId) : undefined;
+		if (localSource && localSource.id !== excludeRecordId) {
+			const sourceText = getRecordYText(ydoc!, localSource.id);
+			const context = sourceText ? plainText(yTextToRichText(sourceText)).trim() : '';
+			return [
+				{
+					sourceDocumentId: data.documentId,
+					sourceDocumentTitle: title || 'Untitled Document',
+					sourceRecordId: localSource.id,
+					context: context || 'Synced source'
+				},
+				...others
+			];
+		}
+		if (remoteGroup?.source && remoteGroup.source.sourceRecordId !== excludeRecordId) {
+			return [remoteGroup.source, ...others];
+		}
+		return others;
 	}
+
+	// #242: kicks off cross-shard resolution for every rendered synced_block
+	// whose target isn't found in this Document's own ydoc — i.e. it likely
+	// lives in a different Document's shard. No-ops once a target is already
+	// resolved/failed/in flight (see createSyncedBlockResolver), so this
+	// safely reruns on every blocks/ydoc change.
+	$effect(() => {
+		if (!ydoc) return;
+		for (const block of blocks) {
+			if (block.blockType !== 'synced_block' || !block.referencedRecordId) continue;
+			if (getRecordYText(ydoc, block.referencedRecordId)) continue;
+			syncedBlockResolver.ensure(block.referencedRecordId);
+		}
+	});
+
+	// #242: the one batched cross-shard "used in N places" lookup for this
+	// Document view — every record id it holds (via outlineBlocks, which
+	// already walks nested columns children too) plus every synced_block's
+	// own referencedRecordId, since that target may not be one of this
+	// Document's own ids at all. Reacts to outlineBlocks/ydoc rather than
+	// firing once synchronously right after connecting: a cold connection's
+	// `doc` is still empty at that instant (real content arrives once the
+	// WebSocket's initial sync lands, which only *this* reactive recompute —
+	// not a one-off call — is guaranteed to see). createSyncGroupResolver's
+	// own one-shot latch (fires at most one real request, only once it sees a
+	// non-empty candidate list) is what keeps this from re-fetching on every
+	// later edit despite rerunning on every blocks change.
+	$effect(() => {
+		if (!ydoc) return;
+		const syncGroupCandidateIds = new SvelteSet<string>();
+		for (const { record } of outlineBlocks) {
+			syncGroupCandidateIds.add(record.id);
+			if (record.blockType === 'synced_block' && record.referencedRecordId) {
+				syncGroupCandidateIds.add(record.referencedRecordId);
+			}
+		}
+		syncGroupResolver.ensure([...syncGroupCandidateIds]);
+	});
 
 	function handleDetachSyncedBlock(blockId: string): void {
 		if (!ydoc) return;
@@ -1130,12 +1283,26 @@
 		</button>
 	{/if}
 	{#each blocks as block, index (block.id)}
-		{@const ytext = ydoc ? getRecordYText(ydoc, syncedBlockTargetId(block)) : undefined}
-		{@const holder = heldByOthers.get(syncedBlockTargetId(block))}
 		{@const provenanceRecordId = syncedBlockTargetId(block)}
-		{@const provenance = ydoc ? (getRecord(ydoc, provenanceRecordId) ?? block) : block}
+		{@const localTargetRecord = ydoc ? getRecord(ydoc, provenanceRecordId) : undefined}
+		{@const remoteTarget =
+			!localTargetRecord && block.blockType === 'synced_block'
+				? syncedBlockResolver.get(provenanceRecordId)
+				: undefined}
+		{@const remoteTargetRecord = remoteTarget
+			? getRecord(remoteTarget.doc, provenanceRecordId)
+			: undefined}
+		{@const ytext = targetYText(
+			provenanceRecordId,
+			localTargetRecord,
+			remoteTargetRecord,
+			remoteTarget
+		)}
+		{@const holder =
+			heldByOthers.get(provenanceRecordId) ?? syncedBlockResolver.holderFor(provenanceRecordId)}
+		{@const provenance = localTargetRecord ?? remoteTargetRecord ?? block}
 		{@const bt = block.blockType ?? 'paragraph'}
-		{@const syncLocations = ydoc ? syncGroupLocations(provenanceRecordId, block.id) : []}
+		{@const syncLocations = syncGroupLocations(provenanceRecordId, block.id)}
 
 		{#snippet customContent()}
 			{#if bt === 'callout'}
@@ -1255,10 +1422,16 @@
 							recordId={block.id}
 							{linkTargets}
 							placeholder="Synced content…"
-							onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
+							onInputText={() =>
+								handleBlockInput(block.id, provenanceRecordId, remoteTarget?.doc ?? ydoc)}
 							onEnter={() => addBlockAfter(block.id)}
 							onBackspaceAtStart={() => handleBackspace(block, index)}
-							onFocusBlock={() => handleFocusBlock(block.id, provenanceRecordId)}
+							onFocusBlock={() =>
+								handleFocusBlock(
+									block.id,
+									provenanceRecordId,
+									remoteTarget?.awareness ?? awareness
+								)}
 							onSlashKey={() => {}}
 							onLinkShortcut={() => linkComposer.open(block.id)}
 							isFirstBlock={index === 0}

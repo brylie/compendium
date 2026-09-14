@@ -246,13 +246,15 @@ export function listIncomingLinks(doc: Y.Doc, targetId: string): Backlink[] {
  * shared index also carries ordinary navigational backlinks to `sourceId`
  * when it happens to be a Document/Collection.
  *
- * Scoped to whatever this `doc` covers, same as listIncomingLinks — and
- * since each Document now resolves to its own shard (#120), that's just the
- * current Document today. A synced_block instance in a different Document
- * can't actually mirror this source's content at all yet (its own
- * getRecordYText lookup finds nothing in that Document's own Y.Doc), so it
- * couldn't appear in this list regardless of index scope — true cross-
- * Document synced blocks need shard-aware resolution first (issue #242).
+ * Scoped to whatever this `doc` covers, same as listIncomingLinks — a
+ * `WeakMap<Y.Doc, …>` index is structurally incapable of seeing another
+ * shard, so this only ever reports same-Document instances. That's a
+ * deliberate, still-correct building block, not a stale limitation: issue
+ * #242's cross-shard "used in N places" is answered one layer up, by merging
+ * this same-shard result with a durable, workspace-wide reverse index
+ * (`services/synced-blocks.ts#resolveSyncGroups`, `server/synced-block-index.ts`)
+ * — see `+page.svelte`'s `syncGroupLocations`, which calls this function for
+ * the still-live local half of that merge.
  */
 export function listSyncedBlockInstances(doc: Y.Doc, sourceId: string): Backlink[] {
 	return listIncomingLinks(doc, sourceId).filter(

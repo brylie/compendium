@@ -1,0 +1,235 @@
+import { and, eq } from 'drizzle-orm';
+import { describe, expect, it } from 'vitest';
+import { resolveRequestContext } from '$lib/server/request-context';
+import { getDb } from '$lib/server/store';
+import { syncedBlockInstance } from '$lib/server/db/schema';
+import { createDocument as rawCrdtCreateDocument } from '$lib/data/document-ops';
+import { createCollection as rawCrdtCreateCollection } from '$lib/data/collection-ops';
+import {
+	createColumnsBlock as rawCrdtCreateColumnsBlock,
+	createRecord as rawCrdtCreateRecord,
+	setRecordReferencedId
+} from '$lib/data/record-ops';
+import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
+import { upsertSyncedBlockInstanceEntry } from '$lib/server/synced-block-index';
+import { resolveSyncGroups } from './synced-blocks';
+import type { ActorId } from '$lib/data/types';
+
+const human: ActorId = { kind: 'human', userId: 'brylie' };
+
+function crdtCreateDocument(...args: Parameters<typeof rawCrdtCreateDocument>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateDocument(...args));
+}
+
+function crdtCreateCollection(...args: Parameters<typeof rawCrdtCreateCollection>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateCollection(...args));
+}
+
+function crdtCreateRecord(...args: Parameters<typeof rawCrdtCreateRecord>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateRecord(...args));
+}
+
+function crdtCreateColumnsBlock(...args: Parameters<typeof rawCrdtCreateColumnsBlock>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateColumnsBlock(...args));
+}
+
+describe('services/synced-blocks: resolveSyncGroups (#242)', () => {
+	it('finds a synced_block instance whose source lives in a different Document’s shard', () => {
+		const context = resolveRequestContext(human);
+		const store = context.workspaceStore;
+
+		const shardA = store.resolve({ workspaceId: context.workspaceId, shardId: 'shard-a' });
+		const documentA = crdtCreateDocument(shardA.doc, { title: 'Doc A' });
+		const source = crdtCreateRecord(
+			shardA.doc,
+			{ parentId: documentA.id, blockType: 'paragraph' },
+			human
+		);
+
+		const shardB = store.resolve({ workspaceId: context.workspaceId, shardId: 'shard-b' });
+		const documentB = crdtCreateDocument(shardB.doc, { title: 'Doc B' });
+		const instance = crdtCreateRecord(
+			shardB.doc,
+			{ parentId: documentB.id, blockType: 'synced_block' },
+			human
+		);
+		transactWithOrigin(shardB.doc, TEST_ORIGIN, () =>
+			setRecordReferencedId(shardB.doc, instance.id, source.id, human)
+		);
+
+		const groups = resolveSyncGroups(context, [source.id, instance.id]);
+
+		expect(groups[source.id]?.source).toMatchObject({
+			sourceDocumentId: documentA.id,
+			sourceRecordId: source.id
+		});
+		expect(groups[source.id]?.instances).toEqual([
+			expect.objectContaining({ sourceDocumentId: documentB.id, sourceRecordId: instance.id })
+		]);
+
+		// The instance's own card resolves its source via the same batch —
+		// it has no instances of its own mirroring it.
+		expect(groups[instance.id]?.source).toMatchObject({
+			sourceDocumentId: documentB.id,
+			sourceRecordId: instance.id
+		});
+		expect(groups[instance.id]?.instances).toEqual([]);
+	});
+
+	it('omits an id that resolves to nothing (never existed, or already deleted)', () => {
+		const context = resolveRequestContext(human);
+		const groups = resolveSyncGroups(context, ['does-not-exist']);
+		expect(groups['does-not-exist']).toBeUndefined();
+	});
+
+	it('omits a Collection row’s own location (no owning Document to resolve a source against), while still counting it as one more request among several', () => {
+		const context = resolveRequestContext(human);
+		const collection = crdtCreateCollection(context.workspace.doc, {
+			title: 'Rows',
+			schema: []
+		});
+		const row = crdtCreateRecord(context.workspace.doc, { parentId: collection.id }, human);
+
+		const groups = resolveSyncGroups(context, [row.id]);
+		expect(groups[row.id]).toBeUndefined();
+	});
+
+	it('collects every instance of one source, across more than one row in the same shard', () => {
+		const context = resolveRequestContext(human);
+		const store = context.workspaceStore;
+
+		const shardA = store.resolve({ workspaceId: context.workspaceId, shardId: 'shard-multi-a' });
+		const documentA = crdtCreateDocument(shardA.doc, { title: 'Multi Source Doc' });
+		const source = crdtCreateRecord(
+			shardA.doc,
+			{ parentId: documentA.id, blockType: 'paragraph' },
+			human
+		);
+
+		const shardB = store.resolve({ workspaceId: context.workspaceId, shardId: 'shard-multi-b' });
+		const documentB = crdtCreateDocument(shardB.doc, { title: 'Multi Instance Doc' });
+		const instance1 = crdtCreateRecord(
+			shardB.doc,
+			{ parentId: documentB.id, blockType: 'synced_block' },
+			human
+		);
+		const instance2 = crdtCreateRecord(
+			shardB.doc,
+			{ parentId: documentB.id, blockType: 'synced_block' },
+			human
+		);
+		transactWithOrigin(shardB.doc, TEST_ORIGIN, () => {
+			setRecordReferencedId(shardB.doc, instance1.id, source.id, human);
+			setRecordReferencedId(shardB.doc, instance2.id, source.id, human);
+		});
+
+		const groups = resolveSyncGroups(context, [source.id]);
+		expect(new Set(groups[source.id]?.instances.map((i) => i.sourceRecordId))).toEqual(
+			new Set([instance1.id, instance2.id])
+		);
+	});
+
+	it('skips a stale reverse-index row whose instance no longer resolves in its recorded shard', () => {
+		const context = resolveRequestContext(human);
+		const store = context.workspaceStore;
+
+		const shardA = store.resolve({ workspaceId: context.workspaceId, shardId: 'shard-stale-a' });
+		const documentA = crdtCreateDocument(shardA.doc, { title: 'Stale Source Doc' });
+		const source = crdtCreateRecord(
+			shardA.doc,
+			{ parentId: documentA.id, blockType: 'paragraph' },
+			human
+		);
+		const instance = crdtCreateRecord(
+			shardA.doc,
+			{ parentId: documentA.id, blockType: 'synced_block' },
+			human
+		);
+		transactWithOrigin(shardA.doc, TEST_ORIGIN, () =>
+			setRecordReferencedId(shardA.doc, instance.id, source.id, human)
+		);
+
+		// Overwrites the (already correctly live-indexed, by shard-stale-a's
+		// own observer) row to instead claim this instance lives in a shard
+		// that has never actually resolved — the same shape a stale,
+		// not-yet-reconciled index entry takes: the reverse index says an
+		// instance exists, but the shard it names doesn't actually have it.
+		upsertSyncedBlockInstanceEntry(
+			context.workspaceId,
+			'shard-stale-orphan',
+			shardA.doc,
+			instance.id
+		);
+
+		const groups = resolveSyncGroups(context, [source.id]);
+		expect(groups[source.id]?.instances).toEqual([]);
+	});
+
+	it('excludes an instance whose live record has since been retargeted, even though a stale row still names the old source (issue #310 review)', () => {
+		const context = resolveRequestContext(human);
+		const store = context.workspaceStore;
+
+		const shardA = store.resolve({ workspaceId: context.workspaceId, shardId: 'shard-retarget-a' });
+		const documentA = crdtCreateDocument(shardA.doc, { title: 'Retarget Doc A' });
+		const oldSource = crdtCreateRecord(
+			shardA.doc,
+			{ parentId: documentA.id, blockType: 'paragraph' },
+			human
+		);
+		const newSource = crdtCreateRecord(
+			shardA.doc,
+			{ parentId: documentA.id, blockType: 'paragraph' },
+			human
+		);
+		const instance = crdtCreateRecord(
+			shardA.doc,
+			{ parentId: documentA.id, blockType: 'synced_block' },
+			human
+		);
+		// Retargets the live record to newSource — the observer keeps the
+		// durable index correctly pointed at newSource for this instance.
+		transactWithOrigin(shardA.doc, TEST_ORIGIN, () =>
+			setRecordReferencedId(shardA.doc, instance.id, newSource.id, human)
+		);
+
+		// Simulates the not-yet-reconciled window the code comment describes:
+		// a row still claiming this (still-real, still-synced_block) instance
+		// mirrors the *old* source, even though its live referencedRecordId has
+		// already moved on — something no code path through the public
+		// upsert/rebuild API can produce today (it always derives the row's
+		// source from the record's own current state), but exactly the shape
+		// a genuine write-ordering race would leave behind.
+		getDb()
+			.update(syncedBlockInstance)
+			.set({ sourceRecordId: oldSource.id })
+			.where(
+				and(
+					eq(syncedBlockInstance.workspaceId, context.workspaceId),
+					eq(syncedBlockInstance.instanceRecordId, instance.id)
+				)
+			)
+			.run();
+
+		// oldSource's usage list must not show this instance — it stopped
+		// mirroring oldSource the moment it was retargeted, regardless of what
+		// the (now-stale) row still claims.
+		const groups = resolveSyncGroups(context, [oldSource.id, newSource.id]);
+		expect(groups[oldSource.id]?.instances).toEqual([]);
+	});
+
+	it('falls back to a block-type label when a source has no text of its own (a columns container)', () => {
+		const context = resolveRequestContext(human);
+		const documentA = crdtCreateDocument(context.workspace.doc, { title: 'Columns Doc' });
+		const columns = crdtCreateColumnsBlock(
+			context.workspace.doc,
+			{ parentId: documentA.id },
+			human
+		);
+
+		const groups = resolveSyncGroups(context, [columns.id]);
+		expect(groups[columns.id]?.source).toMatchObject({
+			sourceRecordId: columns.id,
+			context: 'Synced source'
+		});
+	});
+});
