@@ -74,24 +74,51 @@ export function upsertSyncedBlockInstanceEntry(
  * createContext(), right before attachSyncedBlockIndexObserver takes over
  * keeping it live), the same "rebuildable by replaying the Y.Doc's current
  * state" contract record-index.ts's rebuildRecordIndexForShard follows.
+ *
+ * The wipe and every insert happen in one transaction, and only
+ * `synced_block` records with a `referencedRecordId` are written at all
+ * (unlike a per-record `upsertSyncedBlockInstanceEntry` call, which would
+ * also issue a redundant delete for every other record) — a concurrent
+ * `listSyncedBlockInstancesAcrossShards` read can therefore never observe
+ * this shard's rows as transiently empty mid-rebuild, and a large Document
+ * costs one bulk insert here, not one write per record.
  */
 export function rebuildSyncedBlockIndexForShard(
 	workspaceId: string,
 	shardId: string,
 	doc: Y.Doc
 ): void {
-	getDb()
-		.delete(syncedBlockInstance)
-		.where(
-			and(
-				eq(syncedBlockInstance.workspaceId, workspaceId),
-				eq(syncedBlockInstance.instanceShardId, shardId)
-			)
-		)
-		.run();
+	const now = Date.now();
+	const rows: {
+		workspaceId: string;
+		sourceRecordId: string;
+		instanceRecordId: string;
+		instanceShardId: string;
+		createdAt: number;
+	}[] = [];
 	for (const recordId of listAllRecordIds(doc)) {
-		upsertSyncedBlockInstanceEntry(workspaceId, shardId, doc, recordId);
+		const record = getRecord(doc, recordId);
+		if (record?.blockType !== 'synced_block' || !record.referencedRecordId) continue;
+		rows.push({
+			workspaceId,
+			sourceRecordId: record.referencedRecordId,
+			instanceRecordId: recordId,
+			instanceShardId: shardId,
+			createdAt: now
+		});
 	}
+
+	getDb().transaction((tx) => {
+		tx.delete(syncedBlockInstance)
+			.where(
+				and(
+					eq(syncedBlockInstance.workspaceId, workspaceId),
+					eq(syncedBlockInstance.instanceShardId, shardId)
+				)
+			)
+			.run();
+		if (rows.length > 0) tx.insert(syncedBlockInstance).values(rows).run();
+	});
 }
 
 export interface SyncedBlockInstanceRow {
