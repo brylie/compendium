@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import * as Y from 'yjs';
 import { createDocument } from '$lib/data/document-ops';
+import { createUndoManager } from '$lib/client/undo';
 import {
 	createRecord,
 	getRecord,
@@ -25,6 +26,7 @@ function baseProps(ydoc: Y.Doc, block: ReturnType<typeof createRecord>) {
 		selectedBlockIds: new Set<string>(),
 		justNavigatedBlockId: null,
 		convertOptions: [],
+		heldByOthers: new Map<string, ActorId>(),
 		onFocusBlock: vi.fn(),
 		onInputText: vi.fn(),
 		onDragHandlePointerDown: vi.fn(),
@@ -225,5 +227,34 @@ describe('ToggleChildren (#227)', () => {
 		await fireEvent.input(editor);
 
 		expect(props.onInputText).toHaveBeenCalledWith(child.id);
+	});
+
+	it('renders the held placeholder (not an editor) for a child another actor is currently holding', () => {
+		const ydoc = new Y.Doc();
+		const toggle = createToggle(ydoc);
+		const child = createRecord(ydoc, { parentId: toggle.id, blockType: 'paragraph' }, actor);
+		const holder: ActorId = { kind: 'human', userId: 'other' };
+
+		render(ToggleChildren, {
+			...baseProps(ydoc, getRecord(ydoc, toggle.id)!),
+			heldByOthers: new Map([[child.id, holder]])
+		});
+
+		expect(screen.getByRole('group', { name: /other is editing this block/i })).toBeInTheDocument();
+		expect(document.querySelector(`[data-block-editor-id="${child.id}"]`)).not.toBeInTheDocument();
+	});
+
+	it('a locally-created child participates in local undo history', async () => {
+		const ydoc = new Y.Doc();
+		const toggle = createToggle(ydoc);
+		const undoManager = createUndoManager(ydoc);
+
+		render(ToggleChildren, baseProps(ydoc, getRecord(ydoc, toggle.id)!));
+		await fireEvent.click(screen.getByRole('button', { name: 'Add block' }));
+		expect(getRecord(ydoc, toggle.id)!.childRecordIds).toHaveLength(1);
+
+		undoManager.undo();
+
+		expect(getRecord(ydoc, toggle.id)!.childRecordIds).toHaveLength(0);
 	});
 });

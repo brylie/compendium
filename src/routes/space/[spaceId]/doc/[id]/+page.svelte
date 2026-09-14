@@ -1647,6 +1647,7 @@
 					selectedBlockIds={blockSelection.ids}
 					{justNavigatedBlockId}
 					convertOptions={TOGGLE_CONVERTIBLE_BLOCK_TYPES}
+					{heldByOthers}
 					onFocusBlock={(blockId) => handleFocusBlock(blockId)}
 					onInputText={(blockId) => handleBlockInput(blockId)}
 					onDragHandlePointerDown={(e, blockId, parentId, blockIndex) =>

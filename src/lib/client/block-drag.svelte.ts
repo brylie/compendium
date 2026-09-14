@@ -1,12 +1,12 @@
 import type * as Y from 'yjs';
-import { BLOCK_CAPABILITIES } from '$lib/data/block-capabilities';
+import { blockCapabilitiesFor } from '$lib/data/block-capabilities';
 import {
 	getRecord,
 	listRecordsForParent,
 	moveRecordToParent,
 	reorderRecord
 } from '$lib/data/record-ops';
-import type { WorkspaceRecord } from '$lib/data/types';
+import type { BlockType, WorkspaceRecord } from '$lib/data/types';
 import type { BlockSelectionController } from './block-selection.svelte';
 
 export interface BlockDragOptions {
@@ -245,6 +245,24 @@ export function createBlockDrag(options: BlockDragOptions) {
 	// reorderRecord/moveRecordToParent's afterRecordId (resolved among
 	// blockId's prospective siblings, i.e. that same array *without*
 	// blockId).
+	// Dropping into a container is restricted to that container's own curated
+	// `childBlockTypes` set (`BLOCK_CAPABILITIES`) the same way create_record
+	// enforces at creation time (services/records.ts) — the drag path
+	// bypasses that service-layer check entirely (a direct data-layer call,
+	// like every other UI mutation), so it needs its own guard here or an
+	// unsupported type (e.g. a table or another columns block dropped into a
+	// column, or a callout dropped into a toggle) could land somewhere with
+	// nothing to render it. Generic on `blockCapabilitiesFor(...)
+	// .childBlockTypes` rather than hardcoded to `column`, so a future
+	// container type (issue #148's columns/column; toggle, issue #227) picks
+	// this guard up for free. `undefined` means "not a curated container" —
+	// every block type is welcome (the ordinary Document-level flow).
+	function isBlockTypeAllowedIn(containerBlockType: BlockType | undefined, blockType: BlockType) {
+		if (!containerBlockType) return true;
+		const allowed = blockCapabilitiesFor(containerBlockType).childBlockTypes;
+		return !allowed || allowed.includes(blockType);
+	}
+
 	function moveBlockToContainerIndex(
 		blockId: string,
 		targetParentId: string,
@@ -268,18 +286,11 @@ export function createBlockDrag(options: BlockDragOptions) {
 			return;
 		}
 
-		// Cross-container move (issue #148) — into/out of a column. Dropping
-		// into a column is restricted to the same curated
-		// BLOCK_CAPABILITIES.column.childBlockTypes set create_record enforces
-		// at creation time (services/records.ts) — the drag path bypasses that
-		// service-layer check entirely (a direct data-layer call, like every
-		// other UI mutation), so it needs its own guard here or an unsupported
-		// type (e.g. a table or another columns block) could be dropped into a
-		// column with nothing to render it.
+		// Cross-container move (issue #148; toggle, issue #227) — into/out of
+		// a column or toggle.
 		const targetContainer = getRecord(ydoc, targetParentId);
-		if (targetContainer?.blockType === 'column') {
-			const allowed = BLOCK_CAPABILITIES.column.childBlockTypes;
-			if (!allowed?.includes(record.blockType ?? 'paragraph')) return;
+		if (!isBlockTypeAllowedIn(targetContainer?.blockType, record.blockType ?? 'paragraph')) {
+			return;
 		}
 		const destSiblings = listRecordsForParent(ydoc, targetParentId);
 		const afterRecordId = targetIndex > 0 ? destSiblings[targetIndex - 1]?.id : undefined;

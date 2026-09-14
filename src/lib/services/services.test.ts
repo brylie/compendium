@@ -57,6 +57,7 @@ import {
 	setRecordCollapsed as crdtSetRecordCollapsed
 } from '$lib/data/record-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
+import { recordsMap } from '$lib/data/yjs-shapes';
 import {
 	createSpace as catalogCreateSpace,
 	listCatalogCollections,
@@ -2051,6 +2052,46 @@ describe('service layer: toggle block real child-block nesting (issue #227)', ()
 		expect(collapsedView.markdown).toContain('hidden detail');
 	});
 
+	it('getDocument still wraps a pre-#227 flat toggle (no recordIds array at all) in <details><summary>', () => {
+		const doc = createDocument(resolveRequestContext(human), { title: 'Notes' });
+		const toggle = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'toggle'
+		});
+		writeRecord(resolveRequestContext(human), toggle.id, { markdown: 'Legacy summary' });
+		// Simulates a toggle created before issue #227 shipped — createRecord
+		// always seeds a (possibly empty) recordIds array today, but a
+		// pre-existing toggle record has no such array at all, so
+		// `resolveDocumentRecordData`'s `children` field comes back
+		// `undefined`, not `[]`.
+		const shardDoc = resolveWorkspaceContext({ shardId: doc.id }).doc;
+		writeTestYText(shardDoc, () => recordsMap(shardDoc).get(toggle.id)!.raw.delete('recordIds'));
+
+		const projected = getDocument(resolveRequestContext(human), doc.id)!;
+		const toggleView = projected.records[0];
+		expect(toggleView.children).toBeUndefined();
+		expect(toggleView.markdown).toBe(
+			'<details open>\n<summary>Legacy summary</summary>\n</details>'
+		);
+	});
+
+	it("HTML-escapes a toggle's summary so it can't prematurely close the <summary> tag", () => {
+		const doc = createDocument(resolveRequestContext(human), { title: 'Notes' });
+		const toggle = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'toggle'
+		});
+		writeRecord(resolveRequestContext(human), toggle.id, {
+			markdown: 'A & B </summary><script>'
+		});
+
+		const projected = getDocument(resolveRequestContext(human), doc.id)!;
+		const toggleView = projected.records[0];
+		expect(toggleView.markdown).toBe(
+			'<details open>\n<summary>A &amp; B &lt;/summary&gt;&lt;script&gt;</summary>\n</details>'
+		);
+	});
+
 	it('deleteRecord on a toggle recursively deletes its children', () => {
 		const doc = createDocument(resolveRequestContext(human), { title: 'Notes' });
 		const toggle = createRecord(resolveRequestContext(human), {
@@ -2066,6 +2107,32 @@ describe('service layer: toggle block real child-block nesting (issue #227)', ()
 
 		expect(() => getRecord(resolveRequestContext(human), toggle.id)).toThrow(PermissionDeniedError);
 		expect(() => getRecord(resolveRequestContext(human), child.id)).toThrow(PermissionDeniedError);
+	});
+
+	it('deleteRecord on a toggle releases its own locator and every descendant locator, not just the root', () => {
+		const { workspaceId } = resolveWorkspaceContext();
+		const doc = createDocument(resolveRequestContext(human), { title: 'Notes' });
+		const toggle = createRecord(resolveRequestContext(human), {
+			parentId: doc.id,
+			blockType: 'toggle'
+		});
+		const firstChild = createRecord(resolveRequestContext(human), {
+			parentId: toggle.id,
+			blockType: 'paragraph'
+		});
+		const secondChild = createRecord(resolveRequestContext(human), {
+			parentId: toggle.id,
+			blockType: 'paragraph',
+			afterRecordId: firstChild.id
+		});
+		expect(resolveShardForRecord(workspaceId, firstChild.id)).toEqual({ shardId: doc.id });
+		expect(resolveShardForRecord(workspaceId, secondChild.id)).toEqual({ shardId: doc.id });
+
+		deleteRecord(resolveRequestContext(human), toggle.id);
+
+		expect(resolveShardForRecord(workspaceId, toggle.id)).toBeUndefined();
+		expect(resolveShardForRecord(workspaceId, firstChild.id)).toBeUndefined();
+		expect(resolveShardForRecord(workspaceId, secondChild.id)).toBeUndefined();
 	});
 
 	it('a token granted only the owning Document can create, write, and delete a block nested inside a toggle', () => {

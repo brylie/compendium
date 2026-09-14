@@ -125,6 +125,19 @@ function renderColumnsMarkdown(columns: DocumentRecordView[]): string {
 	return ['::: columns', ...columns.map(renderColumnMarkdown), ':::'].join('\n');
 }
 
+// <summary>/<details> are the only raw HTML tags this module ever emits —
+// every other block's markdown (headings, lists, blockquotes, fenced divs)
+// is plain CommonMark/GFM syntax with no literal angle brackets to worry
+// about. The summary text is ordinary user-typed content transcoded via
+// richTextToMarkdown's own markdown-syntax escaping (escapeMarkdown in
+// markdown-transcode.ts), which never touches `<`/`>`/`&` — left unescaped,
+// a summary containing e.g. `</summary>` would prematurely close the tag and
+// corrupt the rest of get_document's output for every consumer of this
+// toggle, not just this one field.
+function escapeHtml(text: string): string {
+	return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 // get_document always renders a toggle's full children regardless of
 // `collapsed` (issue #227) — matching native <details> semantics, where the
 // content exists in the markup whether or not the `open` attribute is set;
@@ -142,7 +155,7 @@ function renderToggleMarkdown(
 		.filter((markdown) => markdown.length > 0)
 		.join('\n\n');
 	const openAttr = collapsed ? '' : ' open';
-	const summaryLine = `<summary>${summary}</summary>`;
+	const summaryLine = `<summary>${escapeHtml(summary)}</summary>`;
 	return body
 		? `<details${openAttr}>\n${summaryLine}\n\n${body}\n</details>`
 		: `<details${openAttr}>\n${summaryLine}\n</details>`;
@@ -174,8 +187,14 @@ export function projectDocumentRecordView(
 	let markdown = ownMarkdown;
 	if (data.blockType === 'columns' && children) {
 		markdown = renderColumnsMarkdown(children);
-	} else if (data.blockType === 'toggle' && children) {
-		markdown = renderToggleMarkdown(ownMarkdown, !!data.collapsed, children);
+	} else if (data.blockType === 'toggle') {
+		// A pre-#227 toggle record has no `recordIds` array at all (never
+		// created), so `children` is `undefined` here rather than `[]` — still
+		// gets the same <details><summary> wrapper as a fresh toggle (with an
+		// empty body) instead of silently reverting to a bare-summary
+		// representation, keeping every toggle's markdown shape consistent
+		// regardless of when it was created.
+		markdown = renderToggleMarkdown(ownMarkdown, !!data.collapsed, children ?? []);
 	}
 	return {
 		id: data.id,

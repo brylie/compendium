@@ -10,8 +10,10 @@
 		setBlockType
 	} from '$lib/data/record-ops';
 	import { plainText, yTextToRichText } from '$lib/data/richtext';
+	import { formatActor } from '$lib/data/format';
+	import { LOCAL_UI_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 	import type { InternalLinkTarget } from '$lib/data/links';
-	import type { BlockType, WorkspaceRecord } from '$lib/data/types';
+	import type { ActorId, BlockType, WorkspaceRecord } from '$lib/data/types';
 	import BlockRow, { type BlockEditorHandle } from './BlockRow.svelte';
 	import Icon from './Icon.svelte';
 
@@ -26,6 +28,7 @@
 		selectedBlockIds,
 		justNavigatedBlockId,
 		convertOptions,
+		heldByOthers,
 		onFocusBlock,
 		onInputText,
 		onDragHandlePointerDown,
@@ -47,6 +50,8 @@
 		selectedBlockIds: Set<string>;
 		justNavigatedBlockId: string | null;
 		convertOptions: { type: BlockType; label: string }[];
+		/** Same map +page.svelte's own top-level flow reads (subscribeHeldByOthers) — keyed generically by any held record id, not just top-level ones, so a toggle's own child rows can render the same held placeholder a top-level block does (issue #227's own hold-semantics gap: a child's hold was tracked but never surfaced here). */
+		heldByOthers: Map<string, ActorId>;
 		onFocusBlock: (blockId: string) => void;
 		onInputText: (blockId: string) => void;
 		onDragHandlePointerDown: (
@@ -92,10 +97,8 @@
 		afterId?: string,
 		blockType: BlockType = 'paragraph'
 	): Promise<void> {
-		const record = createRecord(
-			ydoc,
-			{ parentId: block.id, afterRecordId: afterId, blockType },
-			CURRENT_USER
+		const record = transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () =>
+			createRecord(ydoc, { parentId: block.id, afterRecordId: afterId, blockType }, CURRENT_USER)
 		);
 		await tick();
 		blockRefs[record.id]?.focusEditor(true);
@@ -109,7 +112,9 @@
 		const blockType = childRecord.blockType ?? 'paragraph';
 		const isList = LIST_BLOCK_TYPES.includes(blockType);
 		if (isList && isBlockTextEmpty(childRecord.id)) {
-			setBlockType(ydoc, childRecord.id, 'paragraph', CURRENT_USER);
+			transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () =>
+				setBlockType(ydoc, childRecord.id, 'paragraph', CURRENT_USER)
+			);
 			await tick();
 			blockRefs[childRecord.id]?.focusEditor(true);
 			return;
@@ -127,7 +132,7 @@
 		if (!previous) return;
 
 		if (isBlockTextEmpty(current.id)) {
-			deleteRecord(ydoc, current.id);
+			transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () => deleteRecord(ydoc, current.id));
 			await tick();
 			blockRefs[previous.id]?.focusEditor(true);
 		}
@@ -142,6 +147,7 @@
 >
 	{#each children as childRecord, index (childRecord.id)}
 		{@const ytext = getRecordYText(ydoc, childRecord.id)}
+		{@const holder = heldByOthers.get(childRecord.id)}
 
 		{#if draggingBlockId && dropIndicatorParentId === block.id && dropIndicatorIndex === index}
 			<div class="drop-indicator" aria-hidden="true"></div>
@@ -162,6 +168,7 @@
 			rowClass="flex items-start py-0.5"
 			moveAriaLabel="Move block in toggle. Drag, or use Arrow Up, Arrow Down, Home, and End. Shift-click, Ctrl-click, or Shift-Arrow to select multiple blocks."
 			placeholder={index === 0 ? 'Type in this toggle…' : ''}
+			heldByActorLabel={holder ? formatActor(holder) : undefined}
 			{onDragHandlePointerDown}
 			{onDragHandleKeydown}
 			{onDuplicateBlock}

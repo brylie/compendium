@@ -102,4 +102,30 @@ describe('copyDocumentVerbatim / copyCollectionVerbatim: cross-doc migration pri
 		const copiedColumnB = getRecord(target, columnBId);
 		expect(copiedColumnB?.childRecordIds).toHaveLength(1);
 	});
+
+	it('copies a toggle block, preserving both its own summary content and its children (issue #227)', () => {
+		const source = new Y.Doc();
+		const target = new Y.Doc();
+
+		const document = createDocument(source, { title: 'Notes Doc' });
+		const toggle = createRecord(source, { parentId: document.id, blockType: 'toggle' }, human);
+		updateRecordContent(
+			source,
+			toggle.id,
+			{ runs: [{ text: 'Click to expand', marks: {} }] },
+			human
+		);
+		const child = createRecord(source, { parentId: toggle.id, blockType: 'paragraph' }, human);
+		updateRecordContent(source, child.id, { runs: [{ text: 'Detail', marks: {} }] }, human);
+
+		copyDocumentVerbatim(source, target, document.id);
+
+		const copiedToggle = getRecord(target, toggle.id);
+		expect(copiedToggle?.blockType).toBe('toggle');
+		expect(copiedToggle?.content).toEqual({ runs: [{ text: 'Click to expand', marks: {} }] });
+		expect(copiedToggle?.childRecordIds).toEqual([child.id]);
+
+		const copiedChild = getRecord(target, child.id);
+		expect(copiedChild?.content).toEqual({ runs: [{ text: 'Detail', marks: {} }] });
+	});
 });
