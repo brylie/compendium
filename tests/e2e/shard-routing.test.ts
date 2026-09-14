@@ -383,8 +383,15 @@ describe('Document/Shard/Space Routing', () => {
 		// the same connection $lib/client/yjs-client.ts's resolveRecordDoc
 		// makes once it resolves that shard id via GET /api/records/[id]/shard
 		// for a synced_block instance whose target isn't in the viewing
-		// Document's own ydoc.
-		const sourceShardClient = harness.getYjsClient({ room: `shard-${sourceDoc.id}` });
+		// Document's own ydoc. disableBc: true on both this and
+		// independentSourceClient below so the two same-room clients can only
+		// converge via the real WebSocket server, not same-process
+		// BroadcastChannel sharing — otherwise this test could pass even if
+		// server-side cross-shard sync were broken.
+		const sourceShardClient = harness.getYjsClient({
+			room: `shard-${sourceDoc.id}`,
+			disableBc: true
+		});
 		await harness.waitForCondition(() => {
 			const ytext = getRecordYText(sourceShardClient.doc, source.recordId);
 			return !!ytext && plainText(yTextToRichText(ytext)).includes('Shared content');
@@ -402,7 +409,10 @@ describe('Document/Shard/Space Routing', () => {
 				human
 			)
 		);
-		const independentSourceClient = harness.getYjsClient({ room: `shard-${sourceDoc.id}` });
+		const independentSourceClient = harness.getYjsClient({
+			room: `shard-${sourceDoc.id}`,
+			disableBc: true
+		});
 		await harness.waitForCondition(() => {
 			const ytext = getRecordYText(independentSourceClient.doc, source.recordId);
 			return !!ytext && plainText(yTextToRichText(ytext)).includes('edited via the instance');

@@ -88,8 +88,17 @@ export function resolveSyncGroups(
 			const instanceDoc = docForShard(row.instanceShardId);
 			const instanceRecord = getRecord(instanceDoc, row.instanceRecordId);
 			// A stale row (instance deleted/retargeted since last indexed, not
-			// yet reconciled) — skip rather than surface a broken entry.
-			if (instanceRecord?.blockType !== 'synced_block') continue;
+			// yet reconciled) — skip rather than surface a broken entry. The
+			// referencedRecordId check specifically catches a retarget: the
+			// instance still exists and is still a synced_block, just no
+			// longer mirroring *this* source, so it must not appear in this
+			// source's usage list.
+			if (
+				instanceRecord?.blockType !== 'synced_block' ||
+				instanceRecord.referencedRecordId !== id
+			) {
+				continue;
+			}
 			const location = locationFor(instanceDoc, row.instanceRecordId);
 			if (location) instances.push(location);
 		}

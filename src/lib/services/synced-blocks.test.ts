@@ -1,8 +1,15 @@
+import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { resolveRequestContext } from '$lib/server/request-context';
+import { getDb } from '$lib/server/store';
+import { syncedBlockInstance } from '$lib/server/db/schema';
 import { createDocument as rawCrdtCreateDocument } from '$lib/data/document-ops';
 import { createCollection as rawCrdtCreateCollection } from '$lib/data/collection-ops';
-import { createRecord as rawCrdtCreateRecord, setRecordReferencedId } from '$lib/data/record-ops';
+import {
+	createColumnsBlock as rawCrdtCreateColumnsBlock,
+	createRecord as rawCrdtCreateRecord,
+	setRecordReferencedId
+} from '$lib/data/record-ops';
 import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import { upsertSyncedBlockInstanceEntry } from '$lib/server/synced-block-index';
 import { resolveSyncGroups } from './synced-blocks';
@@ -20,6 +27,10 @@ function crdtCreateCollection(...args: Parameters<typeof rawCrdtCreateCollection
 
 function crdtCreateRecord(...args: Parameters<typeof rawCrdtCreateRecord>) {
 	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateRecord(...args));
+}
+
+function crdtCreateColumnsBlock(...args: Parameters<typeof rawCrdtCreateColumnsBlock>) {
+	return transactWithOrigin(args[0], TEST_ORIGIN, () => rawCrdtCreateColumnsBlock(...args));
 }
 
 describe('services/synced-blocks: resolveSyncGroups (#242)', () => {
@@ -152,5 +163,73 @@ describe('services/synced-blocks: resolveSyncGroups (#242)', () => {
 
 		const groups = resolveSyncGroups(context, [source.id]);
 		expect(groups[source.id]?.instances).toEqual([]);
+	});
+
+	it('excludes an instance whose live record has since been retargeted, even though a stale row still names the old source (issue #310 review)', () => {
+		const context = resolveRequestContext(human);
+		const store = context.workspaceStore;
+
+		const shardA = store.resolve({ workspaceId: context.workspaceId, shardId: 'shard-retarget-a' });
+		const documentA = crdtCreateDocument(shardA.doc, { title: 'Retarget Doc A' });
+		const oldSource = crdtCreateRecord(
+			shardA.doc,
+			{ parentId: documentA.id, blockType: 'paragraph' },
+			human
+		);
+		const newSource = crdtCreateRecord(
+			shardA.doc,
+			{ parentId: documentA.id, blockType: 'paragraph' },
+			human
+		);
+		const instance = crdtCreateRecord(
+			shardA.doc,
+			{ parentId: documentA.id, blockType: 'synced_block' },
+			human
+		);
+		// Retargets the live record to newSource — the observer keeps the
+		// durable index correctly pointed at newSource for this instance.
+		transactWithOrigin(shardA.doc, TEST_ORIGIN, () =>
+			setRecordReferencedId(shardA.doc, instance.id, newSource.id, human)
+		);
+
+		// Simulates the not-yet-reconciled window the code comment describes:
+		// a row still claiming this (still-real, still-synced_block) instance
+		// mirrors the *old* source, even though its live referencedRecordId has
+		// already moved on — something no code path through the public
+		// upsert/rebuild API can produce today (it always derives the row's
+		// source from the record's own current state), but exactly the shape
+		// a genuine write-ordering race would leave behind.
+		getDb()
+			.update(syncedBlockInstance)
+			.set({ sourceRecordId: oldSource.id })
+			.where(
+				and(
+					eq(syncedBlockInstance.workspaceId, context.workspaceId),
+					eq(syncedBlockInstance.instanceRecordId, instance.id)
+				)
+			)
+			.run();
+
+		// oldSource's usage list must not show this instance — it stopped
+		// mirroring oldSource the moment it was retargeted, regardless of what
+		// the (now-stale) row still claims.
+		const groups = resolveSyncGroups(context, [oldSource.id, newSource.id]);
+		expect(groups[oldSource.id]?.instances).toEqual([]);
+	});
+
+	it('falls back to a block-type label when a source has no text of its own (a columns container)', () => {
+		const context = resolveRequestContext(human);
+		const documentA = crdtCreateDocument(context.workspace.doc, { title: 'Columns Doc' });
+		const columns = crdtCreateColumnsBlock(
+			context.workspace.doc,
+			{ parentId: documentA.id },
+			human
+		);
+
+		const groups = resolveSyncGroups(context, [columns.id]);
+		expect(groups[columns.id]?.source).toMatchObject({
+			sourceRecordId: columns.id,
+			context: 'Synced source'
+		});
 	});
 });

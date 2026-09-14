@@ -142,7 +142,11 @@ export async function resolveRecordDoc(
 ): Promise<{ doc: Y.Doc; awareness: Awareness }> {
 	let shardIdPromise = recordShardIds.get(recordId);
 	if (!shardIdPromise) {
-		shardIdPromise = fetch(`/api/records/${recordId}/shard`)
+		// Unlike a Collection id (always a server-generated nanoid),
+		// recordId here can be a synced_block's referencedRecordId — free text
+		// from the "Set target ID" dialog — so it's encoded before joining the
+		// request path, not assumed URL-safe.
+		shardIdPromise = fetch(`/api/records/${encodeURIComponent(recordId)}/shard`)
 			.then((res) => {
 				if (!res.ok) throw new Error(`Shard lookup for record ${recordId} failed: ${res.status}`);
 				return res.json();

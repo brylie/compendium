@@ -228,14 +228,32 @@
 		activeMarks = blockRefs[blockId]?.getFormatState() ?? {};
 	}
 
-	/** `presenceAwareness` defaults to this Document's own shard Awareness — overridden for a synced_block instance whose target resolved cross-shard (#242), so the hold is claimed against the target's real shard, not the viewing Document's. */
+	/**
+	 * `presenceAwareness` defaults to this Document's own shard Awareness —
+	 * overridden for a synced_block instance whose target resolved cross-shard
+	 * (#242), so the hold is claimed against the target's real shard, not the
+	 * viewing Document's. `claimBlockPresence` replaces its *own* Awareness
+	 * connection's local state wholesale, which is what makes moving focus
+	 * between two blocks on the *same* Awareness a plain overwrite — but
+	 * switching to a *different* Awareness (a cross-shard target, or back to
+	 * this Document's own) leaves the previous one still advertising the old
+	 * hold, since nothing else ever touches it. `lastPresenceAwareness`
+	 * (module state, set below) tracks whichever Awareness the last claim
+	 * actually landed on, so a change of Awareness releases it first.
+	 */
 	function handleFocusBlock(
 		blockId: string,
 		presenceBlockId = blockId,
 		presenceAwareness = awareness
 	): void {
 		activeBlockId = blockId;
-		if (presenceAwareness) claimBlockPresence(presenceAwareness, presenceBlockId);
+		if (presenceAwareness) {
+			if (lastPresenceAwareness && lastPresenceAwareness !== presenceAwareness) {
+				releaseBlockPresence(lastPresenceAwareness);
+			}
+			claimBlockPresence(presenceAwareness, presenceBlockId);
+			lastPresenceAwareness = presenceAwareness;
+		}
 		syncToolbarSelection();
 	}
 
@@ -324,7 +342,20 @@
 		void addBlockAfter(target.afterId, blockType, target.parentId);
 	}
 
-	let awareness: ReturnType<typeof getShardAwareness> | undefined = $state();
+	// $state.raw, not $state: this component only ever reassigns `awareness`
+	// wholesale (never mutates its own fields through Svelte reactivity), and
+	// handleFocusBlock/cleanup below compare it by identity against a plain
+	// (non-proxied) Awareness reference — $state's usual deep-reactivity
+	// proxy would make that comparison false even for "the same" instance
+	// (Svelte's own state_proxy_equality_mismatch warning).
+	let awareness: ReturnType<typeof getShardAwareness> | undefined = $state.raw();
+	// Whichever Awareness connection currently holds this tab's implicit
+	// presence claim — this Document's own `awareness` in the common case, or
+	// a cross-shard synced_block target's resolved Awareness (#242). Not
+	// reactive state: nothing renders from it, it just lets handleFocusBlock
+	// release the *previous* claim before moving to a different Awareness
+	// instance, and lets cleanup release whichever one is still held.
+	let lastPresenceAwareness: ReturnType<typeof getShardAwareness> | undefined;
 
 	// Resolves this Document's real shard (#120) and (re)connects whenever
 	// data.documentId changes — SvelteKit reuses this component instance
@@ -371,24 +402,6 @@
 			recordsMap.observeDeep(observer);
 			documentsMap.observeDeep(observer);
 			refresh();
-
-			// One batched cross-shard "used in N places" lookup for this
-			// Document view (#242) — every record id it holds (including nested
-			// columns children) plus every synced_block's own referencedRecordId,
-			// since that target may not be one of this Document's own ids at
-			// all. Not re-run on every subsequent edit (only on this Document's
-			// initial resolve), matching the durable index's own
-			// refreshed-on-shard-load cadence rather than the live, same-shard
-			// index src/lib/data/links.ts already maintains for the common case.
-			const flattened = flattenDocumentBlocks(doc, id);
-			const syncGroupCandidateIds = new SvelteSet<string>();
-			for (const { record } of flattened) {
-				syncGroupCandidateIds.add(record.id);
-				if (record.blockType === 'synced_block' && record.referencedRecordId) {
-					syncGroupCandidateIds.add(record.referencedRecordId);
-				}
-			}
-			syncGroupResolver.ensure([...syncGroupCandidateIds]);
 
 			// Reset immediately: this component instance is reused across
 			// client-side navigation to a different Document (see the comment
@@ -449,6 +462,14 @@
 				unsubscribePresence();
 				unsubscribeUndoRedo();
 				releaseBlockPresence(docAwareness);
+				// The last presence claim may have landed on a cross-shard
+				// target's Awareness instead of this Document's own (#242) —
+				// release that one too, or it keeps advertising this tab as an
+				// editor there until that separate connection is torn down.
+				if (lastPresenceAwareness && lastPresenceAwareness !== docAwareness) {
+					releaseBlockPresence(lastPresenceAwareness);
+				}
+				lastPresenceAwareness = undefined;
 				syncedBlockResolver.destroy();
 			};
 			// A rejection here (network failure, bad response) previously
@@ -1093,6 +1114,30 @@
 			if (getRecordYText(ydoc, block.referencedRecordId)) continue;
 			syncedBlockResolver.ensure(block.referencedRecordId);
 		}
+	});
+
+	// #242: the one batched cross-shard "used in N places" lookup for this
+	// Document view — every record id it holds (via outlineBlocks, which
+	// already walks nested columns children too) plus every synced_block's
+	// own referencedRecordId, since that target may not be one of this
+	// Document's own ids at all. Reacts to outlineBlocks/ydoc rather than
+	// firing once synchronously right after connecting: a cold connection's
+	// `doc` is still empty at that instant (real content arrives once the
+	// WebSocket's initial sync lands, which only *this* reactive recompute —
+	// not a one-off call — is guaranteed to see). createSyncGroupResolver's
+	// own one-shot latch (fires at most one real request, only once it sees a
+	// non-empty candidate list) is what keeps this from re-fetching on every
+	// later edit despite rerunning on every blocks change.
+	$effect(() => {
+		if (!ydoc) return;
+		const syncGroupCandidateIds = new SvelteSet<string>();
+		for (const { record } of outlineBlocks) {
+			syncGroupCandidateIds.add(record.id);
+			if (record.blockType === 'synced_block' && record.referencedRecordId) {
+				syncGroupCandidateIds.add(record.referencedRecordId);
+			}
+		}
+		syncGroupResolver.ensure([...syncGroupCandidateIds]);
 	});
 
 	function handleDetachSyncedBlock(blockId: string): void {
