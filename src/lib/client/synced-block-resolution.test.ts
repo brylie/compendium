@@ -102,6 +102,48 @@ describe('synced-block-resolution.svelte: createSyncedBlockResolver (#242)', () 
 		}
 	});
 
+	it('automatically retries a failed lookup after the cooldown, with no caller ever calling ensure() again', async () => {
+		vi.useFakeTimers();
+		try {
+			const { createSyncedBlockResolver } = await import('./synced-block-resolution.svelte');
+			resolveRecordDoc.mockRejectedValueOnce(new Error('network error'));
+			const doc = fakeDoc();
+			resolveRecordDoc.mockResolvedValue({ doc, awareness: {} });
+
+			const resolver = createSyncedBlockResolver();
+			resolver.ensure('rec-1');
+			await vi.advanceTimersByTimeAsync(0); // let the rejection settle
+			expect(resolveRecordDoc).toHaveBeenCalledTimes(1);
+			expect(resolver.get('rec-1')).toBeUndefined();
+
+			// Nothing calls ensure() again — only the cooldown elapsing.
+			await vi.advanceTimersByTimeAsync(5000);
+			expect(resolveRecordDoc).toHaveBeenCalledTimes(2);
+			expect(resolver.get('rec-1')).toBeDefined();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('destroy() cancels a scheduled retry so it never fires after teardown', async () => {
+		vi.useFakeTimers();
+		try {
+			const { createSyncedBlockResolver } = await import('./synced-block-resolution.svelte');
+			resolveRecordDoc.mockRejectedValue(new Error('network error'));
+
+			const resolver = createSyncedBlockResolver();
+			resolver.ensure('rec-1');
+			await vi.advanceTimersByTimeAsync(0);
+			expect(resolveRecordDoc).toHaveBeenCalledTimes(1);
+
+			resolver.destroy();
+			await vi.advanceTimersByTimeAsync(10_000);
+			expect(resolveRecordDoc).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it('merges a held-by-others actor from the resolved target’s own Awareness into holderFor', async () => {
 		const { createSyncedBlockResolver } = await import('./synced-block-resolution.svelte');
 		const doc = fakeDoc();

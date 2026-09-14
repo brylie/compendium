@@ -46,6 +46,13 @@ export function createSyncedBlockResolver() {
 	const pending = new SvelteSet<string>();
 	const failedAt = new SvelteMap<string, number>();
 	const unsubscribers = new SvelteMap<string, () => void>();
+	// A scheduled self-retry per failed target — without this, `failedAt`
+	// alone only *permits* a retry on the next `ensure(targetId)` call; if
+	// the viewing Document never changes again (no new block, no edit
+	// elsewhere), nothing would ever call `ensure` for this target again, and
+	// a transient failure would leave the synced_block unresolved
+	// indefinitely instead of recovering on its own.
+	const retryTimers = new SvelteMap<string, ReturnType<typeof setTimeout>>();
 	// Set by destroy() — guards a resolveRecordDoc call that was already in
 	// flight when the viewing Document changed (or this component unmounted)
 	// from installing an Awareness subscription after destroy() ran, which
@@ -91,6 +98,16 @@ export function createSyncedBlockResolver() {
 				pending.delete(targetId);
 				if (destroyed) return;
 				failedAt.set(targetId, Date.now());
+				const timer = setTimeout(() => {
+					retryTimers.delete(targetId);
+					// Cleared unconditionally, not left for ensure()'s own cooldown
+					// check to expire naturally — timer scheduling jitter could
+					// otherwise land a hair under RETRY_COOLDOWN_MS and cause this,
+					// the one guaranteed retry attempt, to silently no-op.
+					failedAt.delete(targetId);
+					ensure(targetId);
+				}, RETRY_COOLDOWN_MS);
+				retryTimers.set(targetId, timer);
 			});
 	}
 
@@ -102,11 +119,13 @@ export function createSyncedBlockResolver() {
 		return holders.get(targetId);
 	}
 
-	/** Tears down every cross-shard Awareness subscription this resolver opened — call when the viewing Document changes or this component unmounts. */
+	/** Tears down every cross-shard Awareness subscription this resolver opened and cancels any scheduled retry — call when the viewing Document changes or this component unmounts. */
 	function destroy(): void {
 		destroyed = true;
 		for (const unsubscribe of unsubscribers.values()) unsubscribe();
 		unsubscribers.clear();
+		for (const timer of retryTimers.values()) clearTimeout(timer);
+		retryTimers.clear();
 	}
 
 	return { ensure, get, holderFor, destroy };
