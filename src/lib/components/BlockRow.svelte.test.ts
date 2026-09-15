@@ -120,11 +120,19 @@ describe('BlockRow (#295)', () => {
 		expect(screen.getByRole('menuitem', { name: 'Move up' })).toBeDisabled();
 		unmount();
 
-		const props = baseProps(ydoc, first, { siblings, index: 0 });
-		render(BlockRow, props);
+		const firstProps = baseProps(ydoc, first, { siblings, index: 0 });
+		const { unmount: unmountFirst } = render(BlockRow, firstProps);
 		await user.click(screen.getByRole('button', { name: 'Block actions' }));
 		await user.click(screen.getByRole('menuitem', { name: 'Move down' }));
-		expect(props.onMoveBlockDown).toHaveBeenCalledWith(first.id);
+		expect(firstProps.onMoveBlockDown).toHaveBeenCalledWith(first.id);
+		unmountFirst();
+
+		const secondProps = baseProps(ydoc, second, { siblings, index: 1 });
+		render(BlockRow, secondProps);
+		await user.click(screen.getByRole('button', { name: 'Block actions' }));
+		expect(screen.getByRole('menuitem', { name: 'Move down' })).toBeDisabled();
+		await user.click(screen.getByRole('menuitem', { name: 'Move up' }));
+		expect(secondProps.onMoveBlockUp).toHaveBeenCalledWith(second.id);
 	});
 
 	it('highlights a selected block, a just-navigated block, and a dragging block with distinct classes', () => {
