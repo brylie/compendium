@@ -362,6 +362,38 @@ describe('BlockRow (#295)', () => {
 		expect(container.querySelector(`[data-block-editor-id="${block.id}"]`)).toBeInTheDocument();
 	});
 
+	it('falls back to the generic dispatch when customBlockTypes is omitted, even for a matching block type', () => {
+		const ydoc = new Y.Doc();
+		const doc = createDocument(ydoc, { title: 'D' });
+		const block = createRecord(ydoc, { parentId: doc.id, blockType: 'callout' }, actor);
+
+		const { container } = render(
+			BlockRow,
+			baseProps(ydoc, block, {
+				customContent: textSnippet('custom', 'Custom callout content')
+			})
+		);
+
+		expect(screen.queryByTestId('custom')).not.toBeInTheDocument();
+		expect(container.querySelector(`[data-block-editor-id="${block.id}"]`)).toBeInTheDocument();
+	});
+
+	it('falls back to the generic dispatch when customContent is omitted, even for a listed block type', () => {
+		const ydoc = new Y.Doc();
+		const doc = createDocument(ydoc, { title: 'D' });
+		const block = createRecord(ydoc, { parentId: doc.id, blockType: 'callout' }, actor);
+
+		const { container } = render(
+			BlockRow,
+			baseProps(ydoc, block, {
+				customBlockTypes: ['callout']
+			})
+		);
+
+		expect(screen.queryByTestId('custom')).not.toBeInTheDocument();
+		expect(container.querySelector(`[data-block-editor-id="${block.id}"]`)).toBeInTheDocument();
+	});
+
 	it('renders trailingContent and insideContent when supplied, and omits them when absent', () => {
 		const ydoc = new Y.Doc();
 		const doc = createDocument(ydoc, { title: 'D' });
