@@ -22,7 +22,6 @@
 		getRecord,
 		getRecordYText,
 		listRecordsForParent,
-		parentKindOf,
 		setBlockType,
 		setRecordCollapsed,
 		setRecordReferencedId,
@@ -33,27 +32,17 @@
 		type Backlink,
 		type InternalLinkTarget
 	} from '$lib/data/links';
-	import {
-		appendRichTextToYText,
-		applyRichTextToYText,
-		plainText,
-		splitRichTextAt,
-		yTextToRichText
-	} from '$lib/data/richtext';
-	import { actorKey, formatActor, formatTimestamp } from '$lib/data/format';
-	import {
-		claimBlockPresence,
-		releaseBlockPresence,
-		subscribeHeldByOthers
-	} from '$lib/client/presence';
+	import { applyRichTextToYText, plainText, yTextToRichText } from '$lib/data/richtext';
+	import { formatActor, formatTimestamp } from '$lib/data/format';
 	import { redo, subscribeUndoRedoState, undo } from '$lib/client/undo';
 	import { createLinkComposer } from '$lib/client/link-composer.svelte';
 	import { createBlockSelection } from '$lib/client/block-selection.svelte';
 	import { createBlockDrag } from '$lib/client/block-drag.svelte';
-	import { BLOCK_CAPABILITIES, blockCapabilitiesFor } from '$lib/data/block-capabilities';
+	import { createDocumentPresence } from '$lib/client/document-presence.svelte';
+	import { createBlockEditing, blockHoldsFreeformText } from '$lib/client/block-editing.svelte';
+	import { BLOCK_CAPABILITIES } from '$lib/data/block-capabilities';
 	import {
 		blockTypes,
-		type ActorId,
 		type BlockType,
 		type TextMarks,
 		type WorkspaceRecord
@@ -62,6 +51,8 @@
 	import BlockRow, { type BlockEditorHandle } from '$lib/components/BlockRow.svelte';
 	import SlashMenu from './SlashMenu.svelte';
 	import Toolbar from './Toolbar.svelte';
+	import DocumentBreadcrumbs from './DocumentBreadcrumbs.svelte';
+	import DocumentTitleInput from './DocumentTitleInput.svelte';
 	import LinkComposerDialog from './LinkComposerDialog.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import CollectionViewBlock from '$lib/components/CollectionViewBlock.svelte';
@@ -74,12 +65,6 @@
 	import BacklinksPanel from '$lib/components/BacklinksPanel.svelte';
 	import DocumentOutline from '$lib/components/DocumentOutline.svelte';
 	import type { PageProps } from './$types';
-
-	// Toggled onto holdAnnouncement below to guarantee a screen reader
-	// re-announces it even when two consecutive, distinct transitions
-	// happen to produce identical wording — a live region only re-fires on
-	// an actual text change, and this doesn't affect what's read aloud.
-	const ZERO_WIDTH_SPACE = String.fromCharCode(0x200b);
 
 	let { data }: PageProps = $props();
 
@@ -104,7 +89,7 @@
 	let blocksDocumentId: string | undefined = $state();
 	let slashMenuBlockId: string | null = $state(null);
 	let slashQuery = $state('');
-	let heldByOthers: Map<string, ActorId> = $state(new Map());
+	const documentPresence = createDocumentPresence();
 	// #242: a synced_block whose target isn't found in this Document's own
 	// ydoc may still live in a different Document's shard — these resolve
 	// that cross-shard content/holder and "used in N places" data
@@ -112,7 +97,6 @@
 	// shard-resolution $effect below).
 	let syncedBlockResolver = $state(createSyncedBlockResolver());
 	let syncGroupResolver = $state(createSyncGroupResolver());
-	let holdAnnouncement = $state('');
 	let parentDocTitle: string | null = $state(null);
 	let activeBlockId: string | null = $state(null);
 	let activeMarks: Partial<Record<keyof TextMarks, boolean>> = $state({});
@@ -134,6 +118,14 @@
 		announceMoved: (message) => (reorderAnnouncement = message),
 		focusDragHandle,
 		selection: blockSelection
+	});
+	const blockEditing = createBlockEditing({
+		getYdoc: () => ydoc,
+		getDefaultParentId: () => data.documentId,
+		getBlocks: () => blocks,
+		getBlockEditor: (blockId) => blockRefs[blockId],
+		createRecord: (doc, opts, actor) => createRecord(doc, opts, actor),
+		applyRichTextToYText: (ytext, rt) => applyRichTextToYText(ytext, rt)
 	});
 	let outlineOpen = $state(false);
 	// Briefly highlighted after a List View selection or a #block-<id> deep
@@ -233,14 +225,7 @@
 	 * `presenceAwareness` defaults to this Document's own shard Awareness —
 	 * overridden for a synced_block instance whose target resolved cross-shard
 	 * (#242), so the hold is claimed against the target's real shard, not the
-	 * viewing Document's. `claimBlockPresence` replaces its *own* Awareness
-	 * connection's local state wholesale, which is what makes moving focus
-	 * between two blocks on the *same* Awareness a plain overwrite — but
-	 * switching to a *different* Awareness (a cross-shard target, or back to
-	 * this Document's own) leaves the previous one still advertising the old
-	 * hold, since nothing else ever touches it. `lastPresenceAwareness`
-	 * (module state, set below) tracks whichever Awareness the last claim
-	 * actually landed on, so a change of Awareness releases it first.
+	 * viewing Document's.
 	 */
 	function handleFocusBlock(
 		blockId: string,
@@ -249,11 +234,7 @@
 	): void {
 		activeBlockId = blockId;
 		if (presenceAwareness) {
-			if (lastPresenceAwareness && lastPresenceAwareness !== presenceAwareness) {
-				releaseBlockPresence(lastPresenceAwareness);
-			}
-			claimBlockPresence(presenceAwareness, presenceBlockId);
-			lastPresenceAwareness = presenceAwareness;
+			documentPresence.claim(presenceAwareness, presenceBlockId);
 		}
 		syncToolbarSelection();
 	}
@@ -321,7 +302,10 @@
 			setBlockType(ydoc, activeBlockId, targetType, CURRENT_USER);
 			return;
 		}
-		const target = resolveToolbarInsertTarget(activeBlockId ?? blocks.at(-1)?.id, blockType);
+		const target = blockEditing.resolveToolbarInsertTarget(
+			activeBlockId ?? blocks.at(-1)?.id,
+			blockType
+		);
 		if (blockType === 'columns') {
 			// Like the slash menu's own columns entry — can't be produced by a
 			// plain blockType flip, needs real column children created
@@ -340,23 +324,16 @@
 			);
 			return;
 		}
-		void addBlockAfter(target.afterId, blockType, target.parentId);
+		void blockEditing.addBlockAfter(target.afterId, blockType, target.parentId);
 	}
 
 	// $state.raw, not $state: this component only ever reassigns `awareness`
 	// wholesale (never mutates its own fields through Svelte reactivity), and
-	// handleFocusBlock/cleanup below compare it by identity against a plain
+	// handleFocusBlock/cleanup compare it by identity against a plain
 	// (non-proxied) Awareness reference — $state's usual deep-reactivity
 	// proxy would make that comparison false even for "the same" instance
 	// (Svelte's own state_proxy_equality_mismatch warning).
 	let awareness: ReturnType<typeof getShardAwareness> | undefined = $state.raw();
-	// Whichever Awareness connection currently holds this tab's implicit
-	// presence claim — this Document's own `awareness` in the common case, or
-	// a cross-shard synced_block target's resolved Awareness (#242). Not
-	// reactive state: nothing renders from it, it just lets handleFocusBlock
-	// release the *previous* claim before moving to a different Awareness
-	// instance, and lets cleanup release whichever one is still held.
-	let lastPresenceAwareness: ReturnType<typeof getShardAwareness> | undefined;
 
 	// Resolves this Document's real shard (#120) and (re)connects whenever
 	// data.documentId changes — SvelteKit reuses this component instance
@@ -404,49 +381,7 @@
 			documentsMap.observeDeep(observer);
 			refresh();
 
-			// Reset immediately: this component instance is reused across
-			// client-side navigation to a different Document (see the comment
-			// above this $effect), so a stale announcement from the
-			// previously-viewed document must not linger until this
-			// document's first real transition.
-			holdAnnouncement = '';
-			let previousHeldByOthers = new Map<string, ActorId>();
-			// The subscription's first callback reports presence as of connect
-			// time, not a transition — without this, every actor who was
-			// already editing before this client joined gets misreported as
-			// having "just started".
-			let isFirstSnapshot = true;
-			let announceToggle = false;
-			const unsubscribePresence = subscribeHeldByOthers(docAwareness, (held) => {
-				const messages: string[] = [];
-				for (const [recordId, actor] of held) {
-					const previousActor = previousHeldByOthers.get(recordId);
-					if (!previousActor) {
-						if (!isFirstSnapshot) {
-							messages.push(`${formatActor(actor)} started editing a block`);
-						}
-					} else if (actorKey(previousActor) !== actorKey(actor)) {
-						// One actor released this block and another claimed it
-						// in the same update — both halves of that handoff need
-						// announcing, not just a silent no-op because the
-						// record id itself never left the map.
-						messages.push(`${formatActor(previousActor)} finished editing a block`);
-						messages.push(`${formatActor(actor)} started editing a block`);
-					}
-				}
-				for (const [recordId, actor] of previousHeldByOthers) {
-					if (!held.has(recordId)) {
-						messages.push(`${formatActor(actor)} finished editing a block`);
-					}
-				}
-				if (messages.length > 0) {
-					announceToggle = !announceToggle;
-					holdAnnouncement = (announceToggle ? ZERO_WIDTH_SPACE : '') + messages.join('; ');
-				}
-				previousHeldByOthers = held;
-				isFirstSnapshot = false;
-				heldByOthers = held;
-			});
+			const unsubscribePresence = documentPresence.connect(docAwareness);
 
 			// Subscribed immediately once the shard resolves, before any local
 			// edit can happen — this is what puts this Document's Y.UndoManager
@@ -462,15 +397,6 @@
 				documentsMap.unobserveDeep(observer);
 				unsubscribePresence();
 				unsubscribeUndoRedo();
-				releaseBlockPresence(docAwareness);
-				// The last presence claim may have landed on a cross-shard
-				// target's Awareness instead of this Document's own (#242) —
-				// release that one too, or it keeps advertising this tab as an
-				// editor there until that separate connection is torn down.
-				if (lastPresenceAwareness && lastPresenceAwareness !== docAwareness) {
-					releaseBlockPresence(lastPresenceAwareness);
-				}
-				lastPresenceAwareness = undefined;
 				syncedBlockResolver.destroy();
 			};
 			// A rejection here (network failure, bad response) previously
@@ -553,224 +479,6 @@
 		const match = /^#block-(.+)$/.exec(page.url.hash);
 		if (match) void navigateToBlock(match[1]);
 	});
-
-	function handleTitleInput(event: Event): void {
-		if (!ydoc) return;
-		title = (event.target as HTMLInputElement).value;
-		updateDocumentTitle(ydoc, data.documentId, title);
-	}
-
-	async function addBlockAfter(
-		afterId?: string,
-		blockType: BlockType = 'paragraph',
-		parentId: string = data.documentId
-	): Promise<void> {
-		if (!ydoc) return;
-		const currentDoc = ydoc;
-		const record = transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () =>
-			createRecord(currentDoc, { parentId, blockType, afterRecordId: afterId }, CURRENT_USER)
-		);
-		await tick();
-		blockRefs[record.id]?.focusEditor(true);
-	}
-
-	// Resolves where a *toolbar-triggered* insert (as opposed to Enter/the
-	// slash menu, which both already know their own container) actually
-	// belongs: normally right after the active block, in its own container.
-	// But a column only holds its own curated BLOCK_CAPABILITIES.column
-	// .childBlockTypes subset (issue #148/#229, see services/records.ts's own
-	// creation-time validation) — inserting an unsupported structural type
-	// (table, embed, ...) while a column's block is active instead escalates
-	// to right after the enclosing columns block itself, at the Document's
-	// top level, rather than writing a block type ColumnsBlock.svelte has no
-	// idea how to render into a column's own recordIds array.
-	function resolveToolbarInsertTarget(
-		afterId: string | undefined,
-		blockType: BlockType
-	): { parentId: string; afterId: string | undefined } {
-		const fallback = { parentId: data.documentId, afterId };
-		if (!ydoc || !afterId) return fallback;
-		const active = getRecord(ydoc, afterId);
-		if (!active) return fallback;
-		if (parentKindOf(ydoc, active.parentId) !== 'record') {
-			return { parentId: active.parentId, afterId };
-		}
-		const allowedInColumn = BLOCK_CAPABILITIES.column.childBlockTypes;
-		if (allowedInColumn?.includes(blockType)) return { parentId: active.parentId, afterId };
-		const column = getRecord(ydoc, active.parentId);
-		const columnsBlock = column ? getRecord(ydoc, column.parentId) : undefined;
-		return { parentId: data.documentId, afterId: columnsBlock?.id ?? afterId };
-	}
-
-	const LIST_BLOCK_TYPES: readonly BlockType[] = [
-		'bulleted_list_item',
-		'numbered_list_item',
-		'to_do'
-	];
-
-	// Every Document-kind record gets a `content` Y.Text at creation
-	// regardless of blockType (see createRecord), so its mere presence can't
-	// distinguish a block that holds free-form inline text from one that
-	// doesn't — these block types have a structurally different content
-	// shape (a table's rows, a divider's absence of content, a reference to
-	// another record) where "append/merge plain text into it" isn't a
-	// meaningful operation. Used to gate both Backspace-joins-the-previous-
-	// block and the toolbar's convert-current-block-in-place behavior.
-	// Driven by BLOCK_CAPABILITIES (issue #229) instead of its own list.
-	// blockCapabilitiesFor (not direct BLOCK_CAPABILITIES indexing) since
-	// `blockType` here can come straight off an existing record's own live
-	// Yjs field, which TypedYMap.get casts but never validates.
-	function blockHoldsFreeformText(blockType?: BlockType): boolean {
-		return !!blockType && blockCapabilitiesFor(blockType).holdsFreeformText;
-	}
-
-	function isBlockTextEmpty(blockId: string): boolean {
-		if (!ydoc) return true;
-		const ytext = getRecordYText(ydoc, blockId);
-		return !ytext || plainText(yTextToRichText(ytext)).length === 0;
-	}
-
-	// Splits `block`'s text at caretOffset: text before the caret stays in
-	// the existing block, text after it (with marks intact) moves into a new
-	// block of `nextBlockType`, created immediately after — the standard
-	// "Enter splits the line" behavior, not just "Enter appends an empty
-	// line" (which silently discarded the caret position). Which of the two
-	// blocks ends up focused depends on the caret position — see below.
-	async function splitBlockOnEnter(
-		block: WorkspaceRecord,
-		caretOffset: number,
-		nextBlockType: BlockType
-	): Promise<void> {
-		if (!ydoc) return;
-		const currentDoc = ydoc;
-		const ytext = getRecordYText(ydoc, block.id);
-		const richText = ytext ? yTextToRichText(ytext) : { runs: [] };
-		const offset = ytext ? Math.min(Math.max(0, caretOffset), ytext.length) : 0;
-		const { after } = splitRichTextAt(richText, offset);
-
-		if (ytext && offset < ytext.length) {
-			const doc = ytext.doc;
-			const trim = () => ytext.delete(offset, ytext.length - offset);
-			if (doc) doc.transact(trim, LOCAL_UI_ORIGIN);
-			else trim();
-		}
-
-		const record = transactWithOrigin(ydoc, LOCAL_UI_ORIGIN, () =>
-			createRecord(
-				currentDoc,
-				{ parentId: data.documentId, blockType: nextBlockType, afterRecordId: block.id },
-				CURRENT_USER
-			)
-		);
-		if (after.runs.length > 0) {
-			const newYtext = getRecordYText(ydoc, record.id);
-			if (newYtext) {
-				transactWithOrigin(currentDoc, LOCAL_UI_ORIGIN, () =>
-					applyRichTextToYText(newYtext, after)
-				);
-			}
-		}
-		await tick();
-		// Caret at the very start (offset 0): `block` becomes the empty line
-		// inserted above, and `record` (the new block right after it) is the
-		// one that ends up holding all the real content. Focus follows
-		// `block` — the empty one — not the content, so a second Enter there
-		// hits the ordinary "empty list item exits the list" rule instead of
-		// cascading into more empty items while the real content keeps
-		// hopping into fresh blocks (the original bug this branch fixes).
-		// Any other caret position focuses the new block as usual — it's the
-		// one that picked up whatever came after the caret.
-		if (offset === 0) {
-			blockRefs[block.id]?.focusEditor(true);
-		} else {
-			blockRefs[record.id]?.focusEditor(true);
-		}
-	}
-
-	// Enter on a list item continues the list (same block type) so a person
-	// can keep pressing Enter to add items without reaching for the toolbar
-	// each time. Enter on an *empty* list item exits the list instead —
-	// converting that item to a paragraph in place, rather than adding yet
-	// another empty item — mirroring the standard list-editing convention
-	// (Notion, Google Docs, etc.) of using an empty item as the "done" signal.
-	async function handleEnter(block: WorkspaceRecord, caretOffset: number): Promise<void> {
-		const blockType = block.blockType ?? 'paragraph';
-		const isList = LIST_BLOCK_TYPES.includes(blockType);
-		if (isList && isBlockTextEmpty(block.id)) {
-			if (!ydoc) return;
-			setBlockType(ydoc, block.id, 'paragraph', CURRENT_USER);
-			await tick();
-			blockRefs[block.id]?.focusEditor(true);
-			return;
-		}
-		await splitBlockOnEnter(block, caretOffset, isList ? blockType : 'paragraph');
-	}
-
-	// Backspace at the very start of a block: word-processor convention
-	// joins its text onto the end of the previous block, same as it would
-	// join two lines of a single document, rather than just discarding the
-	// current block. An empty current block still "joins" — there's simply
-	// nothing to append — matching the previous, simpler delete-and-move-
-	// focus behavior. If the previous block can't hold text (e.g. a
-	// divider), a non-empty current block is left alone rather than
-	// deleted with its content silently lost.
-	async function handleBackspace(block: WorkspaceRecord, index: number): Promise<void> {
-		if (!ydoc) return;
-		const currentDoc = ydoc;
-		const previous = blocks[index - 1];
-		if (!previous) return;
-		// A container with real children (a toggle, issue #227 — columns/
-		// column are never reachable here at all, since neither ever mounts a
-		// BlockEditor against its own row) must never be silently deleted by
-		// an empty-summary Backspace-join: deleteRecord recurses into
-		// children, so this would otherwise destroy real nested content the
-		// person never asked to remove, just because its summary line was
-		// blank. Leave it alone rather than guessing what should happen to
-		// its children instead.
-		if ((block.childRecordIds?.length ?? 0) > 0) return;
-
-		const currentYtext = getRecordYText(currentDoc, block.id);
-		const currentIsEmpty = !currentYtext || currentYtext.length === 0;
-		const previousHoldsText = blockHoldsFreeformText(previous.blockType);
-		if (!currentIsEmpty && !previousHoldsText) return;
-
-		const previousYtext = previousHoldsText ? getRecordYText(currentDoc, previous.id) : undefined;
-		const joinOffset = previousYtext?.length ?? 0;
-		transactWithOrigin(currentDoc, LOCAL_UI_ORIGIN, () => {
-			if (!currentIsEmpty && previousYtext && currentYtext) {
-				appendRichTextToYText(previousYtext, yTextToRichText(currentYtext));
-			}
-			deleteRecord(currentDoc, block.id);
-		});
-		await tick();
-		blockRefs[previous.id]?.focusEditor(joinOffset);
-	}
-
-	// Held blocks (another actor editing) render a placeholder instead of a
-	// BlockEditor (see the {#if holder} branch below), so blockRefs has no
-	// entry for them — skip past any such gap to the next block that does
-	// have a real editor, rather than stalling ArrowUp/ArrowDown at the edge.
-	function handleArrowUpAtStart(index: number, clientX: number | null): boolean {
-		for (let i = index - 1; i >= 0; i--) {
-			const editor = blockRefs[blocks[i].id];
-			if (editor) {
-				editor.focusEditorAtLine('last', clientX);
-				return true;
-			}
-		}
-		return false;
-	}
-
-	function handleArrowDownAtEnd(index: number, clientX: number | null): boolean {
-		for (let i = index + 1; i < blocks.length; i++) {
-			const editor = blockRefs[blocks[i].id];
-			if (editor) {
-				editor.focusEditorAtLine('first', clientX);
-				return true;
-			}
-		}
-		return false;
-	}
 
 	// Block reordering (#40, extracted to blockDrag for #241) — a visible move
 	// handle in each block's gutter, draggable with the pointer or operable
@@ -1164,6 +872,13 @@
 		syncGroupResolver.ensure([...syncGroupCandidateIds]);
 	});
 
+	function handleTitleChange(newTitle: string): void {
+		title = newTitle;
+		if (ydoc) {
+			updateDocumentTitle(ydoc, data.documentId, newTitle);
+		}
+	}
+
 	function handleDetachSyncedBlock(blockId: string): void {
 		if (!ydoc) return;
 		detachSyncedBlock(ydoc, blockId, CURRENT_USER);
@@ -1181,17 +896,6 @@
 				return 4;
 			default:
 				return 1;
-		}
-	}
-
-	async function handleTitleKeydown(e: KeyboardEvent): Promise<void> {
-		if (e.key === 'Enter' || e.key === 'ArrowDown') {
-			e.preventDefault();
-			if (blocks.length > 0) {
-				blockRefs[blocks[0].id]?.focusEditor(true);
-			} else {
-				await addBlockAfter();
-			}
 		}
 	}
 </script>
@@ -1214,44 +918,22 @@
 />
 
 <div class="mx-auto max-w-3xl px-6 pt-10">
-	<!-- Breadcrumb / Hierarchy nav -->
-	<nav class="mb-4 flex items-center gap-1.5 text-xs text-muted">
-		<a
-			href={resolve('/space/[spaceId]', { spaceId: page.params.spaceId! })}
-			class="flex items-center gap-1 transition-colors hover:text-accent"
-		>
-			<span>Workspace</span>
-		</a>
-		{#if parentDocTitle}
-			<span>/</span>
-			<span class="truncate">{parentDocTitle}</span>
-		{/if}
-		<span>/</span>
-		<span class="truncate font-medium text-fg">{title || 'Untitled'}</span>
-		<button
-			type="button"
-			onclick={() => (outlineOpen = !outlineOpen)}
-			class="ml-auto flex flex-shrink-0 items-center gap-1 rounded px-1.5 py-1 text-muted transition-colors hover:bg-surface hover:text-fg"
-			class:text-accent={outlineOpen}
-			aria-pressed={outlineOpen}
-			aria-label="{outlineOpen ? 'Close' : 'Open'} document List View"
-			title="List View"
-		>
-			<Icon name="list-view" size={15} />
-		</button>
-	</nav>
+	<DocumentBreadcrumbs spaceId={page.params.spaceId!} {parentDocTitle} {title} bind:outlineOpen />
 
-	<!-- Document Title -->
-	<input
-		class="w-full border-none bg-transparent font-display text-3xl font-semibold tracking-tight text-fg outline-none placeholder:text-muted/50 focus:ring-0 md:text-4xl"
-		value={title}
-		oninput={handleTitleInput}
-		onkeydown={handleTitleKeydown}
-		placeholder="Untitled document"
+	<DocumentTitleInput
+		bind:title
+		onTitleChange={handleTitleChange}
+		onNavigateNext={async () => {
+			if (blocks.length > 0) {
+				blockRefs[blocks[0].id]?.focusEditor(true);
+			} else {
+				await blockEditing.addBlockAfter();
+			}
+		}}
 	/>
 
 	<!-- Screen-reader announcements for collaborative hold state (issue #18) -->
-	<div class="sr-only" role="status" aria-live="polite">{holdAnnouncement}</div>
+	<div class="sr-only" role="status" aria-live="polite">{documentPresence.holdAnnouncement}</div>
 
 	<!--
 		Backlinks panel (issue #83): re-added after #120 removed the version
@@ -1292,7 +974,7 @@
 			if (blocks.length > 0) {
 				blockRefs[blocks[blocks.length - 1].id]?.focusEditor(false);
 			} else {
-				void addBlockAfter();
+				void blockEditing.addBlockAfter();
 			}
 		}
 	}}
@@ -1300,7 +982,7 @@
 	{#if blocks.length === 0}
 		<button
 			type="button"
-			onclick={() => void addBlockAfter()}
+			onclick={() => void blockEditing.addBlockAfter()}
 			class="mx-auto w-full max-w-3xl cursor-text px-6 py-2 text-left text-base font-normal text-muted/60 select-none hover:text-muted"
 		>
 			Type '/' for commands, or start typing...
@@ -1323,7 +1005,8 @@
 			remoteTarget
 		)}
 		{@const holder =
-			heldByOthers.get(provenanceRecordId) ?? syncedBlockResolver.holderFor(provenanceRecordId)}
+			documentPresence.heldByOthers.get(provenanceRecordId) ??
+			syncedBlockResolver.holderFor(provenanceRecordId)}
 		{@const provenance = localTargetRecord ?? remoteTargetRecord ?? block}
 		{@const bt = block.blockType ?? 'paragraph'}
 		{@const syncLocations = syncGroupLocations(provenanceRecordId, block.id)}
@@ -1340,15 +1023,15 @@
 								{linkTargets}
 								placeholder="Callout note…"
 								onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
-								onEnter={(caretOffset) => handleEnter(block, caretOffset)}
-								onBackspaceAtStart={() => handleBackspace(block, index)}
+								onEnter={(caretOffset) => blockEditing.handleEnter(block, caretOffset)}
+								onBackspaceAtStart={() => blockEditing.handleBackspace(block, index)}
 								onFocusBlock={() => handleFocusBlock(block.id)}
 								onSlashKey={() => openSlashMenu(block.id)}
 								onLinkShortcut={() => linkComposer.open(block.id)}
 								isFirstBlock={index === 0}
 								isLastBlock={index === blocks.length - 1}
-								onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
-								onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
+								onArrowUpAtStart={(x) => blockEditing.handleArrowUpAtStart(index, x)}
+								onArrowDownAtEnd={(x) => blockEditing.handleArrowDownAtEnd(index, x)}
 							/>
 						{/if}
 					</CalloutBlock>
@@ -1364,15 +1047,15 @@
 							class="font-mono text-[13.5px]"
 							placeholder="Code snippet…"
 							onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
-							onEnter={(caretOffset) => handleEnter(block, caretOffset)}
-							onBackspaceAtStart={() => handleBackspace(block, index)}
+							onEnter={(caretOffset) => blockEditing.handleEnter(block, caretOffset)}
+							onBackspaceAtStart={() => blockEditing.handleBackspace(block, index)}
 							onFocusBlock={() => handleFocusBlock(block.id)}
 							onSlashKey={() => openSlashMenu(block.id)}
 							onLinkShortcut={() => linkComposer.open(block.id)}
 							isFirstBlock={index === 0}
 							isLastBlock={index === blocks.length - 1}
-							onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
-							onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
+							onArrowUpAtStart={(x) => blockEditing.handleArrowUpAtStart(index, x)}
+							onArrowDownAtEnd={(x) => blockEditing.handleArrowDownAtEnd(index, x)}
 						/>
 					{/if}
 				</div>
@@ -1448,8 +1131,8 @@
 							placeholder="Synced content…"
 							onInputText={() =>
 								handleBlockInput(block.id, provenanceRecordId, remoteTarget?.doc ?? ydoc)}
-							onEnter={() => addBlockAfter(block.id)}
-							onBackspaceAtStart={() => handleBackspace(block, index)}
+							onEnter={() => blockEditing.addBlockAfter(block.id)}
+							onBackspaceAtStart={() => blockEditing.handleBackspace(block, index)}
 							onFocusBlock={() =>
 								handleFocusBlock(
 									block.id,
@@ -1460,8 +1143,8 @@
 							onLinkShortcut={() => linkComposer.open(block.id)}
 							isFirstBlock={index === 0}
 							isLastBlock={index === blocks.length - 1}
-							onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
-							onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
+							onArrowUpAtStart={(x) => blockEditing.handleArrowUpAtStart(index, x)}
+							onArrowDownAtEnd={(x) => blockEditing.handleArrowDownAtEnd(index, x)}
 						/>
 					{:else}
 						<p class="text-xs text-muted italic">
@@ -1647,7 +1330,7 @@
 					selectedBlockIds={blockSelection.ids}
 					{justNavigatedBlockId}
 					convertOptions={TOGGLE_CONVERTIBLE_BLOCK_TYPES}
-					{heldByOthers}
+					heldByOthers={documentPresence.heldByOthers}
 					onFocusBlock={(blockId) => handleFocusBlock(blockId)}
 					onInputText={(blockId) => handleBlockInput(blockId)}
 					onDragHandlePointerDown={(e, blockId, parentId, blockIndex) =>
@@ -1701,12 +1384,12 @@
 			onMoveBlockDown={(blockId) => blockDrag.moveBlock(blockId, 'down')}
 			onFocusBlock={() => handleFocusBlock(block.id)}
 			onInputText={() => handleBlockInput(block.id, provenanceRecordId)}
-			onEnter={(caretOffset) => handleEnter(block, caretOffset)}
-			onBackspaceAtStart={() => handleBackspace(block, index)}
+			onEnter={(caretOffset) => blockEditing.handleEnter(block, caretOffset)}
+			onBackspaceAtStart={() => blockEditing.handleBackspace(block, index)}
 			onSlashKey={() => openSlashMenu(block.id)}
 			onLinkShortcut={() => linkComposer.open(block.id)}
-			onArrowUpAtStart={(x) => handleArrowUpAtStart(index, x)}
-			onArrowDownAtEnd={(x) => handleArrowDownAtEnd(index, x)}
+			onArrowUpAtStart={(x) => blockEditing.handleArrowUpAtStart(index, x)}
+			onArrowDownAtEnd={(x) => blockEditing.handleArrowDownAtEnd(index, x)}
 			onToggleCollapse={toggleCollapseState}
 		/>
 	{/each}
@@ -1725,7 +1408,7 @@
 	<div class="mt-6 flex items-center gap-2">
 		<button
 			type="button"
-			onclick={() => addBlockAfter(blocks.at(-1)?.id)}
+			onclick={() => blockEditing.addBlockAfter(blocks.at(-1)?.id)}
 			class="inline-flex items-center gap-1.5 rounded-md border border-dashed border-border px-3 py-1.5 text-xs text-muted transition-colors hover:border-accent hover:text-accent"
 		>
 			<Icon name="plus" size={13} />
