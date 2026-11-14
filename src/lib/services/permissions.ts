@@ -2,6 +2,8 @@ import type { ActorId, ParentKind } from '$lib/data/types';
 import type { RequestContext, Caller } from '$lib/server/request-context';
 import type { WorkspaceContext } from '$lib/server/workspace-store';
 import { getRecord, resolveOwningParentId } from '$lib/data/record-ops';
+import { getDocument } from '$lib/data/document-ops';
+import { getCollection } from '$lib/data/collection-ops';
 import { tokenAllowsParent, type AccessToken } from '$lib/server/token-store';
 import { logAudit } from '$lib/server/audit';
 import { resolveShardForParent, resolveShardForRecord } from '$lib/server/catalog';
@@ -70,7 +72,15 @@ export function requireAccessibleParent(
 		// allowlist checks alone can't see a Space-wide grant, so a token
 		// scoped only to a Space (never given this specific id directly)
 		// would otherwise always fail here.
-		const spaceId = resolveShardForParent(context.workspaceId, parentId)?.spaceId;
+		// Legacy content belongs to the default Space only if its owning
+		// Document/Collection actually exists there. A dangling container id
+		// from a concurrent deletion must never acquire a default-Space grant.
+		const spaceId =
+			resolveShardForParent(context.workspaceId, parentId)?.spaceId ??
+			(getDocument(context.workspace.doc, parentId) ||
+			getCollection(context.workspace.doc, parentId)
+				? context.workspace.defaultSpaceId
+				: undefined);
 		if (!tokenAllowsParent(caller, parentId, spaceId)) {
 			logDenial(caller, action, parentId);
 			throw new PermissionDeniedError(`Not permitted to access parent ${parentId}`);

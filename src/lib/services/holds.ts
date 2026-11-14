@@ -1,15 +1,12 @@
 import type { RequestContext } from '$lib/server/request-context';
 import { clientIdForToken, releaseAgentHold, requestAgentHold } from '$lib/server/holds';
-import { getRecord } from '$lib/data/record-ops';
 import { logAudit } from '$lib/server/audit';
-import { tokenAllowsParent } from '$lib/server/token-store';
-import { resolveShardForParent } from '$lib/server/catalog';
 import {
 	actorForCaller,
 	groupRecordIdsByShard,
 	isAccessToken,
 	requireAccessibleRecord,
-	resolveOwningParentId
+	PermissionDeniedError
 } from './permissions';
 
 /**
@@ -20,8 +17,7 @@ import {
  * A single call can legitimately span more than one shard (a cross-document agent batch is
  * a stated acceptance criterion — see docs/specifications/collaboration.md), so recordIds
  * are grouped by their resolved shard and requestAgentHold runs once per shard's own
- * Awareness, merging results. In production every group resolves to the same default shard
- * today (#120 hasn't cut over shard assignment yet), so this is a no-op split until it does.
+ * Awareness, merging results across Document and Collection shards.
  */
 export function holdRecords(
 	context: RequestContext,
@@ -37,20 +33,26 @@ export function holdRecords(
 		const { workspaceId, workspaceStore } = context;
 		const granted: string[] = [];
 		const denied: string[] = [];
+		const permissions = new Map<string, boolean>();
+		const canHold = (id: string): boolean => {
+			const cached = permissions.get(id);
+			if (cached !== undefined) return cached;
+			try {
+				requireAccessibleRecord(context, id, 'hold_records');
+				permissions.set(id, true);
+				return true;
+			} catch (error) {
+				if (!(error instanceof PermissionDeniedError)) throw error;
+				permissions.set(id, false);
+				return false;
+			}
+		};
+		// Contended records skip the hold engine's permission callback. Check them
+		// here too, so every unauthorized request is audited exactly once per id.
+		for (const id of recordIds) canHold(id);
 		for (const [shardId, ids] of groupRecordIdsByShard(context, recordIds)) {
-			const { doc, awareness } = workspaceStore.resolve({ workspaceId, shardId });
-			const groupResult = requestAgentHold(awareness, clientId, actor, ids, (id) => {
-				const record = getRecord(doc, id);
-				if (!record) return false;
-				// A record nested inside a container block (columns/column,
-				// issue #148) isn't itself catalog-navigable — check the
-				// token's grant against its owning Document instead (mirrors
-				// requireAccessibleRecord's own resolution below, for the
-				// human-caller branch).
-				const owningParentId = resolveOwningParentId(doc, record.parentId);
-				const spaceId = resolveShardForParent(workspaceId, owningParentId)?.spaceId;
-				return tokenAllowsParent(caller, owningParentId, spaceId);
-			});
+			const { awareness } = workspaceStore.resolve({ workspaceId, shardId });
+			const groupResult = requestAgentHold(awareness, clientId, actor, ids, canHold);
 			granted.push(...groupResult.granted);
 			denied.push(...groupResult.denied);
 		}
@@ -63,7 +65,8 @@ export function holdRecords(
 			try {
 				requireAccessibleRecord(context, id);
 				granted.push(id);
-			} catch {
+			} catch (error) {
+				if (!(error instanceof PermissionDeniedError)) throw error;
 				denied.push(id);
 			}
 		}

@@ -91,16 +91,17 @@ split by concern into focused files under `tests/e2e/`, each with its own
 `describe` and each still using the shared `createTestHarness()` fixture in
 its own `beforeEach`/`afterEach`:
 
-| File                             | Covers                                                                                                                               |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `sync-parity.test.ts`            | Bidirectional MCP ↔ Yjs write/read convergence (§2's first two required tests)                                                       |
-| `shard-routing.test.ts`          | Document/Collection/Space → shard resolution, cross-shard and cross-Space isolation                                                  |
-| `permissions-grants.test.ts`     | Token scoping and permission-denied enforcement across independent calls                                                             |
-| `holds-attribution.test.ts`      | `hold_records`/`release_records` semantics and audit-log attribution                                                                 |
-| `service-layer-manifest.test.ts` | The `serviceModules`/`serviceSurfaces` manifest wiring check (§2's manifest test, non-UI half)                                       |
-| `collection-views.test.ts`       | `collection_view` block config: `viewConfigPatch`, `groupBy`/`swimlaneBy`                                                            |
-| `markdown-fidelity.test.ts`      | `page_link` authoring/retargeting and nested-block markdown round-tripping                                                           |
-| `ui-adapter-bindings.test.ts`    | The `uiAdapterBindings` half of the manifest check — real route/action or Yjs-mutation wiring (§2's last required test, closes #213) |
+| File                             | Covers                                                                                                                                  |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `sync-parity.test.ts`            | Bidirectional MCP ↔ Yjs write/read convergence (§2's first two required tests)                                                          |
+| `shard-routing.test.ts`          | Document/Collection/Space → shard resolution, cross-shard and cross-Space isolation                                                     |
+| `permissions-grants.test.ts`     | Token scoping and permission-denied enforcement across independent calls                                                                |
+| `permission-hold-safety.test.ts` | Nested columns/toggle permission and hold scoping, denied-hold auditing, and default-Space grants for uncataloged Documents/Collections |
+| `holds-attribution.test.ts`      | `hold_records`/`release_records` semantics and audit-log attribution                                                                    |
+| `service-layer-manifest.test.ts` | The `serviceModules`/`serviceSurfaces` manifest wiring check (§2's manifest test, non-UI half)                                          |
+| `collection-views.test.ts`       | `collection_view` block config: `viewConfigPatch`, `groupBy`/`swimlaneBy`                                                               |
+| `markdown-fidelity.test.ts`      | `page_link` authoring/retargeting and nested-block markdown round-tripping                                                              |
+| `ui-adapter-bindings.test.ts`    | The `uiAdapterBindings` half of the manifest check — real route/action or Yjs-mutation wiring (§2's last required test, closes #213)    |
 
 Shared test-only helpers (`parseMcpText`, `getResultText`, the `createDocument`
 origin-tagged wrapper, `human`, `assertRouteFileWiresCall`) live in
