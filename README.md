@@ -156,7 +156,7 @@ list_documents    get_document      create_document
 move_document     delete_document   list_collections
 query_collection  search_workspace  hold_records
 release_records   create_record     write_record
-delete_record
+delete_record     list_backlinks
 ```
 
 See the [MCP tool contract](docs/specifications/mcp-tools.md) for inputs,

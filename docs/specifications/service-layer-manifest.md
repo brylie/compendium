@@ -59,6 +59,8 @@ The manifest guarantees every method has a recorded _intent_. It cannot, by itse
 
 Static typing alone gets you "nothing was forgotten from the list." It cannot get you "the thing on the list is wired correctly" — that residual has to be a test, and the manifest is what makes that test parametrized and complete instead of another hand-maintained list. The implemented manifest also owns typed `mcpAdapterBindings` and `uiAdapterBindings`: tests prove both maps match the declared surfaces exactly (no missing adapter and no undeclared adapter).
 
+`documents.listBacklinks` is declared for both surfaces: `mcpAdapterBindings` maps it to `list_backlinks`, and `uiAdapterBindings` retains the Document route's server load. The MCP adapter validates `{ documentId }` and calls the same permission-filtered, audited service; it does not duplicate the backlink query or add another audit call. `tests/e2e/backlinks-fidelity.test.ts` exercises this binding over real MCP and WebSocket transports alongside the manifest wiring checks.
+
 ## 4. What this fixes, concretely
 
 - **Silent omission.** Today, shipping a new service method without an MCP tool or UI route compiles fine and looks done. With the manifest, it's a compile error until someone makes an explicit `{ mcp: false, ui: false }` (or `true`) decision — the gap becomes visible instead of implicit.

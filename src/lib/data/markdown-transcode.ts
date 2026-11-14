@@ -58,24 +58,46 @@ export function richTextToMarkdown(doc: Y.Doc, richText: RichText): string {
 }
 
 function runToMarkdown(doc: Y.Doc, text: string, marks: TextMarks): string {
-	if (marks.mention) return `@${text}`;
-	if (marks.link?.startsWith(RECORD_LINK_SCHEME)) {
+	const isWikiLink = marks.link?.startsWith(RECORD_LINK_SCHEME) ?? false;
+	let out: string;
+	if (marks.mention) {
+		out = `@${text}`;
+	} else if (marks.link?.startsWith(RECORD_LINK_SCHEME)) {
 		const id = marks.link.slice(RECORD_LINK_SCHEME.length);
 		// A wiki-link target's own shard (#120: Documents and Collections both
 		// have one) may or may not be `doc` itself. Try `doc` first — cheap,
 		// and correct whenever the target really is local to it — then fall
 		// back to resolving its real shard.
 		const target = resolveInternalLinkTarget(doc, id) ?? resolveWorkspaceLinkTarget(id);
-		return `[[${target?.title ?? DELETED_LINK_LABEL}]]`;
+		out = `[[${target?.title ?? DELETED_LINK_LABEL}]]`;
+	} else {
+		out = marks.code ? text : escapeMarkdown(text);
 	}
 
-	let out = escapeMarkdown(text);
-	if (marks.code) out = `\`${out}\``;
+	if (marks.code) {
+		out = literalCodeSpan(out);
+	}
 	if (marks.bold) out = `**${out}**`;
 	if (marks.italic) out = `_${out}_`;
 	if (marks.strikethrough) out = `~~${out}~~`;
-	if (marks.link) out = `[${out}](${marks.link})`;
+	if (marks.link && !marks.mention && !isWikiLink) out = `[${out}](${marks.link})`;
 	return out;
+}
+
+// Code spans are literal: preserve the token text rather than escaping its
+// Markdown characters, and choose a fence longer than any embedded backticks.
+function literalCodeSpan(text: string): string {
+	const fenceLength = (text.match(/`+/g) ?? []).reduce(
+		(length, ticks) => Math.max(length, ticks.length + 1),
+		1
+	);
+	const fence = '`'.repeat(fenceLength);
+	const needsPadding =
+		text.startsWith('`') ||
+		text.endsWith('`') ||
+		(text.startsWith(' ') && text.endsWith(' ') && /[^ ]/.test(text));
+	const padding = needsPadding ? ' ' : '';
+	return `${fence}${padding}${text}${padding}${fence}`;
 }
 
 function escapeMarkdown(text: string): string {

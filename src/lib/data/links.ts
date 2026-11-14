@@ -109,10 +109,18 @@ function targetIdsForRecord(record: ReturnType<typeof getRecord>): string[] {
 	if (record.blockType === 'synced_block' && record.referencedRecordId) {
 		return [record.referencedRecordId];
 	}
-	return (record.content?.runs ?? [])
-		.map((run) => run.marks.link)
-		.filter((href): href is string => href?.startsWith(RECORD_LINK_SCHEME) ?? false)
-		.map((href) => href.slice(RECORD_LINK_SCHEME.length));
+	const targets: string[] = [];
+	let previousHref: string | undefined;
+	for (const run of record.content?.runs ?? []) {
+		const href = run.marks.link;
+		if (href?.startsWith(RECORD_LINK_SCHEME) && href !== previousHref) {
+			targets.push(href.slice(RECORD_LINK_SCHEME.length));
+		}
+		// Walk every run: filtering out plain/external text first would merge
+		// genuinely separate occurrences on either side of that separator.
+		previousHref = href;
+	}
+	return targets;
 }
 
 /** Remove every prior backlink contribution made by one source record. */

@@ -632,7 +632,7 @@ export function getDocument(
  * `internal-links.md` §5's requirement that a viewer only ever sees backlinks
  * from Documents already within their own access scope. A no-op filter for
  * Phase 0's unscoped human caller (`isAccessToken` is false), load-bearing
- * once this is ever reachable by a scoped MCP token.
+ * for the scoped MCP list_backlinks tool that calls this same service.
  */
 export function listBacklinks(context: RequestContext, documentId: string): Backlink[] {
 	requireAccessibleParent(context, documentId, 'list_backlinks');

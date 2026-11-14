@@ -200,6 +200,20 @@ export function createMcpServer(): McpServer {
 		}
 	);
 
+	registerFromManifest(
+		server,
+		'documents.listBacklinks',
+		{ documentId: z.string() },
+		async ({ documentId }, extra) => {
+			try {
+				const context = requireContext(extra);
+				return textResult(serviceModules.documents.listBacklinks(context, documentId));
+			} catch (err) {
+				return handleToolError(err);
+			}
+		}
+	);
+
 	// 3. documents.createDocument
 	registerFromManifest(
 		server,

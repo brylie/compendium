@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { createDocument, deleteDocument, updateDocumentTitle } from './document-ops';
 import { createCollection } from './collection-ops';
-import { createRecord, deleteRecord, updateRecordContent } from './record-ops';
+import { createRecord, deleteRecord, getRecordYText, updateRecordContent } from './record-ops';
 import {
 	RECORD_LINK_SCHEME,
 	isLinkBroken,
@@ -343,5 +343,69 @@ describe('listSyncedBlockInstances', () => {
 
 		deleteRecord(doc, instance.id);
 		expect(listSyncedBlockInstances(doc, source.id)).toEqual([]);
+	});
+});
+
+describe('logical inline link occurrences (#82)', () => {
+	it('keeps scans and an initialized index stable as formatting splits and rejoins a link', () => {
+		const doc = new Y.Doc();
+		const target = createDocument(doc, { title: 'Target' });
+		const source = createDocument(doc, { title: 'Source' });
+		const record = createRecord(doc, { parentId: source.id, blockType: 'paragraph' }, CURRENT_USER);
+		updateRecordContent(
+			doc,
+			record.id,
+			{ runs: [{ text: 'Target', marks: { link: `record:${target.id}` } }] },
+			CURRENT_USER
+		);
+		expect(listIncomingLinks(doc, target.id)).toHaveLength(1);
+		const text = getRecordYText(doc, record.id)!;
+		text.format(1, 3, { bold: true, italic: true });
+		expect(listOutgoingLinks(doc, source.id)).toHaveLength(1);
+		expect(listIncomingLinks(doc, target.id)).toHaveLength(1);
+		text.format(1, 3, { bold: null, italic: null });
+		expect(listIncomingLinks(doc, target.id)).toHaveLength(1);
+		text.format(0, text.length, { link: null });
+		expect(listOutgoingLinks(doc, source.id)).toEqual([]);
+		expect(listIncomingLinks(doc, target.id)).toEqual([]);
+		doc.destroy();
+	});
+
+	it('preserves occurrences separated by plain text, external links, other targets, or source blocks', () => {
+		const doc = new Y.Doc();
+		const target = createDocument(doc, { title: 'Target' });
+		const other = createDocument(doc, { title: 'Other' });
+		const source = createDocument(doc, { title: 'Source' });
+		const record = createRecord(doc, { parentId: source.id, blockType: 'paragraph' }, CURRENT_USER);
+		const link = { link: `record:${target.id}` };
+		updateRecordContent(
+			doc,
+			record.id,
+			{
+				runs: [
+					{ text: 'Tar', marks: link },
+					{ text: 'get', marks: { ...link, bold: true } },
+					{ text: ' / ', marks: {} },
+					{ text: 'Target', marks: link },
+					{ text: 'external', marks: { link: 'https://example.com' } },
+					{ text: 'Target', marks: link },
+					{ text: 'Other', marks: { link: `record:${other.id}` } },
+					{ text: 'Target', marks: link }
+				]
+			},
+			CURRENT_USER
+		);
+		const second = createRecord(doc, { parentId: source.id, blockType: 'paragraph' }, CURRENT_USER);
+		updateRecordContent(doc, second.id, { runs: [{ text: 'Target', marks: link }] }, CURRENT_USER);
+		expect(
+			listOutgoingLinks(doc, source.id).filter((entry) => entry.targetId === target.id)
+		).toHaveLength(5);
+		expect(listIncomingLinks(doc, target.id)).toHaveLength(5);
+		getRecordYText(doc, record.id)!.format(0, 6, { link: `record:${other.id}` });
+		expect(listIncomingLinks(doc, target.id)).toHaveLength(4);
+		expect(listIncomingLinks(doc, other.id)).toHaveLength(2);
+		deleteRecord(doc, second.id);
+		expect(listIncomingLinks(doc, target.id)).toHaveLength(3);
+		doc.destroy();
 	});
 });
