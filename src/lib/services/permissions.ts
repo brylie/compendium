@@ -70,7 +70,9 @@ export function requireAccessibleParent(
 		// allowlist checks alone can't see a Space-wide grant, so a token
 		// scoped only to a Space (never given this specific id directly)
 		// would otherwise always fail here.
-		const spaceId = resolveShardForParent(context.workspaceId, parentId)?.spaceId;
+		const spaceId =
+			resolveShardForParent(context.workspaceId, parentId)?.spaceId ??
+			context.workspace.defaultSpaceId;
 		if (!tokenAllowsParent(caller, parentId, spaceId)) {
 			logDenial(caller, action, parentId);
 			throw new PermissionDeniedError(`Not permitted to access parent ${parentId}`);
