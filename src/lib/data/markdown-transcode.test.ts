@@ -243,3 +243,67 @@ describe('formatted workspace tokens (#210)', () => {
 		doc.destroy();
 	});
 });
+
+describe('adjacent compatible code spans', () => {
+	it('coalesces plain code and code-marked mentions without adding backticks or whitespace', () => {
+		const doc = new Y.Doc();
+		const richText = {
+			runs: [
+				{ text: 'a', marks: { code: true } },
+				{ text: 'local', marks: { code: true, mention: 'local' } }
+			]
+		};
+		const before = structuredClone(richText);
+		const markdown = richTextToMarkdown(doc, richText);
+		expect(markdownToRichText(doc, markdown).runs).toEqual([
+			{ text: 'a@local', marks: { code: true } }
+		]);
+		expect(richText).toEqual(before);
+		doc.destroy();
+	});
+
+	it('joins literal code and code-marked wiki links with matching decoration', () => {
+		const doc = new Y.Doc();
+		const target = createDocument(doc, { title: 'Target `code`' });
+		const markdown = richTextToMarkdown(doc, {
+			runs: [
+				{ text: 'see ', marks: { code: true, bold: true } },
+				{ text: target.title, marks: { code: true, bold: true, link: `record:${target.id}` } }
+			]
+		});
+		expect(markdownToRichText(doc, markdown).runs).toEqual([
+			{ text: 'see [[Target `code`]]', marks: { code: true, bold: true } }
+		]);
+		doc.destroy();
+	});
+
+	it('preserves different outer formatting and external-link destinations', () => {
+		const doc = new Y.Doc();
+		const richText = {
+			runs: [
+				{ text: 'plain', marks: { code: true } },
+				{ text: 'bold', marks: { code: true, bold: true } },
+				{ text: 'italic', marks: { code: true, italic: true } },
+				{ text: 'strike', marks: { code: true, strikethrough: true } },
+				{ text: 'first', marks: { code: true, link: 'https://one.example' } },
+				{ text: 'second', marks: { code: true, link: 'https://two.example' } }
+			]
+		};
+		expect(markdownToRichText(doc, richTextToMarkdown(doc, richText))).toEqual(richText);
+		doc.destroy();
+	});
+});
+
+it('keeps adjacent compatible bold text, mentions, and wiki links inside one decoration boundary', () => {
+	const doc = new Y.Doc();
+	const target = createDocument(doc, { title: 'Target' });
+	const richText = {
+		runs: [
+			{ text: 'a', marks: { bold: true } },
+			{ text: 'local', marks: { bold: true, mention: 'local' } },
+			{ text: 'Target', marks: { bold: true, link: `record:${target.id}` } }
+		]
+	};
+	expect(markdownToRichText(doc, richTextToMarkdown(doc, richText))).toEqual(richText);
+	doc.destroy();
+});

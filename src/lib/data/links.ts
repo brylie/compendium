@@ -1,8 +1,9 @@
 import type * as Y from 'yjs';
 import { getDocument, listDocuments } from './document-ops';
 import { getCollection } from './collection-ops';
-import { getRecord, listRecordsForParent } from './record-ops';
+import { getRecord, listRecordsForParent, resolveOwningParentId } from './record-ops';
 import { plainText } from './richtext';
+import type { WorkspaceRecord } from './types';
 
 // The one canonical internal-link representation, shared by `page_link`
 // blocks (target on the block record's `referencedRecordId`) and inline
@@ -70,6 +71,23 @@ export function isLinkBroken(link: OutgoingLink): boolean {
 	return link.target === undefined;
 }
 
+/** Visits authoritative descendants in document order, guarding duplicate/cyclic child arrays. */
+function descendantRecords(doc: Y.Doc, parentId: string): WorkspaceRecord[] {
+	const pending = listRecordsForParent(doc, parentId).reverse();
+	const seen = new Set<string>();
+	const records: WorkspaceRecord[] = [];
+	while (pending.length > 0) {
+		const record = pending.pop()!;
+		if (seen.has(record.id)) continue;
+		seen.add(record.id);
+		records.push(record);
+		if (record.childRecordIds) {
+			for (const child of listRecordsForParent(doc, record.id).reverse()) pending.push(child);
+		}
+	}
+	return records;
+}
+
 /**
  * Every internal link a Document's own records point outward to — both
  * `page_link` blocks and inline wiki-link marks in block content. One
@@ -79,7 +97,7 @@ export function isLinkBroken(link: OutgoingLink): boolean {
  */
 export function listOutgoingLinks(doc: Y.Doc, documentId: string): OutgoingLink[] {
 	const links: OutgoingLink[] = [];
-	for (const record of listRecordsForParent(doc, documentId)) {
+	for (const record of descendantRecords(doc, documentId)) {
 		for (const targetId of targetIdsForRecord(record)) {
 			links.push({
 				sourceRecordId: record.id,
@@ -141,7 +159,7 @@ function indexRecord(doc: Y.Doc, index: BacklinkIndex, sourceRecordId: string): 
 	removeRecordFromIndex(index, sourceRecordId);
 	const sourceRecord = getRecord(doc, sourceRecordId);
 	if (!sourceRecord) return;
-	const sourceDocument = getDocument(doc, sourceRecord.parentId);
+	const sourceDocument = getDocument(doc, resolveOwningParentId(doc, sourceRecord.parentId));
 	if (!sourceDocument) return;
 
 	const trimmedContent = sourceRecord.content ? plainText(sourceRecord.content).trim() : '';
@@ -168,11 +186,9 @@ function indexRecord(doc: Y.Doc, index: BacklinkIndex, sourceRecordId: string): 
 }
 
 /** Refresh only the backlinks whose displayed source metadata changed. */
-function indexDocumentSources(doc: Y.Doc, index: BacklinkIndex, sourceDocumentId: string): void {
-	for (const sourceRecordId of listRecordsForParent(doc, sourceDocumentId).map(
-		(record) => record.id
-	)) {
-		indexRecord(doc, index, sourceRecordId);
+function indexDescendantSources(doc: Y.Doc, index: BacklinkIndex, sourceDocumentId: string): void {
+	for (const record of descendantRecords(doc, sourceDocumentId)) {
+		indexRecord(doc, index, record.id);
 	}
 }
 
@@ -205,9 +221,7 @@ function getBacklinkIndex(doc: Y.Doc): BacklinkIndex {
 	const records = doc.getMap<Y.AbstractType<unknown>>('records');
 	const documents = doc.getMap<Y.AbstractType<unknown>>('documents');
 	for (const sourceDocument of listDocuments(doc)) {
-		for (const sourceRecord of listRecordsForParent(doc, sourceDocument.id)) {
-			indexRecord(doc, index, sourceRecord.id);
-		}
+		indexDescendantSources(doc, index, sourceDocument.id);
 	}
 
 	// Observe only the structures that can change a backlink. A text/target
@@ -218,10 +232,33 @@ function getBacklinkIndex(doc: Y.Doc): BacklinkIndex {
 		for (const sourceRecordId of eventIds(events, records)) {
 			indexRecord(doc, index, sourceRecordId);
 		}
+		// A concurrent insert can survive deletion of its container. Only on
+		// record deletions, discard indexed sources whose owner no longer resolves.
+		const hasDeletedRecord = events.some(
+			(event) =>
+				event.target === records &&
+				[...event.changes.keys.values()].some((change) => change.action === 'delete')
+		);
+		if (hasDeletedRecord) {
+			for (const id of index.bySourceRecordId.keys()) {
+				const record = getRecord(doc, id);
+				if (!record || !getDocument(doc, resolveOwningParentId(doc, record.parentId))) {
+					removeRecordFromIndex(index, id);
+				}
+			}
+		}
+		// Moving a container changes its descendants' owning Document without
+		// changing the descendants themselves. Ordinary text edits remain local.
+		for (const event of events) {
+			const id = event.path[0];
+			if (typeof id === 'string' && event.path.length === 1 && event.changes.keys.has('parentId')) {
+				indexDescendantSources(doc, index, id);
+			}
+		}
 	});
 	documents.observeDeep((events) => {
 		for (const sourceDocumentId of eventIds(events, documents)) {
-			indexDocumentSources(doc, index, sourceDocumentId);
+			indexDescendantSources(doc, index, sourceDocumentId);
 		}
 	});
 

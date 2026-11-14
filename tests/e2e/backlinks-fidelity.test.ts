@@ -49,6 +49,40 @@ describe('Backlinks and formatted workspace tokens over MCP', () => {
 					arguments: { parentId: source.id, blockType: 'page_link', referencedRecordId: target.id }
 				})
 			).recordId;
+			const layoutId = parseMcpText<{ recordId: string }>(
+				await mcp.callTool({
+					name: 'create_record',
+					arguments: {
+						parentId: source.id,
+						blockType: grantKind === 'Document' ? 'columns' : 'toggle'
+					}
+				})
+			).recordId;
+			const layoutDocument = parseMcpText<{
+				records: { id: string; children?: { id: string }[] }[];
+			}>(await mcp.callTool({ name: 'get_document', arguments: { documentId: source.id } }));
+			const nestedParentId =
+				grantKind === 'Document'
+					? layoutDocument.records.find((record) => record.id === layoutId)!.children![0].id
+					: layoutId;
+			const nestedId = parseMcpText<{ recordId: string }>(
+				await mcp.callTool({
+					name: 'create_record',
+					arguments: { parentId: nestedParentId, blockType: 'paragraph' }
+				})
+			).recordId;
+			expect(
+				(await mcp.callTool({ name: 'hold_records', arguments: { recordIds: [nestedId] } })).isError
+			).toBeFalsy();
+			expect(
+				(
+					await mcp.callTool({
+						name: 'write_record',
+						arguments: { recordId: nestedId, markdown: '[[Target]]' }
+					})
+				).isError
+			).toBeFalsy();
+
 			const blockId = parseMcpText<{ recordId: string }>(
 				await mcp.callTool({
 					name: 'create_record',
@@ -78,7 +112,10 @@ describe('Backlinks and formatted workspace tokens over MCP', () => {
 				arguments: { documentId: target.id }
 			});
 			const backlinks = parseMcpText<Backlink[]>(result);
-			expect(backlinks).toHaveLength(3);
+			expect(backlinks).toHaveLength(4);
+			expect(backlinks).toContainEqual(
+				expect.objectContaining({ sourceRecordId: nestedId, sourceDocumentId: source.id })
+			);
 			expect(backlinks.filter((link) => link.sourceRecordId === blockId)).toHaveLength(2);
 			expect(backlinks).toContainEqual({
 				sourceDocumentId: source.id,
@@ -96,7 +133,7 @@ describe('Backlinks and formatted workspace tokens over MCP', () => {
 			).toEqual([
 				expect.objectContaining({
 					actor: { kind: 'human-via-client', userId: 'local', client: 'Backlink reader' },
-					diff: { count: 3 }
+					diff: { count: 4 }
 				})
 			]);
 
@@ -115,7 +152,7 @@ describe('Backlinks and formatted workspace tokens over MCP', () => {
 				parseMcpText<Backlink[]>(
 					await freshMcp.callTool({ name: 'list_backlinks', arguments: { documentId: target.id } })
 				)
-			).toHaveLength(3);
+			).toHaveLength(4);
 
 			const { token: targetOnly } = harness.createToken({
 				clientLabel: 'Target only',
@@ -188,18 +225,19 @@ describe('Backlinks and formatted workspace tokens over MCP', () => {
 		transactWithOrigin(yjs.doc, LOCAL_UI_ORIGIN, () => {
 			text.format(0, 5, { code: true });
 			text.format(6, 6, { code: true });
+			text.insert(0, 'a', { code: true, bold: true });
 		});
 		const serverDoc = resolveWorkspaceContext({ shardId: source.id }).doc;
 		await harness.waitForCondition(
 			() =>
-				getRecord(serverDoc, blockId)?.content?.runs.filter((run) => run.marks.code).length === 2
+				getRecord(serverDoc, blockId)?.content?.runs.filter((run) => run.marks.code).length === 3
 		);
 		const freshMcp = await harness.getMcpClient(token);
 		const result = parseMcpText<{ records: { id: string; markdown: string }[] }>(
 			await freshMcp.callTool({ name: 'get_document', arguments: { documentId: source.id } })
 		);
 		expect(result.records.find((record) => record.id === blockId)?.markdown).toBe(
-			'**`@local`** _`[[Target]]`_'
+			'**`a@local`** _`[[Target]]`_'
 		);
 		expect(getRecord(serverDoc, blockId)?.content?.runs).toEqual(
 			expect.arrayContaining([
@@ -209,7 +247,7 @@ describe('Backlinks and formatted workspace tokens over MCP', () => {
 				})
 			])
 		);
-		const literalMarkdown = '**`@local`** _`[[Target]]`_';
+		const literalMarkdown = '**`a@local`** _`[[Target]]`_';
 		expect(
 			(await freshMcp.callTool({ name: 'hold_records', arguments: { recordIds: [blockId] } }))
 				.isError
