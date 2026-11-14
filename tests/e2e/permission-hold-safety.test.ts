@@ -4,7 +4,11 @@ import { getResultText, human, parseMcpText } from './mcp-parity-helpers';
 import { createDocument as createServiceDocument } from '$lib/services/documents';
 import { createRecord as createServiceRecord } from '$lib/services/records';
 import { resolveRequestContext } from '$lib/server/request-context';
-import { getRecord } from '$lib/data/record-ops';
+import {
+	getRecord,
+	createRecord as createRawRecord,
+	deleteRecord as deleteRawRecord
+} from '$lib/data/record-ops';
 import { plainText } from '$lib/data/richtext';
 import { createDocument as createRawDocument } from '$lib/data/document-ops';
 import { createCollection as createRawCollection } from '$lib/data/collection-ops';
@@ -12,7 +16,7 @@ import { resolveWorkspaceContext } from '$lib/server/workspace-store';
 import { createSpace, resolveShardForParent } from '$lib/server/catalog';
 import { queryAuditLog } from '$lib/server/audit';
 import { aggregateHolds } from '$lib/server/holds';
-import { TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
+import { LOCAL_UI_ORIGIN, TEST_ORIGIN, transactWithOrigin } from '$lib/mutation-origin';
 import * as Y from 'yjs';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
@@ -178,6 +182,83 @@ describe('Permission and hold safety across protocols', () => {
 		expect(Y.encodeStateAsUpdate(server.doc)).toEqual(before);
 		expect(aggregateHolds(server.awareness).has(block.id)).toBe(false);
 	});
+
+	it.each(['columns', 'toggle'] as const)(
+		'denies default-Space access to a child surviving concurrent %s deletion in another Space',
+		async (blockType) => {
+			const context = resolveRequestContext(human);
+			const otherSpace = createSpace(context.workspaceId, 'Concurrent editing Space');
+			const document = createServiceDocument(context, {
+				title: 'Concurrent container deletion',
+				spaceId: otherSpace.id
+			});
+			const container = createServiceRecord(context, { parentId: document.id, blockType });
+			const parentId = blockType === 'columns' ? container.childRecordIds![0] : container.id;
+			const yjs = harness.getYjsClient({ room: `shard-${document.id}`, disableBc: true });
+			await harness.waitForCondition(() => getRecord(yjs.doc, parentId) !== undefined);
+
+			// Two replicas fork at the same state: one deletes the container while
+			// the other inserts a child it cannot yet know will be orphaned.
+			const deleting = new Y.Doc();
+			const inserting = new Y.Doc();
+			let childId: string;
+			try {
+				const initialState = Y.encodeStateAsUpdate(yjs.doc);
+				Y.applyUpdate(deleting, initialState);
+				Y.applyUpdate(inserting, initialState);
+				deleteRawRecord(deleting, container.id);
+				childId = createRawRecord(inserting, { parentId, blockType: 'paragraph' }, human).id;
+				Y.applyUpdate(yjs.doc, Y.encodeStateAsUpdate(deleting), LOCAL_UI_ORIGIN);
+				Y.applyUpdate(yjs.doc, Y.encodeStateAsUpdate(inserting), LOCAL_UI_ORIGIN);
+			} finally {
+				deleting.destroy();
+				inserting.destroy();
+			}
+			const server = resolveWorkspaceContext({ shardId: document.id });
+			await harness.waitForCondition(
+				() =>
+					getRecord(server.doc, childId)?.parentId === parentId &&
+					getRecord(server.doc, parentId) === undefined
+			);
+			expect(getRecord(yjs.doc, parentId)).toBeUndefined();
+			expect(getRecord(yjs.doc, childId)?.parentId).toBe(parentId);
+			expect(resolveShardForParent(context.workspaceId, parentId)).toBeUndefined();
+			const { token } = harness.createToken({
+				clientLabel: 'Default-Space orphan probe',
+				allowedDocumentIds: [],
+				allowedCollectionIds: [],
+				allowedSpaceIds: [context.workspace.defaultSpaceId]
+			});
+			const mcp = await harness.getMcpClient(token);
+			const before = Y.encodeStateAsUpdate(server.doc);
+			expect(await hold(mcp, [childId])).toEqual({ granted: [], denied: [childId] });
+			for (const name of ['write_record', 'delete_record'] as const) {
+				const result = await mcp.callTool({
+					name,
+					arguments: {
+						recordId: childId,
+						...(name === 'write_record' ? { markdown: 'Unauthorized orphan edit' } : {})
+					}
+				});
+				expect(result.isError).toBe(true);
+				expect(getResultText(result)).toContain('Permission denied');
+			}
+			expect(Y.encodeStateAsUpdate(server.doc)).toEqual(before);
+			expect(aggregateHolds(server.awareness).has(childId)).toBe(false);
+			for (const action of ['hold_records_denied', 'write_record_denied', 'delete_record_denied']) {
+				expect(queryAuditLog().filter((entry) => entry.action === action)).toEqual([
+					expect.objectContaining({
+						targetRecordId: parentId,
+						actor: {
+							kind: 'human-via-client',
+							userId: 'local',
+							client: 'Default-Space orphan probe'
+						}
+					})
+				]);
+			}
+		}
+	);
 
 	it.each(['Document', 'Collection'] as const)(
 		'honors only default-Space grants for an uncataloged %s',
