@@ -84,11 +84,13 @@ export const serviceSurfaces: Record<ServiceMethod, ServiceSurfaceDefinition> = 
 		mcpToolName: 'list_documents',
 		mcpDescription: 'List Documents this connection has access to, including tree hierarchy.'
 	},
-	// UI-only for now (issue #83): the Document route's own load function
-	// renders a Backlinks panel from this. Not MCP-exposed — #83's own scope
-	// doesn't ask for an agent-facing surface, and this can be added later
-	// without touching the function's own contract.
-	'documents.listBacklinks': { mcp: false, ui: true },
+	'documents.listBacklinks': {
+		mcp: true,
+		ui: true,
+		mcpToolName: 'list_backlinks',
+		mcpDescription:
+			'List incoming links to an accessible Document, including source Document title, source block ID, and text context. Only sources this connection can access are returned; each logical link occurrence is one result.'
+	},
 
 	'records.createRecord': {
 		mcp: true,
@@ -220,6 +222,7 @@ export const mcpAdapterBindings = {
 	'documents.deleteDocument': 'delete_document',
 	'documents.getDocument': 'get_document',
 	'documents.listDocuments': 'list_documents',
+	'documents.listBacklinks': 'list_backlinks',
 	'records.createRecord': 'create_record',
 	'records.writeRecord': 'write_record',
 	'records.deleteRecord': 'delete_record',

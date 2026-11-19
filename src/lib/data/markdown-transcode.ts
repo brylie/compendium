@@ -54,28 +54,68 @@ interface MutableRun {
 
 /** Serializes a block's RichText model to Markdown (the Y.Text ⇄ Markdown boundary, see markdown-transcoding.md). */
 export function richTextToMarkdown(doc: Y.Doc, richText: RichText): string {
-	return richText.runs.map((run) => runToMarkdown(doc, run.text, run.marks)).join('');
+	const runs: MutableRun[] = [];
+	for (const run of richText.runs) {
+		const prepared = prepareMarkdownRun(doc, run.text, run.marks);
+		const previous = runs.at(-1);
+		if (previous && sameMarkdownStyle(previous.marks, prepared.marks)) {
+			previous.text += prepared.text;
+		} else {
+			runs.push(prepared);
+		}
+	}
+	return runs.map(formatMarkdownRun).join('');
 }
 
-function runToMarkdown(doc: Y.Doc, text: string, marks: TextMarks): string {
-	if (marks.mention) return `@${text}`;
-	if (marks.link?.startsWith(RECORD_LINK_SCHEME)) {
-		const id = marks.link.slice(RECORD_LINK_SCHEME.length);
-		// A wiki-link target's own shard (#120: Documents and Collections both
-		// have one) may or may not be `doc` itself. Try `doc` first — cheap,
-		// and correct whenever the target really is local to it — then fall
-		// back to resolving its real shard.
-		const target = resolveInternalLinkTarget(doc, id) ?? resolveWorkspaceLinkTarget(id);
-		return `[[${target?.title ?? DELETED_LINK_LABEL}]]`;
-	}
+function sameMarkdownStyle(left: TextMarks, right: TextMarks): boolean {
+	return (
+		Boolean(left.code) === Boolean(right.code) &&
+		Boolean(left.bold) === Boolean(right.bold) &&
+		Boolean(left.italic) === Boolean(right.italic) &&
+		Boolean(left.strikethrough) === Boolean(right.strikethrough) &&
+		left.link === right.link
+	);
+}
 
-	let out = escapeMarkdown(text);
-	if (marks.code) out = `\`${out}\``;
+function prepareMarkdownRun(doc: Y.Doc, text: string, marks: TextMarks): MutableRun {
+	const isWikiLink = marks.link?.startsWith(RECORD_LINK_SCHEME) ?? false;
+	let out: string;
+	if (marks.mention) {
+		out = `@${text}`;
+	} else if (marks.link?.startsWith(RECORD_LINK_SCHEME)) {
+		const id = marks.link.slice(RECORD_LINK_SCHEME.length);
+		const target = resolveInternalLinkTarget(doc, id) ?? resolveWorkspaceLinkTarget(id);
+		out = `[[${target?.title ?? DELETED_LINK_LABEL}]]`;
+	} else {
+		out = marks.code ? text : escapeMarkdown(text);
+	}
+	const link = marks.mention || isWikiLink || marks.link === '' ? undefined : marks.link;
+	return { text: out, marks: { ...marks, mention: undefined, link } };
+}
+
+function formatMarkdownRun({ text, marks }: MutableRun): string {
+	let out = marks.code ? literalCodeSpan(text) : text;
 	if (marks.bold) out = `**${out}**`;
 	if (marks.italic) out = `_${out}_`;
 	if (marks.strikethrough) out = `~~${out}~~`;
 	if (marks.link) out = `[${out}](${marks.link})`;
 	return out;
+}
+
+// Code spans are literal: preserve the token text rather than escaping its
+// Markdown characters, and choose a fence longer than any embedded backticks.
+function literalCodeSpan(text: string): string {
+	const fenceLength = (text.match(/`+/g) ?? []).reduce(
+		(length, ticks) => Math.max(length, ticks.length + 1),
+		1
+	);
+	const fence = '`'.repeat(fenceLength);
+	const needsPadding =
+		text.startsWith('`') ||
+		text.endsWith('`') ||
+		(text.startsWith(' ') && text.endsWith(' ') && /[^ ]/.test(text));
+	const padding = needsPadding ? ' ' : '';
+	return `${fence}${padding}${text}${padding}${fence}`;
 }
 
 function escapeMarkdown(text: string): string {

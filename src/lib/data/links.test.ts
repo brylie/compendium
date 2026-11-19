@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { createDocument, deleteDocument, updateDocumentTitle } from './document-ops';
 import { createCollection } from './collection-ops';
-import { createRecord, deleteRecord, updateRecordContent } from './record-ops';
+import {
+	createRecord,
+	createColumnsBlock,
+	deleteRecord,
+	getRecordYText,
+	moveRecordToParent,
+	updateRecordContent
+} from './record-ops';
 import {
 	RECORD_LINK_SCHEME,
 	isLinkBroken,
@@ -343,5 +350,149 @@ describe('listSyncedBlockInstances', () => {
 
 		deleteRecord(doc, instance.id);
 		expect(listSyncedBlockInstances(doc, source.id)).toEqual([]);
+	});
+});
+
+describe('logical inline link occurrences (#82)', () => {
+	it('keeps scans and an initialized index stable as formatting splits and rejoins a link', () => {
+		const doc = new Y.Doc();
+		const target = createDocument(doc, { title: 'Target' });
+		const source = createDocument(doc, { title: 'Source' });
+		const record = createRecord(doc, { parentId: source.id, blockType: 'paragraph' }, CURRENT_USER);
+		updateRecordContent(
+			doc,
+			record.id,
+			{ runs: [{ text: 'Target', marks: { link: `record:${target.id}` } }] },
+			CURRENT_USER
+		);
+		expect(listIncomingLinks(doc, target.id)).toHaveLength(1);
+		const text = getRecordYText(doc, record.id)!;
+		text.format(1, 3, { bold: true, italic: true });
+		expect(listOutgoingLinks(doc, source.id)).toHaveLength(1);
+		expect(listIncomingLinks(doc, target.id)).toHaveLength(1);
+		text.format(1, 3, { bold: null, italic: null });
+		expect(listIncomingLinks(doc, target.id)).toHaveLength(1);
+		text.format(0, text.length, { link: null });
+		expect(listOutgoingLinks(doc, source.id)).toEqual([]);
+		expect(listIncomingLinks(doc, target.id)).toEqual([]);
+		doc.destroy();
+	});
+
+	it('preserves occurrences separated by plain text, external links, other targets, or source blocks', () => {
+		const doc = new Y.Doc();
+		const target = createDocument(doc, { title: 'Target' });
+		const other = createDocument(doc, { title: 'Other' });
+		const source = createDocument(doc, { title: 'Source' });
+		const record = createRecord(doc, { parentId: source.id, blockType: 'paragraph' }, CURRENT_USER);
+		const link = { link: `record:${target.id}` };
+		updateRecordContent(
+			doc,
+			record.id,
+			{
+				runs: [
+					{ text: 'Tar', marks: link },
+					{ text: 'get', marks: { ...link, bold: true } },
+					{ text: ' / ', marks: {} },
+					{ text: 'Target', marks: link },
+					{ text: 'external', marks: { link: 'https://example.com' } },
+					{ text: 'Target', marks: link },
+					{ text: 'Other', marks: { link: `record:${other.id}` } },
+					{ text: 'Target', marks: link }
+				]
+			},
+			CURRENT_USER
+		);
+		const second = createRecord(doc, { parentId: source.id, blockType: 'paragraph' }, CURRENT_USER);
+		updateRecordContent(doc, second.id, { runs: [{ text: 'Target', marks: link }] }, CURRENT_USER);
+		expect(
+			listOutgoingLinks(doc, source.id).filter((entry) => entry.targetId === target.id)
+		).toHaveLength(5);
+		expect(listIncomingLinks(doc, target.id)).toHaveLength(5);
+		getRecordYText(doc, record.id)!.format(0, 6, { link: `record:${other.id}` });
+		expect(listIncomingLinks(doc, target.id)).toHaveLength(4);
+		expect(listIncomingLinks(doc, other.id)).toHaveLength(2);
+		deleteRecord(doc, second.id);
+		expect(listIncomingLinks(doc, target.id)).toHaveLength(3);
+		doc.destroy();
+	});
+});
+
+describe('nested container backlink sources', () => {
+	it.each(['columns', 'toggle'] as const)(
+		'includes %s descendants in scans and the live index through edits, moves, rename, and deletion',
+		(blockType) => {
+			const doc = new Y.Doc();
+			const target = createDocument(doc, { title: 'Nested target' });
+			const source = createDocument(doc, { title: 'Nested source' });
+			const other = createDocument(doc, { title: 'Moved source' });
+			const container =
+				blockType === 'columns'
+					? createColumnsBlock(doc, { parentId: source.id }, CURRENT_USER)
+					: createRecord(doc, { parentId: source.id, blockType }, CURRENT_USER);
+			const parentId = blockType === 'columns' ? container.childRecordIds![0] : container.id;
+			const child = createRecord(doc, { parentId, blockType: 'paragraph' }, CURRENT_USER);
+			updateRecordContent(
+				doc,
+				child.id,
+				{ runs: [{ text: 'Nested target', marks: { link: `record:${target.id}` } }] },
+				CURRENT_USER
+			);
+			expect(listOutgoingLinks(doc, source.id).map((link) => link.sourceRecordId)).toEqual([
+				child.id
+			]);
+			expect(listIncomingLinks(doc, target.id)).toEqual([
+				expect.objectContaining({ sourceDocumentId: source.id, sourceRecordId: child.id })
+			]);
+			getRecordYText(doc, child.id)!.format(1, 3, { bold: true });
+			expect(listIncomingLinks(doc, target.id)).toHaveLength(1);
+			updateDocumentTitle(doc, source.id, 'Renamed source');
+			expect(listIncomingLinks(doc, target.id)[0].sourceDocumentTitle).toBe('Renamed source');
+			moveRecordToParent(doc, container.id, other.id);
+			expect(listOutgoingLinks(doc, source.id)).toEqual([]);
+			expect(listOutgoingLinks(doc, other.id)).toHaveLength(1);
+			expect(listIncomingLinks(doc, target.id)[0]).toMatchObject({
+				sourceDocumentId: other.id,
+				sourceDocumentTitle: other.title,
+				sourceRecordId: child.id
+			});
+			deleteRecord(doc, container.id);
+			expect(listIncomingLinks(doc, target.id)).toEqual([]);
+			doc.destroy();
+		}
+	);
+});
+
+describe('nested backlink deletion convergence', () => {
+	it('removes an indexed child orphaned by a concurrent container deletion', () => {
+		const doc = new Y.Doc();
+		const target = createDocument(doc, { title: 'Target' });
+		const source = createDocument(doc, { title: 'Source' });
+		const container = createRecord(doc, { parentId: source.id, blockType: 'toggle' }, CURRENT_USER);
+		const deleting = new Y.Doc();
+		const inserting = new Y.Doc();
+		Y.applyUpdate(deleting, Y.encodeStateAsUpdate(doc));
+		Y.applyUpdate(inserting, Y.encodeStateAsUpdate(doc));
+		expect(listIncomingLinks(doc, target.id)).toEqual([]);
+		const child = createRecord(
+			inserting,
+			{ parentId: container.id, blockType: 'paragraph' },
+			CURRENT_USER
+		);
+		updateRecordContent(
+			inserting,
+			child.id,
+			{ runs: [{ text: 'Target', marks: { link: `record:${target.id}` } }] },
+			CURRENT_USER
+		);
+		Y.applyUpdate(doc, Y.encodeStateAsUpdate(inserting));
+		expect(listIncomingLinks(doc, target.id)).toHaveLength(1);
+		deleteRecord(deleting, container.id);
+		Y.applyUpdate(doc, Y.encodeStateAsUpdate(deleting));
+		expect(getRecordYText(doc, child.id)).toBeDefined();
+		expect(listOutgoingLinks(doc, source.id)).toEqual([]);
+		expect(listIncomingLinks(doc, target.id)).toEqual([]);
+		deleting.destroy();
+		inserting.destroy();
+		doc.destroy();
 	});
 });

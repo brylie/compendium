@@ -147,3 +147,163 @@ describe('markdown transcoding', () => {
 		expect(markdown).not.toContain('Q3 Roadmap');
 	});
 });
+
+describe('formatted workspace tokens (#210)', () => {
+	it.each([
+		'**@local**',
+		'_@local_',
+		'~~@local~~',
+		'~~_**@local**_~~',
+		'**[[Target]]**',
+		'_[[Target]]_',
+		'~~[[Target]]~~',
+		'~~_**[[Target]]**_~~'
+	])('preserves formatting and live token marks through %s', (markdown) => {
+		const doc = new Y.Doc();
+		createDocument(doc, { title: 'Target' });
+		const richText = markdownToRichText(doc, markdown);
+		expect(richTextToMarkdown(doc, richText)).toBe(markdown);
+		expect(markdownToRichText(doc, richTextToMarkdown(doc, richText))).toEqual(richText);
+		doc.destroy();
+	});
+
+	it.each(['mention', 'wiki'] as const)(
+		'exports a code-marked %s as literal code without reactivating tokens on import',
+		(kind) => {
+			const doc = new Y.Doc();
+			const target = createDocument(doc, { title: 'Target' });
+			const richText = {
+				runs: [
+					{
+						text: kind === 'mention' ? 'local' : 'Target',
+						marks: {
+							code: true,
+							bold: true,
+							...(kind === 'mention' ? { mention: 'local' } : { link: `record:${target.id}` })
+						}
+					}
+				]
+			};
+			const markdown = richTextToMarkdown(doc, richText);
+			expect(markdown).toBe(kind === 'mention' ? '**`@local`**' : '**`[[Target]]`**');
+			const imported = markdownToRichText(doc, markdown);
+			expect(richTextToMarkdown(doc, imported)).toBe(markdown);
+			expect(imported.runs).toEqual([
+				{ text: kind === 'mention' ? '@local' : '[[Target]]', marks: { code: true, bold: true } }
+			]);
+			expect(richText.runs[0].marks).toMatchObject(
+				kind === 'mention' ? { mention: 'local' } : { link: `record:${target.id}` }
+			);
+			doc.destroy();
+		}
+	);
+
+	it('keeps literal backticks inside code-marked wiki-link titles', () => {
+		const doc = new Y.Doc();
+		const target = createDocument(doc, { title: 'Target `code`' });
+		const markdown = richTextToMarkdown(doc, {
+			runs: [{ text: target.title, marks: { code: true, link: `record:${target.id}` } }]
+		});
+		expect(markdownToRichText(doc, markdown).runs).toEqual([
+			{ text: '[[Target `code`]]', marks: { code: true } }
+		]);
+		doc.destroy();
+	});
+
+	it('pads a code-marked mention label ending in a backtick without changing its literal text', () => {
+		const doc = new Y.Doc();
+		const markdown = richTextToMarkdown(doc, {
+			runs: [{ text: 'local`', marks: { code: true, mention: 'local' } }]
+		});
+		expect(markdownToRichText(doc, markdown).runs).toEqual([
+			{ text: '@local`', marks: { code: true } }
+		]);
+		doc.destroy();
+	});
+
+	it.each(['[literal]*_\\text', '`ticks`', ' padded ', ' ', '  \t  '])(
+		'preserves literal code content %j',
+		(text) => {
+			const doc = new Y.Doc();
+			const markdown = richTextToMarkdown(doc, { runs: [{ text, marks: { code: true } }] });
+			expect(markdownToRichText(doc, markdown).runs).toEqual([{ text, marks: { code: true } }]);
+			doc.destroy();
+		}
+	);
+
+	it('preserves decoration around a deleted wiki-link placeholder', () => {
+		const doc = new Y.Doc();
+		const target = createDocument(doc, { title: 'Temporary' });
+		deleteDocument(doc, target.id);
+		expect(
+			richTextToMarkdown(doc, {
+				runs: [{ text: 'Temporary', marks: { bold: true, link: `record:${target.id}` } }]
+			})
+		).toBe('**[[Deleted page]]**');
+		doc.destroy();
+	});
+});
+
+describe('adjacent compatible code spans', () => {
+	it('coalesces plain code and code-marked mentions without adding backticks or whitespace', () => {
+		const doc = new Y.Doc();
+		const richText = {
+			runs: [
+				{ text: 'a', marks: { code: true } },
+				{ text: 'local', marks: { code: true, mention: 'local' } }
+			]
+		};
+		const before = structuredClone(richText);
+		const markdown = richTextToMarkdown(doc, richText);
+		expect(markdownToRichText(doc, markdown).runs).toEqual([
+			{ text: 'a@local', marks: { code: true } }
+		]);
+		expect(richText).toEqual(before);
+		doc.destroy();
+	});
+
+	it('joins literal code and code-marked wiki links with matching decoration', () => {
+		const doc = new Y.Doc();
+		const target = createDocument(doc, { title: 'Target `code`' });
+		const markdown = richTextToMarkdown(doc, {
+			runs: [
+				{ text: 'see ', marks: { code: true, bold: true } },
+				{ text: target.title, marks: { code: true, bold: true, link: `record:${target.id}` } }
+			]
+		});
+		expect(markdownToRichText(doc, markdown).runs).toEqual([
+			{ text: 'see [[Target `code`]]', marks: { code: true, bold: true } }
+		]);
+		doc.destroy();
+	});
+
+	it('preserves different outer formatting and external-link destinations', () => {
+		const doc = new Y.Doc();
+		const richText = {
+			runs: [
+				{ text: 'plain', marks: { code: true } },
+				{ text: 'bold', marks: { code: true, bold: true } },
+				{ text: 'italic', marks: { code: true, italic: true } },
+				{ text: 'strike', marks: { code: true, strikethrough: true } },
+				{ text: 'first', marks: { code: true, link: 'https://one.example' } },
+				{ text: 'second', marks: { code: true, link: 'https://two.example' } }
+			]
+		};
+		expect(markdownToRichText(doc, richTextToMarkdown(doc, richText))).toEqual(richText);
+		doc.destroy();
+	});
+});
+
+it('keeps adjacent compatible bold text, mentions, and wiki links inside one decoration boundary', () => {
+	const doc = new Y.Doc();
+	const target = createDocument(doc, { title: 'Target' });
+	const richText = {
+		runs: [
+			{ text: 'a', marks: { bold: true } },
+			{ text: 'local', marks: { bold: true, mention: 'local' } },
+			{ text: 'Target', marks: { bold: true, link: `record:${target.id}` } }
+		]
+	};
+	expect(markdownToRichText(doc, richTextToMarkdown(doc, richText))).toEqual(richText);
+	doc.destroy();
+});

@@ -96,6 +96,7 @@ its own `beforeEach`/`afterEach`:
 | `sync-parity.test.ts`            | Bidirectional MCP ↔ Yjs write/read convergence (§2's first two required tests)                                                          |
 | `shard-routing.test.ts`          | Document/Collection/Space → shard resolution, cross-shard and cross-Space isolation                                                     |
 | `permissions-grants.test.ts`     | Token scoping and permission-denied enforcement across independent calls                                                                |
+| `backlinks-fidelity.test.ts`     | MCP backlink parity and permission filtering, formatting-independent occurrence counts, and decorated/literal-code token output         |
 | `permission-hold-safety.test.ts` | Nested columns/toggle permission and hold scoping, denied-hold auditing, and default-Space grants for uncataloged Documents/Collections |
 | `holds-attribution.test.ts`      | `hold_records`/`release_records` semantics and audit-log attribution                                                                    |
 | `service-layer-manifest.test.ts` | The `serviceModules`/`serviceSurfaces` manifest wiring check (§2's manifest test, non-UI half)                                          |
